@@ -366,7 +366,32 @@ class TestSharedCredentials(_BatchTokensEndpointTestBase):
         result = self._post_openrouter()
         self.assertEqual(result["outcome"], "has_token")
         self.assertEqual(result["secrets"], {"api_key": "sk-or-SHARED"})
-        self.assertEqual(result["metadata"], {"label": "Org Default"})
+        # The row's own metadata is preserved and the org-shared marker is added,
+        # so the broker status card can render the read-only org-provided state.
+        self.assertEqual(
+            result["metadata"],
+            {"label": "Org Default", "org_shared": True, "org_shared_scope": "everyone"},
+        )
+
+    def test_workspace_shared_key_marks_org_shared_with_scope(self) -> None:
+        IntegrationSharedCredential.objects.create(
+            organization=self.org, provider="openrouter", scope="workspace",
+            target_workspace=self.ws_eng, credentials={"api_key": "sk-or-ENG"},
+        )
+        metadata = self._post_openrouter()["metadata"]
+        self.assertTrue(metadata["org_shared"])
+        self.assertEqual(metadata["org_shared_scope"], "workspace")
+
+    def test_personal_key_is_not_marked_org_shared(self) -> None:
+        """The personal-refresh path must never carry the org-shared marker."""
+        IntegrationUserCredential.objects.create(
+            owner_user=self.user, environment=self.env, app_slug="hermes",
+            provider=IntegrationUserCredential.Provider.OPENROUTER,
+            credentials={"api_key": "sk-or-PERSONAL"},
+        )
+        result = self._post_openrouter()
+        self.assertEqual(result["secrets"], {"api_key": "sk-or-PERSONAL"})
+        self.assertNotIn("org_shared", result.get("metadata", {}))
 
     def test_shared_overrides_personal_key(self) -> None:
         IntegrationUserCredential.objects.create(

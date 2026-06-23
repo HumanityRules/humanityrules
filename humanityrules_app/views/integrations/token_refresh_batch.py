@@ -125,6 +125,18 @@ def integrations_tokens_batch(request: HttpRequest) -> JsonResponse:
         if shared is not None:
             shared_outcome = refresh_outcome_from_shared(shared)
             if shared_outcome.get("outcome") != "absent":
+                # Mark the outcome org-provided so the broker status card can
+                # render it read-only ("Provided by your organization") instead
+                # of Configure/Disconnect — only this branch knows the active
+                # token came from a shared credential. Rides the existing
+                # `metadata` channel (carried end-to-end to the WebUI card), so
+                # no broker plumbing changes. `org_shared_scope` is for
+                # logging/debugging; the card surfaces only the boolean.
+                shared_outcome["metadata"] = {
+                    **shared_outcome.get("metadata", {}),
+                    "org_shared": True,
+                    "org_shared_scope": shared.scope,
+                }
                 results[slug] = shared_outcome
                 logger.info(
                     "batched token refresh: shared credential used env=%s owner=%s app=%s provider=%s scope=%s",

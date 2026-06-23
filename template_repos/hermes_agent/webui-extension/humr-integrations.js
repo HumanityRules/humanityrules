@@ -282,6 +282,20 @@
     return elem('button', props, [pending ? 'Disconnecting…' : 'Disconnect']);
   }
 
+  // True when this provider's active credential is an org-shared one the
+  // control plane provisioned (token_refresh_batch stamps metadata.org_shared).
+  // Such credentials are admin-managed: the user can neither reconfigure nor
+  // disconnect them, so the card shows a read-only note instead of buttons.
+  function isOrgShared(item) {
+    return !!(item.metadata && item.metadata.org_shared);
+  }
+
+  // Read-only footer for an org-shared connection: replaces the Configure /
+  // Disconnect actions. Wording mirrors the control-plane user panel.
+  function orgSharedNote() {
+    return elem('div', { class: 'humr-integration-org-shared' }, ['Provided by your organization']);
+  }
+
   function configureButton(item, connectBtnForRevert) {
     const canConfigure = item.connect_mode === 'vault';
     const props = { class: 'humr-integration-btn' };
@@ -505,6 +519,16 @@
     const { card, titleRow, statusPill, isConnected } = buildCardScaffold(item, provider);
 
     if (isConnected) {
+      card.appendChild(elem('div', { class: 'humr-integration-card-head' }, [titleRow, statusPill]));
+      const body = elem('div', { class: 'humr-integration-card-body' });
+      if (isOrgShared(item)) {
+        // No connector is org-shareable today (only vault key providers are),
+        // but honoring the flag here keeps the read-only treatment consistent
+        // if MCP/Merge connectors ever gain org sharing.
+        body.appendChild(orgSharedNote());
+        card.appendChild(body);
+        return card;
+      }
       const disconnectBtn = disconnectButton(provider, () => runDisconnect(provider, async () => {
         if (isMergeConnector) {
           await fetch('/__humr_broker/integrations/merge/disconnect', {
@@ -517,8 +541,6 @@
         }
         await refreshAndRender();
       }));
-      card.appendChild(elem('div', { class: 'humr-integration-card-head' }, [titleRow, statusPill]));
-      const body = elem('div', { class: 'humr-integration-card-body' });
       const actions = elem('div', { class: 'humr-integration-actions' });
       actions.appendChild(configureButton(item));
       actions.appendChild(disconnectBtn);
@@ -1274,6 +1296,13 @@
       const ownerName = item.metadata && item.metadata.owner_name;
       if (ownerName) {
         body.appendChild(elem('div', { class: 'humr-integration-meta' }, ['Replies only to ' + ownerName]));
+      }
+      if (isOrgShared(item)) {
+        // Org-shared credentials are admin-managed: no Configure/Disconnect, and
+        // we drop "Last refreshed" to keep the read-only card clean.
+        body.appendChild(orgSharedNote());
+        card.appendChild(body);
+        return card;
       }
       if (item.last_refreshed_at) {
         body.appendChild(elem('div', {
