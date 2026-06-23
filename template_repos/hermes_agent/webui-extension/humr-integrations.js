@@ -95,6 +95,21 @@
         return;
       }
       await refreshAndRender();
+      // Refresh-all can flip a model provider's connection — most importantly an
+      // org-shared key (e.g. OpenRouter) provisioned on the control plane, which
+      // arrives through Refresh-all rather than the per-connector vault flow. The
+      // vault flow rebuilds the composer's model picker via
+      // refreshModelDropdownsIfProviderAffectsPicker(); Refresh-all must do the
+      // same, otherwise the model dropdown keeps its boot-time catalog (no
+      // OpenRouter) until a full page reload even though the broker now reports
+      // the provider connected. Gate on the catalog actually carrying a model
+      // provider so deployments with only non-model connectors skip the
+      // /api/models round-trip. Covers connect AND disconnect (the rebuild
+      // re-reads /api/models, so a revoked shared key also drops out live).
+      if (_current && Array.isArray(_current.items)
+          && _current.items.some((it) => it && it.affects_model_picker)) {
+        await refreshModelDropdownsIfProviderAffectsPicker({ affects_model_picker: true });
+      }
     } catch (_) {
       if (note) {
         note.textContent = 'Could not reach the integrations broker.';
@@ -1585,6 +1600,18 @@
         .then(() => invalidateBrokerTlsCache(sentinel.provider).catch(() => {}))
         .then(() => waitForWebui(15000))
         .then(refreshAndRender)
+        // If the provider returning through HUMR's start/disconnect feeds the
+        // model picker (a model provider — e.g. a future OAuth-based Gemini),
+        // rebuild the composer dropdown the same way the vault connect and
+        // Refresh-all paths do. No OAuth provider is a model provider today, so
+        // this is a no-op for now: the lookup finds the item in the just-
+        // refreshed catalog and refreshModelDropdownsIfProviderAffectsPicker()
+        // self-guards on its affects_model_picker flag.
+        .then(() => refreshModelDropdownsIfProviderAffectsPicker(
+          (_current && Array.isArray(_current.items))
+            ? _current.items.find((it) => it && it.slug === sentinel.provider)
+            : null,
+        ))
         .finally(() => { transitionModal.remove(); });
     } else {
       refreshAndRender();
