@@ -50,18 +50,18 @@ through `filter_permitted_resources(..., "credential", "credential:use", app_con
 
 Seeded tags per credential:
 
-- always `shared-scope=<scope>`
-- user scope: `shared-user=<target_user.username>` (username is immutable)
-- workspace scope: `shared-workspace=<target_workspace.slug>`
+- always `sharing-scope=<scope>`
+- user scope: `shared-with-user=<target_user.username>` (username is immutable)
+- workspace scope: `shared-with-workspace=<target_workspace.slug>`
 
 The workspace match reuses the existing `workspace-name` tag, whose **value is the
 slug** (`create_default_workspace_tag`), so no new tag is introduced on the workspace side.
 
 Three system policies (seeded at org bootstrap, `resource_type="credential"`):
 
-1. **Everyone** — `resource:[shared-scope=everyone]` -> `credential:use`
-2. **User** — `identity:[username=$resource.shared-user]`, `resource:[shared-scope=user]` -> `credential:use`
-3. **Workspace** — `resource:[shared-workspace=$app.workspace-name]` -> `credential:use`
+1. **Everyone** — `resource:[sharing-scope=everyone]` -> `credential:use`
+2. **User** — `identity:[username=$resource.shared-with-user]`, `resource:[sharing-scope=user]` -> `credential:use`
+3. **Workspace** — `resource:[shared-with-workspace=$app.workspace-name]` -> `credential:use`
 
 ## The `$app` engine extension
 
@@ -133,7 +133,7 @@ Backend is complete and tested:
   `filter_permitted_credentials(org, user, app, queryset)` that supplies the app side.
   The public `evaluate_policies` / `filter_permitted_resources` signatures are
   unchanged, so `$app` is currently surfaced only through the credential path.
-- `sync_shared_credential_tags` seeds `shared-scope` / `shared-user` / `shared-workspace`
+- `sync_shared_credential_tags` seeds `sharing-scope` / `shared-with-user` / `shared-with-workspace`
   on every save (post_save signal).
 - `shared_credential_resolver.resolve` + each vault provider's `refresh_outcome_from_shared`,
   wired into `integrations_tokens_batch` so shared credentials win over personal keys.

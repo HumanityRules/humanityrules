@@ -18,6 +18,12 @@
      value_name     — input name for the hidden value field (for form submission with value_model).
      clear_model    — Alpine expression to reset to '' on input/selection (e.g. "item.value").
                       Useful for clearing a paired value field when the key changes.
+     type_filter_model — Alpine expression holding a resource-type string (e.g. "resourceType").
+                      When set, each suggestion carries a trailing comma-joined
+                      "resource types" element and is only shown when that model's
+                      value is empty or listed among the suggestion's types. Suggestion
+                      shapes gain the extra element: plain mode -> (value, types_csv);
+                      for_key_model mode -> (key, value, types_csv).
    The actual model variable lives in the PARENT Alpine scope (nested scopes inherit).
 {% endcomment %}
 <div x-data="{ open: false }" @click.outside="open = false" class="relative min-w-0">
@@ -47,11 +53,28 @@
                 class="block w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700 truncate">{{ label }}</button>
         {% endfor %}
         {% elif for_key_model %}
+        {% if type_filter_model %}
+        {% for for_key, value, resource_types in suggestions %}
+        <button type="button" data-value="{{ value }}" data-for-key="{{ for_key }}" data-resource-types="{{ resource_types }}"
+                x-show="$el.dataset.forKey === {{ for_key_model }} && (!{{ model }} || $el.dataset.value.toLowerCase().includes({{ model }}.toLowerCase())) && ({{ type_filter_model }} === '' || $el.dataset.resourceTypes.split(',').includes({{ type_filter_model }}))"
+                @click="{{ model }} = $el.dataset.value; open = false{% if clear_model %}; {{ clear_model }} = ''{% endif %}"
+                class="block w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700 truncate">{{ value }}</button>
+        {% endfor %}
+        {% else %}
         {% for for_key, value in suggestions %}
         <button type="button" data-value="{{ value }}" data-for-key="{{ for_key }}"
                 x-show="$el.dataset.forKey === {{ for_key_model }} && (!{{ model }} || $el.dataset.value.toLowerCase().includes({{ model }}.toLowerCase()))"
                 @click="{{ model }} = $el.dataset.value; open = false{% if clear_model %}; {{ clear_model }} = ''{% endif %}"
                 class="block w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700 truncate">{{ value }}</button>
+        {% endfor %}
+        {% endif %}
+        {% else %}
+        {% if type_filter_model %}
+        {% for s, resource_types in suggestions %}
+        <button type="button" data-value="{{ s }}" data-resource-types="{{ resource_types }}"
+                x-show="(!{{ model }} || $el.dataset.value.toLowerCase().includes({{ model }}.toLowerCase())) && ({{ type_filter_model }} === '' || $el.dataset.resourceTypes.split(',').includes({{ type_filter_model }}))"
+                @click="{{ model }} = $el.dataset.value; open = false{% if clear_model %}; {{ clear_model }} = ''{% endif %}"
+                class="block w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700 truncate">{{ s }}</button>
         {% endfor %}
         {% else %}
         {% for s in suggestions %}
@@ -60,6 +83,7 @@
                 @click="{{ model }} = $el.dataset.value; open = false{% if clear_model %}; {{ clear_model }} = ''{% endif %}"
                 class="block w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700 truncate">{{ s }}</button>
         {% endfor %}
+        {% endif %}
         {% endif %}
     </div>
     {% endif %}

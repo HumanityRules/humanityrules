@@ -46,15 +46,6 @@
                        class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white">
             </div>
 
-            {# Resource type #}
-            <div class="mb-6">
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Resource Type</label>
-                <input type="hidden" name="resource_type" :value="resourceType">
-                <div class="w-64" @change="resourceType = $event.target.value">
-                    {% include "humanityrules_app/partials/_dropdown_select.html#dropdown_select" with dropdown_id="resource-type-select" dropdown_name="" dropdown_value=form_resource_type dropdown_selected_label=selected_resource_type_label dropdown_options=resource_type_options %}
-                </div>
-            </div>
-
             {# Identity conditions #}
             <div class="mb-6">
                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Identity Conditions</label>
@@ -64,21 +55,35 @@
                     Match any identity
                 </label>
                 <template x-if="!identityWildcard">
-                    {% include "humanityrules_app/partials/_kv_tag_editor.html" with array_model="identityConditions" suggested_keys=existing_identity_keys suggested_values=existing_identity_values add_label="Add condition" %}
+                    {% include "humanityrules_app/partials/_kv_tag_editor.html" with array_model="identityConditions" suggested_keys=existing_identity_keys suggested_values=existing_identity_values add_label="Add condition" key_width="w-48" value_width="w-48" type_filter_model="resourceType" %}
                 </template>
             </div>
 
-            {# Resource conditions #}
+            {# Resource: type + conditions #}
             <div class="mb-6">
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Resource Conditions</label>
-                <label class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 mb-2">
-                    <input type="checkbox" x-model="resourceWildcard"
-                           class="rounded border-gray-300 dark:border-gray-600 text-indigo-600">
-                    Match any resource
-                </label>
-                <template x-if="!resourceWildcard">
-                    {% include "humanityrules_app/partials/_kv_tag_editor.html" with array_model="resourceConditions" suggested_keys=existing_tag_keys suggested_values=existing_tag_values add_label="Add condition" %}
-                </template>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Resource</label>
+                <div class="pl-4 border-l-2 border-gray-200 dark:border-gray-700 space-y-4">
+                    {# Resource type #}
+                    <div>
+                        <label class="block text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Resource Type</label>
+                        <input type="hidden" name="resource_type" :value="resourceType">
+                        <div class="w-40" @change="resourceType = $event.target.value">
+                            {% include "humanityrules_app/partials/_dropdown_select.html#dropdown_select" with dropdown_id="resource-type-select" dropdown_name="" dropdown_value=form_resource_type dropdown_selected_label=selected_resource_type_label dropdown_options=resource_type_options %}
+                        </div>
+                    </div>
+                    {# Resource conditions #}
+                    <div>
+                        <label class="block text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Resource Conditions</label>
+                        <label class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 mb-2">
+                            <input type="checkbox" x-model="resourceWildcard"
+                                   class="rounded border-gray-300 dark:border-gray-600 text-indigo-600">
+                            Match any resource
+                        </label>
+                        <template x-if="!resourceWildcard">
+                            {% include "humanityrules_app/partials/_kv_tag_editor.html" with array_model="resourceConditions" suggested_keys=existing_tag_keys suggested_values=existing_tag_values add_label="Add condition" type_filter_model="resourceType" key_width="w-48" value_width="w-48" %}
+                        </template>
+                    </div>
+                </div>
             </div>
 
             {# Actions #}

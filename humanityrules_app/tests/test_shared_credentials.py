@@ -80,22 +80,22 @@ class TestSharedCredentialTagSeeding(SharedCredentialTestBase):
 
     def test_everyone_seeds_only_scope_tag(self) -> None:
         cred = self._make_cred("everyone", None, None, "sk-or-1")
-        self.assertEqual(self._tags(cred), {("shared-scope", "everyone")})
+        self.assertEqual(self._tags(cred), {("sharing-scope", "everyone")})
 
     def test_user_seeds_scope_and_username(self) -> None:
         cred = self._make_cred("user", self.alice, None, "sk-or-1")
-        self.assertEqual(self._tags(cred), {("shared-scope", "user"), ("shared-user", "alice")})
+        self.assertEqual(self._tags(cred), {("sharing-scope", "user"), ("shared-with-user", "alice")})
 
     def test_workspace_seeds_scope_and_slug(self) -> None:
         cred = self._make_cred("workspace", None, self.ws_eng, "sk-or-1")
-        self.assertEqual(self._tags(cred), {("shared-scope", "workspace"), ("shared-workspace", "engineering")})
+        self.assertEqual(self._tags(cred), {("sharing-scope", "workspace"), ("shared-with-workspace", "engineering")})
 
     def test_retarget_reseeds_tags(self) -> None:
         cred = self._make_cred("user", self.alice, None, "sk-or-1")
         cred.scope = "everyone"
         cred.target_user = None
         cred.save()
-        self.assertEqual(self._tags(cred), {("shared-scope", "everyone")})
+        self.assertEqual(self._tags(cred), {("sharing-scope", "everyone")})
 
 
 class TestFilterPermittedCredentials(SharedCredentialTestBase):
@@ -238,7 +238,7 @@ class TestAppReferenceValidation(TestCase):
     def test_app_reference_valid_in_resource_condition(self) -> None:
         abac_service.validate_policy_conditions(
             identity_conditions=[{"key": "authenticated", "value": "true"}],
-            resource_conditions=[{"key": "shared-workspace", "value": "$app.workspace-name"}],
+            resource_conditions=[{"key": "shared-with-workspace", "value": "$app.workspace-name"}],
         )
 
     def test_app_reference_valid_in_identity_condition(self) -> None:
