@@ -68,5 +68,6 @@ This split is the simplest model to maintain:
 - `humanityrules_app/templates/humanityrules_app/apps/app_detail.html`
 - `humanityrules_app/templates/humanityrules_app/deploy/_blueprint_section.html`
 - `humanityrules_app/templates/humanityrules_app/environments/_environment_editor_setup_section.html`
+- `humanityrules_app/templates/humanityrules_app/environments/_environment_status.html`
 - `humanityrules_app/templates/humanityrules_app/chat/_chat_panel.html`
 - `humanityrules_app/views/chat.py`

@@ -1,34 +1,39 @@
 <div class="max-w-5xl">
     <div class="mb-6">
         {% url 'environments' as environments_url %}
-        <div class="flex items-center justify-between">
-            {% include "humanityrules_app/partials/_breadcrumb.html" with p1_label="Environments" p1_url=environments_url current=environment.name %}
-            {% if user_is_org_admin %}
-            <div class="flex items-center gap-3">
-                {% if environment.status == 'draft' or environment.status == 'pending' or environment.status == 'provisioning' or environment.status == 'error' %}
-                <a href="{% url 'environment_editor' environment_id=environment.id %}"
-                   hx-get="{% url 'environment_editor' environment_id=environment.id %}"
-                   hx-target="#main-content"
-                   hx-swap="innerHTML"
-                   hx-push-url="true"
-                   class="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700">
-                    Resume Setup
-                </a>
-                {% endif %}
-                {% if environment.status == 'ready' or environment.status == 'error' %}
-                {% if not environment.aws_account.is_humr_sandbox %}
-                <button hx-get="/environments/{{ environment.id }}/teardown-confirm/"
-                        hx-target="#modal-container"
-                        hx-swap="innerHTML"
-                        class="px-3 py-1.5 text-sm font-medium text-red-600 dark:text-red-400 border border-red-300 dark:border-red-600 rounded-lg hover:bg-red-50 dark:hover:bg-red-500/10">
-                    Tear Down
-                </button>
-                {% endif %}
-                {% endif %}
-            </div>
-            {% endif %}
-        </div>
+        {% include "humanityrules_app/partials/_breadcrumb.html" with p1_label="Environments" p1_url=environments_url current=environment.name %}
     </div>
+
+    <div x-data="{ tab: '{{ initial_tab }}' }">
+        {% comment %} Tabs: Overview + the live provisioning log. The log tab is disabled until there's
+        something to show, and opens by default ({{ initial_tab }}) while provisioning/teardown is in flight. {% endcomment %}
+        <div class="mb-6 border-b border-gray-200 dark:border-gray-700">
+            <div class="flex items-end justify-between gap-4">
+            <nav class="-mb-px flex gap-6" aria-label="Tabs">
+                <button type="button"
+                        @click="tab = 'content'"
+                        :class="tab === 'content' ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'"
+                        class="whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium">Overview</button>
+                {% if log_tab_enabled %}
+                <button type="button"
+                        @click="tab = 'logs'"
+                        hx-get="{% url 'environment_provisioning_log' environment_id=environment.id %}"
+                        hx-target="#provisioning-log-region"
+                        hx-swap="innerHTML"
+                        :class="tab === 'logs' ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'"
+                        class="whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium">Provisioning Log</button>
+                {% else %}
+                <span class="cursor-not-allowed whitespace-nowrap border-b-2 border-transparent px-1 py-3 text-sm font-medium text-gray-300 dark:text-gray-600"
+                      title="No provisioning logs yet">Provisioning Log</span>
+                {% endif %}
+            </nav>
+            {% if user_is_org_admin %}
+            {% include "humanityrules_app/environments/_environment_actions.html" %}
+            {% endif %}
+            </div>
+        </div>
+
+        <div x-show="tab === 'content'"{% if initial_tab != 'content' %} style="display: none"{% endif %}>
     {# Environment details and tags side by side #}
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-8">
         <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
@@ -56,7 +61,7 @@
                 <div>
                     <dt class="text-gray-500 dark:text-gray-400">Status</dt>
                     <dd class="mt-1">
-                        {% include "humanityrules_app/partials/_status_pill.html" with status=environment.status label=environment.get_status_display only %}
+                        {% include "humanityrules_app/environments/_environment_status.html" %}
                     </dd>
                 </div>
             </dl>
@@ -95,4 +100,31 @@
         </div>
         {% endif %}
     </div>
+        </div>{# end Overview panel #}
+
+        <div x-show="tab === 'logs'"{% if initial_tab != 'logs' %} style="display: none"{% endif %}>
+            {% comment %} Auto-tail lives here, not on the log fragment, because this element survives
+            the per-second poll swap while #provisioning-log-console is rebuilt each time. Before the swap
+            we record whether the user was pinned to the bottom (within 40px); after, we re-pin only if
+            they were — otherwise we restore their exact scroll position, so manual scrolling isn't yanked.
+            When logs is the initial tab (provisioning is in flight) we also self-load the fragment on page
+            load, since no tab click happens to trigger the fetch. {% endcomment %}
+            <div id="provisioning-log-region"
+                 {% if initial_tab == 'logs' %}
+                 hx-get="{% url 'environment_provisioning_log' environment_id=environment.id %}"
+                 hx-trigger="load"
+                 hx-swap="innerHTML"
+                 {% endif %}
+                 hx-on::before-swap="const c = this.querySelector('#provisioning-log-console'); this._stick = !c || c.scrollHeight - c.scrollTop - c.clientHeight < 40; this._top = c ? c.scrollTop : 0;"
+                 hx-on::after-swap="const c = this.querySelector('#provisioning-log-console'); if (c) c.scrollTop = this._stick ? c.scrollHeight : this._top;">
+                <div class="flex items-center justify-center gap-2 py-8 text-sm text-gray-500 dark:text-gray-400">
+                    <svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z"></path>
+                    </svg>
+                    Loading provisioning log…
+                </div>
+            </div>
+        </div>{# end Provisioning Log panel #}
+    </div>{# end tabs #}
 </div>

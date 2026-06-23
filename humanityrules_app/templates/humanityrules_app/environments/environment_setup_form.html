@@ -1,0 +1,113 @@
+<div class="max-w-3xl">
+    <div class="mb-6">
+        <nav class="text-sm text-gray-500 dark:text-gray-400 mb-2">
+            <a href="{% url 'environments' %}"
+               hx-get="{% url 'environments' %}"
+               hx-target="#main-content"
+               hx-swap="innerHTML"
+               hx-push-url="true"
+               class="hover:text-gray-700 dark:hover:text-gray-200">Environments</a>
+            <span class="mx-1">/</span>
+            <span class="text-gray-900 dark:text-white">New Environment</span>
+        </nav>
+        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">New Environment</h1>
+        <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">
+            Provision a VPC and ECS cluster in a connected AWS account.
+            Provisioning starts as soon as you create it; follow progress on the Provisioning Log tab.
+        </p>
+    </div>
+
+    {% if not account_options %}
+    <div class="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 p-6 text-center">
+        <p class="text-sm text-gray-500 dark:text-gray-400">Connect an AWS account before creating an environment.</p>
+        <a href="{% url 'integrations_org_aws_accounts' %}"
+           hx-get="{% url 'integrations_org_aws_accounts' %}"
+           hx-target="#main-content"
+           hx-swap="innerHTML"
+           hx-push-url="true"
+           class="mt-3 inline-flex items-center text-sm text-indigo-600 dark:text-indigo-400 hover:text-indigo-500">Connect AWS Account</a>
+    </div>
+    {% else %}
+    <form hx-post="{% url 'environment_setup_form' %}"
+          hx-target="#main-content"
+          hx-swap="innerHTML"
+          x-data="{ envName: '{{ form_values.name|default:''|escapejs }}' }"
+          class="space-y-5">
+        {% csrf_token %}
+
+        <div>
+            <label for="aws_account" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">AWS Account</label>
+            {% comment %} Changing the account re-fetches this form so the domain dropdown reloads with that
+            account's Route53 hosted zones (zones are account-specific). Name/region are echoed back. {% endcomment %}
+            <div hx-get="{% url 'environment_setup_form' %}"
+                 hx-trigger="change from:#aws_account"
+                 hx-include="closest form"
+                 hx-target="#main-content"
+                 hx-swap="innerHTML">
+                {% include "humanityrules_app/partials/_dropdown_select.html#dropdown_select" with dropdown_id="aws_account" dropdown_name="aws_account" dropdown_value=selected_account_id dropdown_selected_label=selected_account_label dropdown_options=account_options %}
+            </div>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">The connected AWS account this environment is provisioned in.</p>
+        </div>
+
+        <div>
+            <label for="name" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Name</label>
+            <input type="text"
+                   id="name"
+                   name="name"
+                   value="{{ form_values.name|default:'' }}"
+                   x-model="envName"
+                   required
+                   autocomplete="off"
+                   class="block w-full rounded-lg border {% if errors.name %}border-red-400 dark:border-red-500{% else %}border-gray-300 dark:border-gray-600{% endif %} bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
+            {% if errors.name %}
+            <p class="mt-1 text-xs text-red-600 dark:text-red-400">{{ errors.name }}</p>
+            {% else %}
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">A name for this environment (e.g. Production, Staging). Used as the URL slug; must be unique within the account.</p>
+            {% endif %}
+        </div>
+
+        <div>
+            <label for="aws_region" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Region</label>
+            {% include "humanityrules_app/partials/_dropdown_select.html#dropdown_select" with dropdown_id="aws_region" dropdown_name="aws_region" dropdown_value=selected_region dropdown_selected_label=selected_region dropdown_options=region_options %}
+            {% if errors.aws_region %}
+            <p class="mt-1 text-xs text-red-600 dark:text-red-400">{{ errors.aws_region }}</p>
+            {% else %}
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">The AWS region this environment's infrastructure runs in.</p>
+            {% endif %}
+        </div>
+
+        <div>
+            <label for="shared_alb_hosted_zone" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Domain <span class="font-normal text-gray-400 dark:text-gray-500">(optional)</span></label>
+            {% if domain_lookup_failed %}
+            <input type="text"
+                   id="shared_alb_hosted_zone"
+                   name="shared_alb_hosted_zone"
+                   value="{{ selected_domain }}"
+                   autocomplete="off"
+                   placeholder="e.g. dev.example.com"
+                   class="block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Couldn't load Route53 hosted zones for this account — enter a hosted zone name manually, or leave empty for HTTP only.</p>
+            {% else %}
+            {% include "humanityrules_app/partials/_dropdown_select.html#dropdown_select" with dropdown_id="shared_alb_hosted_zone" dropdown_name="shared_alb_hosted_zone" dropdown_value=selected_domain dropdown_selected_label=selected_domain_label dropdown_options=domain_options %}
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Route53 hosted zone for the shared ALB's wildcard HTTPS certificate. Choose “None (HTTP only)” for plain HTTP.</p>
+            {% endif %}
+        </div>
+
+        <div class="flex justify-end pt-2">
+            <a href="{% url 'environments' %}"
+               hx-get="{% url 'environments' %}"
+               hx-target="#main-content"
+               hx-swap="innerHTML"
+               hx-push-url="true"
+               class="mr-3 rounded-lg px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                Cancel
+            </a>
+            <button type="submit"
+                    :disabled="!envName.trim()"
+                    class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-indigo-600">
+                Provision
+            </button>
+        </div>
+    </form>
+    {% endif %}
+</div>

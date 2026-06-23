@@ -28,12 +28,17 @@ DISCARDABLE_ENVIRONMENT_STATUSES = (
 
 
 def _load_aws_account(request: HttpRequest, aws_account_id: str) -> models.AWSAccount:
-    """Load an AWS account for environment setup."""
+    """Load a CONNECTED, non-sandbox AWS account for environment setup (404 on sandbox).
+
+    The shared sandbox account is excluded so the agent setup flow can't target it for
+    environment creation, even via a crafted ?aws_account=<uuid>.
+    """
     return get_object_or_404(
         models.AWSAccount,
         id=aws_account_id,
         organization=request.user.current_organization,
         status=models.AWSAccount.Status.CONNECTED,
+        is_humr_sandbox=False,
     )
 
 
@@ -116,6 +121,7 @@ def _render_environment_editor(
 
 
 @login_required
+@base.require_agent_deployments
 def environment_editor_new(request: HttpRequest) -> HttpResponse:
     """Entry point for starting a new environment setup flow from an AWS account."""
     if not request.htmx:
@@ -148,6 +154,7 @@ def environment_editor_new(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
+@base.require_agent_deployments
 def environment_editor(request: HttpRequest, environment_id: UUID) -> HttpResponse:
     """Resume the setup task for an existing environment."""
     if not request.htmx:
@@ -170,6 +177,7 @@ def environment_editor(request: HttpRequest, environment_id: UUID) -> HttpRespon
 
 
 @login_required
+@base.require_agent_deployments
 def environment_editor_environment_section(request: HttpRequest, environment_id: UUID) -> HttpResponse:
     """Return the environment setup section partial for HTMX refresh in the editor."""
     denied = abac_view_checks.require_org_admin(request)
@@ -203,6 +211,7 @@ def _reset_and_render_fresh_editor(request: HttpRequest, aws_account: models.AWS
 
 
 @login_required
+@base.require_agent_deployments
 @require_POST
 def environment_editor_reset(request: HttpRequest, environment_id: UUID) -> HttpResponse:
     """Close current conversation, discard draft environment if present, and start fresh."""
