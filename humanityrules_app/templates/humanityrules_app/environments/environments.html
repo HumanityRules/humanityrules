@@ -37,7 +37,11 @@
         </a>
         {% endfor %}
 
-        {# New Environment card - org-admin only, requires AWS accounts #}
+        {% comment %}
+        New Environment card - org-admin only, requires AWS accounts. This is the single gate for
+        the agent flow: with agent deployments on it opens the account picker → agent editor;
+        otherwise it jumps straight to the setup form (which has its own account dropdown).
+        {% endcomment %}
         {% if user_is_org_admin and aws_accounts %}
         <button type="button"
                 onclick="document.getElementById('aws-account-picker-modal').classList.remove('hidden')"

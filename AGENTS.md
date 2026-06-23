@@ -32,6 +32,11 @@ HumR's control plane is called CP.
 **Every query on a tenant-owned model must be scoped to the caller's org.** When fetching a row by a client-supplied id, the org filter (direct or transitive) is part of the lookup — never a separate verify-after step.
 
 
+# Django templates
+
+**`{# #}` comments are single-line only — they leak into the rendered page if wrapped across lines.** Use `{% comment %}...{% endcomment %}` for any multi-line comment.
+
+
 # Browser Testing
 
 **For local dev login (`/auth/dev-login/` or session-cookie curl), see `docs/local_dev_login.md`.**
