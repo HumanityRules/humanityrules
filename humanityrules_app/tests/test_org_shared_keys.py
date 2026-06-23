@@ -6,6 +6,7 @@ multi-tenant isolation. Provider key validation hits the network, so the OpenAI
 `httpx.get` call is mocked throughout.
 """
 
+import re
 from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
@@ -136,6 +137,20 @@ class TestAdd(SharedKeysUITestBase):
             response = self.client.post(ADD_URL, data={"provider": "openai-api", "scope": "user", "api_key": "sk-real"})
         self.assertIn("member of this organization", response.content.decode())
         self.assertFalse(IntegrationSharedCredential.objects.exists())
+
+    def test_error_rerender_shows_selected_scope_target(self) -> None:
+        """The selected scope's target block must render without the `hidden`
+        class so its validation error is visible. The block is server-rendered
+        visible (not toggled by JS) because htmx attribute-settling restores the
+        server class after the swap, clobbering any post-swap JS un-hide."""
+        self.client.force_login(self.admin)
+        with _patch_openai(_ok_openai_response()):
+            response = self.client.post(ADD_URL, data={"provider": "openai-api", "scope": "user", "api_key": "sk-real"})
+        body = response.content.decode()
+        user_class = re.search(r'id="shared-key-target-user" class="([^"]*)"', body).group(1)
+        workspace_class = re.search(r'id="shared-key-target-workspace" class="([^"]*)"', body).group(1)
+        self.assertNotIn("hidden", user_class)
+        self.assertIn("hidden", workspace_class)
 
     def test_duplicate_everyone_rejected(self) -> None:
         self.client.force_login(self.admin)

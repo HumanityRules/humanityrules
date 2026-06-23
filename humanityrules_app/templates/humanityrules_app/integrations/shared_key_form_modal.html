@@ -37,13 +37,7 @@
                         {% if is_edit %}
                         <p class="text-sm text-gray-700 dark:text-gray-300">{{ provider_label }}</p>
                         {% else %}
-                        <select name="provider" id="shared-key-provider"
-                                class="block w-full rounded-md bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-white outline-1 -outline-offset-1 outline-gray-300 dark:outline-white/10 focus:outline-2 focus:-outline-offset-2 focus:outline-indigo-600 dark:focus:outline-indigo-500">
-                            <option value="">Select…</option>
-                            {% for choice in provider_choices %}
-                            <option value="{{ choice.value }}" {% if values.provider == choice.value %}selected{% endif %}>{{ choice.label }}</option>
-                            {% endfor %}
-                        </select>
+                        {% include "humanityrules_app/partials/_dropdown_select.html#dropdown_select" with dropdown_id="shared-key-provider" dropdown_name="provider" dropdown_value=values.provider dropdown_selected_label=provider_selected_label dropdown_options=provider_options %}
                         {% endif %}
                         {% if errors.provider %}<p class="mt-1.5 text-sm text-red-600 dark:text-red-400">{{ errors.provider }}</p>{% endif %}
                     </div>
@@ -80,27 +74,15 @@
                         </div>
                         {% if errors.scope %}<p class="mt-1.5 text-sm text-red-600 dark:text-red-400">{{ errors.scope }}</p>{% endif %}
 
-                        <div id="shared-key-target-workspace" class="mt-3 hidden rounded-md bg-gray-50 dark:bg-white/5 p-3">
+                        <div id="shared-key-target-workspace" class="mt-3 {% if values.scope != 'workspace' %}hidden {% endif %}rounded-md bg-gray-50 dark:bg-white/5 p-3">
                             <label for="shared-key-workspace" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Workspace</label>
-                            <select name="target_workspace" id="shared-key-workspace"
-                                    class="block w-full rounded-md bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-white outline-1 -outline-offset-1 outline-gray-300 dark:outline-white/10 focus:outline-2 focus:-outline-offset-2 focus:outline-indigo-600 dark:focus:outline-indigo-500">
-                                <option value="">Select a workspace…</option>
-                                {% for ws in workspaces %}
-                                <option value="{{ ws.id }}" {% if values.target_workspace == ws.id %}selected{% endif %}>{{ ws.name }}</option>
-                                {% endfor %}
-                            </select>
+                            {% include "humanityrules_app/partials/_dropdown_select.html#dropdown_select" with dropdown_id="shared-key-workspace" dropdown_name="target_workspace" dropdown_value=values.target_workspace dropdown_selected_label=workspace_selected_label dropdown_options=workspace_options %}
                             {% if errors.target_workspace %}<p class="mt-1.5 text-sm text-red-600 dark:text-red-400">{{ errors.target_workspace }}</p>{% endif %}
                         </div>
 
-                        <div id="shared-key-target-user" class="mt-3 hidden rounded-md bg-gray-50 dark:bg-white/5 p-3">
+                        <div id="shared-key-target-user" class="mt-3 {% if values.scope != 'user' %}hidden {% endif %}rounded-md bg-gray-50 dark:bg-white/5 p-3">
                             <label for="shared-key-user" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">User</label>
-                            <select name="target_user" id="shared-key-user"
-                                    class="block w-full rounded-md bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-white outline-1 -outline-offset-1 outline-gray-300 dark:outline-white/10 focus:outline-2 focus:-outline-offset-2 focus:outline-indigo-600 dark:focus:outline-indigo-500">
-                                <option value="">Select a user…</option>
-                                {% for member in members %}
-                                <option value="{{ member.id }}" {% if values.target_user == member.id %}selected{% endif %}>{{ member.label }}</option>
-                                {% endfor %}
-                            </select>
+                            {% include "humanityrules_app/partials/_dropdown_select.html#dropdown_select" with dropdown_id="shared-key-user" dropdown_name="target_user" dropdown_value=values.target_user dropdown_selected_label=member_selected_label dropdown_options=member_options %}
                             {% if errors.target_user %}<p class="mt-1.5 text-sm text-red-600 dark:text-red-400">{{ errors.target_user }}</p>{% endif %}
                         </div>
                     </div>

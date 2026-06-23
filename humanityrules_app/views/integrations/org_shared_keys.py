@@ -53,6 +53,14 @@ def _provider_label(provider: str) -> str:
         return provider
 
 
+def _selected_label(options: list[dict], value: str, placeholder: str) -> str:
+    """Label of the option whose id matches `value`, else the placeholder."""
+    for option in options:
+        if option["id"] == value:
+            return option["name"]
+    return placeholder
+
+
 def _row_view(credential: IntegrationSharedCredential) -> dict:
     """Build the display row for one shared credential (never exposes the secret)."""
     if credential.scope == IntegrationSharedCredential.Scope.USER:
@@ -269,14 +277,21 @@ def _render_form_modal(request: HttpRequest, org: Organization, credential: Inte
     workspaces = Workspace.objects.filter(organization=org).order_by("name")
     members = OrganizationMembership.objects.filter(organization=org).select_related("user").order_by("user__username")
 
+    provider_options = [{"id": choice["value"], "name": choice["label"]} for choice in _shareable_provider_choices()]
+    workspace_options = [{"id": str(ws.id), "name": ws.name} for ws in workspaces]
+    member_options = [{"id": str(m.user.id), "name": m.user.email or m.user.username} for m in members]
+
     context = {
         "is_edit": credential is not None,
         "credential_id": str(credential.id) if credential is not None else "",
-        "provider_choices": _shareable_provider_choices(),
+        "provider_options": provider_options,
+        "provider_selected_label": _selected_label(options=provider_options, value=values["provider"], placeholder="Select…"),
         "provider_label": _provider_label(provider=credential.provider) if credential is not None else "",
         "key_configured": bool(credential.credentials.get("api_key")) if credential is not None else False,
-        "workspaces": [{"id": str(ws.id), "name": ws.name} for ws in workspaces],
-        "members": [{"id": str(m.user.id), "label": m.user.email or m.user.username} for m in members],
+        "workspace_options": workspace_options,
+        "workspace_selected_label": _selected_label(options=workspace_options, value=values["target_workspace"], placeholder="Select a workspace…"),
+        "member_options": member_options,
+        "member_selected_label": _selected_label(options=member_options, value=values["target_user"], placeholder="Select a user…"),
         "values": values,
         "errors": errors,
     }
