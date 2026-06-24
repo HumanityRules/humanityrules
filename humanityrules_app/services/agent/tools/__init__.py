@@ -16,7 +16,6 @@ from .save_app import save_app, SaveAppResult
 from .save_blueprint import save_blueprint, SaveBlueprintResult
 from .deploy_blueprint import deploy_blueprint, DeployBlueprintResult
 from .get_deployment_status import get_deployment_status, DeploymentStatus, DeploymentLogEntry
-from .initiate_aws_connection import initiate_aws_connection, AWSConnectionInfo
 from .list_aws_accounts import list_aws_accounts, AWSAccountSummary
 from .list_environments import list_environments
 from .list_environments import EnvironmentSummary as ListEnvironmentSummary
@@ -57,8 +56,6 @@ __all__ = [
     "DeploymentStatus",
     "DeploymentLogEntry",
     # AWS accounts
-    "initiate_aws_connection",
-    "AWSConnectionInfo",
     "list_aws_accounts",
     "AWSAccountSummary",
     "list_hosted_zones",

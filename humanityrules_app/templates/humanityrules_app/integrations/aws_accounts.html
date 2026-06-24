@@ -1,7 +1,16 @@
 {% extends "humanityrules_app/integrations/integrations.html" %}
 
 {% block integrations_content %}
-<div class="px-8">
+{% comment %}
+Refreshes itself on the awsAccountsChanged event fired after add / edit / connect / disconnect.
+While any account is pending it also self-polls every 30s, re-rendering this fragment until the
+install callback connects it; once nothing is pending the poll attribute drops and polling stops.
+{% endcomment %}
+<div class="px-8"
+     hx-get="{% url 'integrations_org_aws_accounts' %}"
+     hx-trigger="awsAccountsChanged from:body{% if has_pending_accounts %}, every 30s{% endif %}"
+     hx-target="#main-content"
+     hx-swap="innerHTML">
     <div class="flex items-center">
         <div class="flex-auto">
             <h1 class="text-base font-semibold text-gray-900 dark:text-white">AWS Accounts</h1>
@@ -66,7 +75,21 @@
                             </td>
                             <td class="px-3 py-4 text-sm whitespace-nowrap text-gray-500 dark:text-gray-400">{{ account.created_at|date:"M d, Y" }}</td>
                             <td class="py-4 pl-3 text-right text-sm font-medium whitespace-nowrap">
-                                <a href="#" class="text-indigo-600 hover:text-indigo-900 dark:text-indigo-400 dark:hover:text-indigo-300">Edit<span class="sr-only">, {{ account.name }}</span></a>
+                                <button type="button"
+                                        hx-get="{% url 'integrations_org_aws_accounts_edit' account.id %}"
+                                        hx-target="#modal-container"
+                                        hx-swap="innerHTML"
+                                        class="text-indigo-600 hover:text-indigo-900 dark:text-indigo-400 dark:hover:text-indigo-300">Edit<span class="sr-only">, {{ account.name }}</span></button>
+                                {% if account.environment_count %}
+                                    <span class="ml-4 cursor-not-allowed text-gray-400 dark:text-gray-600"
+                                          title="Tear down this account's {{ account.environment_count }} environment{{ account.environment_count|pluralize }} before disconnecting">Disconnect<span class="sr-only">, {{ account.name }}</span></span>
+                                {% else %}
+                                    <button type="button"
+                                            hx-get="{% url 'integrations_org_aws_accounts_disconnect_confirm' account.id %}"
+                                            hx-target="#modal-container"
+                                            hx-swap="innerHTML"
+                                            class="ml-4 text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300">Disconnect<span class="sr-only">, {{ account.name }}</span></button>
+                                {% endif %}
                             </td>
                         </tr>
                         {% endfor %}

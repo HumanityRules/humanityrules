@@ -69,5 +69,7 @@ This split is the simplest model to maintain:
 - `humanityrules_app/templates/humanityrules_app/deploy/_blueprint_section.html`
 - `humanityrules_app/templates/humanityrules_app/environments/_environment_editor_setup_section.html`
 - `humanityrules_app/templates/humanityrules_app/environments/_environment_status.html`
+- `humanityrules_app/templates/humanityrules_app/integrations/_aws_connect_poll.html` (connect modal polls until the account connects; a headless poller with no visible content, so it uses htmx's `every 30s` interval trigger and stops when the terminal response removes the element, rather than the self-replacing `load delay` fragment the visible widgets use)
+- `humanityrules_app/templates/humanityrules_app/integrations/aws_accounts.html` (the AWS accounts list self-polls `every 30s` while any account is pending — the visible self-terminating pattern — so a row that was left pending after the modal was closed still updates to connected)
 - `humanityrules_app/templates/humanityrules_app/chat/_chat_panel.html`
 - `humanityrules_app/views/chat.py`
