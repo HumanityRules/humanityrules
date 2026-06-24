@@ -12,17 +12,21 @@
 .gitignore
 .gitattributes
 
-# Python
-__pycache__
-*.pyc
-*.pyo
-*.pyd
+# Python. Use `**/` (not bare names) so nested artifacts are excluded too --
+# bare `.venv` only matches the context root, which let a developer's macOS
+# `.venv` under template_repos/hermes_agent/vendor/hermes-agent/ leak into the
+# image and break deploys (its bin/python symlinks dangle to /Users/...).
+# Same reasoning as `**/.git` above.
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
 .Python
-.venv
-venv
-.pytest_cache
-.mypy_cache
-*.egg-info
+**/.venv
+**/venv
+**/.pytest_cache
+**/.mypy_cache
+**/*.egg-info
 
 # IDE
 .vscode

@@ -120,15 +120,15 @@ def run_deployment(deployment_id: str) -> bool:
             {"app_name": app.name, "environment_name": environment.name, "git_ref": deployment.git_ref, "image_tag": deployment.image_tag},
         )
 
-        # Clone the repository
-        cloned_repo_path = settings.CLAUDE_SANDBOX_DIR / f"deployment-{deployment_id}"
-        repo_service.clone_repository(
-            repository=app.repository,
-            branch=deployment.git_ref,
-            target_dir=cloned_repo_path,
-        )
-
         try:
+            # Clone the repository
+            cloned_repo_path = settings.CLAUDE_SANDBOX_DIR / f"deployment-{deployment_id}"
+            repo_service.clone_repository(
+                repository=app.repository,
+                branch=deployment.git_ref,
+                target_dir=cloned_repo_path,
+            )
+
             session = _get_aws_session(deployment)
 
             app_config = app_config_builder.build_app_config_from_blueprint(
