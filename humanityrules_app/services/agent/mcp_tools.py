@@ -28,7 +28,6 @@ from .tools import (
     deploy_blueprint as _deploy_blueprint,
     get_deployment_status as _get_deployment_status,
     get_environment_status as _get_environment_status,
-    initiate_aws_connection as _initiate_aws_connection,
     list_apps as _list_apps,
     list_aws_accounts as _list_aws_accounts,
     list_environments as _list_environments,
@@ -99,7 +98,6 @@ TOOL_DISPLAY_NAMES = {
     "mcp__humanityrules__list_aws_accounts": "List AWS Accounts",
     "mcp__humanityrules__list_hosted_zones": "List Hosted Zones",
     "mcp__humanityrules__list_environments": "List Environments",
-    "mcp__humanityrules__initiate_aws_connection": "Initiate AWS Connection",
     "mcp__humanityrules__save_environment": "Save Environment",
     "mcp__humanityrules__provision_environment": "Provision Environment",
     "mcp__humanityrules__get_environment_status": "Get Environment Status",
@@ -134,7 +132,6 @@ def get_tool_display_name(full_name: str, parameters: dict | None) -> str:
 
 # Mapping from tool names to their "main" parameter for display in titles.
 TOOL_INPUT_PARAMS_FOR_TITLE = {
-    "mcp__humanityrules__initiate_aws_connection": "account_name",
     "mcp__humanityrules__list_hosted_zones": "aws_account_uuid",
     "mcp__humanityrules__list_environments": "aws_account_uuid",
     "mcp__humanityrules__save_environment": "environment_name",
@@ -408,26 +405,6 @@ def create_humanityrules_mcp_server(conversation: Conversation):
                 "Use get_environment_status to check progress."
             ),
         })
-
-    @tool(
-        "initiate_aws_connection",
-        (
-            "Start the process of connecting a new AWS account. "
-            "Creates a pending account record and returns a CloudFormation URL. "
-            "The user must click the URL to deploy the stack in their AWS account."
-        ),
-        {
-            "account_name": str,
-        },
-    )
-    async def initiate_aws_connection(args: dict[str, Any]) -> dict[str, Any]:
-        """Create a pending AWS account and return the CloudFormation URL."""
-        result = await _initiate_aws_connection(
-            account_name=args["account_name"],
-            organization=conversation.organization,
-            user=conversation.user,
-        )
-        return _mcp_response(result)
 
     @tool(
         "list_repositories",
@@ -1051,7 +1028,6 @@ def create_humanityrules_mcp_server(conversation: Conversation):
             list_aws_accounts,
             list_hosted_zones,
             list_environments,
-            initiate_aws_connection,
             save_environment,
             provision_environment,
             get_environment_status,
@@ -1084,7 +1060,6 @@ TOOL_NAMES = [
     "mcp__humanityrules__list_aws_accounts",
     "mcp__humanityrules__list_hosted_zones",
     "mcp__humanityrules__list_environments",
-    "mcp__humanityrules__initiate_aws_connection",
     "mcp__humanityrules__save_environment",
     "mcp__humanityrules__provision_environment",
     "mcp__humanityrules__get_environment_status",

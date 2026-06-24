@@ -126,6 +126,10 @@ urlpatterns = [
     path("integrations/", views.integrations_root, name="integrations_root"),
     path("integrations/org/aws-accounts/", views.integrations_org_aws_accounts, name="integrations_org_aws_accounts"),
     path("integrations/org/aws-accounts/add/", views.integrations_org_aws_accounts_add, name="integrations_org_aws_accounts_add"),
+    path("integrations/org/aws-accounts/<uuid:account_id>/status/", views.integrations_org_aws_accounts_status, name="integrations_org_aws_accounts_status"),
+    path("integrations/org/aws-accounts/<uuid:account_id>/edit/", views.integrations_org_aws_accounts_edit, name="integrations_org_aws_accounts_edit"),
+    path("integrations/org/aws-accounts/<uuid:account_id>/disconnect-confirm/", views.integrations_org_aws_accounts_disconnect_confirm, name="integrations_org_aws_accounts_disconnect_confirm"),
+    path("integrations/org/aws-accounts/<uuid:account_id>/disconnect/", views.integrations_org_aws_accounts_disconnect, name="integrations_org_aws_accounts_disconnect"),
 
     # GitHub integration: org-level (org admin configures once at /integrations/;
     path("integrations/org/github/", views.integrations_org_github, name="integrations_org_github"),

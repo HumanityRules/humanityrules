@@ -1,0 +1,16 @@
+{% comment %}
+Invisible poll for the Connect AWS Account modal (mechanism #2 in docs/ui_live_update_contract.md).
+Submitting the form swaps this fragment into the modal and opens the CloudFormation page. This is a
+headless poller (no visible content), so it uses htmx's interval trigger `every 30s` rather than the
+self-replacing `load delay` pattern the visible status widgets use — a hidden element that replaces
+itself via outerHTML does not reliably re-fire `load`, so it would poll only once. While the account
+stays pending, integrations_org_aws_accounts_status returns 204 (nothing to swap) and the interval
+keeps running. Once the install callback flips the account to connected, it returns an empty body that
+retargets #modal-container (closing the modal, which removes this element and stops the interval) and
+fires awsAccountsChanged so the list behind it shows the now-connected account. Closing the modal by
+hand hands off to the list's own pending poll (see aws_accounts.html).
+{% endcomment %}
+<div id="aws-connect-poll" class="hidden"
+     hx-get="{% url 'integrations_org_aws_accounts_status' account.id %}"
+     hx-trigger="every 30s"
+     hx-swap="none"></div>

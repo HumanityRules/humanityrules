@@ -41,6 +41,10 @@ from .integrations.org_aws import (
     aws_install_account_callback,
     integrations_org_aws_accounts,
     integrations_org_aws_accounts_add,
+    integrations_org_aws_accounts_disconnect,
+    integrations_org_aws_accounts_disconnect_confirm,
+    integrations_org_aws_accounts_edit,
+    integrations_org_aws_accounts_status,
     integrations_root,
 )
 from .integrations.org_github import (
@@ -205,6 +209,10 @@ __all__ = [
     "integrations_root",
     "integrations_org_aws_accounts",
     "integrations_org_aws_accounts_add",
+    "integrations_org_aws_accounts_disconnect",
+    "integrations_org_aws_accounts_disconnect_confirm",
+    "integrations_org_aws_accounts_edit",
+    "integrations_org_aws_accounts_status",
     "integrations_org_github",
     "integrations_org_shared_keys",
     "integrations_org_shared_keys_add",

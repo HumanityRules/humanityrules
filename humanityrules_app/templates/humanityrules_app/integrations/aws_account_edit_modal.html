@@ -1,0 +1,101 @@
+{# Edit AWS Account modal. Posts via htmx; on success the view returns an empty body
+   (clearing this container = closing the modal) plus an HX-Trigger that refreshes the
+   AWS Accounts list. On validation error it re-renders this modal. #}
+<div id="aws-account-edit-modal" class="relative z-50" aria-labelledby="aws-account-edit-modal-title" role="dialog" aria-modal="true">
+    <div class="fixed inset-0 bg-gray-500/75 dark:bg-gray-900/80 transition-opacity"></div>
+
+    <div class="fixed inset-0 z-10 w-screen overflow-y-auto">
+        <div class="flex min-h-full items-center justify-center p-4 text-center">
+            <div class="relative transform overflow-hidden rounded-lg bg-white dark:bg-gray-800 p-6 text-left shadow-xl transition-all my-8 w-full max-w-lg">
+                <div class="absolute right-0 top-0 pr-4 pt-4">
+                    <button type="button"
+                            onclick="document.getElementById('modal-container').innerHTML = ''"
+                            class="rounded-md bg-white dark:bg-gray-800 text-gray-400 hover:text-gray-500 dark:hover:text-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800">
+                        <span class="sr-only">Close</span>
+                        <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+                </div>
+
+                <h3 class="text-xl font-semibold text-gray-900 dark:text-white" id="aws-account-edit-modal-title">Edit AWS Account</h3>
+
+                <form id="aws-account-edit-form"
+                      hx-post="{% url 'integrations_org_aws_accounts_edit' account.id %}"
+                      hx-target="#modal-container"
+                      hx-swap="innerHTML"
+                      class="mt-6 space-y-5">
+                    {% csrf_token %}
+
+                    {# Name #}
+                    <div>
+                        <label for="aws-account-edit-name" class="block text-sm font-medium text-gray-900 dark:text-white mb-1.5">AWS Account Name</label>
+                        <input type="text" name="name" id="aws-account-edit-name" value="{{ name }}" required
+                               placeholder="e.g., Production, Staging, Development"
+                               class="block w-full rounded-md bg-white dark:bg-gray-900 px-3 py-2 text-sm text-gray-900 dark:text-white outline-1 -outline-offset-1 {% if error %}outline-red-500 dark:outline-red-500{% else %}outline-gray-300 dark:outline-white/10{% endif %} placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-2 focus:-outline-offset-2 focus:outline-indigo-600 dark:focus:outline-indigo-500">
+                        {% if error %}<p class="mt-1.5 text-sm text-red-600 dark:text-red-400">{{ error }}</p>{% endif %}
+                    </div>
+
+                    {# Connection details (read-only) #}
+                    <div class="rounded-md bg-gray-50 dark:bg-white/5 p-3 space-y-2.5">
+                        <div class="flex items-center justify-between gap-3">
+                            <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Status</span>
+                            {% if account.status == 'connected' %}
+                                <span class="inline-flex items-center rounded-full bg-green-100 px-2 py-1 text-xs font-medium text-green-700 dark:bg-green-500/10 dark:text-green-400">
+                                    <svg class="mr-1 h-1.5 w-1.5 fill-green-500 dark:fill-green-400" viewBox="0 0 6 6"><circle cx="3" cy="3" r="3"/></svg>
+                                    Connected
+                                </span>
+                            {% elif account.status == 'pending' %}
+                                <span class="inline-flex items-center rounded-full bg-yellow-100 px-2 py-1 text-xs font-medium text-yellow-700 dark:bg-yellow-500/10 dark:text-yellow-400">
+                                    <svg class="mr-1 h-1.5 w-1.5 fill-yellow-500 dark:fill-yellow-400" viewBox="0 0 6 6"><circle cx="3" cy="3" r="3"/></svg>
+                                    Pending
+                                </span>
+                            {% else %}
+                                <span class="inline-flex items-center rounded-full bg-red-100 px-2 py-1 text-xs font-medium text-red-700 dark:bg-red-500/10 dark:text-red-400">
+                                    <svg class="mr-1 h-1.5 w-1.5 fill-red-500 dark:fill-red-400" viewBox="0 0 6 6"><circle cx="3" cy="3" r="3"/></svg>
+                                    Error
+                                </span>
+                            {% endif %}
+                        </div>
+                        <div class="flex items-center justify-between gap-3">
+                            <span class="text-sm font-medium text-gray-700 dark:text-gray-300">AWS Account ID</span>
+                            {% if account.aws_account_id %}
+                                <code class="text-xs bg-gray-100 dark:bg-white/10 px-1.5 py-0.5 rounded text-gray-900 dark:text-white">{{ account.aws_account_id }}</code>
+                            {% else %}
+                                <span class="text-sm text-gray-400 dark:text-gray-500">—</span>
+                            {% endif %}
+                        </div>
+                        {% if account.status_message %}
+                        <p class="text-xs text-gray-500 dark:text-gray-400">{{ account.status_message }}</p>
+                        {% endif %}
+                    </div>
+
+                    {# Setup is incomplete: offer the CloudFormation authorization page again. #}
+                    {% if account.status != 'connected' %}
+                    <div class="rounded-md bg-indigo-50 dark:bg-indigo-500/10 p-3">
+                        <p class="text-sm text-indigo-700 dark:text-indigo-300 mb-3">
+                            {% if account.status == 'pending' %}This account is waiting for its CloudFormation stack. Open the authorization page to finish connecting it.{% else %}Connection couldn't be verified. Re-open the authorization page to retry.{% endif %}
+                        </p>
+                        <a href="{{ cloudformation_url }}" target="_blank" rel="noopener noreferrer"
+                           class="inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-xs hover:bg-indigo-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 dark:bg-indigo-500 dark:hover:bg-indigo-400">
+                            {% if account.status == 'pending' %}Open AWS Authorization Page{% else %}Retry Setup in AWS{% endif %}
+                            <svg class="ml-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" /></svg>
+                        </a>
+                    </div>
+                    {% endif %}
+
+                    {# Footer #}
+                    <div class="flex justify-end items-center gap-3 border-t border-gray-200 dark:border-white/10 pt-5">
+                        <button type="button"
+                                onclick="document.getElementById('modal-container').innerHTML = ''"
+                                class="rounded-md bg-white dark:bg-gray-700 px-3 py-2 text-sm font-semibold text-gray-900 dark:text-white shadow-xs ring-1 ring-inset ring-gray-300 dark:ring-white/10 hover:bg-gray-50 dark:hover:bg-gray-600">
+                            Cancel
+                        </button>
+                        <button type="submit"
+                                class="inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-xs hover:bg-indigo-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 dark:bg-indigo-500 dark:hover:bg-indigo-400">
+                            Save
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>

@@ -239,7 +239,7 @@ async def _build_aws_infrastructure_section(organization_id: str) -> str:
         lines.append("</aws_account>")
 
     if account_count == 0:
-        return "<aws_infrastructure>\nNo AWS accounts connected. Guide the user to connect one using initiate_aws_connection.\n</aws_infrastructure>"
+        return "<aws_infrastructure>\nNo AWS accounts connected. Tell the user to connect one in the web app under Integrations → AWS Accounts before deploying.\n</aws_infrastructure>"
 
     lines.append("</aws_infrastructure>")
     return "\n".join(lines)

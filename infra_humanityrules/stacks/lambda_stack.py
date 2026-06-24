@@ -40,9 +40,15 @@ class LambdaStack(Stack):
             removal_policy=RemovalPolicy.DESTROY,
         )
 
-        # Get API endpoint and secret from environment (set during deployment)
-        api_endpoint = os.environ.get("HUMR_API_ENDPOINT", "https://humanityrules.io")
+        # Home base for the shared install Lambda is always prod. Per-issuer routing happens at
+        # call time: the customer stack passes the issuing control plane as ApiEndpoint, and the
+        # Lambda honours it only when allow-listed (otherwise it falls back here). See
+        # resolve_api_endpoint in install_callback_lambda.py.
+        api_endpoint = "https://humanityrules.io"
         api_secret_key = os.environ.get("HUMR_API_SECRET_KEY", "")
+        allowed_api_endpoints = os.environ.get(
+            "HUMR_API_ALLOWED_ENDPOINTS", "https://humanityrules.io,https://humanityrules.ngrok.io"
+        )
 
         # Lambda function with inline code
         self.lambda_function = lambda_.Function(
@@ -59,6 +65,7 @@ class LambdaStack(Stack):
             environment={
                 "HUMR_API_ENDPOINT": api_endpoint,
                 "HUMR_API_SECRET_KEY": api_secret_key,
+                "HUMR_API_ALLOWED_ENDPOINTS": allowed_api_endpoints,
             },
             log_group=log_group,
         )

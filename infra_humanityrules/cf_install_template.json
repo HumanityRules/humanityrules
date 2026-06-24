@@ -5,6 +5,11 @@
     "ExternalId": {
       "Type": "String",
       "Description": "Do not modify! Used to prevent confused deputy attacks."
+    },
+    "ApiEndpoint": {
+      "Type": "String",
+      "Default": "",
+      "Description": "Do not modify! Humanity Rules control-plane endpoint the install callback reports back to."
     }
   },
   "Outputs": {
@@ -62,7 +67,8 @@
         "AwsAccount": { "Ref": "AWS::AccountId" },
         "StackRegion": { "Ref": "AWS::Region" },
         "RoleArn": { "Fn::GetAtt": ["HumanityRulesRole", "Arn"] },
-        "ExternalId": { "Ref": "ExternalId" }
+        "ExternalId": { "Ref": "ExternalId" },
+        "ApiEndpoint": { "Ref": "ApiEndpoint" }
       }
     }
   }

@@ -32,9 +32,8 @@ Tools that modify resources require UUIDs. When a user mentions a resource:
 <aws_account_connection>
 Check the <aws_infrastructure> section — if no accounts are connected:
 1. Explain they need to connect an AWS account first
-2. Use initiate_aws_connection to create a pending account and get the CloudFormation URL
-3. Guide them to click the link and deploy the stack
-4. Once connected, the next conversation will show the account in the Infrastructure section
+2. Direct them to the web app: Integrations → AWS Accounts → Add AWS Account, then deploy the CloudFormation stack
+3. Once connected, the next conversation will show the account in the Infrastructure section
 </aws_account_connection>
 
 <deploying_new_apps>

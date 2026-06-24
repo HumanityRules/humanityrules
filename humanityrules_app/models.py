@@ -262,12 +262,31 @@ class AWSAccount(models.Model):
     def __str__(self) -> str:
         return f"{self.name} ({self.aws_account_id or 'pending'})"
 
-    def get_cloudformation_url(self) -> str:
-        """Generate the AWS CloudFormation quick-create URL for this account."""
+    # The install stack always lives in us-east-1 (see get_cloudformation_url).
+    INSTALL_STACK_REGION = "us-east-1"
+
+    def get_install_stack_name(self) -> str:
+        """CloudFormation stack name HumanityRules onboards this account with.
+
+        Derived from external_id (random uuid4), not id (time-ordered uuid7): uuid7's first
+        8 hex chars are the high bits of a ms timestamp, so they only change every ~65s and
+        two accounts onboarded into the same AWS account within a minute would collide on the
+        stack name. external_id's first 8 hex are random, so the name is effectively unique.
+        """
+        return f"HumanityRules-{self.external_id.hex[:8]}"
+
+    def get_cloudformation_url(self, api_endpoint: str) -> str:
+        """Generate the AWS CloudFormation quick-create URL for this account.
+
+        api_endpoint is woven in as param_ApiEndpoint so the install Lambda reports back to
+        whichever control plane issued this link (callers pass the origin the admin reached us
+        on). Pass "" to let the Lambda fall back to its default (prod).
+        """
         params = {
-            "stackName": f"HumanityRules-{self.id.hex[:8]}",
+            "stackName": self.get_install_stack_name(),
             "templateURL": "https://humr-public.s3.us-east-1.amazonaws.com/cf_install_template.json",
             "param_ExternalId": str(self.external_id),
+            "param_ApiEndpoint": api_endpoint,
         }
         base_url = "https://us-east-1.console.aws.amazon.com/cloudformation/home"
         return f"{base_url}?region=us-east-1#/stacks/quickcreate?{urllib.parse.urlencode(params)}"

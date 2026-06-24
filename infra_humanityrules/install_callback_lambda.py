@@ -17,6 +17,26 @@ logger.setLevel(logging.INFO)
 http = urllib3.PoolManager()
 
 
+def resolve_api_endpoint(requested):
+    """Pick the control-plane endpoint to call back, guarding the shared secret.
+
+    The customer's stack passes its issuing control plane's URL as ApiEndpoint. We only
+    honour it when it is allow-listed (HUMR_API_ALLOWED_ENDPOINTS, plus the Lambda's own
+    default), so a tampered template parameter can't redirect our bearer token to an
+    attacker-controlled host. Anything missing or unrecognised falls back to the default.
+    """
+    default_endpoint = os.environ.get("HUMR_API_ENDPOINT")
+    allowed = {e.strip() for e in os.environ.get("HUMR_API_ALLOWED_ENDPOINTS", "").split(",") if e.strip()}
+    if default_endpoint:
+        allowed.add(default_endpoint)
+
+    if requested and requested in allowed:
+        return requested
+    if requested:
+        logger.error(f"Requested ApiEndpoint not allow-listed, using default: {requested}")
+    return default_endpoint
+
+
 def handler(event, context):
     """
     CloudFormation Custom Resource handler.
@@ -34,7 +54,7 @@ def handler(event, context):
         external_id = props.get("ExternalId")
         stack_region = props.get("StackRegion")
 
-        api_endpoint = os.environ.get("HUMR_API_ENDPOINT")
+        api_endpoint = resolve_api_endpoint(props.get("ApiEndpoint"))
         api_secret = os.environ.get("HUMR_API_SECRET_KEY")
 
         # Prepare payload for HumanityRules backend

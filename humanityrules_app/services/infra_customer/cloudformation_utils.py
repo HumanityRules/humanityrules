@@ -218,7 +218,10 @@ def delete_stack_and_wait(cf_client, stack_name: str) -> bool:
         )
         logger.info("   Stack '%(stack_name)s' deleted", {"stack_name": stack_name})
         return True
-    except ClientError as e:
+    except (ClientError, WaiterError) as e:
+        # WaiterError covers DELETE_FAILED and credential invalidation mid-delete (e.g. a stack
+        # that deletes the very IAM role whose session is performing the delete) — surface as a
+        # failed delete rather than letting it propagate and crash the caller.
         logger.error("   Failed to delete stack '%(stack_name)s': %(error)s", {"stack_name": stack_name, "error": str(e)})
         return False
 
