@@ -52,7 +52,10 @@ def clone_repository(repository: Repository, branch: str, target_dir: Path) -> N
             {"source": str(source_path), "target": str(target_dir)},
         )
 
-        shutil.copytree(src=source_path, dst=target_dir, dirs_exist_ok=False)
+        # symlinks=True copies links verbatim instead of dereferencing them, so a
+        # dangling symlink in the source (e.g. a dev .venv whose bin/python points at
+        # a non-existent path) doesn't abort the whole copy with shutil.Error.
+        shutil.copytree(src=source_path, dst=target_dir, dirs_exist_ok=False, symlinks=True)
         return
 
     # Handle local file:// URLs (backward compatibility with deployable_repos/)
@@ -67,7 +70,10 @@ def clone_repository(repository: Repository, branch: str, target_dir: Path) -> N
         )
 
         # Copy directory contents to target
-        shutil.copytree(src=source_path, dst=target_dir, dirs_exist_ok=False)
+        # symlinks=True copies links verbatim instead of dereferencing them, so a
+        # dangling symlink in the source (e.g. a dev .venv whose bin/python points at
+        # a non-existent path) doesn't abort the whole copy with shutil.Error.
+        shutil.copytree(src=source_path, dst=target_dir, dirs_exist_ok=False, symlinks=True)
         return
 
     # For GitHub repos, we need the integration to get a token
