@@ -115,8 +115,10 @@ class CredentialsService:
         HUMR's unified disconnect handler deletes the credential row and, for
         OAuth providers, best-effort revokes upstream — the provider kind is
         resolved server-side, so both kinds are forwarded identically. On
-        success we drop only this provider's cached token; any process restart
-        is selected from the provider spec inside `credentials_invalidate`.
+        success we flip this provider's durable connection state to disconnected
+        (so a transient follow-up refresh can't leave the card connected) and drop
+        its cached token; any process restart is selected from the provider spec
+        inside `credentials_invalidate`.
         """
         status, payload = await self._humr_client.post_json(
             path="/api/integrations/credentials/disconnect",
@@ -125,6 +127,11 @@ class CredentialsService:
         )
         if not (200 <= status < 300):
             return status, payload
+        # HUMR has authoritatively deleted the row. Flip the broker's durable
+        # connection state to disconnected directly, so even a transient
+        # follow-up refresh (which leaves connection state untouched) can't leave
+        # the card showing connected after the user just disconnected.
+        await self._tls_intercept_runtime.mark_disconnected(slug=provider)
         try:
             await self.credentials_invalidate(slug=provider)
         except RuntimeError as exc:
@@ -330,9 +337,10 @@ def _render_env_lines(provider: tls_providers.TlsProviderSpec, config: dict) -> 
 def _render_managed_block(snapshot: list[tuple[tls_providers.TlsProviderSpec, dict]]) -> str:
     """Render the profile env managed block from a token-store snapshot.
 
-    The snapshot lists only connected providers (cache presence == connected,
-    by the token-store contract). Each tuple is `(provider, config)`, and each
-    provider declares the env lines it needs while connected.
+    The snapshot lists only connected providers (by the token-store's durable
+    connection-state contract, independent of access-token expiry). Each tuple is
+    `(provider, config)`, and each provider declares the env lines it needs while
+    connected.
     """
     body_lines: list[str] = []
     for provider, config in snapshot:

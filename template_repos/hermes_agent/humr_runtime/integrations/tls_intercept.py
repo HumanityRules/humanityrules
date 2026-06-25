@@ -81,11 +81,15 @@ class RefreshResult:
 
 @dataclass
 class _TokenCacheEntry:
-    """One provider's usable secrets plus the metadata we hand to the gateway/UI.
+    """One provider's usable secrets for the proxy injection hot path.
 
     `secrets` is a name→value map; single-secret providers carry one entry.
-    The token store prunes expired entries before returning cache snapshots,
-    so cache presence means "connected".
+    This cache holds only the short-lived access token to inject upstream and is
+    pruned by expiry on the injection path. Durable connection state — what the
+    status cards and gateway env render read — lives in `_ConnState`, so cache
+    presence no longer means "connected". `config`/`metadata`/`last_refreshed_at`
+    are carried here so `_apply_locked` can project them into `_ConnState` from
+    the same has_token result.
     """
 
     secrets: dict[str, str]
@@ -108,6 +112,24 @@ class _TokenCacheEntry:
         sandbox's request because HUMR had a hiccup.
         """
         return self.expires_at > now
+
+
+@dataclass(frozen=True)
+class _ConnState:
+    """Durable connection state for one provider — what the status cards + gateway env read.
+
+    Decoupled from `_TokenCacheEntry`: the access-token cache expires on its own
+    (1–8h) and is pruned on the injection path, but connection state changes only
+    on a refresh OUTCOME (has_token/absent) or an explicit disconnect. `config`/
+    `metadata` are the last-known-good values from the most recent has_token, so a
+    card or env binding survives token expiry; they refresh on the next successful
+    refresh of the slug (connect/disconnect/vault-save always trigger one).
+    """
+
+    connected: bool
+    last_refreshed_at: str | None
+    config: dict
+    metadata: dict
 
 
 async def fetch_provider_tokens_batch(humr_client: HumrClient, slugs: list[str]) -> dict[str, RefreshResult]:
@@ -201,15 +223,16 @@ def _cache_entry_from_connected_result(result: RefreshResult, now: float) -> _To
     )
 
 
-def _status_item_for_provider(provider: tls_providers.TlsProviderSpec, entry: _TokenCacheEntry | None) -> dict:
+def _status_item_for_provider(provider: tls_providers.TlsProviderSpec, state: _ConnState | None) -> dict:
     """Serialize one TLS-intercept provider for the unified integrations payload.
 
-    Connected = cache entry exists; not_connected = it doesn't. The token
-    store prunes expired entries before status rendering, so presence means
-    the proxy still has a usable token.
+    Connected = a durable `_ConnState` says so; not_connected = it doesn't, or
+    there's no state yet. Independent of the access-token cache: a connected
+    provider whose injection token has expired (and been pruned) still renders
+    connected until a refresh outcome or disconnect says otherwise.
     """
     method = provider.credential_method
-    is_connected = entry is not None
+    is_connected = state is not None and state.connected
     return {
         "kind": "tls_intercept",
         "category": provider.category,
@@ -217,9 +240,9 @@ def _status_item_for_provider(provider: tls_providers.TlsProviderSpec, entry: _T
         "label": provider.label,
         "logo_url": provider.logo_url,
         "status": STATUS_CONNECTED if is_connected else STATUS_NOT_CONNECTED,
-        "last_refreshed_at": entry.last_refreshed_at if is_connected else None,
-        "config": entry.config if is_connected else {},
-        "metadata": entry.metadata if is_connected else {},
+        "last_refreshed_at": state.last_refreshed_at if is_connected else None,
+        "config": state.config if is_connected else {},
+        "metadata": state.metadata if is_connected else {},
         "connect_mode": method.connect_mode,
         "restart_required_after_save": provider.restart_gateway_after_save or provider.restart_webui_after_save,
         "affects_model_picker": provider.affects_model_picker,
@@ -247,6 +270,7 @@ class _TokenStore:
         self._refresh_lead_seconds = refresh_lead_seconds
         self._lock = asyncio.Lock()
         self._cache: dict[str, _TokenCacheEntry] = {}
+        self._conn: dict[str, _ConnState] = {}
 
     def provider_for_host(self, host: str) -> tls_providers.TlsProviderSpec | None:
         """Lock-free: reads the immutable host→provider map built at init."""
@@ -291,6 +315,24 @@ class _TokenStore:
         async with self._lock:
             self._cache.clear()
 
+    async def mark_disconnected(self, slug: str) -> None:
+        """Authoritatively mark a provider disconnected after a confirmed disconnect.
+
+        Mirrors an `absent` apply (drop the cache entry, set `_conn` not-connected)
+        but driven by a known disconnect rather than a refresh outcome. The
+        disconnect handler holds HUMR's authoritative row-deletion, so applying it
+        directly here keeps a transient follow-up refresh — which leaves `_conn`
+        untouched — from leaving the card connected after the user just disconnected.
+        Unlike `invalidate` (used for connect-of-another-slug and the 401 evict,
+        where truth is only known after the next refresh), the disconnect outcome
+        is already known, so it's safe to flip `_conn` here.
+        """
+        if slug not in self._providers:
+            return
+        async with self._lock:
+            self._cache.pop(slug, None)
+            self._conn[slug] = _ConnState(connected=False, last_refreshed_at=None, config={}, metadata={})
+
     async def refresh(self, slug: str) -> bool:
         """Refetch one provider from HUMR even when the cache is fresh; False on transient HUMR failure."""
         if slug not in self._providers:
@@ -304,32 +346,37 @@ class _TokenStore:
             return await self._refresh_locked(slugs=list(self._providers))
 
     async def status_items(self) -> list[dict]:
-        """Render integration cards from the current cache; never calls HUMR.
+        """Render integration cards from the durable connection state; never calls HUMR.
 
-        Cache writes happen on three paths: boot bootstrap, the proxy hot
-        path (`token_for_host` near-expiry refresh), and explicit user
-        invalidate/refresh. Status reads are a pure projection of the
-        usable cache.
+        A pure projection of `_conn`, which `_apply_locked` updates from refresh
+        outcomes (boot bootstrap, the proxy hot path, explicit invalidate/refresh)
+        and `mark_disconnected` updates on an explicit disconnect. Deliberately
+        does NOT prune by token expiry: an idle provider whose injection token
+        lapsed is still connected — expiry-pruning belongs only on the injection
+        path, so a card answers "does HUMR hold a usable credential", not "is a
+        warm token cached".
         """
         async with self._lock:
-            self._prune_expired_locked(now=time.monotonic())
             return [
-                _status_item_for_provider(provider=provider, entry=self._cache.get(provider.slug))
+                _status_item_for_provider(provider=provider, state=self._conn.get(provider.slug))
                 for provider in self._providers.values()
             ]
 
     async def gateway_env_snapshot(self) -> list[tuple[tls_providers.TlsProviderSpec, dict]]:
-        """Pair every connected provider with its cached config for env rendering.
+        """Pair every connected provider with its last-known config for env rendering.
 
-        Returns `(provider, config)` tuples for providers currently in
-        the usable cache. The broker calls `refresh_all()` first when it
-        wants the cache aligned with HUMR state.
+        Projects `_conn` (durable connection state), not the access-token cache, so
+        a connected vault provider's env bindings survive token expiry — otherwise
+        an idle provider past its cache TTL would be stripped from the managed block
+        and trigger a spurious gateway restart while its card still showed connected.
+        The broker calls `refresh_all()` first when it wants `_conn` aligned with
+        HUMR state.
         """
         async with self._lock:
-            self._prune_expired_locked(now=time.monotonic())
             return [
-                (self._providers[slug], entry.config)
-                for slug, entry in self._cache.items()
+                (self._providers[slug], state.config)
+                for slug, state in self._conn.items()
+                if state.connected
             ]
 
     async def _ensure_fresh_locked(self, provider: tls_providers.TlsProviderSpec) -> _TokenCacheEntry | None:
@@ -376,22 +423,35 @@ class _TokenStore:
         return any(result.outcome != REFRESH_OUTCOME_TRANSIENT for result in results.values())
 
     def _apply_locked(self, provider: tls_providers.TlsProviderSpec, result: RefreshResult) -> None:
-        """Apply one refresh outcome to the cache. Caller holds `_lock`.
+        """Apply one refresh outcome to the injection cache and the durable connection state. Caller holds `_lock`.
 
-        - has_token → write the new entry.
-        - absent → drop any prior entry (idempotent).
-        - transient → leave the cache untouched (don't replace a working
-          token with a sentinel; the prior entry, if any, stays available).
+        - has_token → write the injection entry AND mark `_conn` connected.
+        - absent → drop any prior entry AND mark `_conn` not-connected (idempotent).
+        - transient → leave BOTH untouched (don't replace a working token with a
+          sentinel, and don't flip a card on a network blip; the prior state, if
+          any, stays available).
+
+        Every refresh caller flows through here — bootstrap, explicit refresh, and
+        the proxy hot path (`_ensure_fresh_locked`) — so a card self-heals on the
+        first real request after an idle token expiry, exactly as the cache does.
         """
         if result.outcome == REFRESH_OUTCOME_HAS_TOKEN:
-            self._cache[provider.slug] = _cache_entry_from_connected_result(result=result, now=time.monotonic())
+            entry = _cache_entry_from_connected_result(result=result, now=time.monotonic())
+            self._cache[provider.slug] = entry
+            self._conn[provider.slug] = _ConnState(
+                connected=True,
+                last_refreshed_at=entry.last_refreshed_at,
+                config=result.config,
+                metadata=result.metadata,
+            )
             logger.info("refreshed %s: connected", provider.slug)
             return
         if result.outcome == REFRESH_OUTCOME_ABSENT:
             self._cache.pop(provider.slug, None)
+            self._conn[provider.slug] = _ConnState(connected=False, last_refreshed_at=None, config={}, metadata={})
             logger.info("refreshed %s: not_connected", provider.slug)
             return
-        logger.info("refreshed %s: transient error (cache untouched)", provider.slug)
+        logger.info("refreshed %s: transient error (cache + connection state untouched)", provider.slug)
 
     def _prune_expired_locked(self, now: float) -> None:
         """Drop expired cache entries. Caller holds `_lock`."""
@@ -446,6 +506,10 @@ class TlsInterceptRuntime:
         """Drop every cached token entry."""
         await self._token_store.invalidate_all()
 
+    async def mark_disconnected(self, slug: str) -> None:
+        """Mark a provider disconnected after a confirmed disconnect (drops cache + flips connection state)."""
+        await self._token_store.mark_disconnected(slug=slug)
+
     async def refresh_slug(self, slug: str) -> bool:
         """Force a single-provider refetch; False when the HUMR round-trip failed transiently."""
         return await self._token_store.refresh(slug=slug)
@@ -455,7 +519,7 @@ class TlsInterceptRuntime:
         return await self._token_store.refresh_all()
 
     async def gateway_env_snapshot(self) -> list[tuple[tls_providers.TlsProviderSpec, dict]]:
-        """Pair every connected provider with its cached config for env rendering."""
+        """Pair every connected provider with its last-known config (durable connection state) for env rendering."""
         return await self._token_store.gateway_env_snapshot()
 
 
