@@ -1201,37 +1201,67 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNone(token)
 
-    async def test_status_items_prunes_expired_entry_before_render(self) -> None:
-        """Status reads must prune expired entries before projecting connected state."""
+    async def test_status_items_reflect_connection_state_not_token_expiry(self) -> None:
+        """A connected provider whose injection token expired still renders connected.
+
+        The core fix: status reads durable `_conn`, not cache presence, and does
+        NOT prune by token expiry — so an idle provider past its access-token TTL
+        keeps a green card instead of flipping to not_connected.
+        """
         import time
         store = self.tls_intercept_runtime._token_store
+        # An expired injection-cache entry (would be pruned on the injection path)...
         store._cache["google"] = broker.tls_intercept._TokenCacheEntry(
             secrets={"access_token": "EXPIRED"},
             expires_at=time.monotonic() - 10,
             last_refreshed_at="2026-05-25T22:00:00+00:00",
             config={}, metadata={},
         )
+        # ...but durable connection state says connected.
+        store._conn["google"] = broker.tls_intercept._ConnState(
+            connected=True,
+            last_refreshed_at="2026-05-25T22:00:00+00:00",
+            config={}, metadata={},
+        )
 
         items_by_slug = {item["slug"]: item for item in await store.status_items()}
-        self.assertEqual(items_by_slug["google"]["status"], "not_connected")
-        self.assertNotIn("google", store._cache)
+        self.assertEqual(items_by_slug["google"]["status"], "connected")
+        self.assertEqual(items_by_slug["google"]["last_refreshed_at"], "2026-05-25T22:00:00+00:00")
+        # Status reads are a pure projection: they do NOT prune the injection cache.
+        self.assertIn("google", store._cache)
 
-    async def test_gateway_env_snapshot_excludes_expired_entries(self) -> None:
-        """Expired entries must be pruned before rendering gateway env bindings."""
+    async def test_gateway_env_snapshot_projects_connection_state(self) -> None:
+        """Env snapshot lists connected providers + last-known config, independent of token expiry.
+
+        A connected vault provider whose injection token expired must still appear
+        (with its config) so the managed env block isn't stripped and the gateway
+        isn't restarted without the integration; a disconnected provider is excluded.
+        """
         import time
         store = self.tls_intercept_runtime._token_store
+        # Token cache expired, but connection state is connected with config.
         store._cache["telegram"] = broker.tls_intercept._TokenCacheEntry(
             secrets={"access_token": "EXPIRED"},
             expires_at=time.monotonic() - 10,
             last_refreshed_at="2026-05-25T22:00:00+00:00",
-            config={"bot_token": "STALE"},
+            config={"allowed_users": ["123"]},
             metadata={},
+        )
+        store._conn["telegram"] = broker.tls_intercept._ConnState(
+            connected=True,
+            last_refreshed_at="2026-05-25T22:00:00+00:00",
+            config={"allowed_users": ["123"]},
+            metadata={},
+        )
+        # A disconnected provider must be excluded.
+        store._conn["slack"] = broker.tls_intercept._ConnState(
+            connected=False, last_refreshed_at=None, config={}, metadata={},
         )
 
         snapshot = await self.tls_intercept_runtime.gateway_env_snapshot()
-        slugs = [provider.slug for provider, _config in snapshot]
-        self.assertNotIn("telegram", slugs)
-        self.assertNotIn("telegram", store._cache)
+        by_slug = {provider.slug: config for provider, config in snapshot}
+        self.assertEqual(by_slug["telegram"], {"allowed_users": ["123"]})
+        self.assertNotIn("slack", by_slug)
 
     async def test_proxy_hot_path_prunes_expired_entry_after_transient(self) -> None:
         """Transient refresh on an expired entry must leave the cache empty."""
@@ -1256,6 +1286,83 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNone(token)
         self.assertNotIn("google", store._cache)
+
+    async def test_hot_path_has_token_marks_connection_connected(self) -> None:
+        """A proxy hot-path refresh returning has_token marks the card connected (E2).
+
+        Self-healing: a provider that was idle/never-refreshed turns green on the
+        first real request, because the shared refresh path updates `_conn` too.
+        """
+        store = self.tls_intercept_runtime._token_store
+        with patch.object(
+            broker.tls_intercept,
+            "fetch_provider_tokens_batch",
+            return_value=_batched(slug="google", result=broker.tls_intercept.RefreshResult(
+                outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
+                secrets={"access_token": "fresh"}, expires_in=3600, config={}, metadata={},
+            )),
+        ):
+            token = await store.token_for_host(host="gmail.googleapis.com")
+
+        self.assertEqual(token, "fresh")
+        items_by_slug = {item["slug"]: item for item in await store.status_items()}
+        self.assertEqual(items_by_slug["google"]["status"], "connected")
+
+    async def test_hot_path_absent_marks_connection_not_connected(self) -> None:
+        """A proxy hot-path refresh returning absent flips a previously-connected card off (E2).
+
+        A provider revoked/disconnected elsewhere stops showing connected the
+        moment the proxy next tries to use it.
+        """
+        store = self.tls_intercept_runtime._token_store
+        store._conn["google"] = broker.tls_intercept._ConnState(
+            connected=True, last_refreshed_at="2026-05-25T22:00:00+00:00", config={}, metadata={},
+        )
+        with patch.object(
+            broker.tls_intercept,
+            "fetch_provider_tokens_batch",
+            return_value=_batched(slug="google", result=broker.tls_intercept.RefreshResult(
+                outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
+                secrets=None, expires_in=None, config={}, metadata={},
+            )),
+        ):
+            token = await store.token_for_host(host="gmail.googleapis.com")
+
+        self.assertIsNone(token)
+        items_by_slug = {item["slug"]: item for item in await store.status_items()}
+        self.assertEqual(items_by_slug["google"]["status"], "not_connected")
+
+    async def test_evict_then_transient_keeps_card_connected_but_token_unavailable(self) -> None:
+        """After a 401 evict + transient refresh the card stays connected while the token is gone (E3).
+
+        `invalidate` (the 401-evict path) drops only the cache, not `_conn`; a
+        transient follow-up leaves `_conn` untouched. The card reads "connected"
+        (last known good) while a proxy request would 503 — the deliberate trade
+        for not eagerly disconnecting on a recoverable 401.
+        """
+        store = self.tls_intercept_runtime._token_store
+        with patch.object(
+            broker.tls_intercept,
+            "fetch_provider_tokens_batch",
+            return_value=_batched(slug="google", result=broker.tls_intercept.RefreshResult(
+                outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
+                secrets={"access_token": "T1"}, expires_in=3600, config={}, metadata={},
+            )),
+        ):
+            await store.refresh(slug="google")
+        # Upstream 401 evicts the token cache (but not connection state)...
+        await store.invalidate(slug="google")
+        # ...and the next refresh fails transiently.
+        with patch.object(
+            broker.tls_intercept,
+            "fetch_provider_tokens_batch",
+            return_value=_batched(slug="google", result=broker.tls_intercept._transient_result()),
+        ):
+            token = await store.token_for_host(host="gmail.googleapis.com")
+
+        self.assertIsNone(token)  # a proxy request would 503
+        items_by_slug = {item["slug"]: item for item in await store.status_items()}
+        self.assertEqual(items_by_slug["google"]["status"], "connected")  # card still connected
 
     async def test_refresh_endpoint_reloads_catalog_and_drops_tls_cache(self) -> None:
         """POST /integrations/refresh_all fans out catalog reload + all-providers TLS invalidate."""
@@ -1715,7 +1822,7 @@ class TestRefreshAllBatchedApply(unittest.IsolatedAsyncioTestCase):
     """`_TokenStore.refresh_all` must apply batched results under per-slug refresh_locks."""
 
     async def test_has_token_writes_absent_drops_transient_leaves(self) -> None:
-        """One batched call covers all three apply paths."""
+        """One batched call covers all three apply paths, for both the cache and the durable connection state."""
         import time
         store = _make_token_store()
         store._cache["github"] = broker.tls_intercept._TokenCacheEntry(
@@ -1723,6 +1830,10 @@ class TestRefreshAllBatchedApply(unittest.IsolatedAsyncioTestCase):
             expires_at=time.monotonic() + 600,
             last_refreshed_at="2026-05-25T22:00:00+00:00",
             config={}, metadata={},
+        )
+        # GitHub is the transient slug: its prior connected state must survive.
+        store._conn["github"] = broker.tls_intercept._ConnState(
+            connected=True, last_refreshed_at="2026-05-25T22:00:00+00:00", config={}, metadata={},
         )
 
         # refresh_all() batches every configured provider, so the mock must
@@ -1755,6 +1866,11 @@ class TestRefreshAllBatchedApply(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(store._cache["google"].secrets, {"access_token": "G"})
         self.assertEqual(store._cache["github"].secrets, {"access_token": "PRIOR-GITHUB"})  # transient ⇒ preserved
         self.assertNotIn("telegram", store._cache)
+        # Connection state tracks the same three outcomes: has_token ⇒ connected,
+        # absent ⇒ not-connected, transient ⇒ prior state preserved.
+        self.assertTrue(store._conn["google"].connected)
+        self.assertTrue(store._conn["github"].connected)  # transient ⇒ prior connected state preserved
+        self.assertFalse(store._conn["telegram"].connected)
 
 
 class TestGatewayEnvRender(unittest.TestCase):
@@ -2115,6 +2231,81 @@ class TestCredentialsServiceChoreography(unittest.IsolatedAsyncioTestCase):
             runtime_dir=pathlib.Path("/nonexistent/humr-runtime"),
             hermes_home=pathlib.Path("/nonexistent/hermes-home"),
         )
+
+    async def test_disconnect_marks_card_disconnected_even_when_refresh_is_transient(self) -> None:
+        """A confirmed disconnect flips the card off even if the follow-up refresh is transient (E4).
+
+        HUMR authoritatively deleted the row, so the broker marks connection state
+        disconnected directly; a transient `/tokens` refresh (which leaves
+        connection state untouched) must not leave the card showing connected.
+        """
+        runtime = self._make_runtime()
+        service = _make_credentials_service(
+            tls_intercept_runtime=runtime,
+            gateway_env_path=self.env_path,
+            webui_state_dir=self.webui_state_dir,
+        )
+        # Telegram starts connected.
+        runtime._token_store._conn["telegram"] = broker.tls_intercept._ConnState(
+            connected=True, last_refreshed_at="2026-05-25T22:00:00+00:00",
+            config={"allowed_users": ["123"]}, metadata={},
+        )
+
+        with patch.object(service._humr_client, "post_json", return_value=(200, {"ok": True})), patch.object(
+            broker.tls_intercept,
+            "fetch_provider_tokens_batch",
+            return_value=_batched(slug="telegram", result=broker.tls_intercept._transient_result()),
+        ):
+            status, _payload = await service.credentials_disconnect(provider="telegram")
+
+        self.assertEqual(status, 200)
+        items_by_slug = {item["slug"]: item for item in await runtime.status_items()}
+        self.assertEqual(items_by_slug["telegram"]["status"], "not_connected")
+
+    async def test_disconnect_removes_env_block_and_restarts_on_normal_absent_refresh(self) -> None:
+        """The normal disconnect (HUMR 200 + absent refresh) still strips the env block and restarts.
+
+        Proves the env-render/restart choreography runs through `credentials_disconnect`, not just the
+        lower-level `credentials_invalidate` path the other tests exercise.
+        """
+        runtime = self._make_runtime()
+        service = _make_credentials_service(
+            tls_intercept_runtime=runtime,
+            gateway_env_path=self.env_path,
+            webui_state_dir=self.webui_state_dir,
+        )
+        # Telegram starts connected, with its managed env block already on disk.
+        runtime._token_store._conn["telegram"] = broker.tls_intercept._ConnState(
+            connected=True, last_refreshed_at="2026-05-25T22:00:00+00:00",
+            config={"allowed_users": ["123"]}, metadata={},
+        )
+        spec = tls_providers.TLS_INTERCEPT_PROVIDERS["telegram"]
+        seeded = credentials_service._render_managed_block(snapshot=[(spec, {"allowed_users": ["123"]})])
+        credentials_service._write_gateway_env_file(env_path=self.env_path, managed_block=seeded)
+        self.assertIn("TELEGRAM_BOT_TOKEN", self.env_path.read_text(encoding="utf-8"))
+
+        with patch.object(service._humr_client, "post_json", return_value=(200, {"ok": True})), patch.object(
+            broker.tls_intercept,
+            "fetch_provider_tokens_batch",
+            return_value=_batched(slug="telegram", result=broker.tls_intercept.RefreshResult(
+                outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
+                secrets=None, expires_in=None, config={}, metadata={},
+            )),
+        ), patch.object(
+            credentials_service,
+            "_post_process_compose_restart",
+            return_value=(200, "ok"),
+        ) as restart_mock:
+            status, _payload = await service.credentials_disconnect(provider="telegram")
+
+        self.assertEqual(status, 200)
+        self.assertNotIn("TELEGRAM_BOT_TOKEN", self.env_path.read_text(encoding="utf-8"))
+        restart_mock.assert_called_once_with(
+            process_compose_url="http://127.0.0.1:9999",
+            process_name=credentials_service.GATEWAY_PROCESS_NAME,
+        )
+        items_by_slug = {item["slug"]: item for item in await runtime.status_items()}
+        self.assertEqual(items_by_slug["telegram"]["status"], "not_connected")
 
     async def test_invalidate_all_uses_single_batched_call(self) -> None:
         """Explicit Refresh-all collapses to one HUMR round-trip across every provider.
