@@ -1,0 +1,119 @@
+{% comment %}
+Landing page hero section with headline, subheadline, email signup form, and feature badges.
+{% endcomment %}
+
+<section id="hero" class="landing-section relative min-h-screen flex items-center pt-20 overflow-hidden">
+    <!-- Background effects -->
+    <div class="absolute inset-0 bg-grid-pattern"></div>
+    <div class="absolute inset-0 bg-radial-gradient"></div>
+
+    <!-- Animated background blobs -->
+    <div class="absolute top-1/4 left-1/4 w-96 h-96 bg-cyber-500/10 rounded-full blur-3xl animate-pulse-glow"></div>
+    <div class="absolute bottom-1/4 right-1/4 w-80 h-80 bg-cyan-500/10 rounded-full blur-3xl animate-pulse-glow" style="animation-delay: 1s;"></div>
+
+    <div class="container-custom relative z-10">
+        <div class="max-w-4xl mx-auto text-center">
+            <!-- Badge -->
+            <div class="inline-flex items-center gap-3 px-6 py-3 bg-cyber-500/10 border border-cyber-500/20 rounded-full mt-2 mb-4 animate-fade-in-landing">
+                <!-- Sparkles icon -->
+                <svg class="w-5 h-5 text-cyber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/>
+                    <path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/>
+                </svg>
+                <span class="text-lg text-cyber-300 font-semibold">Everyone's vibe-coding. Now everyone can vibe-deploy.</span>
+            </div>
+
+            <!-- Demo video -->
+            <div class="max-w-3xl mx-auto mb-10 animate-fade-in-landing">
+                <div class="relative rounded-xl overflow-hidden border border-white/10 shadow-2xl" style="padding-bottom: 56.25%; height: 0;">
+                    <iframe
+                        class="absolute inset-0 w-full h-full"
+                        src="https://www.youtube.com/embed/qQy2v9t35s4"
+                        title="Humanity Rules demo"
+                        frameborder="0"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                        referrerpolicy="strict-origin-when-cross-origin"
+                        allowfullscreen
+                    ></iframe>
+                </div>
+            </div>
+
+            <!-- Headline -->
+            <h1 class="text-5xl sm:text-6xl lg:text-7xl font-bold leading-tight mb-6">
+                <span class="text-white">Deploy internal tools inside your AWS account </span>
+                <span class="gradient-text">in minutes</span>
+            </h1>
+
+            <!-- Sub-headline -->
+            <p class="text-xl sm:text-2xl font-semibold mb-4">
+                <span class="gradient-text-glow">SSO + RBAC, least-privilege IAM, and approval workflows</span>
+                <span class="text-white"> — built in</span>
+            </p>
+
+            <!-- Description -->
+            <p class="text-lg text-gray-400 max-w-3xl mx-auto mb-10 leading-relaxed">
+                Humanity Rules is an AI deployment co-pilot that provisions infrastructure and generates least-privilege IAM requests in your AWS account.
+                Build or vibe-code dashboards, APIs, Slack bots, admin portals, and more — then ship them without opening infra tickets.
+            </p>
+
+            <!-- Email signup form -->
+            <div class="max-w-md mx-auto mb-16">
+                <form
+                    hx-post="{% url 'waitlist_signup' %}"
+                    hx-target="#signup-response-hero"
+                    hx-swap="innerHTML"
+                    class="space-y-3"
+                >
+                    {% csrf_token %}
+                    <input type="hidden" name="source" value="hero">
+                    <div class="flex gap-2">
+                        <input
+                            type="email"
+                            name="email"
+                            placeholder="name@company.com"
+                            class="flex-1 px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyber-500 focus:border-transparent transition-all"
+                            required
+                        >
+                        <button type="submit" class="btn-primary whitespace-nowrap py-2 px-6">
+                            Notify me
+                        </button>
+                    </div>
+                    <div id="signup-response-hero">
+                        <p class="text-sm text-gray-500 text-left">
+                            We'll email you when Humanity Rules is ready. No spam.
+                        </p>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Feature badges -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-6 max-w-3xl mx-auto">
+                <div class="flex items-center justify-center gap-3 px-6 py-4 bg-white/5 rounded-xl border border-white/5">
+                    <!-- Clock icon -->
+                    <svg class="w-5 h-5 text-cyber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                    </svg>
+                    <span class="text-gray-300 text-sm font-medium">Private networking in your VPC</span>
+                </div>
+                <div class="flex items-center justify-center gap-3 px-6 py-4 bg-white/5 rounded-xl border border-white/5">
+                    <!-- Shield icon -->
+                    <svg class="w-5 h-5 text-cyber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>
+                    </svg>
+                    <span class="text-gray-300 text-sm font-medium">Approval workflows & audit trails</span>
+                </div>
+                <div class="flex items-center justify-center gap-3 px-6 py-4 bg-white/5 rounded-xl border border-white/5">
+                    <!-- Sparkles icon -->
+                    <svg class="w-5 h-5 text-cyber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/>
+                        <path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/>
+                    </svg>
+                    <span class="text-gray-300 text-sm font-medium">AI-Driven self-serve deployments</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bottom gradient fade -->
+    <div class="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-navy-950 to-transparent"></div>
+</section>

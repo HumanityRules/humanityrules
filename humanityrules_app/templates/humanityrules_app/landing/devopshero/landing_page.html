@@ -1,0 +1,272 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Humanity Rules - Deploy Internal Tools with Ease</title>
+    <meta name="description" content="Humanity Rules is an AI deployment co-pilot that provisions infrastructure and generates least-privilege IAM requests in your AWS account.">
+    <meta name="robots" content="noindex">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/dist/styles.css' %}">
+    <style>
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+        }
+        .font-mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+        ::selection {
+            background-color: rgba(6, 182, 212, 0.3);
+            color: white;
+        }
+    </style>
+
+    {% include "humanityrules_app/partials/_posthog.html" %}
+    <script src="https://unpkg.com/htmx.org@2.0.4" integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+" crossorigin="anonymous"></script>
+</head>
+<body class="min-h-screen bg-navy-950 text-gray-100 antialiased">
+    {% include "humanityrules_app/landing/devopshero/_header.html" %}
+    
+    <main>
+        {% include "humanityrules_app/landing/devopshero/_hero.html" %}
+        {% include "humanityrules_app/landing/devopshero/_problem.html" %}
+        {% include "humanityrules_app/landing/devopshero/_solution.html" %}
+        {% include "humanityrules_app/landing/devopshero/_features.html" %}
+        {% include "humanityrules_app/landing/devopshero/_personas.html" %}
+        {% include "humanityrules_app/landing/devopshero/_cta.html" %}
+        {% include "humanityrules_app/landing/devopshero/_footer.html" %}
+    </main>
+
+    <script>
+    (function() {
+
+        // ===== Mobile Menu Toggle =====
+        const menuButton = document.getElementById('mobile-menu-button');
+        const mobileMenu = document.getElementById('mobile-menu');
+        const menuIconOpen = document.getElementById('menu-icon-open');
+        const menuIconClose = document.getElementById('menu-icon-close');
+        let isMenuOpen = false;
+
+        function toggleMenu() {
+            isMenuOpen = !isMenuOpen;
+            if (isMenuOpen) {
+                mobileMenu.classList.remove('opacity-0', 'pointer-events-none');
+                mobileMenu.classList.add('opacity-100', 'pointer-events-auto');
+                menuIconOpen.classList.add('opacity-0', 'rotate-90');
+                menuIconOpen.classList.remove('opacity-100', 'rotate-0');
+                menuIconClose.classList.add('opacity-100', 'rotate-0');
+                menuIconClose.classList.remove('opacity-0', '-rotate-90');
+                document.body.style.overflow = 'hidden';
+            } else {
+                mobileMenu.classList.add('opacity-0', 'pointer-events-none');
+                mobileMenu.classList.remove('opacity-100', 'pointer-events-auto');
+                menuIconOpen.classList.remove('opacity-0', 'rotate-90');
+                menuIconOpen.classList.add('opacity-100', 'rotate-0');
+                menuIconClose.classList.remove('opacity-100', 'rotate-0');
+                menuIconClose.classList.add('opacity-0', '-rotate-90');
+                document.body.style.overflow = '';
+            }
+        }
+
+        menuButton.addEventListener('click', toggleMenu);
+
+        // Close menu when clicking nav links
+        mobileMenu.querySelectorAll('a').forEach(link => {
+            link.addEventListener('click', () => {
+                if (isMenuOpen) toggleMenu();
+            });
+        });
+
+        // ===== Scroll Animation Observer =====
+        const animatedElements = document.querySelectorAll('.animate-on-scroll');
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('visible');
+                }
+            });
+        }, { threshold: 0.1, rootMargin: '0px 0px -50px 0px' });
+
+        animatedElements.forEach(el => observer.observe(el));
+
+        // ===== Animated Counter =====
+        function animateCounter(element, end, duration) {
+            let start = 0;
+            const startTime = performance.now();
+            
+            function update(currentTime) {
+                const elapsed = currentTime - startTime;
+                const progress = Math.min(elapsed / duration, 1);
+                const easeOut = 1 - Math.pow(1 - progress, 3);
+                const current = Math.round(start + (end - start) * easeOut);
+                element.textContent = current;
+                
+                if (progress < 1) {
+                    requestAnimationFrame(update);
+                }
+            }
+            
+            requestAnimationFrame(update);
+        }
+
+        const counterObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting && !entry.target.dataset.animated) {
+                    entry.target.dataset.animated = 'true';
+                    const end = parseInt(entry.target.dataset.value, 10);
+                    const delay = parseInt(entry.target.dataset.delay || '0', 10);
+                    setTimeout(() => {
+                        animateCounter(entry.target, end, 2000);
+                    }, delay);
+                }
+            });
+        }, { threshold: 0.3 });
+
+        document.querySelectorAll('.counter-value').forEach(el => {
+            counterObserver.observe(el);
+        });
+
+        // ===== Terminal Animation =====
+        const terminalSteps = document.querySelectorAll('.terminal-step');
+        const terminalSuccess = document.getElementById('terminal-success');
+        let currentStep = 0;
+        
+        function animateTerminal() {
+            // Reset all steps
+            terminalSteps.forEach((step, index) => {
+                step.classList.remove('bg-emerald-500/10', 'border-emerald-500/20', 'bg-cyber-500/10', 'border-cyber-500/30');
+                step.classList.add('opacity-0', 'translate-y-2', 'bg-white/[0.02]', 'border-white/5');
+                const dot = step.querySelector('.step-dot');
+                const text = step.querySelector('.step-text');
+                const check = step.querySelector('.step-check');
+                if (dot) dot.className = 'step-dot w-2 h-2 rounded-full bg-gray-600 transition-colors';
+                if (text) text.className = 'step-text text-gray-500 transition-colors';
+                if (check) check.classList.add('hidden');
+            });
+            if (terminalSuccess) terminalSuccess.classList.add('hidden');
+            currentStep = 0;
+            
+            function showNextStep() {
+                if (currentStep < terminalSteps.length) {
+                    const step = terminalSteps[currentStep];
+                    step.classList.remove('opacity-0', 'translate-y-2');
+                    
+                    // Mark previous step as complete
+                    if (currentStep > 0) {
+                        const prevStep = terminalSteps[currentStep - 1];
+                        prevStep.classList.remove('bg-cyber-500/10', 'border-cyber-500/30');
+                        prevStep.classList.add('bg-emerald-500/10', 'border-emerald-500/20');
+                        const prevDot = prevStep.querySelector('.step-dot');
+                        const prevText = prevStep.querySelector('.step-text');
+                        const prevCheck = prevStep.querySelector('.step-check');
+                        if (prevDot) prevDot.className = 'step-dot w-2 h-2 rounded-full bg-emerald-400 transition-colors';
+                        if (prevText) prevText.className = 'step-text text-emerald-300 transition-colors';
+                        if (prevCheck) prevCheck.classList.remove('hidden');
+                    }
+                    
+                    // Style current step as active
+                    step.classList.remove('bg-white/[0.02]', 'border-white/5');
+                    step.classList.add('bg-cyber-500/10', 'border-cyber-500/30');
+                    const dot = step.querySelector('.step-dot');
+                    const text = step.querySelector('.step-text');
+                    if (dot) dot.className = 'step-dot w-2 h-2 rounded-full bg-cyber-400 animate-pulse transition-colors';
+                    if (text) text.className = 'step-text text-cyber-300 transition-colors';
+                    
+                    currentStep++;
+                    setTimeout(showNextStep, 1500);
+                } else if (currentStep === terminalSteps.length) {
+                    // Mark last step complete
+                    const lastStep = terminalSteps[terminalSteps.length - 1];
+                    lastStep.classList.remove('bg-cyber-500/10', 'border-cyber-500/30');
+                    lastStep.classList.add('bg-emerald-500/10', 'border-emerald-500/20');
+                    const lastDot = lastStep.querySelector('.step-dot');
+                    const lastText = lastStep.querySelector('.step-text');
+                    const lastCheck = lastStep.querySelector('.step-check');
+                    if (lastDot) lastDot.className = 'step-dot w-2 h-2 rounded-full bg-emerald-400 transition-colors';
+                    if (lastText) lastText.className = 'step-text text-emerald-300 transition-colors';
+                    if (lastCheck) lastCheck.classList.remove('hidden');
+                    
+                    // Show success message
+                    setTimeout(() => {
+                        if (terminalSuccess) terminalSuccess.classList.remove('hidden');
+                    }, 500);
+                    
+                    currentStep++;
+                    // Restart animation after delay
+                    setTimeout(animateTerminal, 3000);
+                }
+            }
+            
+            setTimeout(showNextStep, 1000);
+        }
+
+        // Start terminal animation when visible
+        const terminalContainer = document.getElementById('terminal-container');
+        if (terminalContainer) {
+            const terminalObserver = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting && !terminalContainer.dataset.started) {
+                        terminalContainer.dataset.started = 'true';
+                        animateTerminal();
+                    }
+                });
+            }, { threshold: 0.3 });
+            terminalObserver.observe(terminalContainer);
+        }
+
+        // ===== Full-page Section Scrolling =====
+        const sections = document.querySelectorAll('.landing-section');
+        let isScrolling = false;
+        let wheelAccumulator = 0;
+        const wheelThreshold = 15;
+
+        function scrollToSection(index) {
+            if (index < 0 || index >= sections.length || isScrolling) return;
+            isScrolling = true;
+            sections[index].scrollIntoView({ behavior: 'smooth' });
+            setTimeout(() => { isScrolling = false; }, 800);
+        }
+
+        function getCurrentSectionIndex() {
+            const scrollY = window.scrollY;
+            const viewportHeight = window.innerHeight;
+            for (let i = sections.length - 1; i >= 0; i--) {
+                if (scrollY >= sections[i].offsetTop - viewportHeight / 2) {
+                    return i;
+                }
+            }
+            return 0;
+        }
+
+        // Disabled: full-page section snapping (wheel hijacks scroll and snaps to sections).
+        // window.addEventListener('wheel', (e) => {
+        //     e.preventDefault();
+        //     if (isScrolling) return;
+
+        //     wheelAccumulator += e.deltaY;
+
+        //     if (Math.abs(wheelAccumulator) >= wheelThreshold) {
+        //         const currentIndex = getCurrentSectionIndex();
+        //         if (wheelAccumulator > 0) {
+        //             scrollToSection(currentIndex + 1);
+        //         } else {
+        //             scrollToSection(currentIndex - 1);
+        //         }
+        //         wheelAccumulator = 0;
+        //     }
+        // }, { passive: false });
+
+        // Reset accumulator after pause in scrolling
+        let wheelTimeout;
+        window.addEventListener('wheel', () => {
+            clearTimeout(wheelTimeout);
+            wheelTimeout = setTimeout(() => { wheelAccumulator = 0; }, 150);
+        }, { passive: true });
+    })();
+    </script>
+</body>
+</html>

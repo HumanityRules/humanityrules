@@ -601,6 +601,9 @@
   .-ml-0\.5 {
     margin-left: calc(var(--spacing) * -0.5);
   }
+  .-ml-1 {
+    margin-left: calc(var(--spacing) * -1);
+  }
   .ml-0\.5 {
     margin-left: calc(var(--spacing) * 0.5);
   }
@@ -774,6 +777,9 @@
   }
   .h-screen {
     height: 100vh;
+  }
+  .max-h-14 {
+    max-height: calc(var(--spacing) * 14);
   }
   .max-h-32 {
     max-height: calc(var(--spacing) * 32);
@@ -950,6 +956,9 @@
     max-width: 80%;
   }
   .max-w-\[100\%\] {
+    max-width: 100%;
+  }
+  .max-w-full {
     max-width: 100%;
   }
   .max-w-lg {
@@ -1902,6 +1911,9 @@
   .fill-yellow-500 {
     fill: var(--color-yellow-500);
   }
+  .object-contain {
+    object-fit: contain;
+  }
   .p-0 {
     padding: calc(var(--spacing) * 0);
   }
@@ -2714,6 +2726,16 @@
       @media (hover: hover) {
         --tw-translate-x: calc(var(--spacing) * 1);
         translate: var(--tw-translate-x) var(--tw-translate-y);
+      }
+    }
+  }
+  .group-hover\:scale-105 {
+    &:is(:where(.group):hover *) {
+      @media (hover: hover) {
+        --tw-scale-x: 105%;
+        --tw-scale-y: 105%;
+        --tw-scale-z: 105%;
+        scale: var(--tw-scale-x) var(--tw-scale-y);
       }
     }
   }

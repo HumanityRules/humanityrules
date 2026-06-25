@@ -10,6 +10,7 @@ urlpatterns = [
     path("apps/<slug:app_slug>/cost-panel/", views.app_cost_panel, name="app_cost_panel"),
 
     path("", views.landing, name="landing"),
+    path("devopshero-ai/", views.devopshero_landing, name="devopshero_landing"),
     path("waitlist/signup/", views.waitlist_signup, name="waitlist_signup"),
     path("dashboard/", views.dashboard, name="dashboard"),
     path("workspaces/", views.workspaces, name="workspaces"),
