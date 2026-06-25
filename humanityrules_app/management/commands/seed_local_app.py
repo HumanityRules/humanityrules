@@ -1,27 +1,18 @@
-"""Seed the DB rows the local Hermes compose stack needs for integrations.
+"""Seed DB rows so a local Hermes compose stack appears as an App in HUMR.
 
-The integrations broker (`integrations_broker.py`) only starts when supervisor
-sees HUMR_CONTROL_PLANE_URL / HUMR_ENV_BEARER / HUMR_OWNER_USERNAME / HUMR_APP_SLUG.
-Locally those point the broker at the laptop's Django (via the humanityrules.ngrok.io
-tunnel) and identify it as one existing App owned by one existing user.
+The running docker-compose stack *is* the app — no AWS deployment or Blueprint
+is created. HUMR only needs identity rows: a DB-only App stub (App row + owner
+tag), a localhost Environment, and an EnvironmentBearerToken.
 
-Two control-plane checks then have to pass for "Connect Google" to work:
-
-1. The OAuth start view resolves the WebUI return URL (`rd`) to an Environment
-   by suffix-matching its host against `shared_alb_hosted_zone`. The local WebUI
-   is http://localhost:8788, so we need an Environment whose zone is `localhost`.
-2. The token-refresh + OAuth-start views resolve the env from the bearer and the
-   app from `app_slug` (must be owned by `owner_username` in the env's org).
-
-This command creates that Environment (status READY so the provisioning
-job_worker, which polls PENDING, leaves it alone — no CloudFormation), mints
-an EnvironmentBearerToken with a known raw value, and ensures a DB-only App
-stub (App row + owner tag) for the local compose container to impersonate.
-No AWS deployment or Blueprint is created — the running docker-compose stack
-*is* the app; HUMR only needs the identity rows for integrations auth.
+Those rows let the local container impersonate one existing App owned by one
+user when supervisor sees HUMR_CONTROL_PLANE_URL / HUMR_ENV_BEARER /
+HUMR_OWNER_USERNAME / HUMR_APP_SLUG. That wiring is required for the app to
+show up in the control plane UI and for the integrations broker (Google/GitHub
+OAuth) to authenticate against the laptop's Django via the humanityrules.ngrok.io
+tunnel.
 
 Usage:
-    uv run manage.py seed_local_integrations \\
+    uv run manage.py seed_local_app \\
         --aws-account "CH Sandbox" \\
         --app-slug hermes-vmendi00 \\
         --owner-username vmendi@gmail.com
@@ -51,7 +42,7 @@ DEFAULT_WORKSPACE_SLUG = "default"
 
 
 class Command(BaseCommand):
-    help = "Seed the localhost Environment + bearer the local Hermes compose stack needs for integrations."
+    help = "Seed DB rows for a local Hermes compose app (App stub, Environment, bearer)."
 
     def add_arguments(self, parser) -> None:
         parser.add_argument("--aws-account", required=True, help="AWS account name the env lives under (e.g. 'CH Sandbox').")
@@ -109,7 +100,7 @@ class Command(BaseCommand):
                 "aws_region": region,
                 "shared_alb_hosted_zone": hosted_zone,
                 "status": Environment.Status.READY,
-                "status_message": "Local integrations dev env (seed_local_integrations); not provisioned.",
+                "status_message": "Local dev env (seed_local_app); not provisioned.",
             },
         )
         action = "created" if created else "updated"

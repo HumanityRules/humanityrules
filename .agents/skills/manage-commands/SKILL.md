@@ -26,6 +26,7 @@ All custom commands live in `humanityrules_app/management/commands/`.
 - **seed_test_apps** — Seed orgs, workspaces, environments, and apps for UI testing.
 - **seed_test_groups** — Seed test groups with attributes for ABAC testing.
 - **seed_test_users** — Seed test users with group memberships.
+- **seed_local_app** — Seed DB rows for a local Hermes compose app (App stub, localhost Environment, bearer token).
 - **seed_local_repos** — Scan local directory and create Repository records.
 - **setup_oidc_org** — Create/update an organization with OIDC (Okta) auth config.
 - **ensure_superuser** — Create or promote a user to superuser.

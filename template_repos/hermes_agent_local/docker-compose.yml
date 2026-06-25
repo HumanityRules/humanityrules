@@ -38,10 +38,10 @@ services:
       HUMR_LLM_MODEL: ${HUMR_LLM_MODEL:-global.anthropic.claude-sonnet-4-6}
       HUMR_PUBLIC_HOSTNAME: localhost
       HERMES_WEBUI_SKIP_ONBOARDING: ${HERMES_WEBUI_SKIP_ONBOARDING:-1}
-      # Integrations broker identity. supervisor.sh starts the broker only when
-      # all four are set; locally they point it at the laptop's Django (via the
-      # humanityrules.ngrok.io tunnel) as one existing App owned by one user. Seed
-      # the matching DB rows with: uv run manage.py seed_local_integrations.
+      # Control-plane app identity. supervisor.sh starts the integrations broker only
+      # when all four are set; they point the local stack at the laptop's Django
+      # (via the humanityrules.ngrok.io tunnel) as one existing App. Seed the DB
+      # rows first: uv run manage.py seed_local_app.
       HUMR_CONTROL_PLANE_URL: ${HUMR_CONTROL_PLANE_URL:-https://humanityrules.ngrok.io}
       HUMR_ENV_BEARER: ${HUMR_ENV_BEARER:-}
       HUMR_OWNER_USERNAME: ${HUMR_OWNER_USERNAME:-}
