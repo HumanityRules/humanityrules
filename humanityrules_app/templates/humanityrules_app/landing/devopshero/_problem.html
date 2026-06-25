@@ -1,0 +1,141 @@
+{% comment %}
+Landing page problem section - highlights the pain points Humanity Rules solves.
+{% endcomment %}
+
+<section id="problem" class="landing-section relative overflow-hidden min-h-screen pt-24 pb-16">
+    <div class="absolute inset-0 bg-radial-gradient-bottom opacity-50"></div>
+
+    <div class="container-custom relative z-10">
+        <div class="max-w-4xl mx-auto">
+            <!-- Section header -->
+            <div class="flex items-center justify-center gap-3 mb-6">
+                <div class="p-2 bg-amber-500/10 rounded-lg">
+                    <!-- AlertTriangle icon -->
+                    <svg class="w-6 h-6 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/>
+                        <path d="M12 9v4"/><path d="M12 17h.01"/>
+                    </svg>
+                </div>
+                <span class="text-amber-500 font-semibold text-sm uppercase tracking-wider">The Problem</span>
+            </div>
+
+            <p class="text-2xl sm:text-3xl font-medium gradient-text mb-6 text-center">
+                AI sped up building internal apps
+            </p>
+
+            <h2 class="text-4xl sm:text-5xl font-bold text-white mb-4 leading-tight text-center">
+                Getting them deployed inside your company is still the bottleneck
+            </h2>
+
+            <p class="text-lg text-gray-400 mb-8 leading-relaxed max-w-3xl mx-auto text-justify">
+                You've written the perfect internal tool, but now you're stuck wiring IAM policies,
+                approval flows, SSO, logging and metrics. A week later, you're still waiting for infra
+                tickets to be resolved. Innovation shouldn't be this hard.
+            </p>
+
+            <!-- Stats row -->
+            <div class="grid grid-cols-3 gap-8 mb-10 p-8 bg-white/[0.02] rounded-2xl border border-white/[0.06] animate-on-scroll">
+                <div class="text-center">
+                    <div class="text-4xl sm:text-5xl font-bold text-amber-400 mb-2">
+                        <span class="counter-value" data-value="6" data-delay="0">0</span> days
+                    </div>
+                    <div class="text-gray-400 text-sm">Average deployment time</div>
+                </div>
+                <div class="text-center">
+                    <div class="text-4xl sm:text-5xl font-bold text-amber-400 mb-2">
+                        <span class="counter-value" data-value="15" data-delay="200">0</span>%
+                    </div>
+                    <div class="text-gray-400 text-sm">Time spent on infrastructure</div>
+                </div>
+                <div class="text-center">
+                    <div class="text-4xl sm:text-5xl font-bold text-amber-400 mb-2">
+                        <span class="counter-value" data-value="3" data-delay="400">0</span>+
+                    </div>
+                    <div class="text-gray-400 text-sm">Tickets per deployment</div>
+                </div>
+            </div>
+
+            <!-- Pain points grid -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                <!-- IAM Policy Maze -->
+                <div class="group p-6 bg-white/[0.02] border border-white/5 rounded-xl card-hover hover:border-amber-500/30 hover:bg-amber-500/5">
+                    <div class="flex items-start gap-4">
+                        <div class="p-3 bg-amber-500/10 rounded-lg group-hover:bg-amber-500/20 transition-colors">
+                            <!-- Lock icon -->
+                            <svg class="w-5 h-5 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                            </svg>
+                        </div>
+                        <div>
+                            <h3 class="text-lg font-semibold text-white mb-2">IAM Policy Maze</h3>
+                            <p class="text-gray-400 text-sm leading-relaxed">Complex permission configurations that require deep AWS expertise</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Terraform Wrangling -->
+                <div class="group p-6 bg-white/[0.02] border border-white/5 rounded-xl card-hover hover:border-amber-500/30 hover:bg-amber-500/5">
+                    <div class="flex items-start gap-4">
+                        <div class="p-3 bg-amber-500/10 rounded-lg group-hover:bg-amber-500/20 transition-colors">
+                            <!-- FileCode icon -->
+                            <svg class="w-5 h-5 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M10 12.5 8 15l2 2.5"/><path d="m14 12.5 2 2.5-2 2.5"/>
+                                <path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/>
+                            </svg>
+                        </div>
+                        <div>
+                            <h3 class="text-lg font-semibold text-white mb-2">Terraform Wrangling</h3>
+                            <p class="text-gray-400 text-sm leading-relaxed">Endless YAML and HCL files that need constant maintenance</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SSO Integration -->
+                <div class="group p-6 bg-white/[0.02] border border-white/5 rounded-xl card-hover hover:border-amber-500/30 hover:bg-amber-500/5">
+                    <div class="flex items-start gap-4">
+                        <div class="p-3 bg-amber-500/10 rounded-lg group-hover:bg-amber-500/20 transition-colors">
+                            <!-- Activity icon -->
+                            <svg class="w-5 h-5 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/>
+                            </svg>
+                        </div>
+                        <div>
+                            <h3 class="text-lg font-semibold text-white mb-2">SSO Integration</h3>
+                            <p class="text-gray-400 text-sm leading-relaxed">Days spent configuring authentication and authorization flows</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Infra Ticket Queues -->
+                <div class="group p-6 bg-white/[0.02] border border-white/5 rounded-xl card-hover hover:border-amber-500/30 hover:bg-amber-500/5">
+                    <div class="flex items-start gap-4">
+                        <div class="p-3 bg-amber-500/10 rounded-lg group-hover:bg-amber-500/20 transition-colors">
+                            <!-- Ticket icon -->
+                            <svg class="w-5 h-5 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/>
+                                <path d="M13 5v2"/><path d="M13 17v2"/><path d="M13 11v2"/>
+                            </svg>
+                        </div>
+                        <div>
+                            <h3 class="text-lg font-semibold text-white mb-2">Infra Ticket Queues</h3>
+                            <p class="text-gray-400 text-sm leading-relaxed">Waiting days for platform teams to provision resources</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Bottom callout -->
+            <div class="mt-12 p-6 bg-gradient-to-r from-amber-500/10 to-transparent border-l-4 border-amber-500 rounded-r-xl">
+                <div class="flex items-center gap-3">
+                    <!-- Clock icon -->
+                    <svg class="w-5 h-5 text-amber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                    </svg>
+                    <p class="text-gray-300">
+                        <span class="text-white font-semibold">Average deployment time:</span> 2 days to 2 weeks for a simple internal tool
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
