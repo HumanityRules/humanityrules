@@ -1,6 +1,7 @@
 {% comment %}
-Landing page solution section - shows what Humanity Rules offers with terminal demo.
-JS for terminal animation is in landing_page.html.
+Landing page solution section - governed agents deployed in your own cloud.
+The terminal animation is driven by JS in landing_page.html (selectors:
+#terminal-container, .terminal-step, .step-dot/.step-text/.step-check, #terminal-success).
 {% endcomment %}
 
 <section id="solution" class="landing-section section-padding relative overflow-hidden min-h-screen flex items-center">
@@ -13,78 +14,73 @@ JS for terminal animation is in landing_page.html.
             <div>
                 <div class="flex items-center gap-3 mb-6">
                     <div class="p-2 bg-cyber-500/10 rounded-lg">
-                        <!-- Zap icon -->
+                        <!-- Sparkles icon -->
                         <svg class="w-6 h-6 text-cyber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/>
+                            <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/>
+                            <path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/>
                         </svg>
                     </div>
-                    <span class="text-cyber-400 font-semibold text-sm uppercase tracking-wider">Our Solution</span>
+                    <span class="text-cyber-400 font-semibold text-sm uppercase tracking-wider">The Solution</span>
                 </div>
 
                 <h2 class="text-4xl sm:text-5xl font-bold text-white mb-6 leading-tight">
-                    The Heroku experience<br>
-                    <span class="gradient-text">inside your enterprise</span>
+                    Real agents for your team<br>
+                    <span class="gradient-text">governed from day one</span>
                 </h2>
 
                 <p class="text-lg text-gray-400 mb-8 leading-relaxed">
-                    Our AI-powered co-pilot automates infrastructure provisioning directly into your
-                    company's AWS account, configures least-privilege IAM policies through a simple wizard, and
-                    sets up approval chains that satisfy your CISO.
+                    Humanity Rules deploys a personal AI assistant for every employee inside your own cloud.
+                    Each one is isolated, always-on, and reachable from Slack, the web, or a personal URL —
+                    with permissions, approvals, and audit built into the platform.
                 </p>
 
                 <!-- Solution points -->
                 <div class="space-y-4 mb-8">
-                    <!-- AI Co-Pilot -->
+                    <!-- An agent for everyone -->
                     <div class="flex items-start gap-4">
                         <div class="p-2 bg-cyber-500/10 rounded-lg flex-shrink-0">
-                            <!-- Bot icon -->
+                            <!-- Users icon -->
                             <svg class="w-5 h-5 text-cyber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/>
-                                <path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>
+                                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
                             </svg>
                         </div>
                         <div>
-                            <h3 class="text-white font-semibold mb-1">AI Co-Pilot</h3>
-                            <p class="text-gray-400 text-sm">Intelligent automation that understands your infrastructure needs</p>
+                            <h3 class="text-white font-semibold mb-1">An agent for everyone</h3>
+                            <p class="text-gray-400 text-sm">Per-employee, isolated, always-on. Real tool execution and persistent memory — not just a chat box.</p>
                         </div>
                     </div>
 
-                    <!-- Enterprise Security -->
+                    <!-- In your own cloud -->
                     <div class="flex items-start gap-4">
                         <div class="p-2 bg-cyber-500/10 rounded-lg flex-shrink-0">
-                            <!-- Shield icon -->
+                            <!-- Cloud icon -->
                             <svg class="w-5 h-5 text-cyber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>
+                                <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>
                             </svg>
                         </div>
                         <div>
-                            <h3 class="text-white font-semibold mb-1">Enterprise Security</h3>
-                            <p class="text-gray-400 text-sm">Least-privilege IAM policies configured through a simple wizard</p>
+                            <h3 class="text-white font-semibold mb-1">Inside your perimeter</h3>
+                            <p class="text-gray-400 text-sm">Runs in your VPC, with in-VPC model paths like Bedrock. External calls route only through a governed, audited broker.</p>
                         </div>
                     </div>
 
-                    <!-- Built-in SDK -->
+                    <!-- Governed by default -->
                     <div class="flex items-start gap-4">
                         <div class="p-2 bg-cyber-500/10 rounded-lg flex-shrink-0">
-                            <!-- Boxes icon -->
+                            <!-- Shield-check icon -->
                             <svg class="w-5 h-5 text-cyber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M2.97 12.92A2 2 0 0 0 2 14.63v3.24a2 2 0 0 0 .97 1.71l3 1.8a2 2 0 0 0 2.06 0L12 19v-5.5l-5-3-4.03 2.42Z"/>
-                                <path d="m7 16.5-4.74-2.85"/><path d="m7 16.5 5-3"/><path d="M7 16.5v5.17"/>
-                                <path d="M12 13.5V19l3.97 2.38a2 2 0 0 0 2.06 0l3-1.8a2 2 0 0 0 .97-1.71v-3.24a2 2 0 0 0-.97-1.71L17 10.5l-5 3Z"/>
-                                <path d="m17 16.5-5-3"/><path d="m17 16.5 4.74-2.85"/><path d="M17 16.5v5.17"/>
-                                <path d="M7.97 4.42A2 2 0 0 0 7 6.13v4.37l5 3 5-3V6.13a2 2 0 0 0-.97-1.71l-3-1.8a2 2 0 0 0-2.06 0l-3 1.8Z"/>
-                                <path d="M12 8 7.26 5.15"/><path d="m12 8 4.74-2.85"/><path d="M12 13.5V8"/>
+                                <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/>
                             </svg>
                         </div>
                         <div>
-                            <h3 class="text-white font-semibold mb-1">Built-in SDK</h3>
-                            <p class="text-gray-400 text-sm">SSO, RBAC, logging, and metrics included by default</p>
+                            <h3 class="text-white font-semibold mb-1">Governed by default</h3>
+                            <p class="text-gray-400 text-sm">Curated skills, ABAC permissions, approval workflows, SSO, and a complete audit trail.</p>
                         </div>
                     </div>
                 </div>
 
-                <a href="#features" class="inline-flex items-center gap-2 text-cyber-400 hover:text-cyber-300 font-medium transition-colors group">
-                    Explore all features
+                <a href="#platform" class="inline-flex items-center gap-2 text-cyber-400 hover:text-cyber-300 font-medium transition-colors group">
+                    Explore the platform
                     <!-- ArrowRight icon -->
                     <svg class="w-4 h-4 group-hover:translate-x-1 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>
@@ -104,7 +100,7 @@ JS for terminal animation is in landing_page.html.
                             <div class="w-3 h-3 rounded-full bg-green-500/80"></div>
                         </div>
                         <div class="flex-1 text-center">
-                            <span class="text-xs text-gray-500 font-mono">devops-hero deploy</span>
+                            <span class="text-xs text-gray-500 font-mono">humr · deploy agent</span>
                         </div>
                         <div class="w-14"></div>
                     </div>
@@ -113,15 +109,14 @@ JS for terminal animation is in landing_page.html.
                     <div class="p-6 font-mono text-sm space-y-3">
                         <div class="flex items-center gap-2 text-gray-400">
                             <span class="text-cyber-400">$</span>
-                            <span>devops-hero deploy ./my-app</span>
+                            <span>humr deploy --for jane@acme.com</span>
                             <span class="typing-cursor"></span>
                         </div>
 
                         <!-- Step 1 -->
                         <div class="terminal-step flex items-center gap-3 p-3 rounded-lg border transition-all duration-500 opacity-0 translate-y-2 bg-white/[0.02] border-white/5">
                             <div class="step-dot w-2 h-2 rounded-full bg-gray-600 transition-colors"></div>
-                            <span class="step-text text-gray-500 transition-colors">Analyzing your application...</span>
-                            <!-- Check icon (hidden by default) -->
+                            <span class="step-text text-gray-500 transition-colors">Provisioning isolated sandbox in your VPC...</span>
                             <svg class="step-check w-4 h-4 text-emerald-400 ml-auto hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <path d="M20 6 9 17l-5-5"/>
                             </svg>
@@ -130,7 +125,7 @@ JS for terminal animation is in landing_page.html.
                         <!-- Step 2 -->
                         <div class="terminal-step flex items-center gap-3 p-3 rounded-lg border transition-all duration-500 opacity-0 translate-y-2 bg-white/[0.02] border-white/5">
                             <div class="step-dot w-2 h-2 rounded-full bg-gray-600 transition-colors"></div>
-                            <span class="step-text text-gray-500 transition-colors">Configuring least-privilege IAM...</span>
+                            <span class="step-text text-gray-500 transition-colors">Applying ABAC policies &amp; SSO...</span>
                             <svg class="step-check w-4 h-4 text-emerald-400 ml-auto hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <path d="M20 6 9 17l-5-5"/>
                             </svg>
@@ -139,7 +134,7 @@ JS for terminal animation is in landing_page.html.
                         <!-- Step 3 -->
                         <div class="terminal-step flex items-center gap-3 p-3 rounded-lg border transition-all duration-500 opacity-0 translate-y-2 bg-white/[0.02] border-white/5">
                             <div class="step-dot w-2 h-2 rounded-full bg-gray-600 transition-colors"></div>
-                            <span class="step-text text-gray-500 transition-colors">Setting up VPC networking...</span>
+                            <span class="step-text text-gray-500 transition-colors">Mounting curated, audited skills...</span>
                             <svg class="step-check w-4 h-4 text-emerald-400 ml-auto hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <path d="M20 6 9 17l-5-5"/>
                             </svg>
@@ -148,7 +143,7 @@ JS for terminal animation is in landing_page.html.
                         <!-- Step 4 -->
                         <div class="terminal-step flex items-center gap-3 p-3 rounded-lg border transition-all duration-500 opacity-0 translate-y-2 bg-white/[0.02] border-white/5">
                             <div class="step-dot w-2 h-2 rounded-full bg-gray-600 transition-colors"></div>
-                            <span class="step-text text-gray-500 transition-colors">Deploying to production...</span>
+                            <span class="step-text text-gray-500 transition-colors">Connecting Bedrock — model runs in your cloud...</span>
                             <svg class="step-check w-4 h-4 text-emerald-400 ml-auto hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <path d="M20 6 9 17l-5-5"/>
                             </svg>
@@ -161,10 +156,10 @@ JS for terminal animation is in landing_page.html.
                                 <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                     <path d="M20 6 9 17l-5-5"/>
                                 </svg>
-                                Deployed successfully in 2m 34s
+                                Jane's agent is live — governed &amp; audited
                             </div>
                             <div class="mt-2 text-gray-400 text-xs">
-                                https://my-app.internal.company.com
+                                slack: @jane-agent · https://jane.acme.humr.app
                             </div>
                         </div>
                     </div>

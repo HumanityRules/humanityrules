@@ -1,8 +1,9 @@
 {% comment %}
-Landing page problem section - highlights the pain points Humanity Rules solves.
+Landing page problem section - shadow AI: agents your team already runs on
+laptops or on a vendor's cloud, ungoverned, unaudited, and locked to one lab.
 {% endcomment %}
 
-<section id="problem" class="landing-section relative overflow-hidden min-h-screen pt-24 pb-16">
+<section id="problem" class="landing-section relative overflow-hidden min-h-screen flex items-center pt-28 pb-20">
     <div class="absolute inset-0 bg-radial-gradient-bottom opacity-50"></div>
 
     <div class="container-custom relative z-10">
@@ -20,105 +21,82 @@ Landing page problem section - highlights the pain points Humanity Rules solves.
             </div>
 
             <p class="text-2xl sm:text-3xl font-medium gradient-text mb-6 text-center">
-                AI sped up building internal apps
+                Your team is already using AI agents
             </p>
 
-            <h2 class="text-4xl sm:text-5xl font-bold text-white mb-4 leading-tight text-center">
-                Getting them deployed inside your company is still the bottleneck
+            <h2 class="text-4xl sm:text-5xl font-bold text-white mb-6 leading-tight text-center">
+                You just can't see them — or stop them
             </h2>
 
-            <p class="text-lg text-gray-400 mb-8 leading-relaxed max-w-3xl mx-auto text-justify">
-                You've written the perfect internal tool, but now you're stuck wiring IAM policies,
-                approval flows, SSO, logging and metrics. A week later, you're still waiting for infra
-                tickets to be resolved. Innovation shouldn't be this hard.
+            <p class="text-lg text-gray-400 mb-12 leading-relaxed max-w-3xl mx-auto text-center">
+                Most agents today run on employees' laptops, wired to unvetted plugins and MCP servers — or
+                on a vendor's platform you don't control. Either way, they read files, call APIs, and act on
+                your systems: a second control plane outside your IAM, your VPC, your approvals, and your audit.
+                Data walks out the door, nothing is logged, and you're locked into one lab's model and memory.
             </p>
-
-            <!-- Stats row -->
-            <div class="grid grid-cols-3 gap-8 mb-10 p-8 bg-white/[0.02] rounded-2xl border border-white/[0.06] animate-on-scroll">
-                <div class="text-center">
-                    <div class="text-4xl sm:text-5xl font-bold text-amber-400 mb-2">
-                        <span class="counter-value" data-value="6" data-delay="0">0</span> days
-                    </div>
-                    <div class="text-gray-400 text-sm">Average deployment time</div>
-                </div>
-                <div class="text-center">
-                    <div class="text-4xl sm:text-5xl font-bold text-amber-400 mb-2">
-                        <span class="counter-value" data-value="15" data-delay="200">0</span>%
-                    </div>
-                    <div class="text-gray-400 text-sm">Time spent on infrastructure</div>
-                </div>
-                <div class="text-center">
-                    <div class="text-4xl sm:text-5xl font-bold text-amber-400 mb-2">
-                        <span class="counter-value" data-value="3" data-delay="400">0</span>+
-                    </div>
-                    <div class="text-gray-400 text-sm">Tickets per deployment</div>
-                </div>
-            </div>
 
             <!-- Pain points grid -->
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                <!-- IAM Policy Maze -->
+                <!-- Data & credential leakage -->
                 <div class="group p-6 bg-white/[0.02] border border-white/5 rounded-xl card-hover hover:border-amber-500/30 hover:bg-amber-500/5">
                     <div class="flex items-start gap-4">
                         <div class="p-3 bg-amber-500/10 rounded-lg group-hover:bg-amber-500/20 transition-colors">
-                            <!-- Lock icon -->
+                            <!-- Lock-open / leak icon -->
                             <svg class="w-5 h-5 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                                <rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/>
                             </svg>
                         </div>
                         <div>
-                            <h3 class="text-lg font-semibold text-white mb-2">IAM Policy Maze</h3>
-                            <p class="text-gray-400 text-sm leading-relaxed">Complex permission configurations that require deep AWS expertise</p>
+                            <h3 class="text-lg font-semibold text-white mb-2">Data &amp; credentials leak</h3>
+                            <p class="text-gray-400 text-sm leading-relaxed">Unvetted plugins and MCP servers can quietly exfiltrate secrets and company data. One prompt injection is all it takes.</p>
                         </div>
                     </div>
                 </div>
 
-                <!-- Terraform Wrangling -->
+                <!-- No visibility / audit -->
                 <div class="group p-6 bg-white/[0.02] border border-white/5 rounded-xl card-hover hover:border-amber-500/30 hover:bg-amber-500/5">
                     <div class="flex items-start gap-4">
                         <div class="p-3 bg-amber-500/10 rounded-lg group-hover:bg-amber-500/20 transition-colors">
-                            <!-- FileCode icon -->
+                            <!-- Eye-off icon -->
                             <svg class="w-5 h-5 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M10 12.5 8 15l2 2.5"/><path d="m14 12.5 2 2.5-2 2.5"/>
-                                <path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/>
+                                <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><path d="m2 2 20 20"/><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/>
                             </svg>
                         </div>
                         <div>
-                            <h3 class="text-lg font-semibold text-white mb-2">Terraform Wrangling</h3>
-                            <p class="text-gray-400 text-sm leading-relaxed">Endless YAML and HCL files that need constant maintenance</p>
+                            <h3 class="text-lg font-semibold text-white mb-2">No visibility, no audit</h3>
+                            <p class="text-gray-400 text-sm leading-relaxed">You can't see what employees do with their agents — and neither can your auditors. There's no trail to point to.</p>
                         </div>
                     </div>
                 </div>
 
-                <!-- SSO Integration -->
+                <!-- Runs on someone else's computer -->
                 <div class="group p-6 bg-white/[0.02] border border-white/5 rounded-xl card-hover hover:border-amber-500/30 hover:bg-amber-500/5">
                     <div class="flex items-start gap-4">
                         <div class="p-3 bg-amber-500/10 rounded-lg group-hover:bg-amber-500/20 transition-colors">
-                            <!-- Activity icon -->
+                            <!-- Laptop icon -->
                             <svg class="w-5 h-5 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/>
+                                <path d="M18 5a2 2 0 0 1 2 2v8.526a2 2 0 0 0 .212.897l1.068 2.127a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45l1.068-2.127A2 2 0 0 0 4 15.526V7a2 2 0 0 1 2-2z"/><path d="M20.054 15.987H3.946"/>
                             </svg>
                         </div>
                         <div>
-                            <h3 class="text-lg font-semibold text-white mb-2">SSO Integration</h3>
-                            <p class="text-gray-400 text-sm leading-relaxed">Days spent configuring authentication and authorization flows</p>
+                            <h3 class="text-lg font-semibold text-white mb-2">Running on someone else's account</h3>
+                            <p class="text-gray-400 text-sm leading-relaxed">Whether it's a laptop or a vendor's managed cloud, agents that run outside your own account are a non-starter for regulated, audited industries. Your data shouldn't leave your perimeter.</p>
                         </div>
                     </div>
                 </div>
 
-                <!-- Infra Ticket Queues -->
+                <!-- Lock-in -->
                 <div class="group p-6 bg-white/[0.02] border border-white/5 rounded-xl card-hover hover:border-amber-500/30 hover:bg-amber-500/5">
                     <div class="flex items-start gap-4">
                         <div class="p-3 bg-amber-500/10 rounded-lg group-hover:bg-amber-500/20 transition-colors">
-                            <!-- Ticket icon -->
+                            <!-- Link / chain icon -->
                             <svg class="w-5 h-5 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/>
-                                <path d="M13 5v2"/><path d="M13 17v2"/><path d="M13 11v2"/>
+                                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
                             </svg>
                         </div>
                         <div>
-                            <h3 class="text-lg font-semibold text-white mb-2">Infra Ticket Queues</h3>
-                            <p class="text-gray-400 text-sm leading-relaxed">Waiting days for platform teams to provision resources</p>
+                            <h3 class="text-lg font-semibold text-white mb-2">Locked into one lab</h3>
+                            <p class="text-gray-400 text-sm leading-relaxed">One model, one harness, non-portable memory. As agents learn your company, that memory gets bound to their platform — not yours.</p>
                         </div>
                     </div>
                 </div>
@@ -126,13 +104,14 @@ Landing page problem section - highlights the pain points Humanity Rules solves.
 
             <!-- Bottom callout -->
             <div class="mt-12 p-6 bg-gradient-to-r from-amber-500/10 to-transparent border-l-4 border-amber-500 rounded-r-xl">
-                <div class="flex items-center gap-3">
-                    <!-- Clock icon -->
-                    <svg class="w-5 h-5 text-amber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                <div class="flex items-start gap-3">
+                    <!-- Alert icon -->
+                    <svg class="w-5 h-5 text-amber-400 mt-0.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>
                     </svg>
                     <p class="text-gray-300">
-                        <span class="text-white font-semibold">Average deployment time:</span> 2 days to 2 weeks for a simple internal tool
+                        <span class="text-white font-semibold">Shadow AI is already in your org.</span>
+                        The only question is whether it's governed — or running loose.
                     </p>
                 </div>
             </div>
