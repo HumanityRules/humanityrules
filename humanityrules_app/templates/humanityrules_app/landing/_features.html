@@ -1,131 +1,129 @@
 {% comment %}
-Landing page features section - grid of key product features.
+Landing page platform section - the trust capabilities grid. The moat is the
+delivery platform: curated, governed, audited agentic tooling.
 {% endcomment %}
 
-<section id="features" class="landing-section section-padding relative overflow-hidden bg-navy-900/30 min-h-screen flex items-center">
+<section id="platform" class="landing-section section-padding relative overflow-hidden bg-navy-900/30 min-h-screen flex items-center">
     <div class="absolute inset-0 bg-grid-pattern opacity-30"></div>
 
     <div class="container-custom relative z-10">
         <!-- Section header -->
         <div class="text-center max-w-3xl mx-auto mb-16">
             <span class="text-cyber-400 font-semibold text-sm uppercase tracking-wider mb-4 block">
-                Key Features
+                The Platform
             </span>
             <h2 class="text-4xl sm:text-5xl font-bold text-white mb-6">
-                Everything you need to<br>
-                <span class="gradient-text">ship with confidence</span>
+                Trust, built into<br>
+                <span class="gradient-text">every layer</span>
             </h2>
             <p class="text-lg text-gray-400">
-                A complete platform that handles infrastructure, security, and compliance so you can focus on building great tools.
+                Models change. Agent frameworks change. Your governance layer shouldn't be disposable.
+                Humanity Rules is the durable control plane for agent access, tools, memory, approvals,
+                and audit — with security defaults that just make sense.
             </p>
         </div>
 
         <!-- Features grid -->
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            <!-- Feature 1: Heroku-like Deployment Experience -->
+            <!-- Runs in your cloud -->
             <div class="group relative p-8 bg-white/[0.02] border border-white/5 rounded-2xl card-hover hover:border-cyber-500/30">
                 <div class="absolute inset-0 bg-gradient-to-br from-cyber-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl"></div>
                 <div class="relative z-10">
                     <div class="flex items-center gap-4 mb-4">
                         <div class="inline-flex p-3 rounded-xl bg-gradient-to-br from-cyber-400 to-cyan-500 shrink-0">
-                            <!-- Rocket icon -->
+                            <!-- Cloud icon -->
                             <svg class="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/>
-                                <path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/>
-                                <path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/>
+                                <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>
                             </svg>
                         </div>
-                        <h3 class="text-xl font-semibold text-white">Heroku-like Deployment Experience</h3>
+                        <h3 class="text-xl font-semibold text-white">Runs in your cloud</h3>
                     </div>
-                    <p class="text-gray-400 leading-relaxed">Deploy via web UI or CLI; rollbacks and destruction are always trivial. No infrastructure expertise required.</p>
+                    <p class="text-gray-400 leading-relaxed">Every agent is deployed into your own AWS VPC — sandboxed, isolated, and always-on. Your data stays inside your perimeter.</p>
                 </div>
             </div>
 
-            <!-- Feature 2: AI-Assisted IAM & Approval Chains -->
+            <!-- No model lock-in -->
             <div class="group relative p-8 bg-white/[0.02] border border-white/5 rounded-2xl card-hover hover:border-cyber-500/30">
                 <div class="absolute inset-0 bg-gradient-to-br from-cyber-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl"></div>
                 <div class="relative z-10">
                     <div class="flex items-center gap-4 mb-4">
                         <div class="inline-flex p-3 rounded-xl bg-gradient-to-br from-teal-400 to-emerald-500 shrink-0">
-                            <!-- Bot icon -->
+                            <!-- Repeat / swap icon -->
                             <svg class="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/>
-                                <path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>
+                                <path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>
                             </svg>
                         </div>
-                        <h3 class="text-xl font-semibold text-white">AI-Assisted IAM & Approval Chains</h3>
+                        <h3 class="text-xl font-semibold text-white">No model lock-in</h3>
                     </div>
-                    <p class="text-gray-400 leading-relaxed">Know what permissions are missing, request them automatically, and track approvals through an intelligent wizard.</p>
+                    <p class="text-gray-400 leading-relaxed">Bedrock, hosted APIs, open-source, OpenRouter — switch providers without re-platforming. Orchestrate models by cost and performance.</p>
                 </div>
             </div>
 
-            <!-- Feature 3: Governance & Audit Trails -->
+            <!-- Curated, audited skills -->
             <div class="group relative p-8 bg-white/[0.02] border border-white/5 rounded-2xl card-hover hover:border-cyber-500/30">
                 <div class="absolute inset-0 bg-gradient-to-br from-cyber-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl"></div>
                 <div class="relative z-10">
                     <div class="flex items-center gap-4 mb-4">
                         <div class="inline-flex p-3 rounded-xl bg-gradient-to-br from-cyan-400 to-blue-500 shrink-0">
-                            <!-- FileCheck icon -->
+                            <!-- Package-check icon -->
                             <svg class="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/>
-                                <path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="m9 15 2 2 4-4"/>
+                                <path d="M16 16 1.7 16"/><path d="m16 8 4.6 2.3a1 1 0 0 1 .4.9V18a1 1 0 0 1-.5.9l-7 4a1 1 0 0 1-1 0l-7-4A1 1 0 0 1 3 18v-7a1 1 0 0 1 .5-.9L10 6"/><path d="m9 11 3 3L22 4"/>
                             </svg>
                         </div>
-                        <h3 class="text-xl font-semibold text-white">Governance & Audit Trails</h3>
+                        <h3 class="text-xl font-semibold text-white">Curated, audited skills</h3>
                     </div>
-                    <p class="text-gray-400 leading-relaxed">Require approvals for sensitive actions and maintain a complete audit log for compliance and security reviews.</p>
+                    <p class="text-gray-400 leading-relaxed">An allowlist of reviewed, versioned skills and MCP servers. Every entry passes security review — automated and human — before your team can use it.</p>
                 </div>
             </div>
 
-            <!-- Feature 4: Built-in Observability -->
+            <!-- ABAC permissions & approvals -->
             <div class="group relative p-8 bg-white/[0.02] border border-white/5 rounded-2xl card-hover hover:border-cyber-500/30">
                 <div class="absolute inset-0 bg-gradient-to-br from-cyber-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl"></div>
                 <div class="relative z-10">
                     <div class="flex items-center gap-4 mb-4">
                         <div class="inline-flex p-3 rounded-xl bg-gradient-to-br from-emerald-400 to-teal-500 shrink-0">
-                            <!-- Activity icon -->
+                            <!-- Key icon -->
                             <svg class="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/>
+                                <path d="m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4"/><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/>
                             </svg>
                         </div>
-                        <h3 class="text-xl font-semibold text-white">Built-in Observability</h3>
+                        <h3 class="text-xl font-semibold text-white">ABAC &amp; approvals</h3>
                     </div>
-                    <p class="text-gray-400 leading-relaxed">Logs and metrics flow into CloudWatch, Datadog or your preferred stack automatically. Zero configuration needed.</p>
+                    <p class="text-gray-400 leading-relaxed">Fine-grained, attribute-based access control decides what each agent can see and do. Sensitive actions gate through human approval workflows.</p>
                 </div>
             </div>
 
-            <!-- Feature 5: SDK with SSO & RBAC -->
+            <!-- SSO & audit trails -->
             <div class="group relative p-8 bg-white/[0.02] border border-white/5 rounded-2xl card-hover hover:border-cyber-500/30">
                 <div class="absolute inset-0 bg-gradient-to-br from-cyber-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl"></div>
                 <div class="relative z-10">
                     <div class="flex items-center gap-4 mb-4">
                         <div class="inline-flex p-3 rounded-xl bg-gradient-to-br from-blue-400 to-cyan-500 shrink-0">
-                            <!-- Code icon -->
+                            <!-- File-check / audit icon -->
                             <svg class="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>
+                                <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="m9 15 2 2 4-4"/>
                             </svg>
                         </div>
-                        <h3 class="text-xl font-semibold text-white">SDK with SSO & RBAC</h3>
+                        <h3 class="text-xl font-semibold text-white">SSO &amp; audit trails</h3>
                     </div>
-                    <p class="text-gray-400 leading-relaxed">Inject standardized authentication and authorization into your app. Our AI helps scaffold the integration code.</p>
+                    <p class="text-gray-400 leading-relaxed">Okta / WorkOS sign-in out of the box. Action-level audit — prompts, tools, approvals, outcomes — built for compliance and security review.</p>
                 </div>
             </div>
 
-            <!-- Feature 6: Instant Rollbacks -->
+            <!-- Secured integrations -->
             <div class="group relative p-8 bg-white/[0.02] border border-white/5 rounded-2xl card-hover hover:border-cyber-500/30">
                 <div class="absolute inset-0 bg-gradient-to-br from-cyber-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl"></div>
                 <div class="relative z-10">
                     <div class="flex items-center gap-4 mb-4">
                         <div class="inline-flex p-3 rounded-xl bg-gradient-to-br from-cyan-400 to-teal-500 shrink-0">
-                            <!-- RotateCcw icon -->
+                            <!-- Network / hub icon -->
                             <svg class="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
-                                <path d="M3 3v5h5"/>
+                                <rect x="9" y="2" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="16" y="16" width="6" height="6" rx="1"/><path d="M12 8v4"/><path d="M5 16v-2a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v2"/>
                             </svg>
                         </div>
-                        <h3 class="text-xl font-semibold text-white">Instant Rollbacks</h3>
+                        <h3 class="text-xl font-semibold text-white">Secured integrations</h3>
                     </div>
-                    <p class="text-gray-400 leading-relaxed">One-click rollbacks to any previous version. Never worry about breaking production again.</p>
+                    <p class="text-gray-400 leading-relaxed">Brokered egress, scoped credentials, and approval gates for Slack, GitHub, Notion and any MCP server — with SIEM-exportable logs. Agents never touch raw secrets.</p>
                 </div>
             </div>
         </div>

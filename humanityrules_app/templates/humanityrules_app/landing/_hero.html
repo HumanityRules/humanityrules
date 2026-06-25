@@ -1,8 +1,10 @@
 {% comment %}
-Landing page hero section with headline, subheadline, email signup form, and feature badges.
+Landing page hero - positions Humanity Rules: governed AI agents, deployed in
+your own cloud. Includes the email waitlist form and a custom "your cloud"
+architecture visual (per-employee agents contained inside the VPC).
 {% endcomment %}
 
-<section id="hero" class="landing-section relative min-h-screen flex items-center pt-20 overflow-hidden">
+<section id="hero" class="landing-section relative min-h-screen flex items-center pt-28 pb-20 overflow-hidden">
     <!-- Background effects -->
     <div class="absolute inset-0 bg-grid-pattern"></div>
     <div class="absolute inset-0 bg-radial-gradient"></div>
@@ -13,51 +15,37 @@ Landing page hero section with headline, subheadline, email signup form, and fea
 
     <div class="container-custom relative z-10">
         <div class="max-w-4xl mx-auto text-center">
-            <!-- Badge -->
-            <div class="inline-flex items-center gap-3 px-6 py-3 bg-cyber-500/10 border border-cyber-500/20 rounded-full mt-2 mb-4 animate-fade-in-landing">
-                <!-- Sparkles icon -->
+            <!-- Eyebrow badge -->
+            <div class="inline-flex items-center gap-3 px-5 py-2.5 bg-cyber-500/10 border border-cyber-500/20 rounded-full mb-8 animate-fade-in-landing">
+                <!-- Shield-check icon -->
                 <svg class="w-5 h-5 text-cyber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/>
-                    <path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/>
+                    <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>
+                    <path d="m9 12 2 2 4-4"/>
                 </svg>
-                <span class="text-lg text-cyber-300 font-semibold">Everyone's vibe-coding. Now everyone can vibe-deploy.</span>
-            </div>
-
-            <!-- Demo video -->
-            <div class="max-w-3xl mx-auto mb-10 animate-fade-in-landing">
-                <div class="relative rounded-xl overflow-hidden border border-white/10 shadow-2xl" style="padding-bottom: 56.25%; height: 0;">
-                    <iframe
-                        class="absolute inset-0 w-full h-full"
-                        src="https://www.youtube.com/embed/qQy2v9t35s4"
-                        title="Humanity Rules demo"
-                        frameborder="0"
-                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                        referrerpolicy="strict-origin-when-cross-origin"
-                        allowfullscreen
-                    ></iframe>
-                </div>
+                <span class="text-sm sm:text-base text-cyber-300 font-semibold tracking-wide">Governed AI agents, deployed in your own cloud</span>
             </div>
 
             <!-- Headline -->
-            <h1 class="text-5xl sm:text-6xl lg:text-7xl font-bold leading-tight mb-6">
-                <span class="text-white">Deploy internal tools inside your AWS account </span>
-                <span class="gradient-text">in minutes</span>
+            <h1 class="text-5xl sm:text-6xl lg:text-7xl font-bold leading-[1.05] mb-6">
+                <span class="text-white">Bring agent adoption</span><br>
+                <span class="gradient-text">under control.</span>
             </h1>
 
             <!-- Sub-headline -->
-            <p class="text-xl sm:text-2xl font-semibold mb-4">
-                <span class="gradient-text-glow">SSO + RBAC, least-privilege IAM, and approval workflows</span>
-                <span class="text-white"> — built in</span>
+            <p class="text-xl sm:text-2xl font-semibold mb-5">
+                <span class="text-white">A real AI agent for every employee —</span>
+                <span class="gradient-text-glow"> isolated, audited, and yours</span>
             </p>
 
             <!-- Description -->
-            <p class="text-lg text-gray-400 max-w-3xl mx-auto mb-10 leading-relaxed">
-                Humanity Rules is an AI deployment co-pilot that provisions infrastructure and generates least-privilege IAM requests in your AWS account.
-                Build or vibe-code dashboards, APIs, Slack bots, admin portals, and more — then ship them without opening infra tickets.
+            <p class="text-lg text-gray-400 max-w-2xl mx-auto mb-9 leading-relaxed">
+                Humanity Rules runs each agent with real tools, persistent memory, and Slack/web access —
+                all inside your perimeter. Your team owns the runtime, the model choice, the skill allowlist,
+                the approvals, and an action-level audit trail. Governance built in, not bolted on.
             </p>
 
             <!-- Email signup form -->
-            <div class="max-w-md mx-auto mb-16">
+            <div class="max-w-md mx-auto mb-6">
                 <form
                     hx-post="{% url 'waitlist_signup' %}"
                     hx-target="#signup-response-hero"
@@ -66,54 +54,158 @@ Landing page hero section with headline, subheadline, email signup form, and fea
                 >
                     {% csrf_token %}
                     <input type="hidden" name="source" value="hero">
-                    <div class="flex gap-2">
+                    <div class="flex flex-col sm:flex-row gap-2">
                         <input
                             type="email"
                             name="email"
                             placeholder="name@company.com"
-                            class="flex-1 px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyber-500 focus:border-transparent transition-all"
+                            class="flex-1 px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyber-500 focus:border-transparent transition-all"
                             required
                         >
-                        <button type="submit" class="btn-primary whitespace-nowrap py-2 px-6">
-                            Notify me
+                        <button type="submit" class="btn-primary whitespace-nowrap py-3 px-6">
+                            Get early access
                         </button>
                     </div>
                     <div id="signup-response-hero">
-                        <p class="text-sm text-gray-500 text-left">
-                            We'll email you when Humanity Rules is ready. No spam.
+                        <p class="text-sm text-gray-500">
+                            Pre-beta, for security &amp; platform teams. Be first to roll out governed agents — no spam, ever.
                         </p>
                     </div>
                 </form>
             </div>
 
-            <!-- Feature badges -->
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-6 max-w-3xl mx-auto">
-                <div class="flex items-center justify-center gap-3 px-6 py-4 bg-white/5 rounded-xl border border-white/5">
-                    <!-- Clock icon -->
-                    <svg class="w-5 h-5 text-cyber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
-                    </svg>
-                    <span class="text-gray-300 text-sm font-medium">Private networking in your VPC</span>
+            <!-- Trust badges -->
+            <div class="flex flex-wrap items-center justify-center gap-x-6 gap-y-3 text-sm text-gray-400">
+                <div class="flex items-center gap-2">
+                    <svg class="w-4 h-4 text-cyber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                    Runs in your VPC
                 </div>
-                <div class="flex items-center justify-center gap-3 px-6 py-4 bg-white/5 rounded-xl border border-white/5">
-                    <!-- Shield icon -->
-                    <svg class="w-5 h-5 text-cyber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>
-                    </svg>
-                    <span class="text-gray-300 text-sm font-medium">Approval workflows & audit trails</span>
+                <div class="flex items-center gap-2">
+                    <svg class="w-4 h-4 text-cyber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                    No model lock-in
                 </div>
-                <div class="flex items-center justify-center gap-3 px-6 py-4 bg-white/5 rounded-xl border border-white/5">
-                    <!-- Sparkles icon -->
-                    <svg class="w-5 h-5 text-cyber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/>
-                        <path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/>
-                    </svg>
-                    <span class="text-gray-300 text-sm font-medium">AI-Driven self-serve deployments</span>
+                <div class="flex items-center gap-2">
+                    <svg class="w-4 h-4 text-cyber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                    ABAC permissions &amp; SSO
+                </div>
+                <div class="flex items-center gap-2">
+                    <svg class="w-4 h-4 text-cyber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                    Full audit trails
+                </div>
+            </div>
+
+            <!-- Hero visual: agents contained inside your cloud -->
+            <div class="relative mt-16 max-w-4xl mx-auto animate-fade-in-landing">
+                <div class="absolute -inset-4 bg-gradient-to-r from-cyber-500/20 via-cyan-500/20 to-teal-500/20 rounded-3xl blur-2xl opacity-60"></div>
+                <div class="relative bg-navy-900/90 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl overflow-hidden text-left">
+                    <!-- Panel header: the perimeter -->
+                    <div class="flex items-center justify-between gap-3 px-5 py-3.5 border-b border-white/10 bg-white/[0.02]">
+                        <div class="flex items-center gap-2.5">
+                            <svg class="w-5 h-5 text-cyber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>
+                            </svg>
+                            <span class="text-sm font-semibold text-white">Your Cloud</span>
+                            <span class="font-mono text-xs text-gray-500">VPC · isolated</span>
+                        </div>
+                        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs font-medium">
+                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                            Governed
+                        </span>
+                    </div>
+
+                    <!-- Agent grid: one assistant per employee -->
+                    <div class="p-5">
+                        <div class="flex items-center justify-between mb-4">
+                            <span class="text-xs font-semibold uppercase tracking-wider text-gray-500">Per-employee agents</span>
+                            <span class="text-xs text-gray-500 font-mono">6 of 240 live</span>
+                        </div>
+                        <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                            {% comment %} Each tile = an isolated, governed assistant {% endcomment %}
+                            <div class="flex items-center gap-3 p-3 rounded-xl bg-white/[0.03] border border-white/5">
+                                <div class="w-9 h-9 rounded-full bg-cyan-500/20 border border-cyan-400/30 flex items-center justify-center text-cyan-300 text-sm font-semibold shrink-0">MR</div>
+                                <div class="min-w-0 flex-1">
+                                    <div class="flex items-center gap-1.5">
+                                        <span class="text-sm text-white font-medium truncate">Maya</span>
+                                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" title="live"></span>
+                                    </div>
+                                    <div class="text-xs text-gray-500 truncate">Design</div>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-3 p-3 rounded-xl bg-white/[0.03] border border-white/5">
+                                <div class="w-9 h-9 rounded-full bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center text-emerald-300 text-sm font-semibold shrink-0">SK</div>
+                                <div class="min-w-0 flex-1">
+                                    <div class="flex items-center gap-1.5">
+                                        <span class="text-sm text-white font-medium truncate">Sam</span>
+                                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" title="live"></span>
+                                    </div>
+                                    <div class="text-xs text-gray-500 truncate">Finance</div>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-3 p-3 rounded-xl bg-white/[0.03] border border-white/5">
+                                <div class="w-9 h-9 rounded-full bg-violet-500/20 border border-violet-400/30 flex items-center justify-center text-violet-300 text-sm font-semibold shrink-0">PN</div>
+                                <div class="min-w-0 flex-1">
+                                    <div class="flex items-center gap-1.5">
+                                        <span class="text-sm text-white font-medium truncate">Priya</span>
+                                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" title="live"></span>
+                                    </div>
+                                    <div class="text-xs text-gray-500 truncate">Legal</div>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-3 p-3 rounded-xl bg-white/[0.03] border border-white/5">
+                                <div class="w-9 h-9 rounded-full bg-amber-500/20 border border-amber-400/30 flex items-center justify-center text-amber-300 text-sm font-semibold shrink-0">TB</div>
+                                <div class="min-w-0 flex-1">
+                                    <div class="flex items-center gap-1.5">
+                                        <span class="text-sm text-white font-medium truncate">Tom</span>
+                                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" title="live"></span>
+                                    </div>
+                                    <div class="text-xs text-gray-500 truncate">Sales</div>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-3 p-3 rounded-xl bg-white/[0.03] border border-white/5">
+                                <div class="w-9 h-9 rounded-full bg-blue-500/20 border border-blue-400/30 flex items-center justify-center text-blue-300 text-sm font-semibold shrink-0">LF</div>
+                                <div class="min-w-0 flex-1">
+                                    <div class="flex items-center gap-1.5">
+                                        <span class="text-sm text-white font-medium truncate">Lena</span>
+                                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" title="live"></span>
+                                    </div>
+                                    <div class="text-xs text-gray-500 truncate">Engineering</div>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-3 p-3 rounded-xl bg-white/[0.03] border border-white/5">
+                                <div class="w-9 h-9 rounded-full bg-teal-500/20 border border-teal-400/30 flex items-center justify-center text-teal-300 text-sm font-semibold shrink-0">RS</div>
+                                <div class="min-w-0 flex-1">
+                                    <div class="flex items-center gap-1.5">
+                                        <span class="text-sm text-white font-medium truncate">Ravi</span>
+                                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" title="live"></span>
+                                    </div>
+                                    <div class="text-xs text-gray-500 truncate">Operations</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Boundary: integrations only through an audited broker -->
+                    <div class="px-5 py-4 border-t border-white/10 bg-white/[0.02]">
+                        <div class="flex items-center gap-2 mb-3">
+                            <svg class="w-4 h-4 text-cyber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                            </svg>
+                            <span class="text-xs text-gray-400">Integrations reach out through an <span class="text-gray-200 font-medium">audited broker</span> — nothing leaves your VPC directly</span>
+                        </div>
+                        <div class="flex flex-wrap gap-2">
+                            <span class="px-3 py-1.5 rounded-lg bg-white/[0.04] border border-white/10 text-xs text-gray-300 font-mono">Bedrock</span>
+                            <span class="px-3 py-1.5 rounded-lg bg-white/[0.04] border border-white/10 text-xs text-gray-300 font-mono">Slack</span>
+                            <span class="px-3 py-1.5 rounded-lg bg-white/[0.04] border border-white/10 text-xs text-gray-300 font-mono">Okta</span>
+                            <span class="px-3 py-1.5 rounded-lg bg-white/[0.04] border border-white/10 text-xs text-gray-300 font-mono">GitHub</span>
+                            <span class="px-3 py-1.5 rounded-lg bg-white/[0.04] border border-white/10 text-xs text-gray-300 font-mono">Notion</span>
+                            <span class="px-3 py-1.5 rounded-lg bg-white/[0.04] border border-white/10 text-xs text-gray-300 font-mono">+ MCP</span>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 
     <!-- Bottom gradient fade -->
-    <div class="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-navy-950 to-transparent"></div>
+    <div class="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-navy-950 to-transparent pointer-events-none"></div>
 </section>

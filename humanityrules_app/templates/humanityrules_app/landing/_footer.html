@@ -1,32 +1,28 @@
 {% comment %}
-Landing page footer with links and social icons.
+Landing page footer with brand, links and social icons.
 {% endcomment %}
+{% load static %}
 
-<footer class="landing-section min-h-screen flex items-end relative pb-10 border-t border-white/5">
+<footer class="relative pt-20 pb-10 border-t border-white/5">
     <div class="absolute inset-0 bg-gradient-to-t from-navy-900/50 to-transparent"></div>
 
     <div class="container-custom relative z-10">
         <div class="grid grid-cols-2 md:grid-cols-6 gap-8 mb-16">
             <!-- Brand column -->
             <div class="col-span-2">
-                <a href="#" class="flex items-center gap-2 mb-6">
-                    <div class="w-10 h-10 bg-gradient-to-br from-cyber-400 to-cyan-500 rounded-lg flex items-center justify-center">
-                        <!-- Zap icon -->
-                        <svg class="w-6 h-6 text-navy-950" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/>
-                        </svg>
-                    </div>
+                <a href="#" class="flex items-center gap-2.5 mb-6">
+                    <img src="{% static 'humanityrules_app/humr-icon-transparent.png' %}" alt="Humanity Rules" width="40" height="40" class="w-9 h-9 object-contain">
                     <span class="text-xl font-bold text-white">
-                        DevOps<span class="gradient-text">Hero</span>
+                        Humanity <span class="gradient-text">Rules</span>
                     </span>
                 </a>
                 <p class="text-gray-400 text-sm leading-relaxed mb-6 max-w-xs">
-                    The AI co-pilot for internal app deployment. Ship to your company's AWS account in minutes, not weeks.
+                    Governed AI assistants, deployed in your company's own cloud. Bring the agents, without the chaos.
                 </p>
                 <!-- Social links -->
                 <div class="flex items-center gap-4">
-                    <!-- Twitter -->
-                    <a href="#" aria-label="Twitter" class="p-2 bg-white/5 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors">
+                    <!-- X / Twitter -->
+                    <a href="#" aria-label="X" class="p-2 bg-white/5 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors">
                         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M22 4s-.7 2.1-2 3.4c1.6 10-9.4 17.3-18 11.6 2.2.1 4.4-.6 6-2C3 15.5.5 9.6 3 5c2.2 2.6 5.6 4.1 9 4-.9-4.2 4-6.6 7-3.8 1.1 0 3-1.2 3-1.2z"/>
                         </svg>
@@ -52,9 +48,9 @@ Landing page footer with links and social icons.
             <div>
                 <h4 class="text-white font-semibold mb-4 text-sm">Product</h4>
                 <ul class="space-y-3">
-                    <li><a href="#features" class="text-gray-400 hover:text-white text-sm transition-colors">Features</a></li>
-                    <li><a href="#" class="text-gray-400 hover:text-white text-sm transition-colors">Pricing</a></li>
-                    <li><a href="#" class="text-gray-400 hover:text-white text-sm transition-colors">Changelog</a></li>
+                    <li><a href="#platform" class="text-gray-400 hover:text-white text-sm transition-colors">Platform</a></li>
+                    <li><a href="#how" class="text-gray-400 hover:text-white text-sm transition-colors">How it works</a></li>
+                    <li><a href="#why" class="text-gray-400 hover:text-white text-sm transition-colors">Why Humanity Rules</a></li>
                 </ul>
             </div>
 
@@ -64,8 +60,7 @@ Landing page footer with links and social icons.
                 <ul class="space-y-3">
                     <li><a href="#" class="text-gray-400 hover:text-white text-sm transition-colors">About</a></li>
                     <li><a href="#" class="text-gray-400 hover:text-white text-sm transition-colors">Blog</a></li>
-                    <li><a href="#" class="text-gray-400 hover:text-white text-sm transition-colors">Careers</a></li>
-                    <li><a href="#" class="text-gray-400 hover:text-white text-sm transition-colors">Contact</a></li>
+                    <li><a href="#cta" class="text-gray-400 hover:text-white text-sm transition-colors">Contact</a></li>
                 </ul>
             </div>
 
@@ -74,9 +69,8 @@ Landing page footer with links and social icons.
                 <h4 class="text-white font-semibold mb-4 text-sm">Resources</h4>
                 <ul class="space-y-3">
                     <li><a href="#" class="text-gray-400 hover:text-white text-sm transition-colors">Documentation</a></li>
-                    <li><a href="#" class="text-gray-400 hover:text-white text-sm transition-colors">API Reference</a></li>
+                    <li><a href="#" class="text-gray-400 hover:text-white text-sm transition-colors">Security</a></li>
                     <li><a href="#" class="text-gray-400 hover:text-white text-sm transition-colors">Status</a></li>
-                    <li><a href="#" class="text-gray-400 hover:text-white text-sm transition-colors">Support</a></li>
                 </ul>
             </div>
 
@@ -86,7 +80,7 @@ Landing page footer with links and social icons.
                 <ul class="space-y-3">
                     <li><a href="#" class="text-gray-400 hover:text-white text-sm transition-colors">Privacy</a></li>
                     <li><a href="#" class="text-gray-400 hover:text-white text-sm transition-colors">Terms</a></li>
-                    <li><a href="#" class="text-gray-400 hover:text-white text-sm transition-colors">Security</a></li>
+                    <li><a href="#" class="text-gray-400 hover:text-white text-sm transition-colors">Trust &amp; compliance</a></li>
                 </ul>
             </div>
         </div>
@@ -95,10 +89,10 @@ Landing page footer with links and social icons.
         <div class="pt-8 border-t border-white/5">
             <div class="flex flex-col md:flex-row items-center justify-between gap-4">
                 <p class="text-gray-500 text-sm">
-                    2026 Humanity Rules. All rights reserved.
+                    © 2026 Humanity Rules. All rights reserved.
                 </p>
                 <p class="text-gray-500 text-sm">
-                    Made with precision for enterprise teams.
+                    Humans in command. <span class="text-gray-400">humanityrules.io</span>
                 </p>
             </div>
         </div>
