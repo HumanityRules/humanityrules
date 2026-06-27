@@ -84,6 +84,7 @@ broker = _load_broker_module()
 # sibling modules; bind the ones the tests patch/construct directly.
 import credentials_service  # noqa: E402
 import humr_client  # noqa: E402
+import tls_proxy  # noqa: E402
 import tls_providers  # noqa: E402
 
 
@@ -589,7 +590,7 @@ class TestStreamingRelay(unittest.IsolatedAsyncioTestCase):
         async def _fake_open_connection(**kwargs) -> tuple[asyncio.StreamReader, _StubUpstreamWriter]:
             return upstream_reader, _StubUpstreamWriter()
 
-        with patch.object(broker.tls_intercept.asyncio, "open_connection", _fake_open_connection):
+        with patch.object(tls_proxy.asyncio, "open_connection", _fake_open_connection):
             status, keep_alive = await broker.tls_intercept._forward_to_upstream(
                 host=host,
                 port=443,

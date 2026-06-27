@@ -1,15 +1,15 @@
 """Provider catalog for the TLS-intercept proxy.
 
 Static data only: the credential-method dataclasses, the per-provider
-`TlsProviderSpec` entries, and the registries built from them. The proxy,
-token store, and cert minter that consume this catalog live in
-`tls_intercept`; the gateway-env projection of `env_bindings` lives in
+`TlsProviderSpec` entries, and the registries built from them. The proxy, token store, and cert minter that consume this catalog live in
+`tls_intercept` (composed from `tls_proxy`, `tls_token_store`, and
+`tls_cert_minter`); the gateway-env projection of `env_bindings` lives in
 `credentials_service`.
 
 To add a provider that uses an existing credential method, append a
 `TlsProviderSpec` to `TLS_INTERCEPT_PROVIDER_SPECS` — no mechanism change
 needed. A new credential method also needs `_request_addresses_humr_credential`
-and `_rewrite_request_for_provider` branches in `tls_intercept`.
+and `_rewrite_request_for_provider` branches in `tls_proxy`.
 """
 
 from dataclasses import dataclass
