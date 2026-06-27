@@ -69,3 +69,13 @@ See **`docs/AGENTS.md`** for the documentation index.
 **Freshness misleads.** Whatever occupied your attention while doing the work feels load-bearing in the document you write at the end. To a reader who didn't share that hour — including yourself days later — most of it isn't. The test: would this sentence earn its place if you'd written it cold, with no recent context? If it only makes sense in light of what you just did, drop it.
 
 **Prefer numbered lists in replies.** When presenting options, recommendations, or multi-item analysis to the user, use numbered lists instead of bullet points so they can refer to items by number ("do 2 and 4").
+
+
+# Cursor Cloud specific instructions
+
+The control plane (this repo) runs fully locally with no AWS/WorkOS/Anthropic credentials. Run/test/login commands are in `README.md` and `docs/local_dev_login.md`; only the non-obvious facts are below.
+
+- **`.env` is required** (gitignored). For a credential-free local setup, the load-bearing flags are `DJANGO_DEBUG=1`, `HUMR_DEBUG_DEPLOYMENTS=1` (fakes deploys, no AWS calls), and `HUMR_RUN_JOB_WORKER=1`. With that last flag the job worker runs **in-process** inside the web server — `run_dev.py` alone covers it; no separate `run_job_worker` process is needed.
+- **Local DB is SQLite** at `local/db.sqlite3` (also gitignored) — no DB service to start, just `migrate`.
+- **Bootstrapping the first superuser is a chicken-and-egg:** `ensure_superuser` only *promotes* an existing row, and `User.current_organization` is NOT NULL, so you can't create a bare superuser. Create an `Organization` first, then the `User` pointing at it, then promote. `seed_test_apps --user=<email>` populates demo orgs/apps for that user (and bootstraps them as admin). `/auth/dev-login/` logs in as the first `is_superuser` row.
+- **Tests run fully offline:** `uv run manage.py test` (Django runner, ~840 tests). Expected noise: tests log `connection refused` / `http 500` lines on purpose; trust the final `OK`. There is **no separate linter** configured for the control plane — use `uv run manage.py check`.
