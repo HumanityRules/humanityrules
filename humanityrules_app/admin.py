@@ -31,6 +31,7 @@ from humanityrules_app.models import (
     OrganizationMembership,
     AwsResourceCache,
     AppPermissionRequest,
+    PlatformSharedCredential,
     Policy,
     EnvironmentBearerToken,
     Repository,
@@ -526,6 +527,45 @@ class IntegrationSharedCredentialAdmin(admin.ModelAdmin):
     autocomplete_fields = ["organization", "target_user", "target_workspace", "created_by"]
 
     def save_model(self, request: HttpRequest, obj: IntegrationSharedCredential, form: forms.ModelForm, change: bool) -> None:
+        if obj.created_by_id is None:
+            obj.created_by = request.user
+        super().save_model(request, obj, form, change)
+
+
+class PlatformSharedCredentialForm(forms.ModelForm):
+    """Admin form that live-validates a platform credential's key via the provider."""
+
+    class Meta:
+        model = PlatformSharedCredential
+        fields = "__all__"
+
+    def clean(self) -> dict:
+        cleaned = super().clean()
+        provider = cleaned.get("provider")
+        credentials = cleaned.get("credentials")
+        spec = provider_registry.get(provider=provider) if provider else None
+        validate_shared_key = getattr(spec.module, "validate_shared_key", None) if spec is not None else None
+        if validate_shared_key is not None and isinstance(credentials, dict):
+            # Require (and live-validate) a real key. A blank platform share would
+            # resolve to `absent` at refresh time and just fall through to the
+            # personal/org path; validate_shared_key rejects an empty key.
+            api_key = str(credentials.get("api_key", "") or "").strip()
+            metadata, error = validate_shared_key(api_key=api_key)
+            if error is not None:
+                raise forms.ValidationError({"credentials": error})
+            cleaned["metadata"] = metadata
+        return cleaned
+
+
+@admin.register(PlatformSharedCredential)
+class PlatformSharedCredentialAdmin(admin.ModelAdmin):
+    form = PlatformSharedCredentialForm
+    list_display = ["provider", "enabled", "created_by", "created_at", "updated_at"]
+    list_filter = ["provider", "enabled"]
+    readonly_fields = ["id", "created_at", "updated_at", "metadata"]
+    autocomplete_fields = ["created_by"]
+
+    def save_model(self, request: HttpRequest, obj: PlatformSharedCredential, form: forms.ModelForm, change: bool) -> None:
         if obj.created_by_id is None:
             obj.created_by = request.user
         super().save_model(request, obj, form, change)

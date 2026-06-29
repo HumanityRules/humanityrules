@@ -1960,6 +1960,53 @@ class IntegrationSharedCredential(models.Model):
         return f"IntegrationSharedCredential({self.organization.slug}:{self.provider}:{self.scope})"
 
 
+class PlatformSharedCredential(models.Model):
+    """A HumR-provisioned integration credential shared with every customer org.
+
+    The platform tier sits at the bottom of the resolution ladder
+    (``org-shared > personal > platform``): a broker receives one only where
+    neither an org-shared nor a personal credential carries a usable secret.
+    Unlike ``IntegrationSharedCredential`` it has no org targeting and is never
+    ABAC-evaluated — it is global by construction (v1 audience is all orgs).
+    HumR staff manage it through the Django admin. See
+    ``docs/platform_shared_credentials_design.md``.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
+    provider = models.CharField(max_length=50, choices=IntegrationUserCredential.Provider.choices)
+    credentials = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Secret provider-owned values supplied by HumR staff, such as API keys.",
+    )
+    config = models.JSONField(default=dict, blank=True, help_text="Non-secret provider configuration.")
+    metadata = models.JSONField(default=dict, blank=True, help_text="Derived display/status data such as validation timestamps.")
+    enabled = models.BooleanField(
+        default=True,
+        help_text="When false the share is inert — kept for history without being handed to brokers.",
+    )
+    created_by = models.ForeignKey(
+        "User", on_delete=models.SET_NULL, null=True, blank=True, related_name="+",
+        help_text="The HumR staff member who provisioned this platform credential.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Platform Shared Credential"
+        verbose_name_plural = "Platform Shared Credentials"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["provider"],
+                condition=models.Q(enabled=True),
+                name="uniq_enabled_platform_credential_per_provider",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"PlatformSharedCredential({self.provider}:{'enabled' if self.enabled else 'disabled'})"
+
+
 # =============================================================================
 # Cost subsystem models
 # =============================================================================

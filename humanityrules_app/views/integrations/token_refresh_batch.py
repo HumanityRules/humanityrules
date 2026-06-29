@@ -28,7 +28,12 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from humanityrules_app.models import App, Environment, User
-from humanityrules_app.views.integrations import broker_request_context, provider_registry, shared_credential_resolver
+from humanityrules_app.views.integrations import (
+    broker_request_context,
+    platform_credential_resolver,
+    provider_registry,
+    shared_credential_resolver,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -166,6 +171,45 @@ def integrations_tokens_batch(request: HttpRequest) -> JsonResponse:
                         slug, environment.slug, owner_username, app_slug,
                     )
                     results[slug] = {"outcome": "transient"}
+
+    # Platform-shared credentials are the lowest-priority fallback
+    # (org-shared > personal > platform): HumR provisions one key for every
+    # customer org. Apply it only where nothing else produced a usable token —
+    # i.e. the slug is still `absent` after the org-shared and personal passes.
+    # A `transient` is left untouched (a connected credential whose refresh
+    # failed, not "nothing connected"). Reuses the provider's
+    # `refresh_outcome_from_shared` packaging (duck-typed on `.credentials`), so
+    # the vault providers need no platform-specific code.
+    for slug, spec in specs_to_run.items():
+        if results[slug]["outcome"] != "absent":
+            continue
+        refresh_outcome_from_shared = getattr(spec.module, "refresh_outcome_from_shared", None)
+        if refresh_outcome_from_shared is None:
+            continue
+        platform_credential = platform_credential_resolver.resolve(provider=slug)
+        if platform_credential is None:
+            continue
+        platform_outcome = refresh_outcome_from_shared(platform_credential)
+        if platform_outcome.get("outcome") == "absent":
+            logger.error(
+                "batched token refresh: platform credential has no usable secret "
+                "env=%s owner=%s app=%s provider=%s",
+                environment.slug, owner_username, app_slug, slug,
+            )
+            continue
+        # Mark the outcome platform-provided so the broker status card can render
+        # it read-only ("Provided by Humanity Rules"). Rides the existing
+        # `metadata` channel like `org_shared`, so no broker plumbing changes.
+        platform_outcome["metadata"] = {
+            **platform_outcome.get("metadata", {}),
+            "platform_shared": True,
+        }
+        results[slug] = platform_outcome
+        logger.info(
+            "batched token refresh: platform credential used env=%s owner=%s app=%s provider=%s",
+            environment.slug, owner_username, app_slug, slug,
+        )
+
     logger.info(
         "batched token refresh: done env=%s owner=%s app=%s outcomes=%s",
         environment.slug,
