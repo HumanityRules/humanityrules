@@ -19,7 +19,7 @@ from humanityrules_app.models import (
     User,
 )
 from humanityrules_app.services import abac_service
-from humanityrules_app.views.integrations import provider_nous, provider_openai_codex
+from humanityrules_app.views.integrations import provider_nous, provider_openai_codex, shared_credential_store
 from humanityrules_app.views.integrations.org_shared_keys import SESSION_KEY
 
 HTMX = {"HTTP_HX_REQUEST": "true"}
@@ -202,3 +202,49 @@ class TestCancel(ConnectTestBase):
         response = self.client.post(CANCEL_URL)
         self.assertEqual(response.status_code, 200)
         self.assertNotIn(SESSION_KEY, self.client.session)
+
+
+class TestReconnectClearsTokenCache(ConnectTestBase):
+    """A reconnect rotates the shared refresh_token, so the cached access token now
+    belongs to the old account. ``upsert_share`` must drop ``token_cache`` — otherwise
+    ``run_shared_refresh_exchange`` (which serves the cache before re-reading the
+    refresh_token) fans the wrong account's token to every broker until it lapses."""
+
+    def _cred_with_cache(self) -> IntegrationSharedCredential:
+        return IntegrationSharedCredential.objects.create(
+            organization=self.org,
+            provider="openai-codex",
+            scope=IntegrationSharedCredential.Scope.EVERYONE,
+            credentials={"refresh_token": "rt-old"},
+            token_cache={"secrets": {"access_token": "stale"}, "expires_at": time.time() + 3600},
+            created_by=self.admin,
+        )
+
+    def test_rotated_refresh_token_clears_cache(self) -> None:
+        cred = self._cred_with_cache()
+        target = shared_credential_store.ShareTarget(
+            is_platform=False, scope=IntegrationSharedCredential.Scope.EVERYONE, target_user=None, target_workspace=None,
+        )
+        row, error = shared_credential_store.upsert_share(
+            organization=self.org, provider="openai-codex", target=target,
+            credentials={"refresh_token": "rt-new"}, metadata={}, created_by=self.admin, existing=cred,
+        )
+        self.assertIsNone(error)
+        row.refresh_from_db()
+        self.assertEqual(row.credentials, {"refresh_token": "rt-new"})
+        self.assertEqual(row.token_cache, {})
+
+    def test_retarget_without_secret_change_keeps_cache(self) -> None:
+        cred = self._cred_with_cache()
+        target = shared_credential_store.ShareTarget(
+            is_platform=False, scope=IntegrationSharedCredential.Scope.USER, target_user=self.member, target_workspace=None,
+        )
+        # Same refresh_token, new audience (the re-target path): the cache is still valid.
+        row, error = shared_credential_store.upsert_share(
+            organization=self.org, provider="openai-codex", target=target,
+            credentials={"refresh_token": "rt-old"}, metadata={}, created_by=self.admin, existing=cred,
+        )
+        self.assertIsNone(error)
+        row.refresh_from_db()
+        self.assertEqual(row.scope, IntegrationSharedCredential.Scope.USER)
+        self.assertEqual(row.token_cache["secrets"], {"access_token": "stale"})

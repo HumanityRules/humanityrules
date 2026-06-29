@@ -59,7 +59,7 @@ def provider_kind(provider: str) -> str:
         return ""
     if hasattr(spec.module, "validate_shared_key"):
         return "key"
-    if spec.kind == provider_registry.ProviderKind.OAUTH and hasattr(spec.module, "device_authorize"):
+    if spec.kind == provider_registry.ProviderKind.OAUTH and hasattr(spec.module, "device_authorize") and hasattr(spec.module, "device_poll"):
         return "login"
     return ""
 
@@ -257,7 +257,7 @@ def integrations_org_shared_login_reconnect(request: HttpRequest, credential_id:
 def _connect_spec(provider: str) -> provider_registry.ProviderSpec | None:
     """Return the spec for a device-flow OAuth provider that supports shared logins, or None."""
     spec = provider_registry.get_of_kind(provider=provider, kind=provider_registry.ProviderKind.OAUTH)
-    if spec is None or not hasattr(spec.module, "device_authorize") or not hasattr(spec.module, "refresh_outcome_from_shared"):
+    if spec is None or not hasattr(spec.module, "device_authorize") or not hasattr(spec.module, "device_poll") or not hasattr(spec.module, "refresh_outcome_from_shared"):
         return None
     return spec
 

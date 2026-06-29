@@ -3,9 +3,12 @@ vault providers' duck-typed packaging. The endpoint-level precedence (org-shared
 personal > platform) is covered in ``test_integrations_tokens_batch.py``.
 """
 
-from django.test import TestCase
+from django.contrib import admin
+from django.http import HttpRequest
+from django.test import RequestFactory, TestCase
 
-from humanityrules_app.models import PlatformSharedCredential
+from humanityrules_app.admin import PlatformSharedCredentialAdmin
+from humanityrules_app.models import Organization, PlatformSharedCredential, User
 from humanityrules_app.views.integrations import platform_credential_resolver, provider_tavily
 
 
@@ -42,3 +45,34 @@ class TestPlatformRefreshPackaging(TestCase):
         cred = PlatformSharedCredential.objects.create(provider="tavily", credentials={"api_key": ""})
         outcome = provider_tavily.refresh_outcome_from_shared(credential=cred)
         self.assertEqual(outcome["outcome"], "absent")
+
+
+class TestPlatformSharedCredentialAdminPermissions(TestCase):
+    """Platform-wide credentials apply to every customer org, so the Django-admin model
+    is superuser-only — a staff non-superuser must not view/add/change/delete them."""
+
+    def setUp(self) -> None:
+        self.model_admin = PlatformSharedCredentialAdmin(model=PlatformSharedCredential, admin_site=admin.site)
+        self.org = Organization.objects.create(name="Admin Perms Org", slug="admin-perms-org")
+
+    def _request(self, is_superuser: bool) -> HttpRequest:
+        request = RequestFactory().get("/admin/")
+        request.user = User.objects.create_user(
+            username=f"staff-{is_superuser}", password="pw", current_organization=self.org,
+            is_staff=True, is_superuser=is_superuser,
+        )
+        return request
+
+    def test_non_superuser_denied(self) -> None:
+        request = self._request(is_superuser=False)
+        self.assertFalse(self.model_admin.has_view_permission(request))
+        self.assertFalse(self.model_admin.has_add_permission(request))
+        self.assertFalse(self.model_admin.has_change_permission(request))
+        self.assertFalse(self.model_admin.has_delete_permission(request))
+
+    def test_superuser_allowed(self) -> None:
+        request = self._request(is_superuser=True)
+        self.assertTrue(self.model_admin.has_view_permission(request))
+        self.assertTrue(self.model_admin.has_add_permission(request))
+        self.assertTrue(self.model_admin.has_change_permission(request))
+        self.assertTrue(self.model_admin.has_delete_permission(request))

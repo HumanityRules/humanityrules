@@ -115,6 +115,13 @@ def upsert_share(
     if existing is not None and isinstance(existing, PlatformSharedCredential) != target.is_platform:
         return None, "Changing a share between your organization and all customers isn't supported — delete it and create a new one."
 
+    if existing is not None and credentials != existing.credentials:
+        # An OAuth reconnect rotates the shared refresh_token, so the cached access
+        # token now belongs to the old account. Drop it: run_shared_refresh_exchange
+        # serves token_cache before re-reading refresh_token, so a stale cache would
+        # fan the wrong account's token out to every broker until it lapses (~1h).
+        existing.token_cache = {}
+
     if target.is_platform:
         return _upsert_platform(provider=provider, credentials=credentials, metadata=metadata, created_by=created_by, existing=existing)
     return _upsert_org(organization=organization, provider=provider, target=target, credentials=credentials, metadata=metadata, created_by=created_by, existing=existing)
