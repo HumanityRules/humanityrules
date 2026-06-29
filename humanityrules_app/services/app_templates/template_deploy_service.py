@@ -10,6 +10,7 @@ from datetime import datetime
 
 from humanityrules_app import models
 from humanityrules_app.services import deployment_blueprint_effective_values
+from humanityrules_app.services import llm_preset_service
 
 logger = logging.getLogger(__name__)
 
@@ -212,7 +213,12 @@ async def deploy_from_template(
         owner_username=owner_username,
     )
 
-    containers_with_overrides = _apply_variable_overrides(template.containers, runtime_variable_overrides)
+    # The org's LLM preset replaces the template's hard-coded Bedrock model
+    # defaults; explicit caller overrides (CLI --var) are applied afterward so
+    # they still win. Templates without HUMR_LLM_* vars are unaffected.
+    preset_overrides = llm_preset_service.llm_overrides_for(organization=organization)
+    containers_with_preset = _apply_variable_overrides(template.containers, preset_overrides)
+    containers_with_overrides = _apply_variable_overrides(containers_with_preset, runtime_variable_overrides)
     blueprint_containers = _materialize_blueprint_containers(containers_with_overrides)
 
     blueprint = await models.DeploymentBlueprint.objects.acreate(
