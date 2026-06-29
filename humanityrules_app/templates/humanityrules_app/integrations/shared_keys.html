@@ -6,13 +6,12 @@
      hx-trigger="sharedKeysChanged from:body"
      hx-target="#main-content"
      hx-swap="innerHTML">
-    <div class="flex items-center">
+    <div class="flex items-start justify-between gap-6">
         <div class="flex-auto">
             <h1 class="text-base font-semibold text-gray-900 dark:text-white">Shared credentials</h1>
-            <p class="mt-2 text-sm text-gray-700 dark:text-gray-300">Provision a credential once and choose who receives it. Members' agents get it automatically — no pasting or per-user login.</p>
         </div>
         {% if shared_key_rows %}
-        <div class="ml-16 flex-none">
+        <div class="flex-none">
             <button type="button"
                     hx-get="{% url 'integrations_org_shared_keys_add' %}"
                     hx-target="#modal-container"
@@ -24,10 +23,36 @@
         {% endif %}
     </div>
 
-    <div class="mt-6 flex items-start gap-2 rounded-md bg-indigo-50 dark:bg-indigo-500/10 px-3 py-2.5 text-sm text-indigo-700 dark:text-indigo-300">
-        <svg class="mt-0.5 h-4 w-4 flex-none" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" /></svg>
-        <span>A shared credential overrides a member's own for the same provider — the organization wins.</span>
-    </div>
+    <dl class="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div class="flex items-start gap-3 rounded-lg border border-gray-200 dark:border-white/10 bg-white dark:bg-white/5 p-4">
+            <span class="flex h-9 w-9 flex-none items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-400">
+                <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v6m3-3H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            </span>
+            <div>
+                <dt class="text-sm font-semibold text-gray-900 dark:text-white">Provision once</dt>
+                <dd class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">Add a shared credential a single time, then choose who it covers.</dd>
+            </div>
+        </div>
+        <div class="flex items-start gap-3 rounded-lg border border-gray-200 dark:border-white/10 bg-white dark:bg-white/5 p-4">
+            <span class="flex h-9 w-9 flex-none items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-400">
+                <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" /></svg>
+            </span>
+            <div>
+                <dt class="text-sm font-semibold text-gray-900 dark:text-white">Used automatically</dt>
+                <dd class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">Members' agents use it automatically. No setup, no copy-paste.</dd>
+            </div>
+        </div>
+        <div class="flex items-start gap-3 rounded-lg border border-gray-200 dark:border-white/10 bg-white dark:bg-white/5 p-4">
+            <span class="flex h-9 w-9 flex-none items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-400">
+                <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
+            </span>
+            <div>
+                <dt class="text-sm font-semibold text-gray-900 dark:text-white">Never exposed</dt>
+                <dd class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">No member can view, copy, or export the underlying value.</dd>
+                <p class="mt-1.5 text-sm font-semibold tracking-tight text-indigo-600 dark:text-indigo-400">Share access, not secrets.</p>
+            </div>
+        </div>
+    </dl>
 
     <div class="mt-6 flow-root">
         <div class="-mx-8 -my-2 overflow-x-auto">
