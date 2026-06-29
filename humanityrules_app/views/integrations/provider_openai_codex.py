@@ -24,7 +24,13 @@ import logging
 
 import httpx
 
-from humanityrules_app.models import Environment, IntegrationUserCredential, User
+from humanityrules_app.models import (
+    Environment,
+    IntegrationSharedCredential,
+    IntegrationUserCredential,
+    PlatformSharedCredential,
+    User,
+)
 from humanityrules_app.views.integrations import provider_common
 
 logger = logging.getLogger(__name__)
@@ -58,6 +64,22 @@ def _account_id_from_access_token(access_token: str) -> str | None:
         return None
     account_id = auth_claim.get("chatgpt_account_id")
     return account_id if isinstance(account_id, str) and account_id else None
+
+
+def _build_codex_secrets(access_token: str) -> provider_common.RefreshSecrets | None:
+    """Build the Codex broker secrets (access_token + chatgpt_account_id), or None if unusable.
+
+    A token with no derivable `chatgpt_account_id` is useless against chatgpt.com,
+    so callers surface `transient` rather than cache a half-usable credential.
+    """
+    account_id = _account_id_from_access_token(access_token=access_token)
+    if account_id is None:
+        return None
+    return provider_common.RefreshSecrets(
+        secrets={"access_token": access_token, "chatgpt_account_id": account_id},
+        expires_in=provider_common.expires_in_from_access_token(access_token=access_token, fallback=CODEX_DEFAULT_EXPIRES_IN),
+        row_metadata={"chatgpt_account_id": account_id},
+    )
 
 
 def _error_code_of(body: dict) -> str:
@@ -133,18 +155,13 @@ def refresh_outcome(environment: Environment, owner_user: User, app_slug: str) -
     (and log loudly) rather than cache a half-usable credential.
     """
     def build_secrets(access_token: str, response: dict) -> provider_common.RefreshSecrets | None:
-        account_id = _account_id_from_access_token(access_token)
-        if account_id is None:
+        built = _build_codex_secrets(access_token=access_token)
+        if built is None:
             logger.error(
                 "codex token refresh: access_token carries no chatgpt_account_id env=%s owner=%s app=%s",
                 environment.slug, owner_user.username, app_slug,
             )
-            return None
-        return provider_common.RefreshSecrets(
-            secrets={"access_token": access_token, "chatgpt_account_id": account_id},
-            expires_in=provider_common.expires_in_from_access_token(access_token=access_token, fallback=CODEX_DEFAULT_EXPIRES_IN),
-            row_metadata={"chatgpt_account_id": account_id},
-        )
+        return built
 
     return provider_common.run_refresh_exchange(
         provider=IntegrationUserCredential.Provider.OPENAI_CODEX,
@@ -152,6 +169,28 @@ def refresh_outcome(environment: Environment, owner_user: User, app_slug: str) -
         environment=environment,
         owner_user=owner_user,
         app_slug=app_slug,
+        exchange=_exchange_refresh_token,
+        build_secrets=build_secrets,
+    )
+
+
+def refresh_outcome_from_shared(credential: IntegrationSharedCredential | PlatformSharedCredential) -> dict:
+    """Central refresh + cache for a shared (platform or org) Codex credential.
+
+    Exchanges the shared refresh_token once on the control plane and caches the
+    access token on the row, fanning it out to every requesting broker. See
+    `docs/platform_shared_credentials_design.md` (Phase 2).
+    """
+    def build_secrets(access_token: str, response: dict) -> provider_common.RefreshSecrets | None:
+        built = _build_codex_secrets(access_token=access_token)
+        if built is None:
+            logger.error("shared codex refresh: access_token carries no chatgpt_account_id id=%s", credential.pk)
+        return built
+
+    return provider_common.run_shared_refresh_exchange(
+        credential=credential,
+        logger=logger,
+        margin_seconds=provider_common.SHARED_TOKEN_REFRESH_MARGIN_SECONDS,
         exchange=_exchange_refresh_token,
         build_secrets=build_secrets,
     )

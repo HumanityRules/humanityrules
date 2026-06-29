@@ -29,9 +29,18 @@ from collections.abc import Callable
 from urllib.parse import urlencode, urlparse
 
 import httpx
+from django.db import transaction
 from django.utils import timezone
 
-from humanityrules_app.models import App, Environment, IntegrationUserCredential, ResourceTag, User
+from humanityrules_app.models import (
+    App,
+    Environment,
+    IntegrationSharedCredential,
+    IntegrationUserCredential,
+    PlatformSharedCredential,
+    ResourceTag,
+    User,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -284,6 +293,93 @@ def run_refresh_exchange(
     integration.save(update_fields=update_fields)
 
     return has_token_outcome(secrets=built.secrets, expires_in=built.expires_in, config={}, metadata={})
+
+
+# Refresh a shared credential's access token slightly before it lapses, so a
+# broker reading the cache always gets a token with usable life left.
+SHARED_TOKEN_REFRESH_MARGIN_SECONDS = 60
+
+
+def _cached_shared_outcome(token_cache: dict, margin_seconds: int) -> dict | None:
+    """Return a `has_token` outcome from a still-fresh cached access token, or None."""
+    secrets = token_cache.get("secrets")
+    expires_at = token_cache.get("expires_at")
+    if not isinstance(secrets, dict) or not secrets or not isinstance(expires_at, (int, float)):
+        return None
+    remaining = int(expires_at - time.time())
+    if remaining <= margin_seconds:
+        return None
+    return has_token_outcome(secrets=secrets, expires_in=remaining, config={}, metadata={})
+
+
+def run_shared_refresh_exchange(
+    *,
+    credential: IntegrationSharedCredential | PlatformSharedCredential,
+    logger: logging.Logger,
+    margin_seconds: int,
+    exchange: Callable[[str], ExchangeResult],
+    build_secrets: Callable[[str, dict], RefreshSecrets | None],
+) -> dict:
+    """Refresh a *shared* OAuth credential's access token once and cache it on the row.
+
+    A shared refresh_token (platform- or org-provisioned) backs many brokers. The
+    control plane exchanges it once and caches the access token on the credential
+    row (`token_cache`), fanning the cached token out so the broker swarm does not
+    each hit the provider — and, for providers that rotate the refresh_token on
+    exchange, do not race and orphan one another. Concurrent refreshes serialize
+    on a row lock (`select_for_update`): the first exchanges, the rest read the
+    freshly written cache. A revoked refresh_token is NOT auto-deleted (an admin
+    must reconnect the shared credential); it surfaces `absent` and clears the cache.
+    """
+    fresh = _cached_shared_outcome(token_cache=credential.token_cache, margin_seconds=margin_seconds)
+    if fresh is not None:
+        return fresh
+
+    model = type(credential)
+    with transaction.atomic():
+        locked = model.objects.select_for_update().filter(pk=credential.pk).first()
+        if locked is None:
+            return absent_outcome()
+        # Double-checked: another worker may have refreshed while we waited on the lock.
+        fresh = _cached_shared_outcome(token_cache=locked.token_cache, margin_seconds=margin_seconds)
+        if fresh is not None:
+            return fresh
+
+        refresh_token = locked.credentials.get("refresh_token", "")
+        if not refresh_token:
+            logger.error("shared %s refresh: row missing refresh_token id=%s", locked.provider, locked.pk)
+            return absent_outcome()
+
+        result = exchange(refresh_token)
+        if result.revoked:
+            logger.error("shared %s refresh: refresh_token revoked upstream id=%s", locked.provider, locked.pk)
+            locked.token_cache = {}
+            locked.save(update_fields=["token_cache", "updated_at"])
+            return absent_outcome()
+        if result.error is not None:
+            logger.error("shared %s refresh failed id=%s error=%s", locked.provider, locked.pk, result.error)
+            return transient_outcome()
+
+        access_token = result.response.get("access_token", "")
+        if not access_token:
+            logger.error("shared %s refresh: response missing access_token id=%s", locked.provider, locked.pk)
+            return transient_outcome()
+
+        built = build_secrets(access_token, result.response)
+        if built is None:
+            return transient_outcome()
+
+        update_fields = ["token_cache", "updated_at"]
+        new_refresh = result.response.get("refresh_token")
+        if new_refresh and new_refresh != refresh_token:
+            locked.credentials = {**locked.credentials, "refresh_token": new_refresh}
+            update_fields.append("credentials")
+        if built.row_metadata:
+            locked.metadata = {**locked.metadata, **built.row_metadata}
+            update_fields.append("metadata")
+        locked.token_cache = {"secrets": built.secrets, "expires_at": time.time() + built.expires_in}
+        locked.save(update_fields=update_fields)
+        return has_token_outcome(secrets=built.secrets, expires_in=built.expires_in, config={}, metadata={})
 
 
 # --- Broker refresh-outcome contract -----------------------------------------
