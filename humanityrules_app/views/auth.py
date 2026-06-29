@@ -7,8 +7,8 @@ from urllib.parse import urlencode
 import httpx
 from django.conf import settings
 from django.contrib.auth import login, logout
-from django.http import HttpRequest, HttpResponseBadRequest
-from django.shortcuts import redirect
+from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest
+from django.shortcuts import redirect, render
 from django.utils.http import url_has_allowed_host_and_scheme
 from workos import WorkOSClient
 
@@ -130,16 +130,48 @@ def _stash_post_login_redirect(request: HttpRequest) -> None:
         request.session.pop("post_login_redirect", None)
 
 
-def dev_login(request):
-    """Auto-login as superuser for local development. Only available when DEBUG=True."""
+def dev_login(request: HttpRequest) -> HttpResponse:
+    """Local-dev login bypass, available only when DEBUG=True.
+
+    No `email` renders a picker page. A known `email` logs that user straight
+    in; an unknown one simulates the WorkOS new-user callback and hands off to
+    the real /onboarding/ flow, so the new-user path runs end to end.
+    """
     if not settings.DEBUG:
         return HttpResponseBadRequest("Not available")
-    user = User.objects.filter(is_superuser=True).first()
-    if not user:
-        return HttpResponseBadRequest("No superuser found")
-    login(request, user, backend="django.contrib.auth.backends.ModelBackend")
-    next_url = request.GET.get("next", "/dashboard/")
-    return redirect(next_url)
+
+    next_url = _safe_next(request=request, next_url=request.GET.get("next", ""))
+    email = request.GET.get("email", "").strip()
+
+    if not email:
+        users = User.objects.select_related("current_organization").order_by(
+            "-is_superuser", "email",
+        )
+        return render(
+            request,
+            "humanityrules_app/dev_login.html",
+            {"users": users, "next_url": next_url or ""},
+        )
+
+    user = User.objects.filter(email__iexact=email).first()
+    if user is not None:
+        login(request, user, backend="django.contrib.auth.backends.ModelBackend")
+        return redirect(next_url or "/dashboard/")
+
+    # Unknown email: replay auth_callback's new-user branch so the real
+    # onboarding flow runs, instead of shortcutting around it. Drop any current
+    # session first — otherwise onboarding sees an authenticated user and
+    # redirects straight to /dashboard/ instead of creating the new org.
+    logout(request)
+    request.session["pending_workos_user"] = {
+        "workos_user_id": f"dev_{secrets.token_hex(8)}",
+        "email": email,
+        "first_name": request.GET.get("first_name", "Test"),
+        "last_name": request.GET.get("last_name", "User"),
+    }
+    if next_url:
+        request.session["post_login_redirect"] = next_url
+    return redirect("/onboarding/")
 
 
 def auth_login(request):
