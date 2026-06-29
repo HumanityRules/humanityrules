@@ -144,7 +144,6 @@
     --font-weight-medium: 500;
     --font-weight-semibold: 600;
     --font-weight-bold: 700;
-    --tracking-tight: -0.025em;
     --tracking-normal: 0em;
     --tracking-wide: 0.025em;
     --tracking-wider: 0.05em;
@@ -2805,6 +2804,10 @@
     --tw-ease: var(--ease-out);
     transition-timing-function: var(--ease-out);
   }
+  .select-all {
+    -webkit-user-select: all;
+    user-select: all;
+  }
   .select-none {
     -webkit-user-select: none;
     user-select: none;
@@ -4075,6 +4078,14 @@
       }
     }
   }
+  .dark\:bg-purple-500\/15 {
+    &:where(.dark, .dark *) {
+      background-color: color-mix(in srgb, oklch(62.7% 0.265 303.9) 15%, transparent);
+      @supports (color: color-mix(in lab, red, red)) {
+        background-color: color-mix(in oklab, var(--color-purple-500) 15%, transparent);
+      }
+    }
+  }
   .dark\:bg-purple-500\/20 {
     &:where(.dark, .dark *) {
       background-color: color-mix(in srgb, oklch(62.7% 0.265 303.9) 20%, transparent);
@@ -4130,6 +4141,14 @@
       background-color: color-mix(in srgb, oklch(39.6% 0.141 25.723) 50%, transparent);
       @supports (color: color-mix(in lab, red, red)) {
         background-color: color-mix(in oklab, var(--color-red-900) 50%, transparent);
+      }
+    }
+  }
+  .dark\:bg-sky-500\/15 {
+    &:where(.dark, .dark *) {
+      background-color: color-mix(in srgb, oklch(68.5% 0.169 237.323) 15%, transparent);
+      @supports (color: color-mix(in lab, red, red)) {
+        background-color: color-mix(in oklab, var(--color-sky-500) 15%, transparent);
       }
     }
   }
@@ -4650,6 +4669,18 @@
           background-color: color-mix(in srgb, #fff 5%, transparent);
           @supports (color: color-mix(in lab, red, red)) {
             background-color: color-mix(in oklab, var(--color-white) 5%, transparent);
+          }
+        }
+      }
+    }
+  }
+  .dark\:hover\:bg-white\/10 {
+    &:where(.dark, .dark *) {
+      &:hover {
+        @media (hover: hover) {
+          background-color: color-mix(in srgb, #fff 10%, transparent);
+          @supports (color: color-mix(in lab, red, red)) {
+            background-color: color-mix(in oklab, var(--color-white) 10%, transparent);
           }
         }
       }

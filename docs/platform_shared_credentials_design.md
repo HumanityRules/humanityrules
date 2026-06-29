@@ -48,10 +48,14 @@ opt-out step. The platform tier is a *default*, never mandatory.
 6. **Opt-out / connector-disable deferred.** "An org makes connector X unavailable to all its
    employees regardless of key source" is a separate org-level feature that plugs into the same
    resolver chokepoint. Not in v1.
-7. **Management via Django admin (v1).** Platform credentials are HumR-staff-only; the superuser
-   Django admin is the input surface. The "platform-owner org" / master-account UI (a gated
-   "share with all customers" checkbox) is deferred until there is a customer-facing master
-   account — it is not needed while management is superuser-only.
+7. **Management via the unified Provider Keys UI (delivered) + Django admin (fallback).** Platform
+   credentials are created from the org-admin Integrations → Provider Keys tab by the
+   **platform-owner org** — a single org named by slug in `settings.HUMR_PLATFORM_OWNER_ORG_SLUG`
+   (mirrors the `HUMR_SANDBOX_*` settings pattern; `platform_owner.is_platform_owner_org` is the
+   gate). That org's admins get an extra **"All customers"** scope on the same share form; every
+   other org sees only the per-org scopes. The gate is enforced server-side on every write — UI
+   hiding is not sufficient for a global credential. The superuser `PlatformSharedCredentialAdmin`
+   remains as a staff fallback.
 
 ## Shared service (Phase 2) — OAuth/device login + central refresh
 
@@ -95,14 +99,30 @@ OAuth/device sharing via the shared service above. Split into three increments:
 
 - **Phase 2a (DONE) — the central-refresh engine.** `token_cache` on both shared models;
   `provider_common.run_shared_refresh_exchange` (cache + `select_for_update` + exchange + rotate);
-  `provider_openai_codex.refresh_outcome_from_shared`. The platform fallback in
-  `token_refresh_batch` already dispatches it by `getattr`, so a platform Codex credential works
-  end-to-end once a refresh-token is present (seed via Django admin until 2b).
-- **Phase 2b — control-plane device-login UI.** An admin-facing device flow that *obtains* the
-  refresh-token (today it runs only in the broker). Until this lands, a refresh-token is pasted
-  into Django admin.
-- **Phase 2c — org-level OAuth sharing (Option B).** A customer admin connects + shares an
-  OAuth/device login with their employees, reusing 2a + 2b plus the existing org ABAC targeting.
+  `provider_openai_codex.refresh_outcome_from_shared` (+ `provider_nous.refresh_outcome_from_shared`).
+  The platform fallback in `token_refresh_batch` already dispatches it by `getattr`, so a populated
+  shared OAuth credential works end-to-end with no further wiring.
+- **Phase 2b/2c (DONE) — one unified credential-sharing dialog.** The originally-separate 2b
+  (CP device-login UI) and 2c (org-level OAuth sharing) ship as a single surface: the org-admin
+  Integrations → Provider Keys tab has **one "Add shared credential" dialog** whose body adapts to
+  the chosen provider — **paste a key** (vault providers) or **connect a login** (device-flow OAuth
+  — Codex, Nous). The provider dropdown spans both kinds; selecting one toggles the API-key field
+  vs. a connect note client-side (JS keyed on a provider→kind map, driven by the `el-select` change
+  event + a `value`-attribute MutationObserver), and the add/edit endpoints **dispatch by provider
+  kind** server-side. Each share targets everyone / a workspace / a user (per-org
+  `IntegrationSharedCredential`) or — for the platform-owner org only — **all customers**
+  (`PlatformSharedCredential`); both paths route writes through `shared_credential_store`, which
+  owns the table choice + the platform-owner gate. Each device-flow provider exposes
+  `device_authorize()` (start) + `device_poll(opaque)` (one attempt); shared dataclasses
+  (`DeviceAuthorization`, `DevicePollResult`) live in `provider_common`. The control plane drives
+  the handshake (a shared credential has no per-user broker); Django is request-scoped, so the
+  admin's browser **self-polls**: submitting a login provider swaps the same dialog to a
+  code/verification-link stage that htmx-polls `poll` every few seconds; each poll is one
+  `device_poll`; on approval the refresh-token is stored on the routed row. The UI + device flow
+  live in one module (`views/integrations/org_shared_keys.py`); in-flight state lives in
+  `request.session`, so identity + the platform gate are re-derived from the live request, never
+  trusted from the session.
 
-**Reserved, not built:** audience targeting; account pool; opt-out / connector-disable;
-master-account UI.
+**Reserved, not built:** redirect-OAuth providers (Google / GitHub / X — they need a HumR-hosted
+callback + per-provider `refresh_outcome_from_shared`); audience targeting; account pool;
+opt-out / connector-disable.

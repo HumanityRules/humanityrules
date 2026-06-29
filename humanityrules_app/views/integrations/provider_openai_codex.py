@@ -40,7 +40,21 @@ logger = logging.getLogger(__name__)
 # IntegrationConfig row for this provider (contrast Google/GitHub, which carry
 # a client_secret). Sourced from the Codex CLI / Hermes codex login path.
 CODEX_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
-CODEX_OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token"
+CODEX_OAUTH_ISSUER = "https://auth.openai.com"
+CODEX_OAUTH_TOKEN_URL = f"{CODEX_OAUTH_ISSUER}/oauth/token"
+
+# Device-flow endpoints for the control-plane-run connect (shared Codex credentials,
+# where there is no per-user broker to drive the handshake). OpenAI's device flow is
+# its bespoke `deviceauth` JSON API, not RFC 8628: the usercode call returns a
+# `device_auth_id`, polling returns an `authorization_code` + server-generated
+# `code_verifier`, and the token exchange uses the `deviceauth/callback` redirect.
+# Mirrors the broker adapter in humr_runtime/integrations/device_flow.py.
+CODEX_USERCODE_URL = f"{CODEX_OAUTH_ISSUER}/api/accounts/deviceauth/usercode"
+CODEX_DEVICEAUTH_TOKEN_URL = f"{CODEX_OAUTH_ISSUER}/api/accounts/deviceauth/token"
+CODEX_DEVICEAUTH_REDIRECT_URI = f"{CODEX_OAUTH_ISSUER}/deviceauth/callback"
+CODEX_VERIFICATION_URL = f"{CODEX_OAUTH_ISSUER}/codex/device"
+CODEX_DEVICE_MAX_WAIT_SECONDS = 15 * 60
+CODEX_DEVICE_MIN_POLL_SECONDS = 3
 
 # One small POST, same budget rationale as Google's exchange: bound the batched
 # refresh by the slowest single provider, surface `transient` rather than hang.
@@ -116,6 +130,98 @@ def _exchange_refresh_token(refresh_token: str) -> provider_common.ExchangeResul
         revoking_error_codes=frozenset({"invalid_grant", "token_expired", "invalid_token"}),
         error_code_of=_error_code_of,
     )
+
+
+def device_authorize() -> tuple[provider_common.DeviceAuthorization | None, str | None]:
+    """Begin Codex's device flow on the control plane: get a user code + verification URL.
+
+    Used by the shared-credential connect UI (no per-user broker drives the flow).
+    Returns (authorization, None) or (None, human-facing error).
+    """
+    try:
+        response = httpx.post(
+            CODEX_USERCODE_URL,
+            json={"client_id": CODEX_OAUTH_CLIENT_ID},
+            headers={"Content-Type": "application/json"},
+            timeout=provider_common.DEVICE_HTTP_TIMEOUT_SECONDS,
+        )
+    except httpx.HTTPError as exc:
+        return None, f"Could not reach OpenAI to start the login ({exc})."
+    if response.status_code != 200:
+        return None, f"OpenAI rejected the login start (HTTP {response.status_code})."
+    try:
+        body = response.json()
+    except ValueError:
+        return None, "OpenAI returned an unreadable login-start response."
+    user_code = body.get("user_code")
+    device_auth_id = body.get("device_auth_id")
+    if not user_code or not device_auth_id:
+        return None, "OpenAI's login-start response was missing the user code."
+    return provider_common.DeviceAuthorization(
+        user_code=str(user_code),
+        verification_uri=CODEX_VERIFICATION_URL,
+        interval=max(CODEX_DEVICE_MIN_POLL_SECONDS, int(body.get("interval") or 5)),
+        expires_in=CODEX_DEVICE_MAX_WAIT_SECONDS,
+        opaque={"device_auth_id": str(device_auth_id), "user_code": str(user_code)},
+    ), None
+
+
+def device_poll(opaque: dict) -> provider_common.DevicePollResult:
+    """Run ONE Codex device-poll attempt; on approval, exchange the code for tokens."""
+    try:
+        response = httpx.post(
+            CODEX_DEVICEAUTH_TOKEN_URL,
+            json={"device_auth_id": opaque.get("device_auth_id", ""), "user_code": opaque.get("user_code", "")},
+            headers={"Content-Type": "application/json"},
+            timeout=provider_common.DEVICE_HTTP_TIMEOUT_SECONDS,
+        )
+    except httpx.HTTPError as exc:
+        return provider_common.device_failed(error=f"Could not reach OpenAI while polling ({exc}).")
+    if response.status_code in (403, 404):
+        return provider_common.device_pending()
+    if response.status_code != 200:
+        return provider_common.device_failed(error=f"OpenAI poll failed (HTTP {response.status_code}).")
+    try:
+        body = response.json()
+    except ValueError:
+        return provider_common.device_failed(error="OpenAI returned an unreadable approval response.")
+    authorization_code = body.get("authorization_code")
+    code_verifier = body.get("code_verifier")
+    if not authorization_code or not code_verifier:
+        return provider_common.device_failed(error="OpenAI's approval response was incomplete.")
+    return _exchange_device_code(authorization_code=str(authorization_code), code_verifier=str(code_verifier))
+
+
+def _exchange_device_code(authorization_code: str, code_verifier: str) -> provider_common.DevicePollResult:
+    """Exchange an approved Codex authorization code for a refresh/access token pair."""
+    try:
+        response = httpx.post(
+            CODEX_OAUTH_TOKEN_URL,
+            data={
+                "grant_type": "authorization_code",
+                "code": authorization_code,
+                "redirect_uri": CODEX_DEVICEAUTH_REDIRECT_URI,
+                "client_id": CODEX_OAUTH_CLIENT_ID,
+                "code_verifier": code_verifier,
+            },
+            timeout=provider_common.DEVICE_HTTP_TIMEOUT_SECONDS,
+        )
+    except httpx.HTTPError as exc:
+        return provider_common.device_failed(error=f"Could not reach OpenAI to finish the login ({exc}).")
+    if response.status_code != 200:
+        return provider_common.device_failed(error=f"OpenAI token exchange failed (HTTP {response.status_code}).")
+    try:
+        body = response.json()
+    except ValueError:
+        return provider_common.device_failed(error="OpenAI returned an unreadable token response.")
+    refresh_token = body.get("refresh_token")
+    access_token = body.get("access_token")
+    if not refresh_token or not isinstance(access_token, str) or not access_token:
+        return provider_common.device_failed(error="OpenAI did not return a usable token pair.")
+    account_id = _account_id_from_access_token(access_token=access_token)
+    if account_id is None:
+        return provider_common.device_failed(error="This login has no ChatGPT subscription (no account id); not usable for Codex.")
+    return provider_common.device_completed(refresh_token=str(refresh_token), row_metadata={"chatgpt_account_id": account_id})
 
 
 def store_device_credentials(environment: Environment, owner_user: User, app_slug: str, payload: dict) -> tuple[int, dict]:

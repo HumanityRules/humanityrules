@@ -60,6 +60,9 @@ from .integrations.org_shared_keys import (
     integrations_org_shared_keys_add,
     integrations_org_shared_keys_delete,
     integrations_org_shared_keys_edit,
+    integrations_org_shared_login_cancel,
+    integrations_org_shared_login_poll,
+    integrations_org_shared_login_reconnect,
 )
 from .integrations.provider_google import (
     integrations_user_google_start,

@@ -414,3 +414,67 @@ def absent_outcome() -> dict:
 def transient_outcome() -> dict:
     """Build the broker `transient` outcome: refresh failed; serve the cached token."""
     return {"outcome": "transient"}
+
+
+# --- Control-plane device-login driver ---------------------------------------
+# A *shared* OAuth credential (platform- or org-provisioned) has no per-user
+# broker to run OpenAI's / Nous's device handshake, so the control plane drives
+# it itself. The broker can afford an always-on asyncio poll loop; Django is
+# request-scoped, so the admin's browser self-polls instead — every poll is ONE
+# attempt: `device_poll` returns `pending` and the browser retries, rather than
+# the request thread blocking for minutes. Each device-flow provider exposes
+# `device_authorize()` (start) + `device_poll(opaque)` (one attempt); the connect
+# view (`org_shared_keys.py`) owns the session state and stores the result.
+# See docs/integrations/device_flow_integration_design.md for the broker analogue.
+
+DEVICE_HTTP_TIMEOUT_SECONDS = 10
+
+DEVICE_PENDING = "pending"
+DEVICE_COMPLETED = "completed"
+DEVICE_FAILED = "failed"
+
+
+@dataclasses.dataclass(frozen=True)
+class DeviceAuthorization:
+    """Provider-normalized device-code start result shown to the connecting admin.
+
+    `opaque` is the provider's poll handle (e.g. Codex `device_auth_id`, Nous
+    `device_code`); the connect view stashes it in the session and hands it back
+    to `device_poll`. `verification_uri` is where the admin approves in a browser.
+    """
+
+    user_code: str
+    verification_uri: str
+    interval: int
+    expires_in: int
+    opaque: dict
+
+
+@dataclasses.dataclass(frozen=True)
+class DevicePollResult:
+    """Outcome of ONE `device_poll` attempt.
+
+    `status` discriminates: DEVICE_PENDING (not approved yet — keep polling),
+    DEVICE_COMPLETED (carries the `refresh_token` to store + provider-derived
+    `row_metadata`), DEVICE_FAILED (carries a human-facing `error`).
+    """
+
+    status: str
+    refresh_token: str
+    row_metadata: dict
+    error: str
+
+
+def device_pending() -> DevicePollResult:
+    """A `device_poll` result meaning the admin has not approved yet."""
+    return DevicePollResult(status=DEVICE_PENDING, refresh_token="", row_metadata={}, error="")
+
+
+def device_completed(refresh_token: str, row_metadata: dict) -> DevicePollResult:
+    """A `device_poll` result carrying the approved refresh_token to store."""
+    return DevicePollResult(status=DEVICE_COMPLETED, refresh_token=refresh_token, row_metadata=row_metadata, error="")
+
+
+def device_failed(error: str) -> DevicePollResult:
+    """A `device_poll` result carrying a terminal, human-facing failure."""
+    return DevicePollResult(status=DEVICE_FAILED, refresh_token="", row_metadata={}, error=error)

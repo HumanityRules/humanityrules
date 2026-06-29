@@ -49,7 +49,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options) -> None:
         org = _resolve_organization(org_identifier=options["org"])
-        choices = org_shared_keys._shareable_provider_choices()
+        choices = org_shared_keys.paste_provider_choices()
         if not choices:
             raise CommandError("No shareable providers are registered.")
 

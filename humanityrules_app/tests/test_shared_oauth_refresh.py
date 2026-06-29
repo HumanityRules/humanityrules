@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 
 from humanityrules_app.models import PlatformSharedCredential
 from humanityrules_app.tests.test_integrations_tokens_batch import _BatchTokensEndpointTestBase
-from humanityrules_app.views.integrations import provider_openai_codex
+from humanityrules_app.views.integrations import provider_nous, provider_openai_codex
 
 from django.test import TestCase
 
@@ -102,6 +102,35 @@ class TestSharedCodexRefresh(TestCase):
         cred = self._cred({})
         outcome = provider_openai_codex.refresh_outcome_from_shared(credential=cred)
         self.assertEqual(outcome, {"outcome": "absent"})
+
+
+class TestSharedNousRefresh(TestCase):
+    """Nous reuses the same central-refresh engine as Codex (no account-id claim)."""
+
+    def _cred(self, credentials: dict) -> PlatformSharedCredential:
+        return PlatformSharedCredential.objects.create(provider="nous", credentials=credentials)
+
+    def test_exchanges_and_caches(self) -> None:
+        cred = self._cred({"refresh_token": "rt-1"})
+        with patch.object(provider_nous.httpx, "post", return_value=_token_response(200, {"access_token": "at-1"})) as post:
+            outcome = provider_nous.refresh_outcome_from_shared(credential=cred)
+        self.assertEqual(outcome["outcome"], "has_token")
+        self.assertEqual(outcome["secrets"], {"access_token": "at-1"})
+        post.assert_called_once()
+        cred.refresh_from_db()
+        self.assertEqual(cred.token_cache["secrets"], {"access_token": "at-1"})
+
+    def test_revoked_returns_absent_and_clears_cache(self) -> None:
+        cred = self._cred({"refresh_token": "rt-1"})
+        PlatformSharedCredential.objects.filter(pk=cred.pk).update(
+            token_cache={"secrets": {"access_token": "old"}, "expires_at": time.time() - 10},
+        )
+        cred.refresh_from_db()
+        with patch.object(provider_nous.httpx, "post", return_value=_token_response(400, {"error": "invalid_grant"})):
+            outcome = provider_nous.refresh_outcome_from_shared(credential=cred)
+        self.assertEqual(outcome, {"outcome": "absent"})
+        cred.refresh_from_db()
+        self.assertEqual(cred.token_cache, {})
 
 
 class TestPlatformCodexEndpoint(_BatchTokensEndpointTestBase):
