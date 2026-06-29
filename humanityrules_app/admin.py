@@ -565,6 +565,20 @@ class PlatformSharedCredentialAdmin(admin.ModelAdmin):
     readonly_fields = ["id", "created_at", "updated_at", "metadata"]
     autocomplete_fields = ["created_by"]
 
+    # Platform-wide credentials apply to every customer org, so they are superuser-only
+    # (the spec; the org-admin Provider Keys UI gates the "All customers" scope separately).
+    def has_view_permission(self, request: HttpRequest, obj: PlatformSharedCredential | None = None) -> bool:
+        return request.user.is_superuser
+
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        return request.user.is_superuser
+
+    def has_change_permission(self, request: HttpRequest, obj: PlatformSharedCredential | None = None) -> bool:
+        return request.user.is_superuser
+
+    def has_delete_permission(self, request: HttpRequest, obj: PlatformSharedCredential | None = None) -> bool:
+        return request.user.is_superuser
+
     def save_model(self, request: HttpRequest, obj: PlatformSharedCredential, form: forms.ModelForm, change: bool) -> None:
         if obj.created_by_id is None:
             obj.created_by = request.user
