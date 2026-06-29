@@ -38,7 +38,11 @@
       "LANG",
       "LC_*",
       "TERM",
-      "USER"
+      "USER",
+      "MIX_OS_CONCURRENCY_LOCK",
+      "ELIXIR_ERL_OPTIONS",
+      "RELEASE_DISTRIBUTION",
+      "ERL_EPMD_PORT"
     ]
   },
   "filesystem": {
