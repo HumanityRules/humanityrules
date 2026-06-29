@@ -1920,6 +1920,11 @@ class IntegrationSharedCredential(models.Model):
     )
     config = models.JSONField(default=dict, blank=True, help_text="Non-secret provider configuration.")
     metadata = models.JSONField(default=dict, blank=True, help_text="Derived display/status data such as validation timestamps.")
+    token_cache = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Control-plane cache of the last exchanged access token for OAuth shares: {secrets, expires_at}.",
+    )
     created_by = models.ForeignKey(
         "User", on_delete=models.SET_NULL, null=True, blank=True, related_name="+",
         help_text="The administrator who provisioned this shared credential.",
@@ -1981,6 +1986,11 @@ class PlatformSharedCredential(models.Model):
     )
     config = models.JSONField(default=dict, blank=True, help_text="Non-secret provider configuration.")
     metadata = models.JSONField(default=dict, blank=True, help_text="Derived display/status data such as validation timestamps.")
+    token_cache = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Control-plane cache of the last exchanged access token for OAuth shares: {secrets, expires_at}.",
+    )
     enabled = models.BooleanField(
         default=True,
         help_text="When false the share is inert — kept for history without being handed to brokers.",

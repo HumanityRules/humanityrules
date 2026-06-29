@@ -66,7 +66,12 @@ Tier-agnostic, built once, used by both platform and org sharing:
   that access-token, and fans it out to every requesting broker **behind a lock** — so
   concurrent broker refreshes do not each rotate the token and orphan the others. Codex's refresh
   already runs control-plane-side (the refresh-token never reaches the broker); the new part is
-  the shared cache + lock.
+  the shared cache + lock. **Implemented (Phase 2a) DB-backed:** the access-token bundle is cached
+  on the credential row (`token_cache` JSONField) and concurrent refreshes serialize via
+  `select_for_update` (Postgres row lock; no-op on SQLite) — the refresh-token rotation already
+  needs a DB write, so caching in the same locked transaction is atomic and needs no extra infra.
+  `provider_common.run_shared_refresh_exchange` is the generic engine;
+  `provider_openai_codex.refresh_outcome_from_shared` is the first consumer.
 - **Pool-ready shape.** Key the central cache by *backing login*, not by provider, so a future
   pool of N accounts (to spread one provider's rate limits — relevant at both platform and org
   scale) is additive, not a refactor. v1 ships N=1.
@@ -86,9 +91,18 @@ Tier-agnostic, built once, used by both platform and org sharing:
   personal and org-shared both override platform).
 
 **Phase 2 — OAuth/device login + central refresh.** Delivers platform Codex *and* org-level
-OAuth/device sharing via the shared service above. Extends `IntegrationSharedCredential` (org)
-and `PlatformSharedCredential` (platform) to the OAuth/device kind; adds the control-plane login
-UI and the central-refresh cache.
+OAuth/device sharing via the shared service above. Split into three increments:
+
+- **Phase 2a (DONE) — the central-refresh engine.** `token_cache` on both shared models;
+  `provider_common.run_shared_refresh_exchange` (cache + `select_for_update` + exchange + rotate);
+  `provider_openai_codex.refresh_outcome_from_shared`. The platform fallback in
+  `token_refresh_batch` already dispatches it by `getattr`, so a platform Codex credential works
+  end-to-end once a refresh-token is present (seed via Django admin until 2b).
+- **Phase 2b — control-plane device-login UI.** An admin-facing device flow that *obtains* the
+  refresh-token (today it runs only in the broker). Until this lands, a refresh-token is pasted
+  into Django admin.
+- **Phase 2c — org-level OAuth sharing (Option B).** A customer admin connects + shares an
+  OAuth/device login with their employees, reusing 2a + 2b plus the existing org ABAC targeting.
 
 **Reserved, not built:** audience targeting; account pool; opt-out / connector-disable;
 master-account UI.
