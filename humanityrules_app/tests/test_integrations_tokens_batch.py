@@ -23,6 +23,7 @@ from humanityrules_app.models import (
     IntegrationSharedCredential,
     IntegrationUserCredential,
     Organization,
+    PlatformSharedCredential,
     OrganizationMembership,
     Repository,
     User,
@@ -446,6 +447,63 @@ class TestSharedCredentials(_BatchTokensEndpointTestBase):
             organization=self.org, provider="openrouter", scope="everyone", credentials={},
         )
         self.assertEqual(self._post_openrouter(), {"outcome": "absent"})
+
+
+class TestPlatformSharedCredentials(_BatchTokensEndpointTestBase):
+    """Platform credentials are the lowest-priority fallback: used only where no
+    org-shared or personal credential applies (org-shared > personal > platform)."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        # Seed the credential system policies so the org-shared path is fully
+        # functional for the override test; harmless to the platform-only cases.
+        abac_service.bootstrap_organization(organization=self.org, admin_user=self.user)
+
+    def _post_tavily(self) -> dict:
+        status, body = self._post(
+            body={"owner_username": "vmendi", "app_slug": "hermes", "providers": ["tavily"]},
+            token=self.raw_token,
+        )
+        self.assertEqual(status, 200)
+        return body["results"]["tavily"]
+
+    def test_platform_key_used_when_nothing_else_applies(self) -> None:
+        PlatformSharedCredential.objects.create(provider="tavily", credentials={"api_key": "tvly-PLATFORM"})
+        result = self._post_tavily()
+        self.assertEqual(result["outcome"], "has_token")
+        self.assertEqual(result["secrets"], {"api_key": "tvly-PLATFORM"})
+        self.assertTrue(result["metadata"]["platform_shared"])
+
+    def test_personal_key_overrides_platform(self) -> None:
+        PlatformSharedCredential.objects.create(provider="tavily", credentials={"api_key": "tvly-PLATFORM"})
+        IntegrationUserCredential.objects.create(
+            owner_user=self.user, environment=self.env, app_slug="hermes",
+            provider=IntegrationUserCredential.Provider.TAVILY,
+            credentials={"api_key": "tvly-PERSONAL"},
+        )
+        result = self._post_tavily()
+        self.assertEqual(result["secrets"], {"api_key": "tvly-PERSONAL"})
+        self.assertNotIn("platform_shared", result.get("metadata", {}))
+
+    def test_org_shared_key_overrides_platform(self) -> None:
+        PlatformSharedCredential.objects.create(provider="tavily", credentials={"api_key": "tvly-PLATFORM"})
+        IntegrationSharedCredential.objects.create(
+            organization=self.org, provider="tavily", scope="everyone",
+            credentials={"api_key": "tvly-ORG"},
+        )
+        result = self._post_tavily()
+        self.assertEqual(result["secrets"], {"api_key": "tvly-ORG"})
+        self.assertTrue(result["metadata"]["org_shared"])
+        self.assertNotIn("platform_shared", result["metadata"])
+
+    def test_disabled_platform_key_is_absent(self) -> None:
+        PlatformSharedCredential.objects.create(
+            provider="tavily", credentials={"api_key": "tvly-PLATFORM"}, enabled=False,
+        )
+        self.assertEqual(self._post_tavily(), {"outcome": "absent"})
+
+    def test_no_platform_key_is_absent(self) -> None:
+        self.assertEqual(self._post_tavily(), {"outcome": "absent"})
 
 
 class TestMixedConnectedAndAbsent(_BatchTokensEndpointTestBase):
