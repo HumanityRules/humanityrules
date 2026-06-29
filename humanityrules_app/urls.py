@@ -140,12 +140,21 @@ urlpatterns = [
     path("integrations/org/github/setup/", views.integrations_org_github_setup, name="integrations_org_github_setup"),
     path("integrations/org/github/select-installation/", views.integrations_org_github_select_installation, name="integrations_org_github_select_installation"),
 
-    # Shared provider keys: org admin provisions one key (OpenRouter/OpenAI/Anthropic)
-    # and shares it with everyone / a workspace / a user. Persists IntegrationSharedCredential.
+    # Shared credentials: org admin provisions a key (OpenRouter/OpenAI/Anthropic/Tavily)
+    # or connects a device-flow login (Codex/Nous) and shares it with everyone / a workspace /
+    # a user — or, for the platform-owner org, all customers. Persists IntegrationSharedCredential
+    # (per-org) or PlatformSharedCredential (all customers); see shared_credential_store.
     path("integrations/org/provider-keys/", views.integrations_org_shared_keys, name="integrations_org_shared_keys"),
     path("integrations/org/provider-keys/add/", views.integrations_org_shared_keys_add, name="integrations_org_shared_keys_add"),
     path("integrations/org/provider-keys/<uuid:credential_id>/edit/", views.integrations_org_shared_keys_edit, name="integrations_org_shared_keys_edit"),
     path("integrations/org/provider-keys/<uuid:credential_id>/delete/", views.integrations_org_shared_keys_delete, name="integrations_org_shared_keys_delete"),
+
+    # Device-login sub-steps for the connect-a-login path of the unified dialog (add/edit live on
+    # the provider-keys routes above). The control plane drives the handshake; the admin's browser
+    # self-polls `poll` until approved. `reconnect` replaces an existing login's refresh token.
+    path("integrations/org/shared-logins/poll/", views.integrations_org_shared_login_poll, name="integrations_org_shared_login_poll"),
+    path("integrations/org/shared-logins/cancel/", views.integrations_org_shared_login_cancel, name="integrations_org_shared_login_cancel"),
+    path("integrations/org/shared-logins/<uuid:credential_id>/reconnect/", views.integrations_org_shared_login_reconnect, name="integrations_org_shared_login_reconnect"),
 
     # Integrations — per-user (each user grants OAuth from inside a deployed app).
     # Persists IntegrationUserCredential keyed by (owner_user, environment, app_slug, provider).

@@ -233,6 +233,14 @@ HUMR_SANDBOX_EXTERNAL_ID = os.environ.get("HUMR_SANDBOX_EXTERNAL_ID")
 HUMR_SANDBOX_REGION = os.environ.get("HUMR_SANDBOX_REGION", "")
 HUMR_SANDBOX_HOSTED_ZONE = os.environ.get("HUMR_SANDBOX_HOSTED_ZONE", "")
 
+# Platform-owner org: the single org whose admins may provision platform-shared
+# ("all customers") integration credentials — global, ABAC-free secrets HumR
+# provides to every customer org as the lowest-priority fallback. Defaults to
+# HumR's own org slug ("humanity-rules" in production), so no per-environment
+# config is needed; local dev uses the same slug. Override only for a deployment
+# whose owner org is named differently. See docs/platform_shared_credentials_design.md.
+HUMR_PLATFORM_OWNER_ORG_SLUG = os.environ.get("HUMR_PLATFORM_OWNER_ORG_SLUG", "humanity-rules")
+
 # Job Worker - enable with HUMR_RUN_JOB_WORKER=1
 HUMR_RUN_JOB_WORKER = os.environ.get("HUMR_RUN_JOB_WORKER") == "1"
 

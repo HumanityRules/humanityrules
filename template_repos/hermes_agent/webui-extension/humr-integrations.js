@@ -282,18 +282,26 @@
     return elem('button', props, [pending ? 'Disconnecting…' : 'Disconnect']);
   }
 
-  // True when this provider's active credential is an org-shared one the
-  // control plane provisioned (token_refresh_batch stamps metadata.org_shared).
-  // Such credentials are admin-managed: the user can neither reconfigure nor
-  // disconnect them, so the card shows a read-only note instead of buttons.
-  function isOrgShared(item) {
-    return !!(item.metadata && item.metadata.org_shared);
+  // The provisioned source of this provider's active credential, when it is not
+  // the user's own connection: an org admin's share (metadata.org_shared) or a
+  // platform-wide default (metadata.platform_shared) — both stamped by the
+  // control plane's token_refresh_batch. Such credentials are not user-managed
+  // (they cannot be reconfigured or disconnected here), so the card shows a
+  // read-only note instead of Configure/Disconnect. Returns the note text, or
+  // null when the user owns the connection. Platform is checked first: it is the
+  // lowest-priority token source, so if it stamped the outcome no org/personal
+  // credential applied.
+  function sharedProvisionLabel(item) {
+    const meta = item.metadata || {};
+    if (meta.platform_shared) return 'Provided by Humanity Rules';
+    if (meta.org_shared) return 'Provided by your organization';
+    return null;
   }
 
-  // Read-only footer for an org-shared connection: replaces the Configure /
-  // Disconnect actions. Wording mirrors the control-plane user panel.
-  function orgSharedNote() {
-    return elem('div', { class: 'humr-integration-org-shared' }, ['Provided by your organization']);
+  // Read-only footer for a provisioned (org- or platform-shared) connection:
+  // replaces the Configure / Disconnect actions. Wording mirrors the CP user panel.
+  function sharedProvisionNote(label) {
+    return elem('div', { class: 'humr-integration-org-shared' }, [label]);
   }
 
   function configureButton(item, connectBtnForRevert) {
@@ -521,11 +529,12 @@
     if (isConnected) {
       card.appendChild(elem('div', { class: 'humr-integration-card-head' }, [titleRow, statusPill]));
       const body = elem('div', { class: 'humr-integration-card-body' });
-      if (isOrgShared(item)) {
-        // No connector is org-shareable today (only vault key providers are),
-        // but honoring the flag here keeps the read-only treatment consistent
-        // if MCP/Merge connectors ever gain org sharing.
-        body.appendChild(orgSharedNote());
+      const connectorSharedLabel = sharedProvisionLabel(item);
+      if (connectorSharedLabel) {
+        // No connector is org/platform-shareable today (only key/login providers
+        // are), but honoring the flag here keeps the read-only treatment
+        // consistent if MCP/Merge connectors ever gain sharing.
+        body.appendChild(sharedProvisionNote(connectorSharedLabel));
         card.appendChild(body);
         return card;
       }
@@ -1297,10 +1306,12 @@
       if (ownerName) {
         body.appendChild(elem('div', { class: 'humr-integration-meta' }, ['Replies only to ' + ownerName]));
       }
-      if (isOrgShared(item)) {
-        // Org-shared credentials are admin-managed: no Configure/Disconnect, and
-        // we drop "Last refreshed" to keep the read-only card clean.
-        body.appendChild(orgSharedNote());
+      const sharedLabel = sharedProvisionLabel(item);
+      if (sharedLabel) {
+        // Org- or platform-provided credentials are not user-managed: no
+        // Configure/Disconnect, and we drop "Last refreshed" to keep the
+        // read-only card clean.
+        body.appendChild(sharedProvisionNote(sharedLabel));
         card.appendChild(body);
         return card;
       }

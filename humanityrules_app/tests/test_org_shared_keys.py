@@ -9,12 +9,13 @@ multi-tenant isolation. Provider key validation hits the network, so the OpenAI
 import re
 from unittest.mock import MagicMock, patch
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from humanityrules_app.models import (
     IntegrationSharedCredential,
     Organization,
     OrganizationMembership,
+    PlatformSharedCredential,
     ResourceTag,
     User,
     Workspace,
@@ -147,8 +148,8 @@ class TestAdd(SharedKeysUITestBase):
         with _patch_openai(_ok_openai_response()):
             response = self.client.post(ADD_URL, data={"provider": "openai-api", "scope": "user", "api_key": "sk-real"})
         body = response.content.decode()
-        user_class = re.search(r'id="shared-key-target-user" class="([^"]*)"', body).group(1)
-        workspace_class = re.search(r'id="shared-key-target-workspace" class="([^"]*)"', body).group(1)
+        user_class = re.search(r'id="shared-cred-target-user" class="([^"]*)"', body).group(1)
+        workspace_class = re.search(r'id="shared-cred-target-workspace" class="([^"]*)"', body).group(1)
         self.assertNotIn("hidden", user_class)
         self.assertIn("hidden", workspace_class)
 
@@ -207,6 +208,75 @@ class TestDelete(SharedKeysUITestBase):
         response = self.client.post(f"/integrations/org/provider-keys/{cred.id}/delete/")
         self.assertEqual(response["HX-Trigger"], "sharedKeysChanged")
         self.assertFalse(IntegrationSharedCredential.objects.filter(id=cred.id).exists())
+
+
+class TestPlatformScope(SharedKeysUITestBase):
+    """The 'All customers' scope routes to PlatformSharedCredential and is owner-org only."""
+
+    @override_settings(HUMR_PLATFORM_OWNER_ORG_SLUG="keys-org")
+    def test_owner_creates_platform_paste_share(self) -> None:
+        self.client.force_login(self.admin)
+        with _patch_openai(_ok_openai_response()):
+            response = self.client.post(ADD_URL, data={"provider": "openai-api", "scope": "platform", "api_key": "sk-real"})
+        self.assertEqual(response["HX-Trigger"], "sharedKeysChanged")
+        self.assertFalse(IntegrationSharedCredential.objects.filter(provider="openai-api").exists())
+        cred = PlatformSharedCredential.objects.get(provider="openai-api")
+        self.assertEqual(cred.credentials, {"api_key": "sk-real"})
+        self.assertTrue(cred.enabled)
+        self.assertEqual(cred.created_by, self.admin)
+
+    def test_non_owner_platform_scope_rejected(self) -> None:
+        self.client.force_login(self.admin)
+        with _patch_openai(_ok_openai_response()):
+            response = self.client.post(ADD_URL, data={"provider": "openai-api", "scope": "platform", "api_key": "sk-real"})
+        self.assertIn("cannot create platform-wide", response.content.decode())
+        self.assertFalse(PlatformSharedCredential.objects.exists())
+
+    @override_settings(HUMR_PLATFORM_OWNER_ORG_SLUG="keys-org")
+    def test_owner_add_modal_offers_platform_scope(self) -> None:
+        self.client.force_login(self.admin)
+        self.assertIn('value="platform"', self.client.get(ADD_URL).content.decode())
+
+    def test_non_owner_add_modal_hides_platform_scope(self) -> None:
+        self.client.force_login(self.admin)
+        self.assertNotIn('value="platform"', self.client.get(ADD_URL).content.decode())
+
+    @override_settings(HUMR_PLATFORM_OWNER_ORG_SLUG="keys-org")
+    def test_owner_list_includes_platform_rows(self) -> None:
+        self.client.force_login(self.admin)
+        PlatformSharedCredential.objects.create(provider="tavily", credentials={"api_key": "tvly-1"})
+        body = self.client.get(LIST_URL, **HTMX).content.decode()
+        self.assertIn("All customers", body)
+        self.assertIn("Tavily", body)
+
+    def test_non_owner_list_excludes_platform_rows(self) -> None:
+        self.client.force_login(self.admin)
+        PlatformSharedCredential.objects.create(provider="tavily", credentials={"api_key": "tvly-1"})
+        self.assertNotIn("All customers", self.client.get(LIST_URL, **HTMX).content.decode())
+
+    @override_settings(HUMR_PLATFORM_OWNER_ORG_SLUG="keys-org")
+    def test_owner_edits_platform_row_key(self) -> None:
+        self.client.force_login(self.admin)
+        cred = PlatformSharedCredential.objects.create(
+            provider="openai-api", credentials={"api_key": "sk-old"}, metadata={"validated_at": "2026-01-01T00:00:00+00:00"},
+        )
+        with _patch_openai(_ok_openai_response()):
+            response = self.client.post(f"/integrations/org/provider-keys/{cred.id}/edit/", data={"scope": "platform", "api_key": "sk-new"})
+        self.assertEqual(response["HX-Trigger"], "sharedKeysChanged")
+        cred.refresh_from_db()
+        self.assertEqual(cred.credentials, {"api_key": "sk-new"})
+
+    @override_settings(HUMR_PLATFORM_OWNER_ORG_SLUG="keys-org")
+    def test_owner_deletes_platform_row(self) -> None:
+        self.client.force_login(self.admin)
+        cred = PlatformSharedCredential.objects.create(provider="tavily", credentials={"api_key": "tvly-1"})
+        self.client.post(f"/integrations/org/provider-keys/{cred.id}/delete/")
+        self.assertFalse(PlatformSharedCredential.objects.filter(id=cred.id).exists())
+
+    def test_non_owner_cannot_reach_platform_row_edit(self) -> None:
+        self.client.force_login(self.admin)
+        cred = PlatformSharedCredential.objects.create(provider="tavily", credentials={"api_key": "tvly-1"})
+        self.assertEqual(self.client.get(f"/integrations/org/provider-keys/{cred.id}/edit/").status_code, 404)
 
 
 class TestMultiTenancy(SharedKeysUITestBase):
