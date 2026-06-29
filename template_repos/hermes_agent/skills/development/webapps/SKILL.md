@@ -96,8 +96,8 @@ Use the *exact host* from the CLI's output, with the trailing slash.
 
 ## Framework gotchas
 
-- **Phoenix / Elixir** — read [`elixir.md`](elixir.md) before scaffolding (sandbox bind constraints).
-- **ttyd** — read [`ttyd.md`](ttyd.md) before registering a web terminal.
+- **Phoenix / Elixir** — read [`elixir.md`](references/elixir.md) before scaffolding (sandbox bind constraints).
+- **ttyd** — read [`ttyd.md`](references/ttyd.md) before registering a web terminal.
 
 ## Don'ts
 
