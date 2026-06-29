@@ -64,6 +64,10 @@ class Organization(models.Model):
         WORKOS = "workos"
         OIDC = "oidc"
 
+    class LlmPreset(models.TextChoices):
+        BEDROCK = "bedrock", "Bedrock"
+        CODEX = "codex", "OpenAI Codex"
+
     id = models.UUIDField(
         primary_key=True,
         default=uuid.uuid7,
@@ -85,6 +89,15 @@ class Organization(models.Model):
     oidc_client_id = models.CharField(max_length=255, blank=True)
     oidc_client_secret = models.CharField(max_length=500, blank=True)
     bootstrap_admin_email = models.EmailField(blank=True, default="")
+    llm_preset = models.CharField(
+        max_length=32,
+        default=LlmPreset.CODEX,
+        choices=LlmPreset.choices,
+        help_text=(
+            "LLM preset for personal assistants deployed by this org. Defaults to "
+            "Codex; set to Bedrock per-customer in admin for the demo."
+        ),
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

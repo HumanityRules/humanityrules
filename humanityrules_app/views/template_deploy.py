@@ -16,6 +16,7 @@ from django.utils.text import slugify
 
 from humanityrules_app import models
 from humanityrules_app.services import abac_service
+from humanityrules_app.services import llm_preset_service
 from humanityrules_app.services.app_templates import template_deploy_service
 from humanityrules_app.views import base
 
@@ -28,12 +29,19 @@ def _editable_variables(template: models.AppTemplate) -> list[dict]:
     The deploy form renders one input per user-editable var regardless of which
     container declares it; at deploy time, overrides are applied by name to
     every container that has a matching variable.
+
+    LLM provider/model vars are omitted: the model is an org-level preset
+    (Organization.llm_preset, applied in template_deploy_service), not a
+    per-deploy choice, so they never surface in the form.
     """
     result: list[dict] = []
     for container in template.containers or []:
         for v in container.get("configurable_variables") or []:
-            if v.get("user_editable"):
-                result.append(v)
+            if not v.get("user_editable"):
+                continue
+            if v["name"] in llm_preset_service.DEPLOY_FORM_HIDDEN_VARS:
+                continue
+            result.append(v)
     return result
 
 
