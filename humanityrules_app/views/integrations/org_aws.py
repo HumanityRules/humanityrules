@@ -11,6 +11,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from ...models import AWSAccount, Organization
+from .org_shared_keys import SHARED_KEYS_URL
 from .. import base
 
 logger = logging.getLogger(__name__)
@@ -18,11 +19,11 @@ logger = logging.getLogger(__name__)
 
 @login_required
 def integrations_root(request: HttpRequest) -> HttpResponse:
-    """Redirect /integrations/ to the default tab (AWS accounts)."""
+    """Redirect /integrations/ to the default tab (Provider Keys)."""
     forbidden = base.require_org_admin(request)
     if forbidden:
         return forbidden
-    return HttpResponseRedirect("/integrations/org/aws-accounts/")
+    return HttpResponseRedirect(SHARED_KEYS_URL)
 
 
 @login_required
