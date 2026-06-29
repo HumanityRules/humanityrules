@@ -6,8 +6,9 @@ from django.db.models import Max, OuterRef, Prefetch, Subquery, Value
 from django.db.models.functions import Coalesce
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils.text import slugify
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
 
 from humanityrules_app.models import App, Deployment, Repository, ResourceTag, Workspace
 from humanityrules_app.services import abac_service
@@ -155,6 +156,51 @@ def workspace_create(request: HttpRequest) -> HttpResponse:
         created_by=request.user,
     )
     return redirect("workspace_detail", workspace_slug=workspace.slug)
+
+
+@login_required
+@require_GET
+def workspace_remove_confirm(request: HttpRequest, workspace_slug: str) -> HttpResponse:
+    """Return the delete-workspace confirmation modal HTML."""
+    workspace = get_object_or_404(Workspace, slug=workspace_slug, organization=request.user.current_organization)
+
+    denied = abac_view_checks.check_abac(request, workspace, "workspace", "workspace:admin")
+    if denied:
+        return denied
+
+    app_count = workspace.apps.count()
+    datastore_count = workspace.datastores.count()
+    context = {
+        "workspace": workspace,
+        "post_url": reverse("workspace_remove", kwargs={"workspace_slug": workspace.slug}),
+        "app_count": app_count,
+        "datastore_count": datastore_count,
+        "is_empty": app_count == 0 and datastore_count == 0,
+    }
+    return render(request, "humanityrules_app/workspaces/_workspace_remove_confirm_modal.html", context=context)
+
+
+@login_required
+@require_POST
+def workspace_remove(request: HttpRequest, workspace_slug: str) -> HttpResponse:
+    """Delete a workspace. Refuses (422) while it still contains apps or datastores."""
+    workspace = get_object_or_404(Workspace, slug=workspace_slug, organization=request.user.current_organization)
+
+    denied = abac_view_checks.check_abac(request, workspace, "workspace", "workspace:admin")
+    if denied:
+        return denied
+
+    # Block deletion of a non-empty workspace: apps and datastores back real infrastructure
+    # and must be torn down through their own removal flows first. A bare workspace.delete()
+    # would DB-cascade those rows away without any teardown, orphaning the resources.
+    if workspace.apps.exists() or workspace.datastores.exists():
+        return HttpResponse(status=422)
+
+    workspace.delete()
+
+    response = HttpResponse(status=200)
+    response["HX-Redirect"] = reverse("workspaces")
+    return response
 
 
 @login_required
