@@ -1,12 +1,23 @@
 :root {
   --bg: #0b0d12;
-  --panel: #0f1117;
-  --grid: #1f2430;
+  --panel: #0d1016;
   --fg: #e5e7eb;
   --muted: #6b7280;
-  --snake: #22c55e;
-  --snake-head: #4ade80;
+
+  /* RGB triplets for effects that animate their own alpha (canvas + CSS). */
+  --grid-rgb: 148, 163, 184;
+  --accent-rgb: 34, 197, 94;
+  --food-rgb: 248, 113, 113;
+
+  /* Snake palette: bright head, mid body, dark tail (read by snakes.js). */
+  --snake-head: #86efac;
+  --snake: #34d399;
+  --snake-tail: #15803d;
+
+  /* Food orb: light core, body, dark edge. */
   --food: #ef4444;
+  --food-core: #fecaca;
+  --food-deep: #b91c1c;
 }
 
 * { box-sizing: border-box; }
@@ -25,6 +36,17 @@ body {
   padding: 16px;
 }
 
+/* Ambient glow that slowly breathes behind everything. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(820px 520px at 50% 4%, rgba(var(--accent-rgb), 0.07), transparent 70%);
+  animation: ambient 8s ease-in-out infinite;
+}
+
 .game { width: min(92vw, 480px); }
 
 .hud {
@@ -37,7 +59,14 @@ body {
 .hud h1 {
   margin: 0;
   font-size: 1.4rem;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.04em;
+  background: linear-gradient(90deg, var(--snake-head), var(--snake), var(--snake-head));
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0 7px rgba(var(--accent-rgb), 0.4));
+  animation: shimmer 6s linear infinite;
 }
 
 .scores {
@@ -48,8 +77,13 @@ body {
 }
 
 .scores strong {
+  display: inline-block;
   color: var(--fg);
   font-variant-numeric: tabular-nums;
+}
+
+.scores strong.pop {
+  animation: pop 0.4s ease;
 }
 
 .board-wrap {
@@ -62,8 +96,9 @@ canvas {
   height: 100%;
   display: block;
   background: var(--panel);
-  border: 1px solid var(--grid);
+  border: 1px solid rgba(var(--accent-rgb), 0.18);
   border-radius: 12px;
+  animation: boardglow 5s ease-in-out infinite;
 }
 
 .overlay {
@@ -77,16 +112,71 @@ canvas {
   background: rgba(11, 13, 18, 0.72);
   backdrop-filter: blur(2px);
   border-radius: 12px;
+  animation: fade-in 0.4s ease;
 }
 
 .overlay.hidden { display: none; }
 
-.overlay h2 { margin: 0; font-size: 1.6rem; }
-.overlay p { margin: 0; color: var(--muted); }
+.overlay h2 {
+  margin: 0;
+  font-size: 1.6rem;
+  animation: title-pulse 2.6s ease-in-out infinite;
+}
+
+.overlay p {
+  margin: 0;
+  color: var(--muted);
+  animation: breathe 2.4s ease-in-out infinite;
+}
 
 .hint {
   margin-top: 12px;
   text-align: center;
   color: var(--muted);
   font-size: 0.85rem;
+}
+
+@keyframes shimmer {
+  to { background-position: 200% 0; }
+}
+
+@keyframes pop {
+  0% { transform: scale(1); }
+  35% {
+    transform: scale(1.55);
+    color: var(--snake-head);
+    text-shadow: 0 0 12px rgba(var(--accent-rgb), 0.8);
+  }
+  100% { transform: scale(1); }
+}
+
+@keyframes boardglow {
+  0%, 100% { box-shadow: 0 0 22px rgba(var(--accent-rgb), 0.10), inset 0 0 44px rgba(0, 0, 0, 0.45); }
+  50% { box-shadow: 0 0 42px rgba(var(--accent-rgb), 0.22), inset 0 0 44px rgba(0, 0, 0, 0.4); }
+}
+
+@keyframes title-pulse {
+  0%, 100% { text-shadow: 0 0 12px rgba(var(--accent-rgb), 0.4); }
+  50% { text-shadow: 0 0 24px rgba(var(--accent-rgb), 0.75); }
+}
+
+@keyframes breathe {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 0.95; }
+}
+
+@keyframes ambient {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Respect users who ask for less motion: drop the decorative CSS animation.
+   The game itself still renders normally. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before { animation: none !important; }
 }

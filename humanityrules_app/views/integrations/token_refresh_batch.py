@@ -85,6 +85,20 @@ def integrations_tokens_batch(request: HttpRequest) -> JsonResponse:
         # not look like an error from this endpoint's perspective.
         return JsonResponse({"results": {slug: {"outcome": "absent"} for slug in requested_providers}})
 
+    # The env bearer is org-wide, so before handing back tokens verify the requested app
+    # actually belongs to owner_username — the ResourceTag owner check every other broker
+    # endpoint does. Without it, any app holding the bearer could pull another owner/app's
+    # outcome. A missing or unowned app is rejected (404/403), not degraded to absent.
+    _owned_slug, ownership_error = broker_request_context.resolve_owned_app_slug(
+        app_slug=app_slug, environment=environment, owner_user=user,
+    )
+    if ownership_error is not None:
+        logger.error(
+            "batched token refresh: app ownership check failed env=%s owner=%s app=%s",
+            environment.slug, owner_username, app_slug,
+        )
+        return ownership_error
+
     logger.info(
         "batched token refresh: env=%s owner=%s app=%s providers=%s",
         environment.slug, owner_username, app_slug, requested_providers,
@@ -111,8 +125,8 @@ def integrations_tokens_batch(request: HttpRequest) -> JsonResponse:
 
     # Org-provisioned shared credentials win over the user's own pasted key.
     # Resolve them first (DB-only, no upstream calls); whatever they cover drops
-    # out of the personal-refresh dispatch below. `app` may be None when app_slug
-    # names no App row — workspace-scoped shares then fail closed in the resolver.
+    # out of the personal-refresh dispatch below. The ownership guard above already
+    # confirmed this app exists and is owned by owner_username, so the lookup hits.
     organization = environment.aws_account.organization
     app = App.objects.filter(organization=organization, slug=app_slug).first()
     personal_specs = {}

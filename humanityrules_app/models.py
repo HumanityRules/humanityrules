@@ -892,6 +892,32 @@ class App(models.Model):
         return self.name
 
 
+class SandboxSlugClaim(models.Model):
+    """Globally-unique, first-come reservation of an app slug in the shared HumR sandbox.
+
+    Every org's sandbox resolves to one shared base infra, so app resources are named
+    humr-sandbox-{slug}-* across all orgs — the slug is a single global namespace. The
+    UNIQUE(slug) here is the atomic backstop: two concurrent first-time deploys racing the
+    same new slug can't both win the INSERT (a plain check-then-create lets both pass).
+    Only the shared sandbox writes here; dedicated customer accounts have a private AWS
+    account per org and may legitimately reuse a slug across orgs. There is no FK to App:
+    the claim is reserved before the App row exists (so a race loss creates no orphan App)
+    and released explicitly on app removal (see app_remove_executor / sandbox_service).
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
+    slug = models.SlugField(max_length=255, unique=True)
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="sandbox_slug_claims",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self) -> str:
+        return self.slug
+
+
 class Conversation(models.Model):
     """A conversation between a user and the agent."""
 

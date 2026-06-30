@@ -3,6 +3,7 @@
 from unittest.mock import patch
 
 from asgiref.sync import async_to_sync
+from django.db import IntegrityError, transaction
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
@@ -109,34 +110,33 @@ class TestSandboxAppNameCollision(TestCase):
             .get(aws_account__organization=organization, slug="sandbox")
         )
 
+    def _claim(self, organization: models.Organization, slug: str) -> None:
+        async_to_sync(sandbox_service.aclaim_sandbox_app_slug)(
+            app_slug=slug,
+            organization_id=organization.id,
+            environment=self._sandbox_env(organization),
+        )
+
     def test_conflicting_slug_from_other_org_is_rejected(self) -> None:
         org_a = models.Organization.objects.create(name="Org A", slug="org-a")
         org_b = models.Organization.objects.create(name="Org B", slug="org-b")
         app_a = _make_app(org_a, "demo")
-        app_b = _make_app(org_b, "demo")
-        # Org A claims "demo" by having a deployment in its sandbox env.
+        # Org A claims "demo" by having a committed deployment in its sandbox env.
         _make_deployment(app_a, self._sandbox_env(org_a))
         with self.assertRaises(ValueError):
-            async_to_sync(sandbox_service.acheck_sandbox_app_name_available)(
-                app=app_b,
-                environment=self._sandbox_env(org_b),
-            )
+            self._claim(org_b, "demo")
 
     def test_same_org_redeploy_is_allowed(self) -> None:
         org_a = models.Organization.objects.create(name="Org A", slug="org-a")
         app_a = _make_app(org_a, "demo")
         _make_deployment(app_a, self._sandbox_env(org_a))
         # No raise: the only conflicting deployment belongs to the same org.
-        async_to_sync(sandbox_service.acheck_sandbox_app_name_available)(
-            app=app_a,
-            environment=self._sandbox_env(org_a),
-        )
+        self._claim(org_a, "demo")
 
     def test_non_sandbox_env_skips_check(self) -> None:
         org_a = models.Organization.objects.create(name="Org A", slug="org-a")
         org_b = models.Organization.objects.create(name="Org B", slug="org-b")
         app_a = _make_app(org_a, "demo")
-        app_b = _make_app(org_b, "demo")
         _make_deployment(app_a, self._sandbox_env(org_a))
         regular_account = models.AWSAccount.objects.create(organization=org_b, name="Own AWS")
         regular_env = (
@@ -150,11 +150,47 @@ class TestSandboxAppNameCollision(TestCase):
                 status=models.Environment.Status.READY,
             ).id)
         )
-        # Conflicting slug exists in the sandbox, but this deploy targets a non-sandbox env.
-        async_to_sync(sandbox_service.acheck_sandbox_app_name_available)(
-            app=app_b,
+        # Conflicting slug exists in the sandbox, but this deploy targets a non-sandbox env:
+        # no raise and no claim row is written.
+        async_to_sync(sandbox_service.aclaim_sandbox_app_slug)(
+            app_slug="demo",
+            organization_id=org_b.id,
             environment=regular_env,
         )
+        self.assertFalse(models.SandboxSlugClaim.objects.filter(slug="demo").exists())
+
+    def test_claim_row_written_on_first_reservation(self) -> None:
+        org_a = models.Organization.objects.create(name="Org A", slug="org-a")
+        self._claim(org_a, "demo")
+        self.assertEqual(models.SandboxSlugClaim.objects.get(slug="demo").organization_id, org_a.id)
+
+    def test_claim_blocks_other_org_before_any_deployment_exists(self) -> None:
+        # The race the claim row exists to close: org A has reserved "demo" but committed no
+        # Deployment yet, so the friendly Deployment pre-check passes — only the UNIQUE(slug)
+        # row stops org B from also taking it.
+        org_a = models.Organization.objects.create(name="Org A", slug="org-a")
+        org_b = models.Organization.objects.create(name="Org B", slug="org-b")
+        self._claim(org_a, "demo")
+        self.assertFalse(models.Deployment.objects.filter(app__slug="demo").exists())
+        with self.assertRaises(ValueError):
+            self._claim(org_b, "demo")
+
+    def test_duplicate_slug_claim_violates_db_constraint(self) -> None:
+        org_a = models.Organization.objects.create(name="Org A", slug="org-a")
+        org_b = models.Organization.objects.create(name="Org B", slug="org-b")
+        models.SandboxSlugClaim.objects.create(slug="demo", organization=org_a)
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            models.SandboxSlugClaim.objects.create(slug="demo", organization=org_b)
+
+    def test_release_frees_claim_for_reuse(self) -> None:
+        org_a = models.Organization.objects.create(name="Org A", slug="org-a")
+        org_b = models.Organization.objects.create(name="Org B", slug="org-b")
+        self._claim(org_a, "demo")
+        sandbox_service.release_sandbox_app_slug(app_slug="demo", organization_id=org_a.id)
+        self.assertFalse(models.SandboxSlugClaim.objects.filter(slug="demo").exists())
+        # With org A's claim released and no deployment, org B can now take the slug.
+        self._claim(org_b, "demo")
+        self.assertEqual(models.SandboxSlugClaim.objects.get(slug="demo").organization_id, org_b.id)
 
 
 @override_settings(**SANDBOX_SETTINGS)

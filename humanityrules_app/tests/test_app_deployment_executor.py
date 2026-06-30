@@ -171,3 +171,31 @@ class TestAppDeploymentExecutor(TestCase):
         self.assertEqual(deployment.status, models.Deployment.Status.FAILED)
         self.assertIn("Refused", deployment.status_message)
 
+    def test_deploy_blueprint_rejects_cross_org_sandbox_slug(self) -> None:
+        """End-to-end through the agent deploy path: a slug another org already holds in the
+        shared sandbox is rejected (by the slug reservation) before any Deployment is created.
+        The template path (deploy_from_template) reserves via the same aclaim_sandbox_app_slug."""
+        self.aws_account.is_humr_sandbox = True
+        self.aws_account.save(update_fields=["is_humr_sandbox"])
+        other_org = models.Organization.objects.create(name="Other Sandbox Org", slug="other-sb")
+        models.SandboxSlugClaim.objects.create(slug=self.app.slug, organization=other_org)
+
+        async_to_sync(agent_tools.save_blueprint)(
+            conversation=self.conversation,
+            workspace=self.workspace,
+            user=self.user,
+            environment_slug=self.environment.slug,
+            branch=None,
+            cpu=256,
+            memory=512,
+            environment_variables=None,
+            app_secrets=None,
+            datastore_id=None,
+            subdomain=None,
+        )
+        with self.assertRaises(ValueError):
+            async_to_sync(agent_tools.deploy_blueprint)(conversation=self.conversation)
+
+        # Rejected before creating a Deployment row for this org's app.
+        self.assertFalse(models.Deployment.objects.filter(app=self.app).exists())
+

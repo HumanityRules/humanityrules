@@ -16,6 +16,7 @@ from django.conf import settings
 from django.db import transaction
 
 from humanityrules_app import models
+from humanityrules_app.services import sandbox_service
 from humanityrules_app.services.infra_customer import cloudformation_utils
 from humanityrules_app.services.infra_customer import deploy_app
 from humanityrules_app.services.infra_customer import iam_utils
@@ -197,6 +198,10 @@ def run_removal(job_id: str) -> bool:
     with transaction.atomic():
         if job.delete_policies:
             _delete_matching_policies(organization_id=app.organization_id, app_slug=app.slug)
+        # Release the shared-sandbox slug claim (if any) so the name is free for reuse. It is
+        # keyed by (slug, org) with no FK to App, so app.delete() does not cascade it. Removal,
+        # not teardown, frees the slug — a torn-down app keeps its App row and can redeploy.
+        sandbox_service.release_sandbox_app_slug(app_slug=app.slug, organization_id=app.organization_id)
         # Cascade deletes DeploymentBlueprint, Deployment, DeploymentLog, AppPermissions,
         # AppPermissionRequest, and ResourceTag rows that point at this app.
         # Conversation.context_app is SET_NULL. Policy has no FK to App; matching rows

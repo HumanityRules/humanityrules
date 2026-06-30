@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "snakes",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8100", "--bind", "127.0.0.1", "--directory", "template_repos/hermes_agent/webapps/examples/snakes"],
+      "port": 8100
+    }
+  ]
+}
