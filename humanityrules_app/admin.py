@@ -64,15 +64,15 @@ class UserAdmin(BaseUserAdmin):
 
 @admin.register(Organization)
 class OrganizationAdmin(admin.ModelAdmin):
-    list_display = ["name", "slug", "auth_provider", "default_org_role", "bootstrap_admin_email", "created_at", "updated_at"]
-    list_filter = ["auth_provider"]
+    list_display = ["name", "slug", "auth_provider", "llm_preset", "default_org_role", "bootstrap_admin_email", "created_at", "updated_at"]
+    list_filter = ["auth_provider", "llm_preset"]
     search_fields = ["name", "slug", "bootstrap_admin_email", "oidc_issuer_url", "oidc_client_id"]
     prepopulated_fields = {"slug": ("name",)}
     readonly_fields = ["id", "created_at", "updated_at"]
 
     fieldsets = (
         (None, {
-            "fields": ("name", "slug", "default_org_role", "bootstrap_admin_email"),
+            "fields": ("name", "slug", "default_org_role", "bootstrap_admin_email", "llm_preset"),
         }),
         ("Authentication", {
             "fields": ("auth_provider", "oidc_issuer_url", "oidc_client_id", "oidc_client_secret"),

@@ -6,10 +6,13 @@ Workspace list, detail, create, and tag management access control.
 from django.test import TestCase
 
 from humanityrules_app.models import (
+    App,
+    Datastore,
     IdentityAttribute,
     Organization,
     OrganizationMembership,
     Policy,
+    Repository,
     ResourceTag,
     User,
     Workspace,
@@ -124,6 +127,77 @@ class TestWorkspaceEndpoints(TestCase):
     def test_no_access_gets_403_on_workspace_create(self) -> None:
         self.client.force_login(self.no_access_user)
         response = self.client.post("/workspaces/create/", {"name": "New WS"})
+        self.assertEqual(response.status_code, 403)
+
+    # --- Workspace Delete (requires workspace:admin; blocked when non-empty) ---
+
+    def test_admin_can_get_workspace_remove_confirm(self) -> None:
+        self.client.force_login(self.admin_user)
+        response = self.client.get("/workspaces/engineering/remove-confirm/", **HTMX)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["is_empty"])
+
+    def test_viewer_gets_403_on_workspace_remove_confirm(self) -> None:
+        self.client.force_login(self.viewer_user)
+        response = self.client.get("/workspaces/engineering/remove-confirm/", **HTMX)
+        self.assertEqual(response.status_code, 403)
+
+    def test_editor_gets_403_on_workspace_remove(self) -> None:
+        """workspace:edit is not enough — workspace:admin is required to delete."""
+        self.client.force_login(self.editor_user)
+        response = self.client.post("/workspaces/engineering/remove/")
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(Workspace.objects.filter(pk=self.ws_eng.pk).exists())
+
+    def test_admin_can_delete_empty_workspace(self) -> None:
+        self.client.force_login(self.admin_user)
+        ws = Workspace.objects.create(organization=self.org, name="Disposable", slug="disposable")
+        response = self.client.post("/workspaces/disposable/remove/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["HX-Redirect"], "/workspaces/")
+        self.assertFalse(Workspace.objects.filter(pk=ws.pk).exists())
+
+    def test_admin_cannot_delete_workspace_with_app(self) -> None:
+        self.client.force_login(self.admin_user)
+        repo = Repository.objects.create(
+            organization=self.org, provider="github", name="repo",
+            full_name="org/repo", clone_url="https://github.com/org/repo.git",
+        )
+        App.objects.create(
+            organization=self.org, workspace=self.ws_eng, repository=repo,
+            name="MyApp", slug="myapp", app_type="web", build_strategy="dockerfile",
+            branch="main", container_port=8000, health_check_path="/health",
+        )
+        response = self.client.post("/workspaces/engineering/remove/")
+        self.assertEqual(response.status_code, 422)
+        self.assertTrue(Workspace.objects.filter(pk=self.ws_eng.pk).exists())
+
+    def test_admin_cannot_delete_workspace_with_datastore(self) -> None:
+        self.client.force_login(self.admin_user)
+        Datastore.objects.create(
+            workspace=self.ws_fin, name="Primary", slug="primary",
+            engine="aurora-postgresql", engine_version="15.4",
+            deployment_mode="aurora_serverless_v2", database_name="appdb",
+        )
+        response = self.client.post("/workspaces/finance/remove/")
+        self.assertEqual(response.status_code, 422)
+        self.assertTrue(Workspace.objects.filter(pk=self.ws_fin.pk).exists())
+
+    def test_remove_confirm_reports_non_empty(self) -> None:
+        self.client.force_login(self.admin_user)
+        Datastore.objects.create(
+            workspace=self.ws_fin, name="Primary", slug="primary",
+            engine="aurora-postgresql", engine_version="15.4",
+            deployment_mode="aurora_serverless_v2", database_name="appdb",
+        )
+        response = self.client.get("/workspaces/finance/remove-confirm/", **HTMX)
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.context["is_empty"])
+        self.assertEqual(response.context["datastore_count"], 1)
+
+    def test_viewer_gets_403_on_workspace_remove(self) -> None:
+        self.client.force_login(self.viewer_user)
+        response = self.client.post("/workspaces/engineering/remove/")
         self.assertEqual(response.status_code, 403)
 
     # --- Workspace Tag Management (requires workspace:admin) ---

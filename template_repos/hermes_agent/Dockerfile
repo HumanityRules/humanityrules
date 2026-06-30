@@ -1,6 +1,54 @@
 # syntax=docker/dockerfile:1
 
 ARG WEBUI_BASE_VERSION=0.51.293
+
+# ============================================================================
+# Erlang/OTP + Elixir builder stage.
+#
+# Built from the SAME base image as the final stage so the trees we copy out
+# link against the same glibc/libssl/libncurses at runtime (ABI match on Debian
+# trixie / glibc 2.41 — precompiled OTP from builds.hex.pm targets older Ubuntu
+# and is risky here). Build deps (gcc, libssl-dev, …) stay in this throwaway
+# stage and never reach the final image or the checkpointed /usr; only the
+# finished /opt/humr/{erlang,elixir} trees are COPYed forward. OTP installs at
+# its final canonical prefix (/opt/humr/erlang), which the persistent-root
+# runner re-syncs to that same path on every boot, so the absolute ROOTDIR
+# baked into `erl` stays correct without relocation.
+# ============================================================================
+FROM ghcr.io/nesquena/hermes-webui:${WEBUI_BASE_VERSION} AS erlang-builder
+USER root
+# Elixir 1.20.x ships an elixir-otp-29 precompiled build, so OTP 29 + Elixir
+# 1.20 are a compatible pair. Bump all three together.
+ARG OTP_VERSION=29.0.2
+ARG ELIXIR_VERSION=1.20.2
+ARG ELIXIR_OTP_RELEASE=29
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential autoconf m4 libncurses-dev libssl-dev zlib1g-dev \
+        unzip curl ca-certificates \
+    && curl -fsSL -o /tmp/otp.tar.gz \
+        "https://github.com/erlang/otp/releases/download/OTP-${OTP_VERSION}/otp_src_${OTP_VERSION}.tar.gz" \
+    && mkdir -p /tmp/otp && tar -xzf /tmp/otp.tar.gz -C /tmp/otp --strip-components=1 \
+    && cd /tmp/otp \
+    && ./configure --prefix=/opt/humr/erlang \
+        --without-wx --without-observer --without-debugger --without-et --without-javac \
+    && make -j"$(nproc)" \
+    && make install \
+    && cd / && rm -rf /tmp/otp /tmp/otp.tar.gz \
+    && curl -fsSL -o /tmp/elixir.zip \
+        "https://github.com/elixir-lang/elixir/releases/download/v${ELIXIR_VERSION}/elixir-otp-${ELIXIR_OTP_RELEASE}.zip" \
+    && mkdir -p /opt/humr/elixir \
+    && unzip -q /tmp/elixir.zip -d /opt/humr/elixir \
+    && rm -f /tmp/elixir.zip \
+    && export PATH="/opt/humr/erlang/bin:/opt/humr/elixir/bin:${PATH}" \
+    && erl -noshell -eval 'ok = crypto:start(), io:format("OTP ~s crypto OK~n", [erlang:system_info(otp_release)]), halt().' \
+    && elixir --version
+
+# ============================================================================
+# Final image.
+# ============================================================================
 FROM ghcr.io/nesquena/hermes-webui:${WEBUI_BASE_VERSION}
 
 # Re-declare so the post-FROM stage can use it: the vendor guard asserts the
@@ -230,6 +278,39 @@ RUN arch="$(dpkg --print-architecture)" \
     && agent-browser --version \
     && npm cache clean --force \
     && rm -rf /root/.npm
+
+# Erlang/OTP + Elixir under /opt/humr (built in the erlang-builder stage above).
+# Image-owned: re-synced from the image on every boot and excluded from the EFS
+# checkpoint (persistent-root-runner.sh lists /opt/humr in IMAGE_OWNED_DIRS), so
+# this multi-hundred-MB runtime never lands in the shutdown tarball — the same
+# treatment as Node. A runtime `brew install elixir` (the old webapps Elixir
+# skill) would instead install under /home, which IS checkpointed, and would
+# inflate every backup by the full Erlang+Elixir footprint. erl/elixir/mix/iex
+# are symlinked into $HUMR_BIN_DIR, already on the agent's PATH. The base image
+# already ships the runtime libs OTP links against (libssl3, libncurses6,
+# libtinfo6). Kept above the HUMR-owned source COPYs so source edits don't
+# rebuild it.
+COPY --from=erlang-builder /opt/humr/erlang /opt/humr/erlang
+COPY --from=erlang-builder /opt/humr/elixir /opt/humr/elixir
+RUN ln -sf /opt/humr/erlang/bin/erl     "$HUMR_BIN_DIR/erl" \
+    && ln -sf /opt/humr/erlang/bin/erlc    "$HUMR_BIN_DIR/erlc" \
+    && ln -sf /opt/humr/erlang/bin/escript "$HUMR_BIN_DIR/escript" \
+    && ln -sf /opt/humr/elixir/bin/elixir  "$HUMR_BIN_DIR/elixir" \
+    && ln -sf /opt/humr/elixir/bin/elixirc "$HUMR_BIN_DIR/elixirc" \
+    && ln -sf /opt/humr/elixir/bin/mix     "$HUMR_BIN_DIR/mix" \
+    && ln -sf /opt/humr/elixir/bin/iex     "$HUMR_BIN_DIR/iex" \
+    && erl -noshell -eval 'ok = crypto:start(), halt().' \
+    && elixir --version
+
+# Elixir sandbox config. nono blocks loopback binds outside 4000-4019, which
+# otherwise makes mix's build lock (Mix.Sync.Lock) and Erlang release EPMD
+# registration fail fatally; +fnu covers the image's latin1 locale. Set here
+# with the runtime and threaded into the sandbox via the nono profile's
+# allow_vars (hermes-nono-profile.json). They only affect Erlang/Elixir.
+ENV MIX_OS_CONCURRENCY_LOCK=0 \
+    ELIXIR_ERL_OPTIONS=+fnu \
+    RELEASE_DISTRIBUTION=none \
+    ERL_EPMD_PORT=-1
 
 # HUMR-owned source below this line. Keep these COPY layers last so edits to
 # humr_runtime/, webui-extension/, and skills/ reuse the cached dependency
