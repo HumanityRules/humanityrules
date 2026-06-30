@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Snakes</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="game">
+    <header class="hud">
+      <h1>Snakes</h1>
+      <div class="scores">
+        <span>Score <strong id="score">0</strong></span>
+        <span>Best <strong id="best">0</strong></span>
+      </div>
+    </header>
+
+    <div class="board-wrap">
+      <canvas id="board" width="480" height="480"></canvas>
+      <div id="overlay" class="overlay">
+        <h2 id="overlay-title">Snakes</h2>
+        <p id="overlay-text">Press Space or tap to start</p>
+      </div>
+    </div>
+
+    <footer class="hint">Arrow keys / WASD to move &middot; Space to start &amp; pause</footer>
+  </main>
+
+  <script src="snakes.js"></script>
+</body>
+</html>

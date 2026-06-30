@@ -94,6 +94,18 @@ Use the *exact host* from the CLI's output, with the trailing slash.
 - **Resync supervisor state:** `webapps reload`. Use only when YAML/daemon/routes look out of sync or after an explicit break-glass YAML repair that the CLI cannot express.
 - **Delete (total):** confirm with the user that source code AND logs will be removed, then `webapps delete <slug> --yes`.
 
+## Bundled example apps
+
+Some agents ship with example webapps (e.g. `snakes`) that are auto-installed on first deploy under `/workspace/webapps/projects/<slug>/`, like any user app. By default they **refresh**: every deploy overwrites the installed copy with the latest bundled version, so platform updates to the example land automatically.
+
+If the user customizes one of these apps and wants to keep their changes, set its update policy to **freeze** by writing `freeze` into its marker file:
+
+```bash
+echo freeze > /workspace/webapps/.seeded/<slug>
+```
+
+A frozen app is never overwritten on deploy. To resume updates, write `refresh` (or delete the marker). This only affects bundled examples; apps you create with `webapps create` are never touched by the seeder.
+
 ## Framework gotchas
 
 - **Phoenix / Elixir** — read [`elixir.md`](references/elixir.md) before scaffolding (sandbox bind constraints).

@@ -1,0 +1,92 @@
+:root {
+  --bg: #0b0d12;
+  --panel: #0f1117;
+  --grid: #1f2430;
+  --fg: #e5e7eb;
+  --muted: #6b7280;
+  --snake: #22c55e;
+  --snake-head: #4ade80;
+  --food: #ef4444;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: radial-gradient(1200px 800px at 50% -10%, #11151f, var(--bg));
+  color: var(--fg);
+  font: 16px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+body {
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+
+.game { width: min(92vw, 480px); }
+
+.hud {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.hud h1 {
+  margin: 0;
+  font-size: 1.4rem;
+  letter-spacing: 0.02em;
+}
+
+.scores {
+  display: flex;
+  gap: 16px;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.scores strong {
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
+.board-wrap {
+  position: relative;
+  aspect-ratio: 1 / 1;
+}
+
+canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  background: var(--panel);
+  border: 1px solid var(--grid);
+  border-radius: 12px;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: 6px;
+  text-align: center;
+  padding: 16px;
+  background: rgba(11, 13, 18, 0.72);
+  backdrop-filter: blur(2px);
+  border-radius: 12px;
+}
+
+.overlay.hidden { display: none; }
+
+.overlay h2 { margin: 0; font-size: 1.6rem; }
+.overlay p { margin: 0; color: var(--muted); }
+
+.hint {
+  margin-top: 12px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
