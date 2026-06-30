@@ -1,0 +1,64 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dev Login - Humanity Rules</title>
+    <link rel="stylesheet" href="{% static 'css/dist/styles.css' %}">
+</head>
+<body class="h-full" style="background-color: #0f1623;">
+    <div class="flex min-h-full flex-col justify-center px-8 py-12">
+        <div class="mx-auto w-full max-w-md">
+            <div class="text-center">
+                <img class="mx-auto h-12 w-auto" src="{% static 'humanityrules_app/humr-logo-large.png' %}" alt="Humanity Rules">
+                <div class="mt-6 flex items-center justify-center gap-2">
+                    <h2 class="text-2xl font-bold text-white">Dev login</h2>
+                    <span class="rounded-md bg-amber-400/10 px-2 py-1 text-xs font-medium text-amber-300 ring-1 ring-inset ring-amber-400/30">DEBUG only</span>
+                </div>
+                <p class="mt-2 text-sm text-gray-400">Localhost bypass — not available in production.</p>
+            </div>
+
+            <div class="mt-8">
+                <label for="email" class="block text-sm font-medium text-gray-300">Create a new test user</label>
+                <form method="get" action="/auth/dev-login/" class="mt-2 flex gap-2">
+                    {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
+                    <input type="email" name="email" id="email" required autofocus
+                           placeholder="alice@test.com"
+                           class="block w-full rounded-md border-0 bg-white/5 py-2.5 px-3 text-white shadow-sm ring-1 ring-inset ring-white/10 placeholder:text-gray-500 focus:ring-2 focus:ring-inset focus:ring-indigo-500 text-sm">
+                    <button type="submit"
+                            class="flex shrink-0 items-center rounded-md bg-indigo-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-400 transition-colors">
+                        Start onboarding
+                    </button>
+                </form>
+                <p class="mt-2 text-xs text-gray-500">An unknown email runs the real new-user onboarding flow.</p>
+            </div>
+
+            {% if users %}
+            <div class="mt-8">
+                <p class="text-sm font-medium text-gray-300">Or log in as an existing user</p>
+                <ul class="mt-2 divide-y divide-white/5 overflow-hidden rounded-md ring-1 ring-inset ring-white/10">
+                    {% for u in users %}
+                    <li>
+                        <a href="/auth/dev-login/?email={{ u.email|urlencode }}{% if next_url %}&next={{ next_url|urlencode }}{% endif %}"
+                           class="flex items-center gap-3 px-3 py-3 hover:bg-white/5 transition-colors">
+                            <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-500/20 text-xs font-medium text-indigo-300">
+                                {{ u.email|slice:":2"|upper }}
+                            </span>
+                            <span class="min-w-0 flex-1">
+                                <span class="block truncate text-sm font-medium text-white">
+                                    {{ u.email }}{% if u.is_superuser %} <span class="text-xs font-normal text-amber-300/80">superuser</span>{% endif %}
+                                </span>
+                                <span class="block truncate text-xs text-gray-400">{{ u.current_organization.name }}</span>
+                            </span>
+                            <span class="shrink-0 text-sm text-indigo-400">Log in &rarr;</span>
+                        </a>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>

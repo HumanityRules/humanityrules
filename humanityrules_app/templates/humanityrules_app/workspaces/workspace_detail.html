@@ -1,7 +1,16 @@
 <div class="max-w-5xl">
-    <div class="mb-6">
-        {% url 'workspaces' as workspaces_url %}
-        {% include "humanityrules_app/partials/_breadcrumb.html" with p1_label="Workspaces" p1_url=workspaces_url current=workspace.name %}
+    <div class="mb-6 flex items-center justify-between gap-4">
+        <div class="flex-1 min-w-0">
+            {% url 'workspaces' as workspaces_url %}
+            {% include "humanityrules_app/partials/_breadcrumb.html" with p1_label="Workspaces" p1_url=workspaces_url current=workspace.name %}
+        </div>
+        {% if can_admin %}
+        <button type="button"
+                hx-get="{% url 'workspace_remove_confirm' workspace_slug=workspace.slug %}"
+                hx-target="#modal-container"
+                hx-swap="innerHTML"
+                class="shrink-0 rounded-lg bg-white dark:bg-gray-800 px-3 py-1.5 text-sm font-medium text-red-700 dark:text-red-400 ring-1 ring-inset ring-red-300 dark:ring-red-500/30 hover:bg-red-50 dark:hover:bg-red-500/10">Delete Workspace</button>
+        {% endif %}
     </div>
 
     {# Workspace details and tags side by side #}

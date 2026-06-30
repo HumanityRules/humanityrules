@@ -5,7 +5,7 @@ must stay outside the sandbox. This started with ChatGPT-subscription Codex auth
 and now also covers Nous Portal. Companion to `integrations_broker_design.md`
 for TLS-intercept mechanics.
 
-Status: implemented (backend + WebUI device dialog). Not yet wired: deploy-time selection of `HUMR_LLM_PROVIDER=openai-codex` (a deploy_app.py concern, not in this repo).
+Status: implemented (backend + WebUI device dialog). Deploy-time selection of `HUMR_LLM_PROVIDER=openai-codex` is now wired via the LLM-preset mechanism: `Organization.llm_preset` (per-customer, defaults to `codex`; `bedrock` selectable in the Django admin), resolved in `services/llm_preset_service.py` and applied as a deploy override in `template_deploy_service.deploy_from_template`. The `codex` preset sets both main and auxiliary providers to `openai-codex` (model hardcoded `gpt-5.5`). There is no env/global configuration — the per-org field is the only knob.
 
 ## Decisions
 
