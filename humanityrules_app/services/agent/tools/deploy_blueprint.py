@@ -68,8 +68,9 @@ async def deploy_blueprint(conversation: Conversation) -> DeployBlueprintResult:
             f"(status: {active_deployment.status}). Wait for it to complete."
         )
 
-    await sandbox_service.acheck_sandbox_app_name_available(
-        app=blueprint.app,
+    await sandbox_service.aclaim_sandbox_app_slug(
+        app_slug=blueprint.app.slug,
+        organization_id=blueprint.app.organization_id,
         environment=blueprint.environment,
     )
 

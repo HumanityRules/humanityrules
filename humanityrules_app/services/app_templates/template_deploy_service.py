@@ -11,6 +11,7 @@ from datetime import datetime
 from humanityrules_app import models
 from humanityrules_app.services import deployment_blueprint_effective_values
 from humanityrules_app.services import llm_preset_service
+from humanityrules_app.services import sandbox_service
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +165,15 @@ async def deploy_from_template(
     label: str,
 ) -> models.Deployment:
     """Create Repository + App + Blueprint + Deployment from a template and queue for deployment."""
+    # Reserve the slug before creating any rows: in the shared sandbox app resources are named
+    # humr-sandbox-{slug}-* across all orgs, so the slug is global and first-come. Raises a
+    # friendly ValueError if another org holds it, and a race loss here leaves no orphan App.
+    await sandbox_service.aclaim_sandbox_app_slug(
+        app_slug=app_slug,
+        organization_id=organization.id,
+        environment=environment,
+    )
+
     # The App row still carries identity/build fields for a single canonical
     # container — the ALB-target one (for multi-container templates) or the
     # sole container (for single-container templates). The rest of the

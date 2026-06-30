@@ -26,6 +26,7 @@ from humanityrules_app.models import (
     PlatformSharedCredential,
     OrganizationMembership,
     Repository,
+    ResourceTag,
     User,
     Workspace,
 )
@@ -71,6 +72,23 @@ class _BatchTokensEndpointTestBase(TransactionTestCase):
         IntegrationConfig.objects.create(
             provider=IntegrationConfig.Provider.GOOGLE,
             config=GOOGLE_WEB_CONFIG,
+        )
+        # The endpoint verifies owner_username owns app_slug (ResourceTag owner check),
+        # so seed app "hermes" owned by "vmendi" — the (owner, app) pair every test posts.
+        self.workspace = Workspace.objects.get(organization=self.org, slug="default")
+        self.repo = Repository.objects.create(
+            organization=self.org, provider="github", name="hermes",
+            full_name="org/hermes", clone_url="https://github.com/org/hermes.git",
+        )
+        self.app = App.objects.create(
+            organization=self.org, workspace=self.workspace, repository=self.repo,
+            name="Hermes", slug="hermes", app_type="web",
+            build_strategy="dockerfile", branch="main", container_port=8000,
+            health_check_path="/health",
+        )
+        ResourceTag.objects.create(
+            organization=self.org, resource_type=ResourceTag.ResourceType.APP,
+            app=self.app, key="owner", value="vmendi",
         )
         self.client = Client()
 
@@ -213,9 +231,8 @@ class TestConnectedProvidersReturnHasToken(_BatchTokensEndpointTestBase):
         self.assertEqual(google_result["metadata"], {})
 
     def test_telegram_passes_config_and_metadata_through(self) -> None:
-        # The batched endpoint trusts the env bearer; App-resource-tag
-        # ownership is enforced by the separate setup-session/submit
-        # vault flow before a row exists. No App fixture needed here.
+        # The base seeds app "hermes" owned by vmendi, so the ownership guard passes; this
+        # asserts config/metadata pass-through for a connected telegram credential.
         IntegrationUserCredential.objects.create(
             owner_user=self.user, environment=self.env, app_slug="hermes",
             provider=IntegrationUserCredential.Provider.TELEGRAM,
@@ -337,19 +354,12 @@ class TestSharedCredentials(_BatchTokensEndpointTestBase):
         super().setUp()
         # Seed the three credential system policies + the user's username identity attribute.
         abac_service.bootstrap_organization(organization=self.org, admin_user=self.user)
-        self.repo = Repository.objects.create(
-            organization=self.org, provider="github", name="hermes",
-            full_name="org/hermes", clone_url="https://github.com/org/hermes.git",
-        )
         self.ws_eng = Workspace.objects.create(organization=self.org, name="Engineering", slug="engineering")
         self.ws_sales = Workspace.objects.create(organization=self.org, name="Sales", slug="sales")
-        # The broker posts app_slug="hermes"; place that app in Engineering.
-        self.app = App.objects.create(
-            organization=self.org, workspace=self.ws_eng, repository=self.repo,
-            name="Hermes", slug="hermes", app_type="web",
-            build_strategy="dockerfile", branch="main", container_port=8000,
-            health_check_path="/health",
-        )
+        # The base seeds app "hermes" (owned by vmendi) in the default workspace; move it to
+        # Engineering so the workspace-scoped share tests resolve against it.
+        self.app.workspace = self.ws_eng
+        self.app.save()
 
     def _post_openrouter(self) -> dict:
         status, body = self._post(
@@ -537,3 +547,48 @@ class TestMixedConnectedAndAbsent(_BatchTokensEndpointTestBase):
         self.assertEqual(body["results"]["google"]["outcome"], "has_token")
         self.assertEqual(body["results"]["github"], {"outcome": "absent"})
         self.assertEqual(body["results"]["telegram"], {"outcome": "absent"})
+
+
+class TestAppOwnership(_BatchTokensEndpointTestBase):
+    """The env bearer is org-wide, so the endpoint must verify owner_username owns app_slug
+    before serving its tokens — a missing or unowned app is rejected, not degraded to absent."""
+
+    def _make_app(self, slug: str, owner_username: str | None) -> App:
+        repo = Repository.objects.create(
+            organization=self.org, provider="github", name=slug,
+            full_name=f"org/{slug}", clone_url=f"https://github.com/org/{slug}.git",
+        )
+        app = App.objects.create(
+            organization=self.org, workspace=self.workspace, repository=repo,
+            name=slug, slug=slug, app_type="web",
+            build_strategy="dockerfile", branch="main", container_port=8000,
+            health_check_path="/health",
+        )
+        if owner_username is not None:
+            ResourceTag.objects.create(
+                organization=self.org, resource_type=ResourceTag.ResourceType.APP,
+                app=app, key="owner", value=owner_username,
+            )
+        return app
+
+    def _post_status(self, app_slug: str) -> int:
+        status, _ = self._post(
+            body={"owner_username": "vmendi", "app_slug": app_slug, "providers": ["google"]},
+            token=self.raw_token,
+        )
+        return status
+
+    def test_owned_app_is_authorized(self) -> None:
+        # The base seeds "hermes" owned by vmendi; the guard lets it through.
+        self.assertEqual(self._post_status("hermes"), 200)
+
+    def test_missing_app_returns_404(self) -> None:
+        self.assertEqual(self._post_status("ghost"), 404)
+
+    def test_unowned_app_returns_403(self) -> None:
+        self._make_app("lonely", owner_username=None)
+        self.assertEqual(self._post_status("lonely"), 403)
+
+    def test_app_owned_by_another_user_returns_403(self) -> None:
+        self._make_app("theirs", owner_username="someone-else")
+        self.assertEqual(self._post_status("theirs"), 403)
