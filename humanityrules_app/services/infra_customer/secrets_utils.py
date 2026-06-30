@@ -211,6 +211,14 @@ def _create_or_merge_secret(
 def ensure_env_bearer_token_exists(session: boto3.Session, env) -> str:
     """Ensure HUMR_ENV_BEARER exists both in shared-secrets and as an EnvironmentBearerToken row.
 
+    The shared-secrets entry is the source of truth for the raw token: whenever it
+    already holds a HUMR_ENV_BEARER, the DB row is made to match its hash (adopted when
+    missing, re-synced when drifted) and the secret is never rewritten. A fresh token is
+    minted only when the secret has none. This keeps every control-plane DB that deploys
+    into the (account-shared) env consistent with the one live secret — e.g. a local-DB
+    deploy against a freshly recreated env adopts the existing token instead of clobbering
+    it and stranding every other DB (including prod) on a now-stale hash.
+
     Returns the ARN of the shared-secrets entry. *env* is a Django Environment
     instance — passed in rather than imported so this module stays free of
     Django model imports at top level.
@@ -225,13 +233,25 @@ def ensure_env_bearer_token_exists(session: boto3.Session, env) -> str:
 
     existing_row = EnvironmentBearerToken.objects.filter(environment=env).first()
     existing_secret = get_shared_secrets(session=session, env_slug=env_slug) if _secret_exists(sm_client, secret_name) else None
-    has_token_in_secret = bool(existing_secret and existing_secret.get(SHARED_SECRETS_KEY_HUMR_ENV_BEARER))
+    secret_raw_token = existing_secret.get(SHARED_SECRETS_KEY_HUMR_ENV_BEARER) if existing_secret else None
 
-    # Happy path: both sides already present → trust them, no-op.
-    if existing_row is not None and has_token_in_secret:
+    # Secret already carries a token → it wins. Make the DB row match its hash and
+    # leave the secret untouched: adopt when the row is missing, re-sync when it has
+    # drifted (the drift case self-heals a DB whose hash fell out of step with the
+    # live secret — the desync that wedges deploys).
+    if secret_raw_token:
+        secret_token_hash = hashlib.sha256(secret_raw_token.encode("utf-8")).hexdigest()
+        if existing_row is None:
+            EnvironmentBearerToken.objects.create(environment=env, token_hash=secret_token_hash)
+            logger.info("env bearer token row adopted from existing secret for env '%s'", env_slug)
+        elif existing_row.token_hash != secret_token_hash:
+            existing_row.token_hash = secret_token_hash
+            existing_row.save(update_fields=["token_hash"])
+            logger.info("env bearer token row re-synced to secret (healed drift) for env '%s'", env_slug)
         return _get_secret_arn(sm_client, secret_name)
 
-    # Otherwise: generate a fresh raw token and write both sides atomically.
+    # Secret has no token (true first provisioning, or it lost the key): mint a
+    # fresh raw token and write both sides together.
     raw = secrets.token_urlsafe(48)[:64]
     token_hash = hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
