@@ -1786,8 +1786,9 @@ class EnvironmentBearerToken(models.Model):
     env (policy proxies, Hermes, future env-resident services) to authenticate
     calls to HUMR's control plane. One active token per environment; the raw
     token lives in the customer's AWS Secrets Manager
-    (humr/{env-slug}/shared-secrets, key HUMR_ENV_BEARER). Only the hash
-    is stored here so HUMR can authenticate incoming control-plane calls
+    (humr/{env-slug}/shared-secrets under key HUMR_ENV_BEARER; namespaced per
+    org as humr/sandbox/{org-slug}/shared-secrets in the shared sandbox). Only
+    the hash is stored here so HUMR can authenticate incoming control-plane calls
     without ever seeing the raw value after issue.
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
