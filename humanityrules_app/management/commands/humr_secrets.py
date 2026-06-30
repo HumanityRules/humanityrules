@@ -29,8 +29,9 @@ are already scheduled for deletion (skips the recovery window).
 with a 7-day recovery window; pass `--force` for immediate permanent deletion.
 
 `shared-*` subcommands manage the per-environment shared secrets store
-(humr/{env-slug}/shared-secrets). Values set here are automatically
-used as defaults for empty-placeholder secrets when deploying apps.
+(humr/{env-slug}/shared-secrets; humr/sandbox/{org-slug}/shared-secrets in the
+shared sandbox — pass --org to target one org's bag). Values set here are
+automatically used as defaults for empty-placeholder secrets when deploying apps.
 
 Subcommands:
     list             List all secrets in Secrets Manager
@@ -177,17 +178,17 @@ class Command(BaseCommand):
             )
         elif operation == "shared-list":
             env = _get_environment(aws_account=aws_account, env_slug=options["env"])
-            self._run_shared_list(session=session, env_slug=env.slug, reveal=options["reveal"])
+            self._run_shared_list(session=session, env=env, reveal=options["reveal"])
         elif operation == "shared-set":
             env = _get_environment(aws_account=aws_account, env_slug=options["env"])
-            self._run_shared_set(session=session, env_slug=env.slug, pairs=options["pairs"])
+            self._run_shared_set(session=session, env=env, pairs=options["pairs"])
         elif operation == "shared-set-from-env":
             env = _get_environment(aws_account=aws_account, env_slug=options["env"])
             pairs = _shared_set_pairs_from_env_file(env_path=options["file"], keys=options["keys"])
-            self._run_shared_set(session=session, env_slug=env.slug, pairs=pairs)
+            self._run_shared_set(session=session, env=env, pairs=pairs)
         elif operation == "shared-delete":
             env = _get_environment(aws_account=aws_account, env_slug=options["env"])
-            self._run_shared_delete(session=session, env_slug=env.slug, keys=options["keys"])
+            self._run_shared_delete(session=session, env=env, keys=options["keys"])
 
     def _run_list(self, session, include_deleted: bool) -> None:
         secrets_list = secrets_utils.list_secrets(session=session, include_deleted=include_deleted)
@@ -208,16 +209,16 @@ class Command(BaseCommand):
                 self.stdout.write(f"   Scheduled deletion: {secret['deleted_date']}")
             self.stdout.write("")
 
-    def _run_shared_list(self, session, env_slug: str, reveal: bool) -> None:
-        shared = secrets_utils.get_shared_secrets(session=session, env_slug=env_slug)
-        secret_name = f"humr/{env_slug}/shared-secrets"
+    def _run_shared_list(self, session, env: Environment, reveal: bool) -> None:
+        shared = secrets_utils.get_shared_secrets(session=session, env=env)
+        secret_name = secrets_utils.shared_secrets_secret_name(env)
 
         if not shared:
-            self.stdout.write(f"No shared secrets found for environment '{env_slug}'.")
+            self.stdout.write(f"No shared secrets found for environment '{env.slug}'.")
             self.stdout.write(f"   (looked for '{secret_name}' in Secrets Manager)")
             return
 
-        self.stdout.write(f"=== Shared secrets for '{env_slug}' ({len(shared)} key(s)) ===")
+        self.stdout.write(f"=== Shared secrets for '{env.slug}' ({len(shared)} key(s)) ===")
         self.stdout.write(f"   Secret: {secret_name}")
         self.stdout.write("")
         for key in sorted(shared):
@@ -225,7 +226,7 @@ class Command(BaseCommand):
             self.stdout.write(f"   {key} = {value}")
         self.stdout.write("")
 
-    def _run_shared_set(self, session, env_slug: str, pairs: list[str]) -> None:
+    def _run_shared_set(self, session, env: Environment, pairs: list[str]) -> None:
         new_values = {}
         for pair in pairs:
             if "=" not in pair:
@@ -236,17 +237,17 @@ class Command(BaseCommand):
                 raise CommandError(f"Empty key in '{pair}'.")
             new_values[key] = value
 
-        secret_name = f"humr/{env_slug}/shared-secrets"
+        secret_name = secrets_utils.shared_secrets_secret_name(env)
         sm_client = session.client("secretsmanager")
 
-        shared = secrets_utils.get_shared_secrets(session=session, env_slug=env_slug)
+        shared = secrets_utils.get_shared_secrets(session=session, env=env)
         if shared:
             shared.update(new_values)
             sm_client.put_secret_value(SecretId=secret_name, SecretString=json.dumps(shared))
         else:
             sm_client.create_secret(
                 Name=secret_name,
-                Description=f"Shared secrets for environment '{env_slug}'",
+                Description=f"Shared secrets for environment '{env.slug}'",
                 SecretString=json.dumps(new_values),
             )
 
@@ -254,12 +255,12 @@ class Command(BaseCommand):
             self.stdout.write(f"   ✅ {key} = {_mask_value(new_values[key])}")
         self.stdout.write(self.style.SUCCESS(f"Set {len(new_values)} key(s) in '{secret_name}'."))
 
-    def _run_shared_delete(self, session, env_slug: str, keys: list[str]) -> None:
-        secret_name = f"humr/{env_slug}/shared-secrets"
+    def _run_shared_delete(self, session, env: Environment, keys: list[str]) -> None:
+        secret_name = secrets_utils.shared_secrets_secret_name(env)
 
-        shared = secrets_utils.get_shared_secrets(session=session, env_slug=env_slug)
+        shared = secrets_utils.get_shared_secrets(session=session, env=env)
         if not shared:
-            raise CommandError(f"No shared secrets found for environment '{env_slug}'.")
+            raise CommandError(f"No shared secrets found for environment '{env.slug}'.")
 
         removed = []
         missing = []

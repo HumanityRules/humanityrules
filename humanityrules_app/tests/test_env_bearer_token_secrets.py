@@ -5,7 +5,7 @@ import json
 from unittest.mock import MagicMock
 
 from botocore.exceptions import ClientError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from humanityrules_app.models import AWSAccount, Environment, EnvironmentBearerToken, Organization
 from humanityrules_app.services.infra_customer import secrets_utils
@@ -189,6 +189,76 @@ class TestEnsureEnvBearerToken(EnvBearerTestBase):
         secret = json.loads(fake.store["humr/staging/shared-secrets"]["SecretString"])
         self.assertEqual(secret["SOMETHING_ELSE"], "keep-me")
         self.assertIn("HUMR_ENV_BEARER", secret)
+
+
+# -----------------------------------------------------------------------------
+# shared-secrets namespacing (audit fix #2: per-org sandbox bag)
+# -----------------------------------------------------------------------------
+
+
+# Neutralize the Organization post_save signal that auto-creates a "Humanity Rules Sandbox"
+# account when sandbox env vars are present — we build the sandbox accounts ourselves here.
+@override_settings(HUMR_SANDBOX_AWS_ACCOUNT_ID="", HUMR_SANDBOX_EXTERNAL_ID="")
+class TestSharedSecretsNamespace(TestCase):
+    """The shared-secrets bag (and its env bearer) is namespaced per org in the HumR sandbox."""
+
+    def _make_org(self, slug: str) -> Organization:
+        return Organization.objects.create(
+            name=slug, slug=slug,
+            auth_provider=Organization.AuthProvider.OIDC,
+            oidc_issuer_url="https://okta.example.com/oauth2/default",
+            oidc_client_id="client-abc",
+            oidc_client_secret="secret-xyz",
+        )
+
+    def _make_sandbox_env(self, org_slug: str) -> Environment:
+        org = self._make_org(slug=org_slug)
+        aws_account = AWSAccount.objects.create(
+            organization=org, name="Humanity Rules Sandbox", is_humr_sandbox=True,
+        )
+        return Environment.objects.create(
+            aws_account=aws_account, name="Sandbox", slug="sandbox", aws_region="us-east-1",
+        )
+
+    def test_sandbox_namespace_is_per_org(self) -> None:
+        env_a = self._make_sandbox_env(org_slug="org-a")
+        env_b = self._make_sandbox_env(org_slug="org-b")
+        self.assertEqual(secrets_utils.env_shared_secrets_namespace(env_a), "sandbox/org-a")
+        self.assertEqual(secrets_utils.shared_secrets_secret_name(env_a), "humr/sandbox/org-a/shared-secrets")
+        self.assertEqual(secrets_utils.shared_secrets_secret_name(env_b), "humr/sandbox/org-b/shared-secrets")
+
+    def test_non_sandbox_namespace_is_env_slug(self) -> None:
+        org = self._make_org(slug="dedicated-org")
+        aws_account = AWSAccount.objects.create(organization=org, name="Prod Account")
+        env = Environment.objects.create(
+            aws_account=aws_account, name="prod", slug="prod", aws_region="us-east-1",
+        )
+        self.assertFalse(aws_account.is_humr_sandbox)
+        self.assertEqual(secrets_utils.env_shared_secrets_namespace(env), "prod")
+        self.assertEqual(secrets_utils.shared_secrets_secret_name(env), "humr/prod/shared-secrets")
+
+    def test_distinct_sandbox_orgs_get_distinct_secrets_and_tokens(self) -> None:
+        # Both orgs' sandbox envs live in ONE AWS account → ONE Secrets Manager store; the
+        # per-org namespace is what keeps them from colliding on a single bag/token.
+        fake = FakeSecretsManager()
+        session = _session_with(fake)
+        env_a = self._make_sandbox_env(org_slug="org-a")
+        env_b = self._make_sandbox_env(org_slug="org-b")
+
+        secrets_utils.ensure_env_bearer_token_exists(session=session, env=env_a)
+        secrets_utils.ensure_env_bearer_token_exists(session=session, env=env_b)
+
+        self.assertIn("humr/sandbox/org-a/shared-secrets", fake.store)
+        self.assertIn("humr/sandbox/org-b/shared-secrets", fake.store)
+        token_a = json.loads(fake.store["humr/sandbox/org-a/shared-secrets"]["SecretString"])["HUMR_ENV_BEARER"]
+        token_b = json.loads(fake.store["humr/sandbox/org-b/shared-secrets"]["SecretString"])["HUMR_ENV_BEARER"]
+        self.assertNotEqual(token_a, token_b)
+
+        hash_a = EnvironmentBearerToken.objects.get(environment=env_a).token_hash
+        hash_b = EnvironmentBearerToken.objects.get(environment=env_b).token_hash
+        self.assertNotEqual(hash_a, hash_b)
+        self.assertEqual(hash_a, hashlib.sha256(token_a.encode()).hexdigest())
+        self.assertEqual(hash_b, hashlib.sha256(token_b.encode()).hexdigest())
 
 
 # -----------------------------------------------------------------------------

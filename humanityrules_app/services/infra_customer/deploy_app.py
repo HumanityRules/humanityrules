@@ -1356,7 +1356,7 @@ def deploy(
     # Resolve shared + app-level secrets in Secrets Manager (created outside CDK for security)
     if app_config.app_secrets:
         logger.info("Ensuring app secrets exist")
-        shared_secrets = secrets_utils.get_shared_secrets(session=session, env_slug=env_slug)
+        shared_secrets = secrets_utils.get_shared_secrets(session=session, env=environment)
         secrets_utils.ensure_app_secrets_exist(session=session, env_slug=env_slug, app_config=app_config, shared_secrets=shared_secrets)
 
     # Look up hosted zone ID for per-app DNS record creation

@@ -34,9 +34,27 @@ def _resolve_secret_value(key: str, value: str | None, shared_secrets: dict[str,
     return value
 
 
-def get_shared_secrets(session: boto3.Session, env_slug: str) -> dict[str, str]:
+def env_shared_secrets_namespace(env) -> str:
+    """Path namespace for an env's shared-secrets bag — per-org for HumR-sandbox envs, else the env slug.
+
+    Every org's sandbox env shares one AWS account and the fixed slug "sandbox", so keying the secret
+    by slug alone collides every org on one bag (and one env bearer → wrong-org resolution). Dedicated
+    customer accounts already have a unique slug, so they keep it. *env* is a Django Environment.
+    """
+    aws_account = env.aws_account
+    if aws_account.is_humr_sandbox:
+        return f"sandbox/{aws_account.organization.slug}"
+    return env.slug
+
+
+def shared_secrets_secret_name(env) -> str:
+    """Secrets Manager name for an env's shared-secrets bag (holds HUMR_ENV_BEARER + shared keys)."""
+    return f"humr/{env_shared_secrets_namespace(env)}/shared-secrets"
+
+
+def get_shared_secrets(session: boto3.Session, env) -> dict[str, str]:
     """Read the environment's shared secrets from Secrets Manager. Returns {} if none exist."""
-    secret_name = f"humr/{env_slug}/shared-secrets"
+    secret_name = shared_secrets_secret_name(env)
     sm_client = session.client("secretsmanager")
     try:
         response = sm_client.get_secret_value(SecretId=secret_name)
@@ -228,11 +246,11 @@ def ensure_env_bearer_token_exists(session: boto3.Session, env) -> str:
     from humanityrules_app.models import EnvironmentBearerToken
 
     env_slug = env.slug
-    secret_name = f"humr/{env_slug}/shared-secrets"
+    secret_name = shared_secrets_secret_name(env)
     sm_client = session.client("secretsmanager")
 
     existing_row = EnvironmentBearerToken.objects.filter(environment=env).first()
-    existing_secret = get_shared_secrets(session=session, env_slug=env_slug) if _secret_exists(sm_client, secret_name) else None
+    existing_secret = get_shared_secrets(session=session, env=env) if _secret_exists(sm_client, secret_name) else None
     secret_raw_token = existing_secret.get(SHARED_SECRETS_KEY_HUMR_ENV_BEARER) if existing_secret else None
 
     # Secret already carries a token → it wins. Make the DB row match its hash and
