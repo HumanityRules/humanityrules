@@ -95,20 +95,19 @@ class TestEnsureEnvBearerToken(EnvBearerTestBase):
         row = EnvironmentBearerToken.objects.get(environment=self.env)
         self.assertEqual(row.token_hash, hashlib.sha256(raw_token.encode()).hexdigest())
 
-    def test_noop_when_both_sides_present(self) -> None:
-        # Pre-seed both sides with consistent state, then call: nothing should change.
+    def test_noop_when_row_already_consistent_with_secret(self) -> None:
+        # Row hash already matches the secret's token → nothing changes.
         fake = FakeSecretsManager()
         session = _session_with(fake)
+        raw_token = "pre-existing-raw-token-of-reasonable-length-0123456789012345"
         fake.create_secret(
             Name="humr/staging/shared-secrets",
             Description="seed",
-            SecretString=json.dumps({
-                "HUMR_ENV_BEARER": "pre-existing-raw-token-of-reasonable-length-0123456789012345",
-                "OTHER_KEY": "keep-me",
-            }),
+            SecretString=json.dumps({"HUMR_ENV_BEARER": raw_token, "OTHER_KEY": "keep-me"}),
         )
-        EnvironmentBearerToken.objects.create(environment=self.env, token_hash="does-not-match-but-we-dont-check-here")
-
+        EnvironmentBearerToken.objects.create(
+            environment=self.env, token_hash=hashlib.sha256(raw_token.encode()).hexdigest(),
+        )
         original_secret = fake.store["humr/staging/shared-secrets"]["SecretString"]
         original_hash = EnvironmentBearerToken.objects.get(environment=self.env).token_hash
 
@@ -116,6 +115,50 @@ class TestEnsureEnvBearerToken(EnvBearerTestBase):
         self.assertIn("shared-secrets", arn)
         self.assertEqual(fake.store["humr/staging/shared-secrets"]["SecretString"], original_secret)
         self.assertEqual(EnvironmentBearerToken.objects.get(environment=self.env).token_hash, original_hash)
+
+    def test_adopts_existing_secret_token_when_row_missing(self) -> None:
+        # The shared secret already has a token but this DB has no row (e.g. a
+        # freshly recreated env). We must ADOPT the secret's token — hashing it
+        # into a new row — not mint a new one, which would clobber the
+        # account-shared secret and strand every other DB on a stale hash.
+        fake = FakeSecretsManager()
+        session = _session_with(fake)
+        raw_token = "account-shared-raw-token-of-reasonable-length-13579246801234"
+        fake.create_secret(
+            Name="humr/staging/shared-secrets",
+            Description="seed",
+            SecretString=json.dumps({"HUMR_ENV_BEARER": raw_token, "OTHER_KEY": "keep-me"}),
+        )
+        original_secret = fake.store["humr/staging/shared-secrets"]["SecretString"]
+
+        secrets_utils.ensure_env_bearer_token_exists(session=session, env=self.env)
+
+        # Secret untouched; row adopted the secret's token.
+        self.assertEqual(fake.store["humr/staging/shared-secrets"]["SecretString"], original_secret)
+        row = EnvironmentBearerToken.objects.get(environment=self.env)
+        self.assertEqual(row.token_hash, hashlib.sha256(raw_token.encode()).hexdigest())
+
+    def test_resyncs_drifted_row_to_secret_without_rewriting_secret(self) -> None:
+        # Row hash disagrees with the secret's token (another DB rotated the
+        # shared secret) → heal the row to match; the secret is NOT rewritten.
+        fake = FakeSecretsManager()
+        session = _session_with(fake)
+        raw_token = "live-shared-raw-token-of-reasonable-length-9876543210987654"
+        fake.create_secret(
+            Name="humr/staging/shared-secrets",
+            Description="seed",
+            SecretString=json.dumps({"HUMR_ENV_BEARER": raw_token}),
+        )
+        EnvironmentBearerToken.objects.create(environment=self.env, token_hash="stale-drifted-hash")
+        original_secret = fake.store["humr/staging/shared-secrets"]["SecretString"]
+
+        secrets_utils.ensure_env_bearer_token_exists(session=session, env=self.env)
+
+        self.assertEqual(fake.store["humr/staging/shared-secrets"]["SecretString"], original_secret)
+        self.assertEqual(
+            EnvironmentBearerToken.objects.get(environment=self.env).token_hash,
+            hashlib.sha256(raw_token.encode()).hexdigest(),
+        )
 
     def test_regenerates_when_row_exists_but_secret_missing(self) -> None:
         # Simulates a corrupted state where the DB row was created but the
