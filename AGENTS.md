@@ -44,7 +44,7 @@ HumR's control plane is called CP.
 
 # Git
 
-**Commit directly to `main`.** This repo does not use feature branches — do not create a branch before committing unless explicitly asked.
+**Work directly on the `main` branch.** Do not create a branch unless explicitly asked.
 
 
 # Documentation
