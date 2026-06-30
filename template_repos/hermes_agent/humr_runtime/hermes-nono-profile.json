@@ -67,6 +67,7 @@
       "/opt/humr/runtime/webapps/webapps_lib.py",
       "/opt/humr/runtime/sandbox_seed.py",
       "/opt/humr/runtime/webapps/system_process_compose_seed.py",
+      "/opt/humr/runtime/webapps/seed_example_webapps.py",
       "/opt/humr/runtime/webapps/admin/__main__.py",
       "/opt/humr/runtime/webapps/admin/server.py",
       "/opt/humr/runtime/webapps/Caddyfile",

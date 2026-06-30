@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
+import json
 import pathlib
 import sys
 import tempfile
@@ -40,6 +41,10 @@ webapps_cli = _load_runtime_module(name="webapps_cli_under_test", filename="weba
 system_process_compose_seed = _load_runtime_module(
     name="system_process_compose_seed_under_test",
     filename="system_process_compose_seed.py",
+)
+seed_example_webapps = _load_runtime_module(
+    name="seed_example_webapps_under_test",
+    filename="seed_example_webapps.py",
 )
 
 
@@ -414,3 +419,258 @@ class TestHermesWebappsRuntimeContract(unittest.TestCase):
             },
         )
         self.assertEqual(doc["processes"]["system.gateway"]["environment"], ["A=B"])
+
+
+class TestSeedExampleWebapps(unittest.TestCase):
+    """First-boot seeding of the bundled example-webapp catalog."""
+
+    def _make_example(
+        self,
+        root: pathlib.Path,
+        slug: str,
+        *,
+        autostart: bool = True,
+        command: str = 'python3 -m http.server "$WEBAPP_PORT" --bind 127.0.0.1',
+        files: dict | None = None,
+    ) -> pathlib.Path:
+        ex_dir = root / slug
+        ex_dir.mkdir(parents=True)
+        manifest = {
+            "slug": slug,
+            "title": slug.title(),
+            "command": command,
+            "autostart": autostart,
+        }
+        (ex_dir / "example.json").write_text(json.dumps(manifest))
+        for name, content in (files or {"index.html": "<h1>hi</h1>"}).items():
+            (ex_dir / name).write_text(content)
+        return ex_dir
+
+    # --- decide_action (policy comes from the marker) ------------------------
+
+    def test_decide_seed_when_no_marker(self) -> None:
+        self.assertEqual(
+            seed_example_webapps.decide_action(None, False),
+            seed_example_webapps.SEED,
+        )
+
+    def test_decide_refresh_overwrites_existing_install(self) -> None:
+        self.assertEqual(
+            seed_example_webapps.decide_action(seed_example_webapps.POLICY_REFRESH, True),
+            seed_example_webapps.REFRESH,
+        )
+
+    def test_decide_freeze_never_overwrites(self) -> None:
+        self.assertEqual(
+            seed_example_webapps.decide_action(seed_example_webapps.POLICY_FREEZE, True),
+            seed_example_webapps.SKIP,
+        )
+
+    def test_decide_does_not_resurrect_deleted_install(self) -> None:
+        # Marker present (was installed) but the user deleted the app — leave it gone.
+        self.assertEqual(
+            seed_example_webapps.decide_action(seed_example_webapps.POLICY_REFRESH, False),
+            seed_example_webapps.SKIP,
+        )
+
+    # --- read_policy ---------------------------------------------------------
+
+    def test_read_policy_none_when_no_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(seed_example_webapps, "SEEDED_DIR", pathlib.Path(tmp)):
+                self.assertIsNone(seed_example_webapps.read_policy("snake"))
+
+    def test_read_policy_reads_freeze_trimmed_and_lowercased(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            seeded = pathlib.Path(tmp)
+            (seeded / "snake").write_text("  FREEZE\n")
+            with patch.object(seed_example_webapps, "SEEDED_DIR", seeded):
+                self.assertEqual(
+                    seed_example_webapps.read_policy("snake"),
+                    seed_example_webapps.POLICY_FREEZE,
+                )
+
+    def test_read_policy_unknown_or_empty_defaults_to_refresh(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            seeded = pathlib.Path(tmp)
+            (seeded / "garbage").write_text("frezee")
+            (seeded / "blank").write_text("")
+            with patch.object(seed_example_webapps, "SEEDED_DIR", seeded):
+                self.assertEqual(seed_example_webapps.read_policy("garbage"), seed_example_webapps.POLICY_REFRESH)
+                self.assertEqual(seed_example_webapps.read_policy("blank"), seed_example_webapps.POLICY_REFRESH)
+
+    # --- load_manifest -------------------------------------------------------
+
+    def test_load_manifest_parses_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            self._make_example(root, "snake", autostart=False)
+            ex = seed_example_webapps.load_manifest(root / "snake")
+        self.assertEqual(ex.slug, "snake")
+        self.assertIn("$WEBAPP_PORT", ex.command)
+        self.assertFalse(ex.autostart)
+
+    def test_load_manifest_rejects_dir_slug_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            ex_dir = pathlib.Path(tmp) / "snake"
+            ex_dir.mkdir()
+            (ex_dir / "example.json").write_text(json.dumps({"slug": "other", "command": "x"}))
+            self.assertIsNone(seed_example_webapps.load_manifest(ex_dir))
+
+    def test_load_manifest_rejects_internal_slug(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            ex_dir = pathlib.Path(tmp) / "__admin"
+            ex_dir.mkdir()
+            (ex_dir / "example.json").write_text(json.dumps({"slug": "__admin", "command": "x"}))
+            self.assertIsNone(seed_example_webapps.load_manifest(ex_dir))
+
+    def test_load_manifest_rejects_missing_command(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            ex_dir = pathlib.Path(tmp) / "snake"
+            ex_dir.mkdir()
+            (ex_dir / "example.json").write_text(json.dumps({"slug": "snake"}))
+            self.assertIsNone(seed_example_webapps.load_manifest(ex_dir))
+
+    # --- seed_one ------------------------------------------------------------
+
+    def test_seed_one_first_install_copies_registers_and_marks_refresh(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            catalog = root / "catalog"
+            catalog.mkdir()
+            projects = root / "projects"
+            seeded = root / "seeded"
+            self._make_example(catalog, "snake")
+            ex = seed_example_webapps.load_manifest(catalog / "snake")
+            with (
+                patch.object(seed_example_webapps, "PROJECTS_DIR", projects),
+                patch.object(seed_example_webapps, "SEEDED_DIR", seeded),
+                patch.object(seed_example_webapps.subprocess, "run") as run,
+            ):
+                seed_example_webapps.seed_one(ex)
+
+            self.assertTrue((projects / "snake" / "index.html").is_file())
+            # Catalog metadata is not copied into the user's project.
+            self.assertFalse((projects / "snake" / "example.json").exists())
+            run.assert_called_once()
+            cmd = run.call_args.args[0]
+            self.assertEqual(cmd[:3], [seed_example_webapps.WEBAPPS_CLI, "create", "snake"])
+            self.assertIn("--if-missing", cmd)
+            self.assertIn("--bootstrap-enabled", cmd)
+            # First install stamps the marker with the default policy.
+            self.assertEqual((seeded / "snake").read_text().strip(), seed_example_webapps.POLICY_REFRESH)
+
+    def test_seed_one_refresh_marker_clobbers_user_edits(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            catalog = root / "catalog"
+            catalog.mkdir()
+            projects = root / "projects"
+            (projects / "snake").mkdir(parents=True)
+            seeded = root / "seeded"
+            seeded.mkdir()
+            (projects / "snake" / "user_edit.txt").write_text("mine")
+            (seeded / "snake").write_text("refresh\n")
+            self._make_example(catalog, "snake", files={"index.html": "<h1>v2</h1>"})
+            ex = seed_example_webapps.load_manifest(catalog / "snake")
+            with (
+                patch.object(seed_example_webapps, "PROJECTS_DIR", projects),
+                patch.object(seed_example_webapps, "SEEDED_DIR", seeded),
+                patch.object(seed_example_webapps.subprocess, "run") as run,
+            ):
+                seed_example_webapps.seed_one(ex)
+
+            self.assertFalse((projects / "snake" / "user_edit.txt").exists())
+            self.assertEqual((projects / "snake" / "index.html").read_text(), "<h1>v2</h1>")
+            run.assert_called_once()
+
+    def test_seed_one_freeze_marker_preserves_user_edits(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            catalog = root / "catalog"
+            catalog.mkdir()
+            projects = root / "projects"
+            (projects / "snake").mkdir(parents=True)
+            seeded = root / "seeded"
+            seeded.mkdir()
+            (projects / "snake" / "user_edit.txt").write_text("mine")
+            # The user (or agent) froze this install by writing "freeze" to the marker.
+            (seeded / "snake").write_text("freeze\n")
+            self._make_example(catalog, "snake", files={"index.html": "<h1>v2</h1>"})
+            ex = seed_example_webapps.load_manifest(catalog / "snake")
+            with (
+                patch.object(seed_example_webapps, "PROJECTS_DIR", projects),
+                patch.object(seed_example_webapps, "SEEDED_DIR", seeded),
+                patch.object(seed_example_webapps.subprocess, "run") as run,
+            ):
+                seed_example_webapps.seed_one(ex)
+
+            # Untouched: edit preserved, baked source not copied, nothing registered.
+            self.assertTrue((projects / "snake" / "user_edit.txt").exists())
+            self.assertFalse((projects / "snake" / "index.html").exists())
+            run.assert_not_called()
+
+    # --- main ----------------------------------------------------------------
+
+    def test_main_skips_without_public_hostname(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            catalog = pathlib.Path(tmp) / "catalog"
+            catalog.mkdir()
+            self._make_example(catalog, "snake")
+            with (
+                patch.object(seed_example_webapps, "EXAMPLES_DIR", catalog),
+                patch.object(seed_example_webapps.subprocess, "run") as run,
+                patch.dict(seed_example_webapps.os.environ, {}, clear=True),
+            ):
+                seed_example_webapps.main()
+        run.assert_not_called()
+
+    def test_main_seeds_catalog_when_routing_available(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            catalog = root / "catalog"
+            catalog.mkdir()
+            projects = root / "projects"
+            seeded = root / "seeded"
+            self._make_example(catalog, "snake")
+            with (
+                patch.object(seed_example_webapps, "EXAMPLES_DIR", catalog),
+                patch.object(seed_example_webapps, "PROJECTS_DIR", projects),
+                patch.object(seed_example_webapps, "SEEDED_DIR", seeded),
+                patch.object(seed_example_webapps.subprocess, "run") as run,
+                patch.dict(seed_example_webapps.os.environ, {"HUMR_PUBLIC_HOSTNAME": "agent.example.com"}),
+            ):
+                seed_example_webapps.main()
+
+            self.assertTrue((projects / "snake" / "index.html").is_file())
+            self.assertTrue((seeded / "snake").is_file())
+            run.assert_called_once()
+
+    # --- wiring guards -------------------------------------------------------
+
+    def test_repo_snakes_manifest_is_valid(self) -> None:
+        hermes_agent = _humr_runtime_dir().parent
+        snakes_dir = hermes_agent / "webapps" / "examples" / "snakes"
+        ex = seed_example_webapps.load_manifest(snakes_dir)
+        self.assertIsNotNone(ex)
+        self.assertEqual(ex.slug, "snakes")
+        self.assertIn("$WEBAPP_PORT", ex.command)
+        self.assertTrue(ex.autostart)
+
+    def test_webui_seeds_examples_in_main_after_admin_bootstrap(self) -> None:
+        script = (_humr_runtime_dir() / "webui.sh").read_text()
+        self.assertIn("seed_example_webapps()", script)
+        self.assertIn("seed_example_webapps.py", script)
+        # Called in main() immediately after the admin bootstrap.
+        self.assertRegex(script, r"bootstrap_admin_webapp\n\s+seed_example_webapps\n")
+
+    def test_dockerfile_bakes_example_catalog(self) -> None:
+        dockerfile = (_humr_runtime_dir().parent / "Dockerfile").read_text()
+        self.assertIn("COPY webapps/examples /opt/humr/webapps/examples", dockerfile)
+
+    def test_nono_profile_allows_seed_script(self) -> None:
+        profile = json.loads((_humr_runtime_dir() / "hermes-nono-profile.json").read_text())
+        self.assertIn(
+            "/opt/humr/runtime/webapps/seed_example_webapps.py",
+            profile["filesystem"]["read_file"],
+        )

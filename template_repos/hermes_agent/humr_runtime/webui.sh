@@ -117,6 +117,19 @@ bootstrap_admin_webapp() {
         --cwd "${HUMR_RUNTIME_DIR}/webapps"
 }
 
+seed_example_webapps() {
+    # Install bundled example webapps (the image-baked catalog under
+    # /opt/humr/webapps/examples) into a fresh agent. Runs before the webapps
+    # daemon starts, so the seeder registers via `webapps create
+    # --bootstrap-enabled` — no daemon RPC, same as bootstrap_admin_webapp. A
+    # per-install marker under /workspace/webapps/.seeded/ holds each example's
+    # update policy: "refresh" (default) re-syncs it from the image every boot,
+    # "freeze" leaves the user's copy alone; a deleted example is not resurrected
+    # (see seed_example_webapps.py). Best-effort: never fail boot over an example.
+    "$HERMES_WEBUI_PYTHON" "${HUMR_RUNTIME_DIR}/webapps/seed_example_webapps.py" \
+        || echo "[webui] example webapp seeding failed (non-fatal); continuing."
+}
+
 bootstrap_gateway_process() {
     # The gateway process: Hermes's headless cron ticker + loopback API
     # server, plus any messaging-platform bindings activated by env vars
@@ -172,6 +185,7 @@ wait_for_webui() {
 main() {
     sandbox_seed
     bootstrap_admin_webapp
+    seed_example_webapps
     bootstrap_gateway_process
     bootstrap_webui_process
     start_system_process_compose
