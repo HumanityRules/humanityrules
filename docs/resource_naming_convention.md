@@ -45,14 +45,14 @@ A few AWS names have limits too tight to hold org + env + app readably. For exam
 - IAM task role — 64 chars
 - Aurora cluster identifier — 63 chars
 
-**Verify this set as you implement** — there may be others. For *only* these, drop the
-readable tokens and use a hash:
+**Verify this set as you implement** — there may be others. For *only* these, leave the app name
+ and use a hash:
 
 ```
 rid = sha256(f"{org_slug}/{env_slug}/{app_slug}").hexdigest()[:12]
 ```
 
-→ `humr-<rid>`, `humr-<rid>-task-role`, `humr-<rid>-aurora`. These are order-neutral and
+→ `humr-<app>-<rid>`, `humr-<app>-<rid>-task-role`, `humr-<app>-<rid>-aurora`. These are order-neutral and
 identified by tags. Every other resource stays readable.
 
 ## Tags (required on every resource)
