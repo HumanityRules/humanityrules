@@ -22,13 +22,16 @@ All custom commands live in `humanityrules_app/management/commands/`.
 - **humr_hermes_migrate** — Migrate a `hermes_agent` app's persistent-root state from one HUMR env to another (same- or cross-account). Five phases (`upload,stage,host-clear,finalize,verify`) with `cleanup` opt-in. See the `hermes-migrate` skill for the full workflow.
 - **humr_secrets** — Manage customer Secrets Manager secrets: list, purge, and shared environment secrets (shared-list/shared-set/shared-delete). All subcommands take --account and optional --org (name or slug).
 - **humr_reset_org_abac** — Full factory reset of ABAC Policy rows for one organization (`--org` slug or name; optional `--admin-email`). Deletes all org policies, re-runs seed bootstrap, recreates default per-app open-access policies.
+- **humr_bootstrap_sandbox** — Idempotently bootstrap the shared HUMR sandbox: backfills a connected sandbox account + ready env per org, and verifies the shared base infra (VPC/cluster/ALB/EFS) exists. Base infra is verify-only by default (`--provision-base` to actually create it). Safe to run on every deploy.
 - **run_job_worker** — Background job worker for deployments and environment provisioning.
+- **seed_app_templates** — Seed `AppTemplate` records (the deployable app catalog, e.g. the OpenClaw AI assistant template).
 - **seed_test_apps** — Seed orgs, workspaces, environments, and apps for UI testing.
 - **seed_test_groups** — Seed test groups with attributes for ABAC testing.
 - **seed_test_users** — Seed test users with group memberships.
 - **seed_local_app** — Seed DB rows for a local Hermes compose app (App stub, localhost Environment, bearer token).
-- **seed_local_repos** — Scan local directory and create Repository records.
 - **setup_oidc_org** — Create/update an organization with OIDC (Okta) auth config.
+- **setup_google_oauth_client** — Load a Google OAuth 2.0 Client ID JSON (from Cloud Console) into `IntegrationConfig`; re-running rotates it in place.
+- **setup_x_oauth_client** — Store X (Twitter) OAuth 2.0 client id/secret/redirect-uris into `IntegrationConfig` via flags (X gives no downloadable JSON); re-running rotates it in place.
 - **ensure_superuser** — Create or promote a user to superuser.
 
 
