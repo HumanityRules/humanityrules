@@ -17,17 +17,16 @@ Everything is `humr-<org>-<env>-<app>`. The only thing that varies is *which* or
 given resource:
 
 - **Owned per-app resources** — `humr-<org>-<env>-<app>-*` (dash names: stacks, ECS
-  service/task-def, target group, roles) and `humr/<org>/<env>/<app>/…` (slash names:
-  Secrets Manager, ECR).
+  service/task-def, target group, roles, etc) and `humr/<org>/<env>/<app>/…` (slash names:
+  Secrets Manager, ECR, etc).
 - **Filesystem/host paths** — `/deployments/<org>/<app>` (EFS) and
   `/var/lib/humr/hermes-roots/<org>/<app>` (EC2 host). Env is implicit — the resource *is*
   that env's filesystem/host — so it isn't repeated in the path.
-- **Shared base infra** (VPC, ALB, cluster, EFS filesystem, builder) is owned by the
-  **platform org** — the operator org named by `settings.HUMR_PLATFORM_OWNER_ORG_SLUG`
-  (there is already a `platform_owner.is_platform_owner_org` helper). So it is
-  `humr-<platform-org>-<env>-vpc`, etc. There is no ownerless infra: the schema is uniform,
-  only the owner differs (platform org for scaffolding, tenant org for apps). In a dedicated
-  single-tenant account the owner is the tenant, so base infra and apps share one prefix.
+- **Base infra** (VPC, ALB, cluster, EFS filesystem, builder, etc) is always owned by an org.
+   So it is `humr-<org>-<env>-vpc`, etc. There is no ownerless infra: the schema is uniform,
+  only the owner differs. In a dedicated single-tenant account the owner is the tenant, so base 
+  infra and apps share one prefix. In the HumR sandbox account, the base infra is 
+  `humr-<platform-org>-<env>-vpc`, where platform-org is settings.HUMR_PLATFORM_OWNER_ORG_SLUG.
 - **DNS** — dedicated account: `<app>.<customer-domain>` (unchanged). Shared sandbox:
   `<app>.<org>.<sandbox-zone>` (e.g. `app.org.humr.io`), each org-zone with its own wildcard cert.
 
@@ -40,7 +39,7 @@ unique per org, so `(org, app)` is already globally unique. No reservation table
 
 ## Length-bound names use a deterministic short id
 
-A few AWS names have limits too tight to hold org + env + app readably:
+A few AWS names have limits too tight to hold org + env + app readably. For example:
 
 - Target group — 32 chars
 - IAM task role — 64 chars
@@ -78,22 +77,6 @@ for renaming.
   is threading `org_slug` into the naming inputs (the AppConfig carries `app_name` but not
   the org today).
 
-- **Rename sites.** Here is the map I found while doing earlier sandbox work. Treat it as a
-  **starting point, not an exhaustive list** — grep the patterns (`humr-{env`, `humr/{env`,
-  `/deployments/`, `hermes-roots`, `resource_prefix`, `target_group_name`,
-  `cluster_identifier`, `role_name`, `subdomain`) and make sure nothing is missed:
-  - `services/infra_customer/deploy_app.py` — the bulk: app stack, target group, task role,
-    Aurora cluster + its secrets, ECR repos, container and log-stream names, subdomain/cert,
-    the EFS access-point path, and secret ARNs embedded in IAM policies.
-  - `services/infra_customer/deploy_base.py` — base infra (becomes platform-org-owned).
-  - `services/infra_customer/iam_utils.py` — `resource_prefix`, task-role names.
-  - `services/infra_customer/secrets_utils.py` — the app secret name and the env-shared-secrets namespace.
-  - `services/infra_customer/ecr_utils.py`, `cloudformation_utils.py`, `example_apps.py`, `appconfig.py`.
-  - `services/jobs/app_deployment_teardown_executor.py` and `app_remove_executor.py` — EFS,
-    host, and secret prefixes; cert and efs-remover resources; teardown-by-name.
-  - The `hermes_agent` template's container `host_mounts` `source_path`
-    (`…/hermes-roots/{app_slug}`) — a template/data change to add the org segment.
-
 - **Retire the `SandboxSlugClaim` mechanism.** It exists only because resources were not
   org-namespaced; once they are, a cross-org slug collision is impossible and the reservation
   is dead weight. Remove the `SandboxSlugClaim` model and its migration, the
@@ -107,10 +90,13 @@ for renaming.
   secrets are just `humr/<org>/<env>/…` like everything else. Fold it into the general path
   and delete the carve-out.
 
+## Renaming sequence
+
+Rename the 
+
 ## Rollout
 
-Redeploy everything (acceptable pre-beta). The HumR sandbox environment has to be tore down 
-and recreated. The couple of HAs that currently exist are of no value.
+Do not rollout anything yet. We will do it together after the rename is done.
 
 ## What this is NOT: isolation
 
@@ -124,6 +110,7 @@ does not isolate tenants. Safely sharing one account still requires, separately:
   still have to be authored and verified.
 
 These are out of scope for this document and task.
+
 
 ## To whoever implements this
 
