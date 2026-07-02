@@ -64,36 +64,36 @@ echo "========================================"
 echo ""
 echo "1/7: Deploying Certificate Stack (ACM)..."
 echo "     This may take a few minutes for DNS validation."
-cdk deploy humr-prod-cert --require-approval never
+cdk deploy humr-prod-cert --require-approval never --express
 
 echo ""
 echo "2/7: Deploying VPC and Storage Stacks..."
-cdk deploy humr-prod-vpc humr-prod-storage --require-approval never
+cdk deploy humr-prod-vpc humr-prod-storage --require-approval never --express
 
 echo ""
 echo "3/7: Deploying Lambda Stack..."
-cdk deploy humr-prod-lambda --require-approval never
+cdk deploy humr-prod-lambda --require-approval never --express
 
 echo ""
 echo "4/7: Deploying Cluster and Database Stacks..."
 echo "     Aurora Serverless v2 may take 10-15 minutes."
-cdk deploy humr-prod-cluster humr-prod-database --require-approval never
+cdk deploy humr-prod-cluster humr-prod-database --require-approval never --express
 
 echo ""
 echo "5/7: Deploying App Stack (ECR + ECS)..."
-cdk deploy humr-prod-app --require-approval never
+cdk deploy humr-prod-app --require-approval never --express
 
 echo ""
 echo "6/7: Deploying CDN Stack (CloudFront + Route53)..."
 echo "     CloudFront distribution may take 10-15 minutes to deploy."
-cdk deploy humr-prod-cdn --require-approval never
+cdk deploy humr-prod-cdn --require-approval never --express
 
 echo ""
 # Only when the sandbox is configured (matches app.py's SANDBOX_CFG.enabled gate);
 # otherwise the stack isn't synthesized and the deploy would fail.
 if [ -n "${HUMR_SANDBOX_EXTERNAL_ID}" ] && [ -n "${HUMR_SANDBOX_AWS_ACCOUNT_ID}" ]; then
     echo "7/7: Deploying Sandbox Role Stack (shared-sandbox assume-role)..."
-    cdk deploy humr-prod-sandbox-role --require-approval never
+    cdk deploy humr-prod-sandbox-role --require-approval never --express
 else
     echo "7/7: Skipping Sandbox Stack (HUMR_SANDBOX_* not set)."
 fi

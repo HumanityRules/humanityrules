@@ -169,30 +169,30 @@ wheels = [
 
 [[package]]
 name = "boto3"
-version = "1.42.17"
+version = "1.43.39"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "botocore" },
     { name = "jmespath" },
     { name = "s3transfer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/8d/cf/6e4a794e73cbf3e774ec27a5acc8442ce55d97cfc5226a20c1f58d8aee16/boto3-1.42.17.tar.gz", hash = "sha256:8a2e345e96d5ceba755c55539c93f99705f403fbfdeef2e838eabdc56750828b", size = 112776, upload-time = "2025-12-26T20:33:38.289Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/eb/35/d936d1f77098a84365ab57798cbf41cf935c07a6c397a4892dc95046a277/boto3-1.43.39.tar.gz", hash = "sha256:ca5701ddf1215ba25b9d973d18505bb4def3a75d3daa9b263c6d8c713b601cb3", size = 112679, upload-time = "2026-07-01T19:37:26.165Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6c/53/9f4241152eb1f5a57351232c14ef411ef35fbcc1d97a63873235d0503a8a/boto3-1.42.17-py3-none-any.whl", hash = "sha256:e0ee40f7102712452f6776af891c8f49b5ae9133bdaf22711d6f4a78963c2614", size = 140572, upload-time = "2025-12-26T20:33:36.307Z" },
+    { url = "https://files.pythonhosted.org/packages/1b/b4/2a105025fa85e27022d55b0dae02b490c74acd20e904e81003d3b622fbbe/boto3-1.43.39-py3-none-any.whl", hash = "sha256:f4eef8bf98559342466a9a1a063b7efcf3e337e98a819479bc2f7a603b8b8ba7", size = 140030, upload-time = "2026-07-01T19:37:24.756Z" },
 ]
 
 [[package]]
 name = "botocore"
-version = "1.42.36"
+version = "1.43.39"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jmespath" },
     { name = "python-dateutil" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/66/4e/b24089cf7a77d38886ac4fbae300a3c4c6d68c1b9ccb66af03cb07b6c35c/botocore-1.42.36.tar.gz", hash = "sha256:2ebd89cc75927944e2cee51b7adce749f38e0cb269a758a6464a27f8bcca65fb", size = 14909073, upload-time = "2026-01-27T20:38:16.621Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/19/03/8800770b04e6b306172af15c7e0e049cb06ae6fb6eff6744a09563c1b80c/botocore-1.43.39.tar.gz", hash = "sha256:a95b90ea13aca409d79cc90d87c75df7db1a104a4c8e93707b62a3593bfdd17d", size = 15640021, upload-time = "2026-07-01T19:37:16.076Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e6/e8/f14d25bd768187424b385bc6a44e2ed5e96964e461ba019add03e48713c7/botocore-1.42.36-py3-none-any.whl", hash = "sha256:2cfae4c482e5e87bd835ab4289b711490c161ba57e852c06b65a03e7c25e08eb", size = 14583066, upload-time = "2026-01-27T20:38:14.02Z" },
+    { url = "https://files.pythonhosted.org/packages/f1/de/1155cade4db5fb1121b66d9936b5e958b663db446752d47acc56ad5d380a/botocore-1.43.39-py3-none-any.whl", hash = "sha256:7cd5fab9d33f487777e2c508573bca6ae230779230263d47a617f4af960d3003", size = 15321601, upload-time = "2026-07-01T19:37:12.952Z" },
 ]
 
 [[package]]
@@ -411,69 +411,6 @@ wheels = [
 ]
 
 [[package]]
-name = "humanityrules"
-version = "0.1.0"
-source = { virtual = "." }
-dependencies = [
-    { name = "anthropic" },
-    { name = "aws-cdk-lib" },
-    { name = "boto3" },
-    { name = "claude-agent-sdk" },
-    { name = "constructs" },
-    { name = "cryptography" },
-    { name = "dj-database-url" },
-    { name = "django" },
-    { name = "django-browser-reload" },
-    { name = "django-htmx" },
-    { name = "django-tailwind", extra = ["cookiecutter", "honcho"] },
-    { name = "django-watchfiles" },
-    { name = "httpx" },
-    { name = "jinja2" },
-    { name = "opentelemetry-api" },
-    { name = "opentelemetry-exporter-otlp" },
-    { name = "opentelemetry-sdk" },
-    { name = "policy-sentry" },
-    { name = "posthog" },
-    { name = "psycopg", extra = ["binary", "pool"] },
-    { name = "pyjwt" },
-    { name = "python-dotenv" },
-    { name = "segno" },
-    { name = "servestatic" },
-    { name = "uvicorn" },
-    { name = "workos" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "anthropic", specifier = ">=0.40.0" },
-    { name = "aws-cdk-lib", specifier = ">=2.170.0" },
-    { name = "boto3", specifier = ">=1.35.0" },
-    { name = "claude-agent-sdk", specifier = ">=0.1.0" },
-    { name = "constructs", specifier = ">=10.0.0" },
-    { name = "cryptography", specifier = ">=44.0.0" },
-    { name = "dj-database-url", specifier = ">=2.2.0" },
-    { name = "django", specifier = "==6.0" },
-    { name = "django-browser-reload", specifier = ">=1.21.0" },
-    { name = "django-htmx", specifier = ">=1.27.0" },
-    { name = "django-tailwind", extras = ["honcho", "cookiecutter"], specifier = ">=4.4.2" },
-    { name = "django-watchfiles", specifier = ">=1.4.0" },
-    { name = "httpx", specifier = ">=0.28.0" },
-    { name = "jinja2", specifier = ">=3.1.0" },
-    { name = "opentelemetry-api", specifier = ">=1.39.1" },
-    { name = "opentelemetry-exporter-otlp", specifier = ">=1.39.1" },
-    { name = "opentelemetry-sdk", specifier = ">=1.39.1" },
-    { name = "policy-sentry", specifier = ">=0.14.0" },
-    { name = "posthog", specifier = ">=3.0.0" },
-    { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.2.0" },
-    { name = "pyjwt", specifier = ">=2.10.0" },
-    { name = "python-dotenv", specifier = ">=1.1.0" },
-    { name = "segno", specifier = ">=1.6.6" },
-    { name = "servestatic", specifier = ">=3.0.0" },
-    { name = "uvicorn", specifier = ">=0.32.0" },
-    { name = "workos", specifier = ">=5.37.0" },
-]
-
-[[package]]
 name = "distro"
 version = "1.9.0"
 source = { registry = "https://pypi.org/simple" }
@@ -666,6 +603,69 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/0f/4c/751061ffa58615a32c31b2d82e8482be8dd4a89154f003147acee90f2be9/httpx_sse-0.4.3.tar.gz", hash = "sha256:9b1ed0127459a66014aec3c56bebd93da3c1bc8bb6618c8082039a44889a755d", size = 15943, upload-time = "2025-10-10T21:48:22.271Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d2/fd/6668e5aec43ab844de6fc74927e155a3b37bf40d7c3790e49fc0406b6578/httpx_sse-0.4.3-py3-none-any.whl", hash = "sha256:0ac1c9fe3c0afad2e0ebb25a934a59f4c7823b60792691f779fad2c5568830fc", size = 8960, upload-time = "2025-10-10T21:48:21.158Z" },
+]
+
+[[package]]
+name = "humanityrules"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "anthropic" },
+    { name = "aws-cdk-lib" },
+    { name = "boto3" },
+    { name = "claude-agent-sdk" },
+    { name = "constructs" },
+    { name = "cryptography" },
+    { name = "dj-database-url" },
+    { name = "django" },
+    { name = "django-browser-reload" },
+    { name = "django-htmx" },
+    { name = "django-tailwind", extra = ["cookiecutter", "honcho"] },
+    { name = "django-watchfiles" },
+    { name = "httpx" },
+    { name = "jinja2" },
+    { name = "opentelemetry-api" },
+    { name = "opentelemetry-exporter-otlp" },
+    { name = "opentelemetry-sdk" },
+    { name = "policy-sentry" },
+    { name = "posthog" },
+    { name = "psycopg", extra = ["binary", "pool"] },
+    { name = "pyjwt" },
+    { name = "python-dotenv" },
+    { name = "segno" },
+    { name = "servestatic" },
+    { name = "uvicorn" },
+    { name = "workos" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "anthropic", specifier = ">=0.40.0" },
+    { name = "aws-cdk-lib", specifier = ">=2.170.0" },
+    { name = "boto3", specifier = ">=1.43.39" },
+    { name = "claude-agent-sdk", specifier = ">=0.1.0" },
+    { name = "constructs", specifier = ">=10.0.0" },
+    { name = "cryptography", specifier = ">=44.0.0" },
+    { name = "dj-database-url", specifier = ">=2.2.0" },
+    { name = "django", specifier = "==6.0" },
+    { name = "django-browser-reload", specifier = ">=1.21.0" },
+    { name = "django-htmx", specifier = ">=1.27.0" },
+    { name = "django-tailwind", extras = ["honcho", "cookiecutter"], specifier = ">=4.4.2" },
+    { name = "django-watchfiles", specifier = ">=1.4.0" },
+    { name = "httpx", specifier = ">=0.28.0" },
+    { name = "jinja2", specifier = ">=3.1.0" },
+    { name = "opentelemetry-api", specifier = ">=1.39.1" },
+    { name = "opentelemetry-exporter-otlp", specifier = ">=1.39.1" },
+    { name = "opentelemetry-sdk", specifier = ">=1.39.1" },
+    { name = "policy-sentry", specifier = ">=0.14.0" },
+    { name = "posthog", specifier = ">=3.0.0" },
+    { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.2.0" },
+    { name = "pyjwt", specifier = ">=2.10.0" },
+    { name = "python-dotenv", specifier = ">=1.1.0" },
+    { name = "segno", specifier = ">=1.6.6" },
+    { name = "servestatic", specifier = ">=3.0.0" },
+    { name = "uvicorn", specifier = ">=0.32.0" },
+    { name = "workos", specifier = ">=5.37.0" },
 ]
 
 [[package]]
@@ -1384,14 +1384,14 @@ wheels = [
 
 [[package]]
 name = "s3transfer"
-version = "0.16.0"
+version = "0.19.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "botocore" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/05/04/74127fc843314818edfa81b5540e26dd537353b123a4edc563109d8f17dd/s3transfer-0.16.0.tar.gz", hash = "sha256:8e990f13268025792229cd52fa10cb7163744bf56e719e0b9cb925ab79abf920", size = 153827, upload-time = "2025-12-01T02:30:59.114Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f6/94/dcdaeb1713cab9c84def276cfac7388b17c7d9855bbcfe88d77e4dbafd44/s3transfer-0.19.0.tar.gz", hash = "sha256:ce436931687addc4c1712d52d40b32f53e88315723f107ffa20ba82b05a0f685", size = 165171, upload-time = "2026-06-16T19:44:51.599Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fc/51/727abb13f44c1fcf6d145979e1535a35794db0f6e450a0cb46aa24732fe2/s3transfer-0.16.0-py3-none-any.whl", hash = "sha256:18e25d66fed509e3868dc1572b3f427ff947dd2c56f844a5bf09481ad3f3b2fe", size = 86830, upload-time = "2025-12-01T02:30:57.729Z" },
+    { url = "https://files.pythonhosted.org/packages/46/5f/4c174edad94f82de888ac00a5ddd8d07b35609b6c94f0bdf4d74af57703e/s3transfer-0.19.0-py3-none-any.whl", hash = "sha256:777cc2415536f1debadb5c2ef7779275d0fc0fe0e042411cdd6caebeb2685262", size = 90101, upload-time = "2026-06-16T19:44:50.439Z" },
 ]
 
 [[package]]
