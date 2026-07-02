@@ -35,10 +35,9 @@ DEPLOY_FORM_HIDDEN_VARS = frozenset({
     "HUMR_AUX_PROVIDER", "HUMR_AUX_MODEL", "HUMR_AUX_BASE_URL",
 })
 
-# Codex sets BOTH main and auxiliary to openai-codex on purpose: deploy_app
-# grants Bedrock IAM when *either* provider is "bedrock", so a stray aux on
-# Bedrock would both fail (no Bedrock key in a Codex sandbox) and needlessly
-# request Bedrock permissions.
+# Codex sets BOTH main and auxiliary to openai-codex on purpose: main and aux
+# stay consistent with the org's single resolved preset rather than mixing
+# providers within one deploy.
 _PRESET_ENV: dict[str, dict[str, str]] = {
     models.Organization.LlmPreset.BEDROCK.value: {
         "HUMR_LLM_PROVIDER": "bedrock",

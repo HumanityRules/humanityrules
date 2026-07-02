@@ -71,12 +71,15 @@ class BedrockPlatformCapabilityTests(SimpleTestCase):
 
         self.assertEqual(actions, sorted(deploy_app.BEDROCK_RUNTIME_ACTIONS))
 
-    def test_custom_provider_does_not_get_bedrock_grant(self) -> None:
+    def test_custom_provider_still_gets_bedrock_grant_when_capability_present(self) -> None:
+        # The WebUI model dropdown always offers Bedrock models regardless of
+        # the org's default provider, so the grant follows the template
+        # capability alone, not the effective LLM provider env var.
         actions = _bedrock_actions_from_stack(
             _app_config(provider="custom", platform_capabilities=["bedrock-runtime"]),
         )
 
-        self.assertEqual(actions, [])
+        self.assertEqual(actions, sorted(deploy_app.BEDROCK_RUNTIME_ACTIONS))
 
     def test_bedrock_provider_without_template_capability_does_not_get_bedrock_grant(self) -> None:
         actions = _bedrock_actions_from_stack(
