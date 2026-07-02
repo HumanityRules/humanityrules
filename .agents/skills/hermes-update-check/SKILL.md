@@ -28,9 +28,10 @@ So the WebUI has **two things that must agree**: the base image tag
 branch commits `.humr-upstream-version`, and `build/check-vendor.sh` fails the build
 if it doesn't equal the base tag. A WebUI bump moves **both** in lockstep.
 
-Rebasing happens in the workbench clones at `hermes-vendor-work/<repo>` — the only
-checkouts with full history (the submodules are shallow). There, `origin` is upstream
-and `humr` is the mirror.
+Rebasing happens in the workbench clones at `../hermes-agent` and `../hermes-webui`
+(siblings of this monorepo checkout) — the only checkouts with full history (the
+submodules are shallow). There, `origin` is upstream and `humr` is the mirror. Never
+clone a workbench inside the monorepo; the siblings are the workbench.
 
 ## Bumping
 
@@ -76,20 +77,6 @@ browser→proxy→Caddy→WebUI path before declaring it safe.
   and `exit 1`s if one is missing → build failure. Upstream moves skills bundled→optional
   between releases; diff our allowlist against the new tag's `skills/*/SKILL.md` and drop
   entries that vanished.
-- **Skill-name collisions → "Ambiguous skill name … Refusing to guess".** The loader
-  (`tools/skills_tool.py`, since ~v2026.6.x) hard-errors when one bare name resolves in more
-  than one place, where pre-bump it silently preferred the local copy. Our layout avoids
-  this by keeping `skills.external_dirs: []` (image skills are *seeded* into
-  `$HERMES_HOME/skills` by `sync_skills()`, not read as a second dir — see
-  [[project_hermes_skills_ownership]]). One residual source survives because it reproduces
-  inside the seeded copy: **flat `<name>.md` inside another skill.** Loader "Strategy 3"
-  rglobs for `<name>.md` anywhere under a search dir and treats each as a skill, so
-  `creative/popular-web-designs/templates/{notion,posthog}.md` collide with the
-  `notion`/`posthog` skills. `prune-skills.sh` deletes those specific template files
-  (tolerant — already-absent is logged, not fatal). On bump, re-derive the colliding set:
-  for each `<name>.md` under any kept skill, flag it if a skill dir of that bare name also
-  exists. **Do NOT re-point `external_dirs` at the image tree** — that reintroduces the
-  full 38-way collision.
 - **A skill silently missing from the catalog.** `sync_skills()` copies image skills as the
   unprivileged agent user; a source file that isn't world-readable (stray 0600) makes
   `copytree` fail and the skill vanishes with only a `! Failed to copy` log line. The
@@ -98,8 +85,8 @@ browser→proxy→Caddy→WebUI path before declaring it safe.
 
 ## Report
 
-Under ~50 lines, two sections (Agent, WebUI): pin + how far behind; per-commit verdict
-(landed / clean / needs re-anchor) with an upstream `file:line`; 2–4 background bullets
+Two sections (Agent, WebUI): pin + how far behind; per-commit verdict
+(landed / clean / needs re-anchor); 2–4 background bullets
 including any landmines hit; bump-or-hold recommendation. Agent and WebUI are
 version-coupled (e.g. WebUI #3443's `openai-api` picker fix only works because the agent
 registry uses that slug) — call out fixes that need both. The user has prior-run context;
