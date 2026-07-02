@@ -1254,9 +1254,20 @@ async def _forward_to_upstream(
 
 
 def _response_is_event_stream(headers: list[tuple[bytes, bytes]]) -> bool:
-    """True when the upstream response is a server-sent-event stream."""
-    content_type = _header_value(headers=headers, name=b"content-type") or b""
-    return b"text/event-stream" in content_type
+    """True when the upstream response should be relayed frame-by-frame.
+
+    An explicit ``text/event-stream`` Content-Type is authoritative. The
+    ChatGPT Codex backend (chatgpt.com/backend-api/codex/responses) omits
+    Content-Type on its SSE responses entirely, so a chunked body with no
+    declared content type is also relayed live. Over-matching is safe: the
+    streaming relay forwards any body transparently, at the sole cost of
+    skipping the buffered X cost audit — and api.x.com always labels its
+    JSON responses.
+    """
+    content_type = _header_value(headers=headers, name=b"content-type")
+    if content_type is not None:
+        return b"text/event-stream" in content_type
+    return _header_value(headers=headers, name=b"transfer-encoding") == b"chunked"
 
 
 async def _relay_streaming_response(

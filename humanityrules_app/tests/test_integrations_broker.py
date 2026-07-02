@@ -627,6 +627,46 @@ class TestStreamingRelay(unittest.IsolatedAsyncioTestCase):
         non_empty_flushes = [f for f in writer.flushes if f]
         self.assertGreaterEqual(len(non_empty_flushes), 4)
 
+    async def test_chunked_without_content_type_is_relayed_frame_by_frame(self) -> None:
+        # The ChatGPT Codex backend omits Content-Type on its SSE responses
+        # (chatgpt.com/backend-api/codex/responses): chunked + no declared
+        # content type must still take the streaming relay, not the buffered
+        # path that would hold every token until the run completes.
+        upstream = (
+            b"HTTP/1.1 200 OK\r\n"
+            b"Transfer-Encoding: chunked\r\n"
+            b"\r\n"
+            + _chunk(b"event: response.created\ndata: {}\n\n")
+            + _chunk(b"event: response.output_text.delta\ndata: {\"d\":\"Hi\"}\n\n")
+            + _chunk(b"event: response.completed\ndata: {}\n\n")
+            + b"0\r\n\r\n"
+        )
+        status, keep_alive, writer = await self._forward(upstream, host="chatgpt.com")
+
+        self.assertEqual(status, 200)
+        self.assertTrue(keep_alive)
+        full = writer.all_bytes()
+        self.assertIn(b"Transfer-Encoding: chunked", full)
+        self.assertNotIn(b"Content-Length:", full)
+        self.assertIn(b"event: response.output_text.delta", full)
+        # Each frame flushes separately: head + 3 events + terminator.
+        non_empty_flushes = [f for f in writer.flushes if f]
+        self.assertGreaterEqual(len(non_empty_flushes), 4)
+
+    async def test_content_length_without_content_type_is_buffered(self) -> None:
+        body = b"{\"ok\":true}"
+        upstream = (
+            b"HTTP/1.1 200 OK\r\n"
+            b"Content-Length: " + str(len(body)).encode() + b"\r\n"
+            b"\r\n" + body
+        )
+        status, keep_alive, writer = await self._forward(upstream, host="api.anthropic.com")
+
+        self.assertEqual(status, 200)
+        self.assertTrue(keep_alive)
+        self.assertTrue(writer.all_bytes().endswith(body))
+        self.assertEqual(len([f for f in writer.flushes if f]), 1)
+
     async def test_content_length_sse_is_relayed(self) -> None:
         payload = b"data: {\"d\":\"hi\"}\n\ndata: [DONE]\n\n"
         upstream = (
