@@ -24,19 +24,19 @@ The five-phase pattern (each phase is idempotent and can be rerun on its own):
 
 Usage (same-account, the common case):
     uv run manage.py humr_hermes_migrate \\
-        --account "CH Sandbox" --source-env default --dest-env sandbox \\
+        --account "Humanity Rules Sandbox" --source-env default --dest-env sandbox \\
         --app hermes-vmendi00
 
 Usage (cross-account):
     uv run manage.py humr_hermes_migrate \\
-        --source-account "CH Sandbox" --source-env default \\
+        --source-account "Humanity Rules Sandbox" --source-env default \\
         --dest-account "Other AWS"  --dest-env prod \\
         --app hermes-vmendi00
 
 Raw mode (when local DB doesn't know one of the envs — e.g. dest is
 prod-controlplane managed):
     uv run manage.py humr_hermes_migrate \\
-        --source-account "CH Sandbox" --source-env default \\
+        --source-account "Humanity Rules Sandbox" --source-env default \\
         --dest-aws-account-id 266117665083 \\
         --dest-aws-external-id 6484b2c0-c50e-4f3e-ba0f-5252f129ef8d \\
         --dest-aws-region us-east-1 \\

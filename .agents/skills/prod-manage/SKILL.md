@@ -31,7 +31,7 @@ The image is pushed to `humr/{env_slug}/{ecr_repo}:{version}` in the customer's 
 
 ```bash
 ./prod_manage.sh humr_build_prebuilt_image \
-    --account "Course Hero Sandbox" \
+    --account "Humanity Rules Sandbox" \
     --env production \
     --source-dir template_repos/humr_dind \
     --ecr-repo humr-dind \

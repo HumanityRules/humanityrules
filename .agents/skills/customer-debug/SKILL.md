@@ -1,6 +1,6 @@
 ---
 name: customer-debug
-description: Debug customer app deployments in customer AWS accounts. Use when an app is crashing, a deployment failed, or you need to check ECS tasks, logs, or CloudFormation in a customer account (e.g., "CH Sandbox"). NOT for HUMR's own infrastructure — use prod-controlplane-debug for that.
+description: Debug customer app deployments in customer AWS accounts. Use when an app is crashing, a deployment failed, or you need to check ECS tasks, logs, or CloudFormation in a customer account (e.g., "Humanity Rules Sandbox"). NOT for HUMR's own infrastructure — use prod-controlplane-debug for that.
 ---
 
 # Debug Customer App Deployments
@@ -29,7 +29,7 @@ Check the `manage-commands` skill first — commands like `humr_app_shell`, `hum
 For non-interactive probes, use `humr_app_exec` (stdin script, structured output, `--as <user>`):
 
 ```bash
-uv run manage.py humr_app_exec --account "CH Sandbox" --env default --app my-app --as hermeswebui --format json <<'EOF'
+uv run manage.py humr_app_exec --account "Humanity Rules Sandbox" --env default --app my-app --as hermeswebui --format json <<'EOF'
 /app/venv/bin/python -c "..."
 EOF
 ```

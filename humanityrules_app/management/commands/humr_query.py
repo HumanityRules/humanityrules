@@ -27,7 +27,7 @@ Common queries:
     humr_query <Model> --describe   # Show available fields for any model
 
   Machine-readable output (used by tooling like prod_manage.sh dispatcher):
-    humr_query AWSAccount aws_account_id external_id --filter name="Course Hero Sandbox" --format json
+    humr_query AWSAccount aws_account_id external_id --filter name="Humanity Rules Sandbox" --format json
 """
 
 import json

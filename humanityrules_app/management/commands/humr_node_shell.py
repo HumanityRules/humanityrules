@@ -8,16 +8,16 @@ use humr_app_shell or humr_app_exec for that.
 
 Usage:
     # Default: shell into the sole running container instance in the ASG.
-    uv run manage.py humr_node_shell --account "CH Sandbox" --env default
+    uv run manage.py humr_node_shell --account "Humanity Rules Sandbox" --env default
 
     # List every container instance with its current tasks, then exit.
-    uv run manage.py humr_node_shell --account "CH Sandbox" --env default --list
+    uv run manage.py humr_node_shell --account "Humanity Rules Sandbox" --env default --list
 
     # Shell into whichever instance is currently hosting an app's RUNNING task.
-    uv run manage.py humr_node_shell --account "CH Sandbox" --env default --app hermes-vmendi00
+    uv run manage.py humr_node_shell --account "Humanity Rules Sandbox" --env default --app hermes-vmendi00
 
     # Shell into a specific instance (override autodetection).
-    uv run manage.py humr_node_shell --account "CH Sandbox" --env default --instance-id i-0abc...
+    uv run manage.py humr_node_shell --account "Humanity Rules Sandbox" --env default --instance-id i-0abc...
 
 Notes:
     - You log in as 'ssm-user'. Use `sudo` for privileged paths like

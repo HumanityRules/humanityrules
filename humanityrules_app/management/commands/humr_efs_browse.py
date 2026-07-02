@@ -2,9 +2,9 @@
 Browse EFS filesystem in a customer environment via ECS Exec.
 
 Usage:
-    uv run manage.py humr_efs_browse --account "CH Sandbox"
-    uv run manage.py humr_efs_browse --account "CH Sandbox" --env prod
-    uv run manage.py humr_efs_browse --account "CH Sandbox" --org "Course Hero"
+    uv run manage.py humr_efs_browse --account "Humanity Rules Sandbox"
+    uv run manage.py humr_efs_browse --account "Humanity Rules Sandbox" --env prod
+    uv run manage.py humr_efs_browse --account "Humanity Rules Sandbox" --org "Course Hero"
 
 Spins up a temporary Fargate task with the root EFS volume mounted (no access
 point, so you see all app data), then opens an interactive bash shell via ECS

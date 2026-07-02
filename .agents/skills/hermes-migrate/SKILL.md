@@ -21,7 +21,7 @@ A hermes app's state lives in two places:
 Ask the user only if missing — never grill. Reasonable defaults are noted.
 
 1. **App slug** (required) — same on source and dest.
-2. **Source env** (required) — name + env slug (e.g., `CH Sandbox` + `default`).
+2. **Source env** (required) — name + env slug (e.g., `Humanity Rules Sandbox` + `default`).
 3. **Dest env** (required) — name + env slug.
 4. **Same AWS account?** — default **yes**. Only ask if the user hasn't said either way and the env names hint otherwise. If yes, accept a single `--account`. If no, you'll pass `--source-account` and `--dest-account` separately, and the command will create the bridge bucket in the source account with a cross-account read policy for the dest account's root.
 5. **Local-DB knowledge.** If either env isn't in the local control plane's DB (typical for prod-controlplane-managed envs), use raw mode for that side (`--source-aws-*` / `--dest-aws-*`). Find the four values via `humr_query` against the *other* control plane (or by reading the env's CloudFormation stacks).

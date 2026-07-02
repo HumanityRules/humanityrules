@@ -13,7 +13,7 @@ tunnel.
 
 Usage:
     uv run manage.py seed_local_app \\
-        --aws-account "CH Sandbox" \\
+        --aws-account "Humanity Rules Sandbox" \\
         --app-slug hermes-vmendi00 \\
         --owner-username vmendi@gmail.com
 """
@@ -45,7 +45,7 @@ class Command(BaseCommand):
     help = "Seed DB rows for a local Hermes compose app (App stub, Environment, bearer)."
 
     def add_arguments(self, parser) -> None:
-        parser.add_argument("--aws-account", required=True, help="AWS account name the env lives under (e.g. 'CH Sandbox').")
+        parser.add_argument("--aws-account", required=True, help="AWS account name the env lives under (e.g. 'Humanity Rules Sandbox').")
         parser.add_argument("--app-slug", required=True, help="App slug the local container impersonates (e.g. 'hermes-vmendi00').")
         parser.add_argument("--owner-username", required=True, help="Username that owns --app-slug (e.g. 'vmendi@gmail.com').")
         parser.add_argument("--env-slug", default=DEFAULT_ENV_SLUG, help=f"Environment slug to create (default '{DEFAULT_ENV_SLUG}').")

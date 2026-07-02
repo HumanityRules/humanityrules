@@ -44,6 +44,6 @@ The unscoped main worker (no `--label`) keeps running and serves UI traffic + en
 
 ## Test environment
 
-- **AWS Account:** `CH Sandbox`.
+- **AWS Account:** `Humanity Rules Sandbox`.
 - **Environment:** `default`.
 - **Blast radius:** this is a throwaway test environment. Destroy, redeploy, or mutate anything you need — no fear.
