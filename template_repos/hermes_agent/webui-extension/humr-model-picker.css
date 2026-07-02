@@ -1,0 +1,11 @@
+/* HUMR model picker: show only the friendly model name in the dropdown.
+   The raw model-id line stays in the DOM — ui.js's show-more dedup reads
+   .model-opt-id textContent — so hide it instead of removing it. The
+   double-class selector outranks upstream's single-class display:block. */
+.model-opt .model-opt-id { display: none; }
+
+/* Drop the "Custom model ID" free-entry section; the curated list is the whole
+   offering. The search row (.model-search-row) stays. */
+.model-dropdown .model-custom-sep,
+.model-dropdown .model-custom-row { display: none; }
+

@@ -36,7 +36,7 @@ export API_SERVER_KEY=humr-loopback-gateway-key
 # URLs — the upstream static handler serves $HERMES_WEBUI_EXTENSION_DIR under
 # /extensions/.
 export HERMES_WEBUI_EXTENSION_SCRIPT_URLS="/extensions/humr-integrations.js,/extensions/humr-webapps.js,/extensions/humr-permissions.js"
-export HERMES_WEBUI_EXTENSION_STYLESHEET_URLS="/extensions/humr-integrations.css,/extensions/humr-webapps.css,/extensions/humr-permissions.css"
+export HERMES_WEBUI_EXTENSION_STYLESHEET_URLS="/extensions/humr-integrations.css,/extensions/humr-webapps.css,/extensions/humr-permissions.css,/extensions/humr-model-picker.css"
 
 CADDY_PORT=8787
 SYSTEM_PROCESS_COMPOSE_PORT=9956
