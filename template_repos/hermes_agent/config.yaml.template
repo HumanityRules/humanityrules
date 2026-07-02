@@ -207,8 +207,12 @@ plugins:
   - dashboard_auth/basic
   - dashboard_auth/nous
   - dashboard_auth/self_hosted
+  - dingtalk-platform
   - discord-platform
+  - email-platform
+  - feishu-platform
   - google_chat-platform
+  - homeassistant-platform
   - image_gen/fal
   - image_gen/krea
   - image_gen/openai
@@ -216,8 +220,10 @@ plugins:
   - image_gen/xai
   - irc-platform
   - line-platform
+  - matrix-platform
   - mattermost-platform
   - ntfy-platform
+  - raft-platform
   - simplex-platform
   - spotify
   - video_gen/fal
@@ -227,6 +233,7 @@ plugins:
   - web-firecrawl
   - web/parallel
   - web/searxng
+  - wecom-platform
 
 web:
   backend: tavily
