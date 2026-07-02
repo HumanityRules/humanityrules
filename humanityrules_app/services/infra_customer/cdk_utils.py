@@ -72,7 +72,7 @@ def deploy_from_assembly(assembly_dir: str, session: boto3.Session, stack_names:
     cdk_env = _get_cdk_env(session)
 
     cmd = ["npx", "--yes", "cdk", "deploy"] + target_args + [
-        "--ci", "--progress", "events", "--require-approval", "never", "--no-notices", "--app", assembly_dir,
+        "--ci", "--progress", "events", "--require-approval", "never", "--no-notices", "--express", "--rollback", "--app", assembly_dir,
     ]
 
     process = subprocess.Popen(

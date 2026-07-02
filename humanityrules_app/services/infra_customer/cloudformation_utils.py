@@ -105,16 +105,19 @@ def deploy_cloudformation_stack(
                 TemplateBody=template_body,
                 Parameters=cf_parameters,
                 Capabilities=cf_capabilities,
+                DeploymentConfig={"Mode": "EXPRESS"},
             )
             waiter = cf_client.get_waiter("stack_update_complete")
         else:
             logger.info("   Stack does not exist, creating")
+            # Express mode: complete once config is applied, rollback disabled by default.
+            # OnFailure is omitted — it conflicts with Express, which owns failure handling.
             cf_client.create_stack(
                 StackName=stack_name,
                 TemplateBody=template_body,
                 Parameters=cf_parameters,
                 Capabilities=cf_capabilities,
-                OnFailure="ROLLBACK",  # Keep stack around so we can see failure events
+                DeploymentConfig={"Mode": "EXPRESS"},
             )
             waiter = cf_client.get_waiter("stack_create_complete")
         
@@ -208,7 +211,7 @@ def delete_stack_and_wait(cf_client, stack_name: str) -> bool:
     
     logger.info("   Deleting stack '%(stack_name)s'", {"stack_name": stack_name})
     try:
-        cf_client.delete_stack(StackName=stack_name)
+        cf_client.delete_stack(StackName=stack_name, DeploymentConfig={"Mode": "EXPRESS"})
         
         # Wait for deletion
         waiter = cf_client.get_waiter("stack_delete_complete")
