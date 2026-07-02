@@ -21,11 +21,9 @@ export HERMES_WEBUI_HOST=127.0.0.1
 export HERMES_WEBUI_PORT=8789
 
 # The WebUI page calls the HUMR control plane cross-origin (401 reauth
-# navigation, quota chip), which upstream's CSP connect-src blocks unless
-# allowlisted via HERMES_WEBUI_CSP_CONNECT_EXTRA (validated upstream; ignored
-# if malformed). Derive the origin (scheme://host[:port]) from
-# HUMR_CONTROL_PLANE_URL. Replaces the vendored CSP patch dropped at the
-# v0.51.819 rebase, which read HUMR_CONTROL_PLANE_URL directly in helpers.py.
+# navigation, quota chip), which the WebUI's CSP connect-src blocks unless
+# the origin (scheme://host[:port]) is allowlisted via
+# HERMES_WEBUI_CSP_CONNECT_EXTRA (validated by the WebUI; ignored if malformed).
 if [ -n "${HUMR_CONTROL_PLANE_URL:-}" ]; then
     export HERMES_WEBUI_CSP_CONNECT_EXTRA="$(printf '%s' "$HUMR_CONTROL_PLANE_URL" | sed -E 's#^(https?://[^/]+).*#\1#')"
 fi
