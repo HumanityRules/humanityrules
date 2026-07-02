@@ -175,17 +175,16 @@ def prebuilt_containers(app_config: appconfig.AppConfig) -> list[appconfig.Conta
     return [c for c in app_config.containers if c.image_source == appconfig.ImageSource.PREBUILT]
 
 
-def _uses_bedrock_runtime(app_config: appconfig.AppConfig) -> bool:
-    """Return True when the template permits Bedrock and effective LLM config selects it."""
-    if PLATFORM_CAPABILITY_BEDROCK_RUNTIME not in app_config.platform_capabilities:
-        return False
+def _grants_bedrock_runtime(app_config: appconfig.AppConfig) -> bool:
+    """Return True when the template declares the bedrock-runtime platform capability.
 
-    for c in app_config.containers:
-        for env_var in c.environment_variables:
-            if env_var.get("name") in {"HUMR_LLM_PROVIDER", "HUMR_AUX_PROVIDER"}:
-                if str(env_var.get("value", "")).lower() == "bedrock":
-                    return True
-    return False
+    Granted unconditionally for any such template regardless of the org's LLM
+    preset — the Hermes WebUI model dropdown always offers Bedrock models
+    (the sandbox's AWS SDK config points at the local signing proxy, which
+    signs with the task role), so a Codex-preset deploy still needs the IAM
+    grant for a user to pick a Bedrock model.
+    """
+    return PLATFORM_CAPABILITY_BEDROCK_RUNTIME in app_config.platform_capabilities
 
 
 def _missing_prebuilt_images(
@@ -696,7 +695,7 @@ class AppStack(Stack):
                 actions=["secretsmanager:GetSecretValue"],
                 resources=[env_bearer_shared_secrets_arn],
             ))
-        if _uses_bedrock_runtime(app_config):
+        if _grants_bedrock_runtime(app_config):
             task_role.add_to_policy(iam.PolicyStatement(
                 actions=BEDROCK_RUNTIME_ACTIONS,
                 resources=["*"],

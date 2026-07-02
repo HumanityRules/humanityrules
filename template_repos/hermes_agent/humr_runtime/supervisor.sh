@@ -157,9 +157,12 @@ render_hermes_config() {
 
     mkdir -p "$HERMES_HOME"
 
+    # Bedrock is always IAM-granted for this template (see deploy_app.py's
+    # PLATFORM_CAPABILITY_BEDROCK_RUNTIME gate), so the curated Bedrock model
+    # list is offered in the WebUI dropdown regardless of which provider is
+    # the org's default.
     providers_block_file=$(mktemp)
-    if [ "$HUMR_LLM_PROVIDER" = "bedrock" ]; then
-        cat > "$providers_block_file" <<'EOF'
+    cat > "$providers_block_file" <<'EOF'
 providers:
   only_configured: false
   bedrock:
@@ -168,9 +171,6 @@ providers:
       'global.anthropic.claude-opus-4-8': "Opus 4.8"
       'global.anthropic.claude-haiku-4-5-20251001-v1:0': "Haiku 4.5"
 EOF
-    else
-        echo "providers: {}" > "$providers_block_file"
-    fi
 
     sed \
         -e "s|__CONFIG_PROVIDER__|${HUMR_LLM_PROVIDER}|g" \
@@ -184,13 +184,11 @@ EOF
         "$HERMES_CONFIG_TEMPLATE" > "$HERMES_HOME/config.yaml"
     rm -f "$providers_block_file"
 
-    if [ "$HUMR_LLM_PROVIDER" = "bedrock" ]; then
-        cat >> "$HERMES_HOME/config.yaml" <<EOF
+    cat >> "$HERMES_HOME/config.yaml" <<EOF
 
 bedrock:
   region: ${AWS_DEFAULT_REGION}
 EOF
-    fi
 }
 
 ensure_workspace_ownership() {
