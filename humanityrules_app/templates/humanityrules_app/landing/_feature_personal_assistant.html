@@ -1,0 +1,172 @@
+{% comment %}
+Landing page killer-feature section 02 - Personal assistant: always on while you
+sleep. Columns are flipped versus feature 01 for page rhythm: animated "overnight
+activity feed" card on the LEFT, text on the RIGHT (lg screens); on mobile the text
+stacks first. The feed entries slide in one by one on scroll-into-view and the last
+entry ("Morning brief ready") lands in an emerald success state, mirroring the
+granted-state of the #approval-card. The animation is driven by the self-contained
+IIFE <script> at the bottom of this partial (IntersectionObserver, loops with a
+pause). All selectors are namespaced under #overnight-feed so this partial does not
+depend on landing_page.html's script block. Governance nuance: the assistant only
+drafts and prepares, it never sends or decides.
+{% endcomment %}
+
+<section id="features" class="landing-section section-padding relative overflow-hidden min-h-screen flex items-center">
+    <div class="absolute inset-0 bg-grid-pattern opacity-30"></div>
+    <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-cyber-500/5 rounded-full blur-3xl"></div>
+
+    <div class="container-custom relative z-10">
+        <div class="grid lg:grid-cols-2 gap-16 items-center">
+            <!-- Visual column: animated overnight activity feed (left on desktop) -->
+            <div class="relative lg:order-1" id="overnight-feed">
+                <div class="absolute -inset-4 bg-gradient-to-r from-cyber-500/20 via-cyan-500/20 to-teal-500/20 rounded-3xl blur-2xl opacity-60"></div>
+                <div class="relative bg-navy-900/90 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden shadow-2xl">
+                    <!-- Card header -->
+                    <div class="flex items-center gap-2 px-4 py-3 bg-white/[0.02] border-b border-white/5">
+                        <div class="p-1.5 bg-cyber-500/10 rounded-lg">
+                            <!-- Moon icon -->
+                            <svg class="w-4 h-4 text-cyber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>
+                            </svg>
+                        </div>
+                        <span class="text-sm font-semibold text-white">While you were away</span>
+                        <span class="ml-auto text-xs text-gray-500 font-mono">your-assistant</span>
+                    </div>
+
+                    <!-- Card body: overnight activity feed -->
+                    <div class="p-6 space-y-3">
+                        <!-- Entry: laptop disconnected -->
+                        <div class="feed-entry flex items-center gap-3 p-3 rounded-lg border transition-all duration-500 opacity-0 translate-y-2 bg-white/[0.02] border-white/5">
+                            <span class="font-mono text-xs text-gray-500 tabular-nums shrink-0">18:42</span>
+                            <span class="text-sm text-gray-300">Laptop disconnected</span>
+                        </div>
+
+                        <!-- Entry: inbox sorted -->
+                        <div class="feed-entry flex items-center gap-3 p-3 rounded-lg border transition-all duration-500 opacity-0 translate-y-2 bg-white/[0.02] border-white/5">
+                            <span class="font-mono text-xs text-gray-500 tabular-nums shrink-0">19:10</span>
+                            <span class="text-sm text-gray-300">Inbox sorted, 3 messages flagged</span>
+                        </div>
+
+                        <!-- Entry: research compiled -->
+                        <div class="feed-entry flex items-center gap-3 p-3 rounded-lg border transition-all duration-500 opacity-0 translate-y-2 bg-white/[0.02] border-white/5">
+                            <span class="font-mono text-xs text-gray-500 tabular-nums shrink-0">21:03</span>
+                            <span class="text-sm text-gray-300">Research compiled, 12 sources</span>
+                        </div>
+
+                        <!-- Entry: replies drafted for review -->
+                        <div class="feed-entry flex items-center gap-3 p-3 rounded-lg border transition-all duration-500 opacity-0 translate-y-2 bg-white/[0.02] border-white/5">
+                            <span class="font-mono text-xs text-gray-500 tabular-nums shrink-0">23:17</span>
+                            <span class="text-sm text-gray-300">4 replies drafted for review</span>
+                        </div>
+
+                        <!-- Entry: follow-ups lined up -->
+                        <div class="feed-entry flex items-center gap-3 p-3 rounded-lg border transition-all duration-500 opacity-0 translate-y-2 bg-white/[0.02] border-white/5">
+                            <span class="font-mono text-xs text-gray-500 tabular-nums shrink-0">05:58</span>
+                            <span class="text-sm text-gray-300">Follow-ups lined up</span>
+                        </div>
+
+                        <!-- Entry: morning brief ready (final, emerald success state) -->
+                        <div class="feed-entry feed-entry-final flex items-center gap-3 p-3 rounded-lg border transition-all duration-500 opacity-0 translate-y-2 bg-white/[0.02] border-white/5">
+                            <span class="feed-time font-mono text-xs text-gray-500 tabular-nums shrink-0">06:30</span>
+                            <span class="feed-label text-sm text-gray-300">Morning brief ready</span>
+                            <svg class="feed-check w-4 h-4 text-emerald-400 ml-auto hidden shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M20 6 9 17l-5-5"/>
+                            </svg>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Text column (right on desktop, first on mobile) -->
+            <div class="lg:order-2">
+                <h2 class="text-4xl sm:text-5xl font-bold text-white mb-6 leading-tight">
+                    A personal assistant,<br>
+                    <span class="gradient-text">always on.</span>
+                </h2>
+
+                <p class="text-2xl sm:text-3xl font-medium text-gray-200 mb-8 leading-tight">
+                    Close the laptop. It keeps working.
+                </p>
+
+                <p class="text-lg text-gray-400 mb-6 leading-relaxed">
+                    It has already sorted your inbox, caught up on Slack, and noticed what changed in Notion.
+                    Hand it something big on your way out: by morning the research is
+                    done, the replies are drafted, and a brief is waiting.
+                </p>
+
+                <p class="text-lg text-gray-400 leading-relaxed">
+                    Talk to it from wherever you are: Slack, the web, your phone. It's the same assistant in
+                    every channel, remembering your projects, your preferences, and where you left off. And
+                    everything it learns stays with you, not on another company's servers.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    (function() {
+        var feed = document.getElementById('overnight-feed');
+        if (!feed) return;
+
+        var entries = feed.querySelectorAll('.feed-entry');
+        var finalEntry = feed.querySelector('.feed-entry-final');
+
+        function reset() {
+            entries.forEach(function(entry) {
+                entry.classList.add('opacity-0', 'translate-y-2');
+                entry.classList.remove('opacity-100', 'translate-y-0');
+            });
+            if (finalEntry) {
+                finalEntry.classList.remove('bg-emerald-500/10', 'border-emerald-500/20');
+                finalEntry.classList.add('bg-white/[0.02]', 'border-white/5');
+                var label = finalEntry.querySelector('.feed-label');
+                var time = finalEntry.querySelector('.feed-time');
+                var check = finalEntry.querySelector('.feed-check');
+                if (label) label.className = 'feed-label text-sm text-gray-300';
+                if (time) time.className = 'feed-time font-mono text-xs text-gray-500 tabular-nums shrink-0';
+                if (check) check.classList.add('hidden');
+            }
+        }
+
+        function revealFinalSuccess() {
+            if (!finalEntry) return;
+            finalEntry.classList.remove('bg-white/[0.02]', 'border-white/5');
+            finalEntry.classList.add('bg-emerald-500/10', 'border-emerald-500/20');
+            var label = finalEntry.querySelector('.feed-label');
+            var time = finalEntry.querySelector('.feed-time');
+            var check = finalEntry.querySelector('.feed-check');
+            if (label) label.className = 'feed-label text-sm text-emerald-300 font-medium';
+            if (time) time.className = 'feed-time font-mono text-xs text-emerald-400 tabular-nums shrink-0';
+            if (check) check.classList.remove('hidden');
+        }
+
+        function loop() {
+            reset();
+            // Stagger each entry in, slow and quiet.
+            entries.forEach(function(entry, index) {
+                setTimeout(function() {
+                    entry.classList.remove('opacity-0', 'translate-y-2');
+                    entry.classList.add('opacity-100', 'translate-y-0');
+                    // The last entry settles into its emerald success state.
+                    if (entry === finalEntry) {
+                        setTimeout(revealFinalSuccess, 500);
+                    }
+                }, 700 + index * 900);
+            });
+            // Hold on the finished feed, then restart from an empty card.
+            setTimeout(loop, 700 + entries.length * 900 + 4500);
+        }
+
+        var observer = new IntersectionObserver(function(entries) {
+            entries.forEach(function(entry) {
+                if (entry.isIntersecting && !feed.dataset.started) {
+                    feed.dataset.started = 'true';
+                    loop();
+                }
+            });
+        }, { threshold: 0.3 });
+
+        observer.observe(feed);
+    })();
+    </script>
+</section>

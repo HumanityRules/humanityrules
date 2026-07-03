@@ -1,0 +1,249 @@
+{% comment %}
+Landing page killer-feature section 03 - A URL for everything: every agent gets an
+address on your domain, apps live under it, and access is shared like Google Docs.
+Text left, animated "share dialog" card right (same column rhythm as feature 01).
+The card animation is driven by the self-contained IIFE <script> at the bottom of
+this partial (IntersectionObserver, loops with a pause like the sibling cards). It
+cycles a "General access" row through four scopes (Just you, 3 people, Finance team,
+Everyone at Northwind) and dramatizes a leaver during the 3-people state: one avatar
+fades to gray with a strikethrough and the count ticks to 2. All selectors are
+namespaced under #share-dialog so this partial does not depend on landing_page.html's
+script block.
+{% endcomment %}
+
+<section id="url-sharing" class="landing-section section-padding relative overflow-hidden min-h-screen flex items-center">
+    <div class="absolute inset-0 bg-grid-pattern opacity-30"></div>
+    <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-cyber-500/5 rounded-full blur-3xl"></div>
+
+    <div class="container-custom relative z-10">
+        <div class="grid lg:grid-cols-2 gap-16 items-center">
+            <!-- Left column: text content -->
+            <div>
+                <h2 class="text-4xl sm:text-5xl font-bold text-white mb-6 leading-tight">
+                    A URL for everything.<br>
+                    <span class="gradient-text">Choose the audience.</span>
+                </h2>
+
+                <p class="text-2xl sm:text-3xl font-medium text-gray-200 mb-8 leading-tight">
+                    Share your agents and apps like Google Docs.
+                </p>
+
+                <p class="text-lg text-gray-400 mb-6 leading-relaxed">
+                    Every agent gets an address on your domain, and every app it ships lives right under
+                    it. Anyone who opens the link signs in with the login they already have, through Okta
+                    or whatever you run, without new accounts or passwords.
+                </p>
+
+                <p class="text-lg text-gray-400 leading-relaxed">
+                    You set who has access: just you, a few people, one team, or everyone. Your
+                    ABAC rules enforce the boundary on every request. And when someone leaves the company,
+                    their access leaves with them.
+                </p>
+            </div>
+
+            <!-- Right column: animated share dialog card -->
+            <div class="relative" id="share-dialog">
+                <div class="absolute -inset-4 bg-gradient-to-r from-cyber-500/20 via-cyan-500/20 to-teal-500/20 rounded-3xl blur-2xl opacity-60"></div>
+                <div class="relative bg-navy-900/90 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden shadow-2xl">
+                    <!-- Card header -->
+                    <div class="flex items-center gap-2 px-4 py-3 bg-white/[0.02] border-b border-white/5">
+                        <div class="p-1.5 bg-cyber-500/10 rounded-lg">
+                            <!-- Share icon -->
+                            <svg class="w-4 h-4 text-cyber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+                            </svg>
+                        </div>
+                        <span class="text-sm font-semibold text-white">Share</span>
+                        <span class="ml-auto text-xs text-gray-500 font-mono">Maria's agent</span>
+                    </div>
+
+                    <!-- Card body -->
+                    <div class="p-6 space-y-4">
+                        <!-- Addresses: agent, with its app nested underneath -->
+                        <div class="space-y-2">
+                            <!-- Agent address -->
+                            <div class="flex items-center gap-3 p-3 rounded-lg bg-white/[0.02] border border-white/5">
+                                <!-- Link icon -->
+                                <svg class="w-4 h-4 text-cyber-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                                </svg>
+                                <span class="font-mono text-sm text-gray-300 truncate">maria.northwind.humr.app</span>
+                            </div>
+
+                            <!-- App address, nested under the agent with a corner connector -->
+                            <div class="flex items-center gap-2 pl-3">
+                                <!-- Tree corner connector -->
+                                <svg class="w-4 h-4 text-gray-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M6 3v11a3 3 0 0 0 3 3h9"/>
+                                </svg>
+                                <div class="flex items-center gap-3 flex-1 p-2.5 rounded-lg bg-white/[0.02] border border-white/5">
+                                    <!-- App / window icon -->
+                                    <svg class="w-4 h-4 text-cyber-400/70 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <rect width="18" height="14" x="3" y="5" rx="2"/><path d="M3 9h18"/>
+                                    </svg>
+                                    <span class="font-mono text-xs text-gray-400 truncate">costs.maria.northwind.humr.app</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- SSO chip: sign-in through the company IdP -->
+                        <div class="flex items-center gap-2 text-xs text-gray-500">
+                            <span class="inline-flex items-center gap-1.5 rounded-full bg-white/[0.03] border border-white/10 px-2.5 py-1 text-gray-400">
+                                <!-- Key icon -->
+                                <svg class="w-3 h-3 text-cyber-400/80 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L21 5"/><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/>
+                                </svg>
+                                SSO · Okta
+                            </span>
+                            <span>Sign in with the login they already have</span>
+                        </div>
+
+                        <!-- General access: cycles through scopes -->
+                        <div class="pt-1">
+                            <p class="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">General access</p>
+
+                            <div id="access-row" class="flex items-center gap-3 p-3 rounded-lg bg-white/[0.02] border border-white/10 transition-all duration-500">
+                                <!-- Scope icon slot: one icon shown per state -->
+                                <span id="access-icon" class="shrink-0 text-cyber-400">
+                                    <!-- Lock (Just you) -->
+                                    <svg data-scope-icon="0" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                                    </svg>
+                                    <!-- Avatar stack (3 people / 2 people) -->
+                                    <span data-scope-icon="1" class="hidden items-center">
+                                        <span class="flex -space-x-2">
+                                            <span data-avatar="0" class="inline-flex items-center justify-center w-6 h-6 rounded-full ring-2 ring-navy-900 bg-cyber-500/25 text-cyber-200 text-[9px] font-semibold transition-all duration-700">MK</span>
+                                            <span data-avatar="1" class="inline-flex items-center justify-center w-6 h-6 rounded-full ring-2 ring-navy-900 bg-violet-500/25 text-violet-300 text-[9px] font-semibold transition-all duration-700">JL</span>
+                                            <span data-avatar="2" class="inline-flex items-center justify-center w-6 h-6 rounded-full ring-2 ring-navy-900 bg-teal-500/25 text-teal-200 text-[9px] font-semibold transition-all duration-700">RP</span>
+                                        </span>
+                                    </span>
+                                    <!-- Team tag (Finance team) -->
+                                    <svg data-scope-icon="2" class="hidden w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                                    </svg>
+                                    <!-- Building (Everyone at Northwind) -->
+                                    <svg data-scope-icon="3" class="hidden w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <rect width="16" height="20" x="4" y="2" rx="2"/><path d="M9 22v-4h6v4"/><path d="M8 6h.01"/><path d="M16 6h.01"/><path d="M12 6h.01"/><path d="M12 10h.01"/><path d="M12 14h.01"/><path d="M16 10h.01"/><path d="M16 14h.01"/><path d="M8 10h.01"/><path d="M8 14h.01"/>
+                                    </svg>
+                                </span>
+
+                                <div class="min-w-0">
+                                    <p id="access-label" class="text-sm font-medium text-white truncate">Just you</p>
+                                    <p id="access-caption" class="text-xs text-gray-500 truncate h-0 opacity-0 transition-all duration-500"></p>
+                                </div>
+
+                                <!-- Chevron: this row is a dropdown -->
+                                <svg class="w-4 h-4 text-gray-500 ml-auto shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="m6 9 6 6 6-6"/>
+                                </svg>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    (function() {
+        var dialog = document.getElementById('share-dialog');
+        if (!dialog) return;
+
+        var iconWrap = dialog.querySelector('#access-icon');
+        var icons = iconWrap ? iconWrap.querySelectorAll('[data-scope-icon]') : [];
+        var label = dialog.querySelector('#access-label');
+        var caption = dialog.querySelector('#access-caption');
+        var thirdAvatar = dialog.querySelector('[data-avatar="2"]');
+
+        var states = [
+            { icon: '0', label: 'Just you', caption: '' },
+            { icon: '1', label: '3 people', caption: '' },
+            { icon: '2', label: 'Finance team', caption: '' },
+            { icon: '3', label: 'Everyone at Northwind', caption: '' }
+        ];
+
+        function showIcon(key) {
+            icons.forEach(function(el) {
+                var match = el.getAttribute('data-scope-icon') === key;
+                // Avatar stack is an inline-flex span; the rest are block svgs.
+                if (el.tagName.toLowerCase() === 'span') {
+                    el.classList.toggle('hidden', !match);
+                    el.classList.toggle('inline-flex', match);
+                } else {
+                    el.classList.toggle('hidden', !match);
+                }
+            });
+        }
+
+        function resetAvatar() {
+            if (!thirdAvatar) return;
+            thirdAvatar.classList.remove('opacity-0', 'line-through', 'grayscale');
+            thirdAvatar.classList.remove('bg-gray-600/25', 'text-gray-500');
+            thirdAvatar.classList.add('bg-teal-500/25', 'text-teal-200');
+        }
+
+        function grayOutLeaver() {
+            if (!thirdAvatar) return;
+            // The third person leaves: fade to gray with a strikethrough.
+            thirdAvatar.classList.remove('bg-teal-500/25', 'text-teal-200');
+            thirdAvatar.classList.add('bg-gray-600/25', 'text-gray-500', 'line-through', 'opacity-40');
+        }
+
+        function setCaption(text) {
+            if (!caption) return;
+            if (text) {
+                caption.textContent = text;
+                caption.classList.remove('h-0', 'opacity-0');
+                caption.classList.add('opacity-100');
+            } else {
+                caption.textContent = '';
+                caption.classList.add('h-0', 'opacity-0');
+                caption.classList.remove('opacity-100');
+            }
+        }
+
+        function applyState(i) {
+            var s = states[i];
+            showIcon(s.icon);
+            if (label) label.textContent = s.label;
+            setCaption(s.caption);
+        }
+
+        function loop() {
+            resetAvatar();
+            var i = 0;
+            applyState(i);
+
+            var timers = [];
+            function at(delay, fn) { timers.push(setTimeout(fn, delay)); }
+
+            // State 1: Just you (already applied at 0)
+            // State 2: 3 people
+            at(2000, function() { applyState(1); });
+            // The leaver beat, during the 3-people state.
+            at(3400, function() {
+                grayOutLeaver();
+                if (label) label.textContent = '2 people';
+                setCaption('RP left Northwind');
+            });
+            // State 3: Finance team
+            at(5400, function() { resetAvatar(); applyState(2); });
+            // State 4: Everyone at Northwind
+            at(7400, function() { applyState(3); });
+            // Hold on the final scope, then restart from the top.
+            at(12000, loop);
+        }
+
+        var observer = new IntersectionObserver(function(entries) {
+            entries.forEach(function(entry) {
+                if (entry.isIntersecting && !dialog.dataset.started) {
+                    dialog.dataset.started = 'true';
+                    loop();
+                }
+            });
+        }, { threshold: 0.3 });
+
+        observer.observe(dialog);
+    })();
+    </script>
+</section>

@@ -1,7 +1,7 @@
 {% comment %}
-Landing page solution section - governed agents deployed in your own cloud.
-The terminal animation is driven by JS in landing_page.html (selectors:
-#terminal-container, .terminal-step, .step-dot/.step-text/.step-check, #terminal-success).
+Landing page solution section - a short, centered, text-only binder between the
+amber problem cards and the visual-heavy killer-feature sections. No terminal,
+no cards, no CTAs: eyebrow, two-line h2, a prominent sub, then two paragraphs.
 {% endcomment %}
 
 <section id="solution" class="landing-section section-padding relative overflow-hidden min-h-screen flex items-center">
@@ -9,162 +9,41 @@ The terminal animation is driven by JS in landing_page.html (selectors:
     <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-cyber-500/5 rounded-full blur-3xl"></div>
 
     <div class="container-custom relative z-10">
-        <div class="grid lg:grid-cols-2 gap-16 items-center">
-            <!-- Left column: text content -->
-            <div>
-                <div class="flex items-center gap-3 mb-6">
-                    <div class="p-2 bg-cyber-500/10 rounded-lg">
-                        <!-- Sparkles icon -->
-                        <svg class="w-6 h-6 text-cyber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/>
-                            <path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/>
-                        </svg>
-                    </div>
-                    <span class="text-cyber-400 font-semibold text-sm uppercase tracking-wider">The Solution</span>
-                </div>
-
-                <h2 class="text-4xl sm:text-5xl font-bold text-white mb-6 leading-tight">
-                    Real agents for your team<br>
-                    <span class="gradient-text">governed from day one</span>
-                </h2>
-
-                <p class="text-lg text-gray-400 mb-8 leading-relaxed">
-                    Humanity Rules deploys a personal AI assistant for every employee inside your own cloud.
-                    Each one is isolated, always-on, and reachable from Slack, the web, or a personal URL —
-                    with permissions, approvals, and audit built into the platform.
-                </p>
-
-                <!-- Solution points -->
-                <div class="space-y-4 mb-8">
-                    <!-- An agent for everyone -->
-                    <div class="flex items-start gap-4">
-                        <div class="p-2 bg-cyber-500/10 rounded-lg flex-shrink-0">
-                            <!-- Users icon -->
-                            <svg class="w-5 h-5 text-cyber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-                            </svg>
-                        </div>
-                        <div>
-                            <h3 class="text-white font-semibold mb-1">An agent for everyone</h3>
-                            <p class="text-gray-400 text-sm">Per-employee, isolated, always-on. Real tool execution and persistent memory — not just a chat box.</p>
-                        </div>
-                    </div>
-
-                    <!-- In your own cloud -->
-                    <div class="flex items-start gap-4">
-                        <div class="p-2 bg-cyber-500/10 rounded-lg flex-shrink-0">
-                            <!-- Cloud icon -->
-                            <svg class="w-5 h-5 text-cyber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>
-                            </svg>
-                        </div>
-                        <div>
-                            <h3 class="text-white font-semibold mb-1">Inside your perimeter</h3>
-                            <p class="text-gray-400 text-sm">Runs in your VPC, with in-VPC model paths like Bedrock. External calls route only through a governed, audited broker.</p>
-                        </div>
-                    </div>
-
-                    <!-- Governed by default -->
-                    <div class="flex items-start gap-4">
-                        <div class="p-2 bg-cyber-500/10 rounded-lg flex-shrink-0">
-                            <!-- Shield-check icon -->
-                            <svg class="w-5 h-5 text-cyber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/>
-                            </svg>
-                        </div>
-                        <div>
-                            <h3 class="text-white font-semibold mb-1">Governed by default</h3>
-                            <p class="text-gray-400 text-sm">Curated skills, ABAC permissions, approval workflows, SSO, and a complete audit trail.</p>
-                        </div>
-                    </div>
-                </div>
-
-                <a href="#platform" class="inline-flex items-center gap-2 text-cyber-400 hover:text-cyber-300 font-medium transition-colors group">
-                    Explore the platform
-                    <!-- ArrowRight icon -->
-                    <svg class="w-4 h-4 group-hover:translate-x-1 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>
+        <div class="max-w-3xl mx-auto text-center">
+            <!-- Section header -->
+            <div class="flex items-center justify-center gap-3 mb-6">
+                <div class="p-2 bg-cyber-500/10 rounded-lg">
+                    <!-- Sparkles icon -->
+                    <svg class="w-6 h-6 text-cyber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/>
+                        <path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/>
                     </svg>
-                </a>
-            </div>
-
-            <!-- Right column: Terminal preview -->
-            <div class="relative" id="terminal-container">
-                <div class="absolute -inset-4 bg-gradient-to-r from-cyber-500/20 via-cyan-500/20 to-teal-500/20 rounded-3xl blur-2xl opacity-60"></div>
-                <div class="relative bg-navy-900/90 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden shadow-2xl">
-                    <!-- Terminal header -->
-                    <div class="flex items-center gap-2 px-4 py-3 bg-white/[0.02] border-b border-white/5">
-                        <div class="flex items-center gap-2">
-                            <div class="w-3 h-3 rounded-full bg-red-500/80"></div>
-                            <div class="w-3 h-3 rounded-full bg-yellow-500/80"></div>
-                            <div class="w-3 h-3 rounded-full bg-green-500/80"></div>
-                        </div>
-                        <div class="flex-1 text-center">
-                            <span class="text-xs text-gray-500 font-mono">humr · deploy agent</span>
-                        </div>
-                        <div class="w-14"></div>
-                    </div>
-
-                    <!-- Terminal content -->
-                    <div class="p-6 font-mono text-sm space-y-3">
-                        <div class="flex items-center gap-2 text-gray-400">
-                            <span class="text-cyber-400">$</span>
-                            <span>humr deploy --for jane@acme.com</span>
-                            <span class="typing-cursor"></span>
-                        </div>
-
-                        <!-- Step 1 -->
-                        <div class="terminal-step flex items-center gap-3 p-3 rounded-lg border transition-all duration-500 opacity-0 translate-y-2 bg-white/[0.02] border-white/5">
-                            <div class="step-dot w-2 h-2 rounded-full bg-gray-600 transition-colors"></div>
-                            <span class="step-text text-gray-500 transition-colors">Provisioning isolated sandbox in your VPC...</span>
-                            <svg class="step-check w-4 h-4 text-emerald-400 ml-auto hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M20 6 9 17l-5-5"/>
-                            </svg>
-                        </div>
-
-                        <!-- Step 2 -->
-                        <div class="terminal-step flex items-center gap-3 p-3 rounded-lg border transition-all duration-500 opacity-0 translate-y-2 bg-white/[0.02] border-white/5">
-                            <div class="step-dot w-2 h-2 rounded-full bg-gray-600 transition-colors"></div>
-                            <span class="step-text text-gray-500 transition-colors">Applying ABAC policies &amp; SSO...</span>
-                            <svg class="step-check w-4 h-4 text-emerald-400 ml-auto hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M20 6 9 17l-5-5"/>
-                            </svg>
-                        </div>
-
-                        <!-- Step 3 -->
-                        <div class="terminal-step flex items-center gap-3 p-3 rounded-lg border transition-all duration-500 opacity-0 translate-y-2 bg-white/[0.02] border-white/5">
-                            <div class="step-dot w-2 h-2 rounded-full bg-gray-600 transition-colors"></div>
-                            <span class="step-text text-gray-500 transition-colors">Mounting curated, audited skills...</span>
-                            <svg class="step-check w-4 h-4 text-emerald-400 ml-auto hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M20 6 9 17l-5-5"/>
-                            </svg>
-                        </div>
-
-                        <!-- Step 4 -->
-                        <div class="terminal-step flex items-center gap-3 p-3 rounded-lg border transition-all duration-500 opacity-0 translate-y-2 bg-white/[0.02] border-white/5">
-                            <div class="step-dot w-2 h-2 rounded-full bg-gray-600 transition-colors"></div>
-                            <span class="step-text text-gray-500 transition-colors">Connecting Bedrock — model runs in your cloud...</span>
-                            <svg class="step-check w-4 h-4 text-emerald-400 ml-auto hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M20 6 9 17l-5-5"/>
-                            </svg>
-                        </div>
-
-                        <!-- Success message (hidden by default) -->
-                        <div id="terminal-success" class="hidden mt-4 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-lg animate-fade-in-landing">
-                            <div class="flex items-center gap-2 text-emerald-400 font-semibold">
-                                <!-- Check icon -->
-                                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                    <path d="M20 6 9 17l-5-5"/>
-                                </svg>
-                                Jane's agent is live — governed &amp; audited
-                            </div>
-                            <div class="mt-2 text-gray-400 text-xs">
-                                slack: @jane-agent · https://jane.acme.humr.app
-                            </div>
-                        </div>
-                    </div>
                 </div>
+                <span class="text-cyber-400 font-semibold text-sm uppercase tracking-wider">The solution</span>
             </div>
+
+            <h2 class="text-4xl sm:text-5xl font-bold text-white mb-6 leading-tight">
+                Agents in your cloud,<br>
+                <span class="gradient-text">governed from day one.</span>
+            </h2>
+
+            <p class="text-2xl sm:text-3xl font-medium text-gray-200 mb-8 leading-tight">
+                Humanity Rules runs them for you. You own them.
+            </p>
+
+            <p class="text-lg text-gray-400 mb-6 leading-relaxed">
+                Nothing to install or babysit: sign in and your agent is there, sandboxed away
+                from your files, passwords, and API keys, on the clock whether you're around or not.
+            </p>
+
+            <p class="text-lg text-gray-400 mb-6 leading-relaxed">
+                Accessible through a beautiful Web UI people actually enjoy using.
+            </p>
+
+            <p class="text-lg text-gray-400 leading-relaxed">
+                Fast and easy to deploy: one for you, one for every team member, one for any job that
+                deserves its own.
+            </p>
         </div>
     </div>
 </section>
