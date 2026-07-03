@@ -1,6 +1,8 @@
 {% comment %}
-Landing page problem section - shadow AI: agents your team already runs on
-laptops or on a vendor's cloud, ungoverned, unaudited, and locked to one lab.
+Landing page problem section - what it feels like to run your own AI agent
+today: it asks for everything, it only works while you watch, and it's built
+for hackers. The few who push through are left running unsupervised agents on
+company laptops with company data.
 {% endcomment %}
 
 <section id="problem" class="landing-section relative overflow-hidden min-h-screen flex items-center pt-28 pb-20">
@@ -17,86 +19,60 @@ laptops or on a vendor's cloud, ungoverned, unaudited, and locked to one lab.
                         <path d="M12 9v4"/><path d="M12 17h.01"/>
                     </svg>
                 </div>
-                <span class="text-amber-500 font-semibold text-sm uppercase tracking-wider">The Problem</span>
+                <span class="text-amber-500 font-semibold text-sm uppercase tracking-wider">The problem</span>
             </div>
 
-            <p class="text-2xl sm:text-3xl font-medium gradient-text mb-6 text-center">
-                Your team is already using AI agents
-            </p>
-
-            <h2 class="text-4xl sm:text-5xl font-bold text-white mb-6 leading-tight text-center">
-                You just can't see them. Or stop them.
+            <h2 class="text-4xl sm:text-5xl font-bold text-white mb-12 leading-tight text-center">
+                The agents are here.<br>
+                <span class="gradient-text">How is your team running them?</span>
             </h2>
 
-            <p class="text-lg text-gray-400 mb-12 leading-relaxed max-w-3xl mx-auto text-center">
-                Most agents today run on employees' laptops, wired to unvetted plugins and MCP servers, or
-                on a vendor's platform you don't control. Either way, they read files, call APIs, and act on
-                your systems: a second control plane outside your IAM, your VPC, your approvals, and your audit.
-                Data walks out the door, nothing is logged, and you're locked into one lab's model and memory.
-            </p>
-
             <!-- Pain points grid -->
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                <!-- Data & credential leakage -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <!-- It asks for everything -->
                 <div class="group p-6 bg-white/[0.02] border border-white/5 rounded-xl card-hover hover:border-amber-500/30 hover:bg-amber-500/5">
                     <div class="flex items-start gap-4">
                         <div class="p-3 bg-amber-500/10 rounded-lg group-hover:bg-amber-500/20 transition-colors">
-                            <!-- Lock-open / leak icon -->
+                            <!-- Key icon -->
                             <svg class="w-5 h-5 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/>
+                                <path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"/>
                             </svg>
                         </div>
                         <div>
-                            <h3 class="text-lg font-semibold text-white mb-2">Data &amp; credentials leak</h3>
-                            <p class="text-gray-400 text-sm leading-relaxed">Unvetted plugins and MCP servers can quietly exfiltrate secrets and company data. One prompt injection is all it takes.</p>
+                            <h3 class="text-lg font-semibold text-white mb-2">You're scared to install it</h3>
+                            <p class="text-gray-400 text-sm leading-relaxed">And the fear is real: to run it, you hand over your files, your browser, your passwords. Everyone feels the same hesitation before install. Most people stop right there.</p>
                         </div>
                     </div>
                 </div>
 
-                <!-- No visibility / audit -->
+                <!-- It only works while you watch -->
                 <div class="group p-6 bg-white/[0.02] border border-white/5 rounded-xl card-hover hover:border-amber-500/30 hover:bg-amber-500/5">
                     <div class="flex items-start gap-4">
                         <div class="p-3 bg-amber-500/10 rounded-lg group-hover:bg-amber-500/20 transition-colors">
-                            <!-- Eye-off icon -->
+                            <!-- Eye icon -->
                             <svg class="w-5 h-5 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><path d="m2 2 20 20"/><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/>
+                                <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/>
                             </svg>
                         </div>
                         <div>
-                            <h3 class="text-lg font-semibold text-white mb-2">No visibility, no audit</h3>
-                            <p class="text-gray-400 text-sm leading-relaxed">You can't see what employees do with their agents, and neither can your auditors. There's no trail to point to.</p>
+                            <h3 class="text-lg font-semibold text-white mb-2">It only works while you watch.</h3>
+                            <p class="text-gray-400 text-sm leading-relaxed">The agent operates from a client app on your laptop. When you step away everything stops. An assistant that needs babysitting isn't much of an assistant.</p>
                         </div>
                     </div>
                 </div>
 
-                <!-- Runs on someone else's computer -->
+                <!-- It's built for hackers -->
                 <div class="group p-6 bg-white/[0.02] border border-white/5 rounded-xl card-hover hover:border-amber-500/30 hover:bg-amber-500/5">
                     <div class="flex items-start gap-4">
                         <div class="p-3 bg-amber-500/10 rounded-lg group-hover:bg-amber-500/20 transition-colors">
-                            <!-- Laptop icon -->
+                            <!-- Terminal icon -->
                             <svg class="w-5 h-5 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M18 5a2 2 0 0 1 2 2v8.526a2 2 0 0 0 .212.897l1.068 2.127a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45l1.068-2.127A2 2 0 0 0 4 15.526V7a2 2 0 0 1 2-2z"/><path d="M20.054 15.987H3.946"/>
+                                <path d="m4 17 6-6-6-6"/><path d="M12 19h8"/>
                             </svg>
                         </div>
                         <div>
-                            <h3 class="text-lg font-semibold text-white mb-2">Running on someone else's account</h3>
-                            <p class="text-gray-400 text-sm leading-relaxed">Whether it's a laptop or a vendor's managed cloud, agents that run outside your own account are a non-starter for regulated, audited industries. Your data shouldn't leave your perimeter.</p>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Lock-in -->
-                <div class="group p-6 bg-white/[0.02] border border-white/5 rounded-xl card-hover hover:border-amber-500/30 hover:bg-amber-500/5">
-                    <div class="flex items-start gap-4">
-                        <div class="p-3 bg-amber-500/10 rounded-lg group-hover:bg-amber-500/20 transition-colors">
-                            <!-- Link / chain icon -->
-                            <svg class="w-5 h-5 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
-                            </svg>
-                        </div>
-                        <div>
-                            <h3 class="text-lg font-semibold text-white mb-2">Locked into one lab</h3>
-                            <p class="text-gray-400 text-sm leading-relaxed">One model, one harness, non-portable memory. As agents learn your company, that memory gets bound to their platform. Not yours.</p>
+                            <h3 class="text-lg font-semibold text-white mb-2">It's built for hackers.</h3>
+                            <p class="text-gray-400 text-sm leading-relaxed">Config files, patches, a terminal. Brilliant if that's you. A wall if it's the rest of your company.</p>
                         </div>
                     </div>
                 </div>
@@ -110,8 +86,8 @@ laptops or on a vendor's cloud, ungoverned, unaudited, and locked to one lab.
                         <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>
                     </svg>
                     <p class="text-gray-300">
-                        <span class="text-white font-semibold">Shadow AI is already in your org.</span>
-                        The only question is whether it's governed, or running loose.
+                        <span class="text-white font-semibold">And the few who push through all three?</span>
+                        They're now running unsupervised agents on company laptops, with company data. That's the version you already have today.
                     </p>
                 </div>
             </div>

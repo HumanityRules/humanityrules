@@ -16,11 +16,6 @@ delivery platform: curated, governed, audited agentic tooling.
                 Trust, built into<br>
                 <span class="gradient-text">every layer</span>
             </h2>
-            <p class="text-lg text-gray-400">
-                Models change. Agent frameworks change. Your governance layer shouldn't be disposable.
-                Humanity Rules is the durable control plane for agent access, tools, memory, approvals,
-                and audit — with security defaults that just make sense.
-            </p>
         </div>
 
         <!-- Features grid -->
@@ -38,11 +33,11 @@ delivery platform: curated, governed, audited agentic tooling.
                         </div>
                         <h3 class="text-xl font-semibold text-white">Runs in your cloud</h3>
                     </div>
-                    <p class="text-gray-400 leading-relaxed">Every agent is deployed into your own AWS VPC — sandboxed, isolated, and always-on. Your data stays inside your perimeter.</p>
+                    <p class="text-gray-400 leading-relaxed">Agents run in your AWS account, not ours. Revoke the IAM role and they stop working.</p>
                 </div>
             </div>
 
-            <!-- No model lock-in -->
+            <!-- Sovereign AI -->
             <div class="group relative p-8 bg-white/[0.02] border border-white/5 rounded-2xl card-hover hover:border-cyber-500/30">
                 <div class="absolute inset-0 bg-gradient-to-br from-cyber-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl"></div>
                 <div class="relative z-10">
@@ -53,60 +48,9 @@ delivery platform: curated, governed, audited agentic tooling.
                                 <path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>
                             </svg>
                         </div>
-                        <h3 class="text-xl font-semibold text-white">No model lock-in</h3>
+                        <h3 class="text-xl font-semibold text-white">Sovereign AI</h3>
                     </div>
-                    <p class="text-gray-400 leading-relaxed">Bedrock, hosted APIs, open-source, OpenRouter — switch providers without re-platforming. Orchestrate models by cost and performance.</p>
-                </div>
-            </div>
-
-            <!-- Curated, audited skills -->
-            <div class="group relative p-8 bg-white/[0.02] border border-white/5 rounded-2xl card-hover hover:border-cyber-500/30">
-                <div class="absolute inset-0 bg-gradient-to-br from-cyber-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl"></div>
-                <div class="relative z-10">
-                    <div class="flex items-center gap-4 mb-4">
-                        <div class="inline-flex p-3 rounded-xl bg-gradient-to-br from-cyan-400 to-blue-500 shrink-0">
-                            <!-- Package-check icon -->
-                            <svg class="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M16 16 1.7 16"/><path d="m16 8 4.6 2.3a1 1 0 0 1 .4.9V18a1 1 0 0 1-.5.9l-7 4a1 1 0 0 1-1 0l-7-4A1 1 0 0 1 3 18v-7a1 1 0 0 1 .5-.9L10 6"/><path d="m9 11 3 3L22 4"/>
-                            </svg>
-                        </div>
-                        <h3 class="text-xl font-semibold text-white">Curated, audited skills</h3>
-                    </div>
-                    <p class="text-gray-400 leading-relaxed">An allowlist of reviewed, versioned skills and MCP servers. Every entry passes security review — automated and human — before your team can use it.</p>
-                </div>
-            </div>
-
-            <!-- ABAC permissions & approvals -->
-            <div class="group relative p-8 bg-white/[0.02] border border-white/5 rounded-2xl card-hover hover:border-cyber-500/30">
-                <div class="absolute inset-0 bg-gradient-to-br from-cyber-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl"></div>
-                <div class="relative z-10">
-                    <div class="flex items-center gap-4 mb-4">
-                        <div class="inline-flex p-3 rounded-xl bg-gradient-to-br from-emerald-400 to-teal-500 shrink-0">
-                            <!-- Key icon -->
-                            <svg class="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4"/><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/>
-                            </svg>
-                        </div>
-                        <h3 class="text-xl font-semibold text-white">ABAC &amp; approvals</h3>
-                    </div>
-                    <p class="text-gray-400 leading-relaxed">Fine-grained, attribute-based access control decides what each agent can see and do. Sensitive actions gate through human approval workflows.</p>
-                </div>
-            </div>
-
-            <!-- SSO & audit trails -->
-            <div class="group relative p-8 bg-white/[0.02] border border-white/5 rounded-2xl card-hover hover:border-cyber-500/30">
-                <div class="absolute inset-0 bg-gradient-to-br from-cyber-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl"></div>
-                <div class="relative z-10">
-                    <div class="flex items-center gap-4 mb-4">
-                        <div class="inline-flex p-3 rounded-xl bg-gradient-to-br from-blue-400 to-cyan-500 shrink-0">
-                            <!-- File-check / audit icon -->
-                            <svg class="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="m9 15 2 2 4-4"/>
-                            </svg>
-                        </div>
-                        <h3 class="text-xl font-semibold text-white">SSO &amp; audit trails</h3>
-                    </div>
-                    <p class="text-gray-400 leading-relaxed">Okta / WorkOS sign-in out of the box. Action-level audit — prompts, tools, approvals, outcomes — built for compliance and security review.</p>
+                    <p class="text-gray-400 leading-relaxed">Run on Bedrock and prompts never leave your network, or point the same agents at OpenRouter, hosted APIs, or open-source models. Switching providers is one admin setting.</p>
                 </div>
             </div>
 
@@ -123,7 +67,58 @@ delivery platform: curated, governed, audited agentic tooling.
                         </div>
                         <h3 class="text-xl font-semibold text-white">Secured integrations</h3>
                     </div>
-                    <p class="text-gray-400 leading-relaxed">Brokered egress, scoped credentials, and approval gates for Slack, GitHub, Notion and any MCP server — with SIEM-exportable logs. Agents never touch raw secrets.</p>
+                    <p class="text-gray-400 leading-relaxed">Credentials for every connector, for example GitHub or Notion, live in a broker; agents call through it and never see the token.</p>
+                </div>
+            </div>
+
+            <!-- Approvals -->
+            <div class="group relative p-8 bg-white/[0.02] border border-white/5 rounded-2xl card-hover hover:border-cyber-500/30">
+                <div class="absolute inset-0 bg-gradient-to-br from-cyber-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl"></div>
+                <div class="relative z-10">
+                    <div class="flex items-center gap-4 mb-4">
+                        <div class="inline-flex p-3 rounded-xl bg-gradient-to-br from-emerald-400 to-teal-500 shrink-0">
+                            <!-- Key icon -->
+                            <svg class="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4"/><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/>
+                            </svg>
+                        </div>
+                        <h3 class="text-xl font-semibold text-white">Approvals</h3>
+                    </div>
+                    <p class="text-gray-400 leading-relaxed">ABAC policies decide what each agent can see and do, and which actions need a human okay first.</p>
+                </div>
+            </div>
+
+            <!-- SSO & audit trails -->
+            <div class="group relative p-8 bg-white/[0.02] border border-white/5 rounded-2xl card-hover hover:border-cyber-500/30">
+                <div class="absolute inset-0 bg-gradient-to-br from-cyber-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl"></div>
+                <div class="relative z-10">
+                    <div class="flex items-center gap-4 mb-4">
+                        <div class="inline-flex p-3 rounded-xl bg-gradient-to-br from-blue-400 to-cyan-500 shrink-0">
+                            <!-- File-check / audit icon -->
+                            <svg class="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="m9 15 2 2 4-4"/>
+                            </svg>
+                        </div>
+                        <h3 class="text-xl font-semibold text-white">SSO &amp; audit trails</h3>
+                    </div>
+                    <p class="text-gray-400 leading-relaxed">Sign in with Okta or WorkOS. Every prompt and tool call is in the log, tied to the user who asked for it.</p>
+                </div>
+            </div>
+
+            <!-- The allowlist -->
+            <div class="group relative p-8 bg-white/[0.02] border border-white/5 rounded-2xl card-hover hover:border-cyber-500/30">
+                <div class="absolute inset-0 bg-gradient-to-br from-cyber-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl"></div>
+                <div class="relative z-10">
+                    <div class="flex items-center gap-4 mb-4">
+                        <div class="inline-flex p-3 rounded-xl bg-gradient-to-br from-cyan-400 to-blue-500 shrink-0">
+                            <!-- Package-check icon -->
+                            <svg class="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M16 16 1.7 16"/><path d="m16 8 4.6 2.3a1 1 0 0 1 .4.9V18a1 1 0 0 1-.5.9l-7 4a1 1 0 0 1-1 0l-7-4A1 1 0 0 1 3 18v-7a1 1 0 0 1 .5-.9L10 6"/><path d="m9 11 3 3L22 4"/>
+                            </svg>
+                        </div>
+                        <h3 class="text-xl font-semibold text-white">The allowlist</h3>
+                    </div>
+                    <p class="text-gray-400 leading-relaxed">Your agents only get vetted skills and MCP servers. Nothing installs from a public registry at runtime.</p>
                 </div>
             </div>
         </div>
