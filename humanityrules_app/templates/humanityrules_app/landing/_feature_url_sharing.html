@@ -5,7 +5,7 @@ Text left, animated "share dialog" card right (same column rhythm as feature 01)
 The card animation is driven by the self-contained IIFE <script> at the bottom of
 this partial (IntersectionObserver, loops with a pause like the sibling cards). It
 cycles a "General access" row through four scopes (Just you, 3 people, Finance team,
-Everyone at Northwind) and dramatizes a leaver during the 3-people state: one avatar
+Everyone at Acme) and dramatizes a leaver during the 3-people state: one avatar
 fades to gray with a strikethrough and the count ticks to 2. All selectors are
 namespaced under #share-dialog so this partial does not depend on landing_page.html's
 script block.
@@ -67,7 +67,7 @@ script block.
                                 <svg class="w-4 h-4 text-cyber-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                     <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
                                 </svg>
-                                <span class="font-mono text-sm text-gray-300 truncate">maria.northwind.humr.app</span>
+                                <span class="font-mono text-sm text-gray-300 truncate">maria.acme.humr.app</span>
                             </div>
 
                             <!-- App address, nested under the agent with a corner connector -->
@@ -81,7 +81,7 @@ script block.
                                     <svg class="w-4 h-4 text-cyber-400/70 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                         <rect width="18" height="14" x="3" y="5" rx="2"/><path d="M3 9h18"/>
                                     </svg>
-                                    <span class="font-mono text-xs text-gray-400 truncate">costs.maria.northwind.humr.app</span>
+                                    <span class="font-mono text-xs text-gray-400 truncate">costs.maria.acme.humr.app</span>
                                 </div>
                             </div>
                         </div>
@@ -121,7 +121,7 @@ script block.
                                     <svg data-scope-icon="2" class="hidden w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                         <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
                                     </svg>
-                                    <!-- Building (Everyone at Northwind) -->
+                                    <!-- Building (Everyone at Acme) -->
                                     <svg data-scope-icon="3" class="hidden w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                         <rect width="16" height="20" x="4" y="2" rx="2"/><path d="M9 22v-4h6v4"/><path d="M8 6h.01"/><path d="M16 6h.01"/><path d="M12 6h.01"/><path d="M12 10h.01"/><path d="M12 14h.01"/><path d="M16 10h.01"/><path d="M16 14h.01"/><path d="M8 10h.01"/><path d="M8 14h.01"/>
                                     </svg>
@@ -159,7 +159,7 @@ script block.
             { icon: '0', label: 'Just you', caption: '' },
             { icon: '1', label: '3 people', caption: '' },
             { icon: '2', label: 'Finance team', caption: '' },
-            { icon: '3', label: 'Everyone at Northwind', caption: '' }
+            { icon: '3', label: 'Everyone at Acme', caption: '' }
         ];
 
         function showIcon(key) {
@@ -224,11 +224,11 @@ script block.
             at(3400, function() {
                 grayOutLeaver();
                 if (label) label.textContent = '2 people';
-                setCaption('RP left Northwind');
+                setCaption('RP left Acme');
             });
             // State 3: Finance team
             at(5400, function() { resetAvatar(); applyState(2); });
-            // State 4: Everyone at Northwind
+            // State 4: Everyone at Acme
             at(7400, function() { applyState(3); });
             // Hold on the final scope, then restart from the top.
             at(12000, loop);
