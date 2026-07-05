@@ -30,7 +30,7 @@ Best external reference if deeper context is needed: https://en.wikipedia.org/wi
 - No em dashes.
 - No swagger idioms or theatrics ("they stop cold"). The concrete fact carries the punch; state it plainly.
 - Within an element (title + body), a word-root appears once.
-- Across elements, no concept is spent twice. Watch for the same idea resurfacing in two cards under different words.
+- Across elements, deliberate reprise is fine and often good: a callback, an escalation, or the page's spine theme returning. Reprise in the SAME words (same-word repetition reads human). What reads generated is the same idea re-explained in different words as if it were new, or an element that exists only to restate another.
 - Concrete beats category jargon; at most one category-label term per element.
 
 ## Workflow
