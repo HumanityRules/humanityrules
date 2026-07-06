@@ -95,7 +95,7 @@ def get_app_shell_context(request, current_page):
         "profile_menu_items": profile_menu_items,
         "current_user": current_user,
         "search_url": "/search/",
-        "site_logo_url": static('humanityrules_app/humr-logo-large.png'),
+        "site_logo_url": static('humanityrules_app/humr-logo-large-dark.png'),
         "site_name": "Humanity Rules",
         "user_is_org_admin": user_is_org_admin,
         "debug": django_settings.DEBUG,
