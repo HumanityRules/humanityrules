@@ -10,6 +10,8 @@ import subprocess
 import boto3
 from aws_cdk import App
 
+from . import cloudformation_utils
+
 CDK_OUT_DIR = Path(__file__).parent / "cdk.out"
 
 logger = logging.getLogger(__name__)
@@ -71,8 +73,11 @@ def deploy_from_assembly(assembly_dir: str, session: boto3.Session, stack_names:
 
     cdk_env = _get_cdk_env(session)
 
-    cmd = ["npx", "--yes", "cdk", "deploy"] + target_args + [
-        "--ci", "--progress", "events", "--require-approval", "never", "--no-notices", "--express", "--rollback", "--app", assembly_dir,
+    # --rollback must accompany --express: express turns rollback off by default, and headless CDK
+    # refuses replacement updates (every task-definition change) with rollback disabled.
+    express_args = ["--express", "--rollback"] if cloudformation_utils.use_express_mode() else []
+    cmd = ["npx", "--yes", "cdk", "deploy"] + target_args + express_args + [
+        "--ci", "--progress", "events", "--require-approval", "never", "--no-notices", "--app", assembly_dir,
     ]
 
     process = subprocess.Popen(
