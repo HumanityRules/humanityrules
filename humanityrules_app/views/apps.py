@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
+from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
 from django.db.models import Case, IntegerField, OuterRef, Subquery, Value, When
@@ -225,8 +226,16 @@ def build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
     latest_deployment = deployments[0] if deployments else None
     deploy_in_progress = latest_deployment is not None and latest_deployment.is_transient
     has_logs = DeploymentLog.objects.filter(deployment__app=app).exists()
+    context["latest_deployment"] = latest_deployment
     context["log_tab_enabled"] = has_logs or deploy_in_progress
     context["initial_tab"] = "logs" if deploy_in_progress else "content"
+    if latest_deployment is not None:
+        # Address shown by the welcome + deploy-success dialogs. Computed here so
+        # every renderer of app_detail.html (detail, redeploy, teardown) includes
+        # the deploy-success watcher, not just the app_detail view.
+        zone = latest_deployment.environment.shared_alb_hosted_zone
+        subdomain = latest_deployment.subdomain or app.slug
+        context["deploy_address"] = f"{subdomain}.{zone}" if zone else subdomain
     org = request.user.current_organization
     context["direct_tags"] = direct_tags
     context["inherited_tags"] = inherited_tags
@@ -245,9 +254,14 @@ def build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
 @login_required
 def app_detail(request: HttpRequest, app_slug: str) -> HttpResponse:
     """Show app detail with configuration and deployments."""
+    welcome_param = request.GET.get("welcome", "")
+    if welcome_param not in ("1", "preview"):
+        welcome_param = ""
+    live_preview = settings.DEBUG and request.GET.get("live") == "preview"
     if not request.htmx:
         context = base.get_app_shell_context(request=request, current_page="workspaces")
-        context["content_url"] = f"/apps/{app_slug}/"
+        params = [p for p in (f"welcome={welcome_param}" if welcome_param else "", "live=preview" if live_preview else "") if p]
+        context["content_url"] = f"/apps/{app_slug}/" + (f"?{'&'.join(params)}" if params else "")
         return render(request, "humanityrules_app/app_shell.html", context=context)
 
     app = _get_app_for_user(request, app_slug)
@@ -257,6 +271,17 @@ def app_detail(request: HttpRequest, app_slug: str) -> HttpResponse:
         return denied
 
     context = build_app_detail_context(request, app)
+    # First-run welcome dialog: only when arriving from onboarding and the
+    # deployment it announces is still running (a stale link shows the plain page).
+    # ?welcome=preview (DEBUG only) forces it on any app with a deployment, kept
+    # across reloads and never self-removing — for iterating on the dialog.
+    latest_deployment = context["latest_deployment"]
+    welcome_preview = settings.DEBUG and welcome_param == "preview"
+    welcome = welcome_param == "1"
+    context["show_welcome"] = latest_deployment is not None and (welcome_preview or (welcome and latest_deployment.is_transient))
+    context["welcome_preview"] = welcome_preview
+    # ?live=preview (DEBUG only): render the deploy-success dialog visible for iteration.
+    context["live_preview"] = live_preview
     return render(request, "humanityrules_app/apps/app_detail.html", context=context)
 
 

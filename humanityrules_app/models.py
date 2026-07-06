@@ -2181,7 +2181,7 @@ def create_default_workspace(
             organization=instance,
             name="Default",
             slug="default",
-            description="Your starting workspace for apps and datastores. Rename or create additional workspaces to organize by team or project.",
+            description="Your starting workspace for agents. Rename or create additional workspaces to organize by team, project, or department.",
         )
 
 

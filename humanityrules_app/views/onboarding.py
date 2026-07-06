@@ -1,15 +1,23 @@
+from asgiref.sync import async_to_sync
 from django.contrib.auth import login
 from django.db import transaction
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render, redirect
 from django.utils.text import slugify
 
-from ..models import Organization, OrganizationInvite, User
+from ..models import App, AppTemplate, Environment, Organization, OrganizationInvite, User, Workspace
 from ..services import abac_service
+from ..services.app_templates import template_deploy_service
 from . import invites as invites_views
 
 
 _INVITE_PATH_PREFIX = "/invite/"
+
+_FIRST_AGENT_TEMPLATE_SLUG = "hermes-personal"
+
+# Set right after org creation; gates the name-your-first-agent step so it is
+# only reachable on the just-signed-up path, never for invitees or later visits.
+_FIRST_AGENT_SESSION_FLAG = "onboarding_first_agent"
 
 
 def _pending_invite_for_session(request: HttpRequest) -> OrganizationInvite | None:
@@ -86,8 +94,9 @@ def onboarding(request: HttpRequest) -> HttpResponse:
             # Clear session data and log in
             del request.session["pending_workos_user"]
             login(request, user)
+            request.session[_FIRST_AGENT_SESSION_FLAG] = True
 
-            return redirect("/dashboard/")
+            return redirect("/onboarding/agent/")
 
     return render(request, "humanityrules_app/onboarding.html", {
         "email": pending_user["email"],
@@ -150,3 +159,92 @@ def _onboarding_via_invite(
     del request.session["pending_workos_user"]
     login(request, user)
     return redirect("/dashboard/")
+
+
+def _first_agent_deploy_targets(org: Organization) -> tuple[AppTemplate, Workspace, Environment] | None:
+    """Resolve template + workspace + environment for the first-agent step; None when any is missing."""
+    template = AppTemplate.objects.filter(slug=_FIRST_AGENT_TEMPLATE_SLUG, is_active=True).first()
+    workspace = Workspace.objects.filter(organization=org).order_by("created_at").first()
+    environment = (
+        Environment.objects
+        .select_related("aws_account")
+        .filter(aws_account__organization=org, status=Environment.Status.READY)
+        .order_by("created_at")
+        .first()
+    )
+    if template is None or workspace is None or environment is None:
+        return None
+    return template, workspace, environment
+
+
+def _default_agent_name(user: User) -> str:
+    """Prefill for the agent-name input."""
+    first_name = user.first_name.strip()
+    return first_name if first_name else "My Agent"
+
+
+def _validate_agent_name(org: Organization, agent_name: str) -> str | None:
+    """Return an error message when the name is unusable, else None."""
+    if not agent_name:
+        return "Give your agent a name."
+    app_slug = slugify(agent_name)
+    if not app_slug:
+        return "The name must contain at least one letter or number."
+    if App.objects.filter(organization=org, slug=app_slug).exists():
+        return f"An app with the name '{app_slug}' already exists in your organization."
+    return None
+
+
+def onboarding_agent(request: HttpRequest) -> HttpResponse:
+    """
+    Step 2 of onboarding: name the first agent, deploy it from the hermes
+    template into the org's starter workspace + sandbox environment, and land
+    on the app page where the deployment log streams. Skippable to /dashboard/.
+    """
+    if not request.user.is_authenticated:
+        return redirect("/auth/login/")
+
+    org = request.user.current_organization
+    if org is None or not request.session.get(_FIRST_AGENT_SESSION_FLAG):
+        return redirect("/dashboard/")
+
+    targets = _first_agent_deploy_targets(org=org)
+    if targets is None:
+        request.session.pop(_FIRST_AGENT_SESSION_FLAG, None)
+        return redirect("/dashboard/")
+    template, workspace, environment = targets
+
+    error = None
+    agent_name = _default_agent_name(user=request.user)
+    if request.method == "POST":
+        agent_name = request.POST.get("agent_name", "").strip()
+        error = _validate_agent_name(org=org, agent_name=agent_name)
+        if error is None:
+            try:
+                deployment = async_to_sync(template_deploy_service.deploy_from_template)(
+                    template=template,
+                    organization=org,
+                    workspace=workspace,
+                    environment=environment,
+                    app_name=agent_name,
+                    app_slug=slugify(agent_name),
+                    created_by=request.user,
+                    runtime_variable_overrides={},
+                    owner_username=request.user.username,
+                    compute_mode=template.default_compute_mode,
+                    label="",
+                )
+            except ValueError as exc:
+                error = str(exc)
+            else:
+                request.session.pop(_FIRST_AGENT_SESSION_FLAG, None)
+                # ?welcome=1 makes the app page show the first-run welcome dialog
+                # over the live deployment log; the dialog strips it after display.
+                return redirect(f"/apps/{deployment.app.slug}/?welcome=1")
+
+    return render(request, "humanityrules_app/onboarding_agent.html", {
+        "agent_name": agent_name,
+        "hosted_zone": environment.shared_alb_hosted_zone,
+        "is_sandbox": environment.aws_account.is_humr_sandbox,
+        "error": error,
+    })

@@ -215,3 +215,11 @@
         </div>{# end Deployment Log panel #}
     </div>{# end tabs #}
 </div>
+
+{% if show_welcome %}
+{% include "humanityrules_app/apps/_app_welcome_dialog.html" %}
+{% endif %}
+
+{% if deploy_address %}
+{% include "humanityrules_app/apps/_app_deploy_success_dialog.html" %}
+{% endif %}

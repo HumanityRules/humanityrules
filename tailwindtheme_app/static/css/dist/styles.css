@@ -826,23 +826,8 @@
   .max-h-\[80vh\] {
     max-height: 80vh;
   }
-  .min-h-10 {
-    min-height: calc(var(--spacing) * 10);
-  }
-  .min-h-12 {
-    min-height: calc(var(--spacing) * 12);
-  }
   .min-h-13 {
     min-height: calc(var(--spacing) * 13);
-  }
-  .min-h-14 {
-    min-height: calc(var(--spacing) * 14);
-  }
-  .min-h-16 {
-    min-height: calc(var(--spacing) * 16);
-  }
-  .min-h-20 {
-    min-height: calc(var(--spacing) * 20);
   }
   .min-h-\[1\.5em\] {
     min-height: 1.5em;
@@ -966,9 +951,6 @@
   }
   .w-auto {
     width: auto;
-  }
-  .w-fit {
-    width: fit-content;
   }
   .w-full {
     width: 100%;
@@ -2711,6 +2693,12 @@
   .ring-red-300 {
     --tw-ring-color: var(--color-red-300);
   }
+  .ring-red-500\/20 {
+    --tw-ring-color: color-mix(in srgb, oklch(63.7% 0.237 25.331) 20%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      --tw-ring-color: color-mix(in oklab, var(--color-red-500) 20%, transparent);
+    }
+  }
   .ring-white\/10 {
     --tw-ring-color: color-mix(in srgb, #fff 10%, transparent);
     @supports (color: color-mix(in lab, red, red)) {
@@ -3215,6 +3203,13 @@
     &:hover {
       @media (hover: hover) {
         color: var(--color-emerald-600);
+      }
+    }
+  }
+  .hover\:text-gray-400 {
+    &:hover {
+      @media (hover: hover) {
+        color: var(--color-gray-400);
       }
     }
   }
