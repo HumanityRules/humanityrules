@@ -111,12 +111,13 @@ def oidc_login(request):
     return _start_oidc_login(request, org)
 
 
-def _start_workos_login(request):
-    """Redirect to WorkOS AuthKit."""
+def _start_workos_login(request: HttpRequest, screen_hint: str | None) -> HttpResponse:
+    """Redirect to WorkOS AuthKit, optionally landing on the sign-up screen."""
     redirect_uri = f"{_build_base_uri(request)}/auth/callback"
     authorization_url = _get_workos_client().user_management.get_authorization_url(
         provider="authkit",
         redirect_uri=redirect_uri,
+        screen_hint=screen_hint,
     )
     return redirect(authorization_url)
 
@@ -174,13 +175,14 @@ def dev_login(request: HttpRequest) -> HttpResponse:
     return redirect("/onboarding/")
 
 
-def auth_login(request):
-    """Redirects to WorkOS AuthKit for authentication."""
+def auth_login(request: HttpRequest) -> HttpResponse:
+    """Redirects to WorkOS AuthKit for authentication (sign-in or, with ?screen_hint=sign-up, sign-up)."""
     if request.user.is_authenticated:
         next_url = _safe_next(request=request, next_url=request.GET.get("next", ""))
         return redirect(next_url or "/dashboard/")
     _stash_post_login_redirect(request=request)
-    return _start_workos_login(request)
+    screen_hint = "sign-up" if request.GET.get("screen_hint") == "sign-up" else None
+    return _start_workos_login(request, screen_hint=screen_hint)
 
 
 def _post_login_redirect_target(request: HttpRequest) -> str:
