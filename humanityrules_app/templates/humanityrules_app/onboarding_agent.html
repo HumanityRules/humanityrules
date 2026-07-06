@@ -1,0 +1,102 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Name Your First Agent - Humanity Rules</title>
+    <link rel="stylesheet" href="{% static 'css/dist/styles.css' %}">
+</head>
+<body class="h-full" style="background-color: #0f1623;">
+    <div class="flex min-h-full flex-col justify-center px-8 py-12">
+        <div class="mx-auto w-full max-w-md text-center">
+            <img class="mx-auto h-12 w-auto" src="{% static 'humanityrules_app/humr-logo-large-dark.png' %}" alt="Humanity Rules">
+
+            <h2 class="mt-8 text-2xl font-bold text-white">
+                Now, let's deploy <span class="text-cyber-400">your first agent</span>
+            </h2>
+            <p class="mt-3 text-sm text-gray-400">
+                The name you choose becomes its web address.
+            </p>
+        </div>
+
+        <div class="mt-8 mx-auto w-full max-w-sm">
+            {% if error %}
+            <div class="mb-6 rounded-md bg-red-500/10 px-4 py-3 text-sm text-red-400 ring-1 ring-inset ring-red-500/20">
+                {{ error }}
+            </div>
+            {% endif %}
+
+            <form method="POST" class="space-y-6">
+                {% csrf_token %}
+
+                <div>
+                    <label for="agent_name" class="block text-sm font-medium text-gray-300">
+                        Agent name
+                    </label>
+                    <div class="mt-2">
+                        <input type="text"
+                               name="agent_name"
+                               id="agent_name"
+                               required
+                               autofocus
+                               value="{{ agent_name }}"
+                               class="block w-full rounded-md border-0 bg-white/5 py-2.5 px-3 text-white shadow-sm ring-1 ring-inset ring-white/10 placeholder:text-gray-500 focus:ring-2 focus:ring-inset focus:ring-indigo-500 text-sm">
+                    </div>
+                    {% if hosted_zone %}
+                    <p id="agent-url-preview" class="mt-4 text-center text-xl text-white font-mono">&nbsp;</p>
+                    {% endif %}
+                </div>
+
+                <button type="submit"
+                        class="flex w-full justify-center rounded-md bg-indigo-500 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-indigo-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 transition-colors">
+                    Create agent
+                </button>
+            </form>
+
+            {% if is_sandbox %}
+            <p class="mt-6 text-sm text-gray-300 text-center">
+                You may not have an AWS account at hand, so for demo purposes your first agent deploys into
+                an account we run.<br><br> Connect your company's own
+                account under Integrations when you're ready, and new agents deploy there instead.
+            </p>
+            {% endif %}
+
+            <p class="mt-6 text-center">
+                <a href="/dashboard/" class="text-sm text-gray-500 hover:text-gray-400 transition-colors">Skip for now</a>
+            </p>
+        </div>
+    </div>
+
+    {% if hosted_zone %}
+    <script>
+        (function () {
+            const input = document.getElementById("agent_name");
+            const preview = document.getElementById("agent-url-preview");
+            const zone = "{{ hosted_zone|escapejs }}";
+
+            // Mirrors django.utils.text.slugify so the preview matches the
+            // subdomain the deploy will actually claim.
+            function slugify(value) {
+                return value
+                    .normalize("NFKD")
+                    .replace(/[\u0300-\u036f]/g, "")
+                    .toLowerCase()
+                    .replace(/[^a-z0-9\s_-]/g, "")
+                    .replace(/[-\s]+/g, "-")
+                    .replace(/^[-_]+|[-_]+$/g, "");
+            }
+
+            function refresh() {
+                const slug = slugify(input.value);
+                preview.textContent = slug ? slug + "." + zone : " ";
+            }
+
+            input.addEventListener("input", refresh);
+            refresh();
+            input.select();
+        })();
+    </script>
+    {% endif %}
+</body>
+</html>

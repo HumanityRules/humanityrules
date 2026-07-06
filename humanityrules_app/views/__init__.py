@@ -95,7 +95,7 @@ from .integrations.merge_handler import (
 from .partials import random_quote, switch_organization
 from .auth import auth_login, auth_callback, auth_logout, oidc_login, oidc_callback, dev_login
 from .auth_env_sso import env_start, env_callback, env_jwks
-from .onboarding import onboarding
+from .onboarding import onboarding, onboarding_agent
 from .invites import accept_invite, create_invite, revoke_invite
 from .health import health_check
 from .pdp import pdp_evaluate
@@ -253,6 +253,7 @@ __all__ = [
     "env_callback",
     "env_jwks",
     "onboarding",
+    "onboarding_agent",
     "accept_invite",
     "create_invite",
     "revoke_invite",

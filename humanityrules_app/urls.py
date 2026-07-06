@@ -118,6 +118,7 @@ urlpatterns = [
 
     # Onboarding
     path("onboarding/", views.onboarding, name="onboarding"),
+    path("onboarding/agent/", views.onboarding_agent, name="onboarding_agent"),
 
     # Organization invites
     path("invite/<uuid:token>/", views.accept_invite, name="invite_accept"),

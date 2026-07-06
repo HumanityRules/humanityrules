@@ -57,7 +57,7 @@ class DevLoginDebugOnTests(TestCase):
     def test_full_new_user_flow_creates_org_and_logs_in(self) -> None:
         self.client.get(reverse("dev_login"), {"email": "founder@test.com"})
         response = self.client.post(reverse("onboarding"), {"organization_name": "Founder Co"})
-        self.assertRedirects(response, "/dashboard/", fetch_redirect_response=False)
+        self.assertRedirects(response, "/onboarding/agent/", fetch_redirect_response=False)
         user = User.objects.get(email="founder@test.com")
         self.assertEqual(user.current_organization.name, "Founder Co")
         self.assertEqual(self.client.session["_auth_user_id"], str(user.pk))
@@ -78,7 +78,7 @@ class DevLoginDebugOnTests(TestCase):
         self.client.get(reverse("dev_login"), {"email": "alice@test.com"})
         self.client.get(reverse("dev_login"), {"email": "fresh@test.com"})
         response = self.client.post(reverse("onboarding"), {"organization_name": "Fresh Co"})
-        self.assertRedirects(response, "/dashboard/", fetch_redirect_response=False)
+        self.assertRedirects(response, "/onboarding/agent/", fetch_redirect_response=False)
         new_user = User.objects.get(email="fresh@test.com")
         self.assertEqual(new_user.current_organization.name, "Fresh Co")
         self.assertNotEqual(new_user.current_organization_id, self.org.id)

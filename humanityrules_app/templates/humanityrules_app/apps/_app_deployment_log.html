@@ -5,6 +5,10 @@ is transient it re-renders itself every second (hx-swap=outerHTML); once conclud
 attributes are omitted and refreshing stops. See docs/ui_live_update_contract.md.
 {% endcomment %}
 <div id="deployment-log-inner"
+     {% if deployment %}
+     data-deployment-status="{{ deployment.status }}"
+     data-service-url="{{ deployment.service_url }}"
+     {% endif %}
      {% if deployment.is_transient %}
      hx-get="{% url 'app_deployment_log' app_slug=app.slug %}"
      hx-trigger="load delay:1s"
