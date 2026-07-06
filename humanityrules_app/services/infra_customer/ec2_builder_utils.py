@@ -14,8 +14,18 @@ import time
 from pathlib import Path
 
 import boto3
+import botocore.exceptions
+from botocore.client import BaseClient
 
 logger = logging.getLogger(__name__)
+
+# StartInstances on a stopped builder can fail with InsufficientInstanceCapacity when its
+# instance type has no free capacity in the AZ the instance is pinned to. Those pools recover
+# on the order of minutes, but boto3's built-in retries only span a few seconds, so a transient
+# blip fails the whole build. We wrap the start in our own longer, backing-off retry loop.
+BUILDER_START_CAPACITY_RETRY_BUDGET_SECONDS = 600
+BUILDER_START_INITIAL_BACKOFF_SECONDS = 15
+BUILDER_START_MAX_BACKOFF_SECONDS = 60
 
 
 def get_builder_instance_id(session: boto3.Session, env_slug: str) -> str | None:
@@ -61,12 +71,24 @@ def ensure_builder_running(session: boto3.Session, env_slug: str) -> str:
 
     if state == "stopped":
         logger.info("Starting builder instance %(instance_id)s", {"instance_id": instance_id})
-        ec2_client.start_instances(InstanceIds=[instance_id])
+        _start_instance_with_capacity_retry(
+            ec2_client=ec2_client,
+            instance_id=instance_id,
+            budget_seconds=BUILDER_START_CAPACITY_RETRY_BUDGET_SECONDS,
+            initial_backoff_seconds=BUILDER_START_INITIAL_BACKOFF_SECONDS,
+            max_backoff_seconds=BUILDER_START_MAX_BACKOFF_SECONDS,
+        )
     elif state == "stopping":
         logger.info("Builder instance is stopping, waiting for stopped state before starting")
         _wait_for_instance_state(ec2_client=ec2_client, instance_id=instance_id, target_state="stopped", timeout_seconds=120)
         logger.info("Starting builder instance %(instance_id)s", {"instance_id": instance_id})
-        ec2_client.start_instances(InstanceIds=[instance_id])
+        _start_instance_with_capacity_retry(
+            ec2_client=ec2_client,
+            instance_id=instance_id,
+            budget_seconds=BUILDER_START_CAPACITY_RETRY_BUDGET_SECONDS,
+            initial_backoff_seconds=BUILDER_START_INITIAL_BACKOFF_SECONDS,
+            max_backoff_seconds=BUILDER_START_MAX_BACKOFF_SECONDS,
+        )
     elif state == "pending":
         logger.info("Builder instance is already starting")
     else:
@@ -77,6 +99,33 @@ def ensure_builder_running(session: boto3.Session, env_slug: str) -> str:
     logger.info("Builder instance %(instance_id)s is now running", {"instance_id": instance_id})
 
     return instance_id
+
+
+def _start_instance_with_capacity_retry(ec2_client: BaseClient, instance_id: str, budget_seconds: int, initial_backoff_seconds: int, max_backoff_seconds: int) -> None:
+    """Call StartInstances, retrying InsufficientInstanceCapacity with exponential backoff until the budget elapses."""
+    deadline = time.time() + budget_seconds
+    backoff_seconds = initial_backoff_seconds
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            ec2_client.start_instances(InstanceIds=[instance_id])
+            return
+        except botocore.exceptions.ClientError as exc:
+            error_code = exc.response.get("Error", {}).get("Code")
+            remaining_seconds = deadline - time.time()
+            # Only capacity errors are transient and worth waiting on; anything else fails fast.
+            if error_code != "InsufficientInstanceCapacity" or remaining_seconds <= 0:
+                raise
+            # Never sleep past the deadline, so the loop makes one final attempt right at the budget edge.
+            sleep_seconds = min(backoff_seconds, remaining_seconds)
+            logger.error(
+                "StartInstances for %(instance_id)s hit InsufficientInstanceCapacity (attempt %(attempt)s); "
+                "retrying in %(sleep)ss, %(remaining)ss left in budget",
+                {"instance_id": instance_id, "attempt": attempt, "sleep": round(sleep_seconds), "remaining": round(remaining_seconds)},
+            )
+            time.sleep(sleep_seconds)
+            backoff_seconds = min(backoff_seconds * 2, max_backoff_seconds)
 
 
 def _wait_for_instance_state(ec2_client, instance_id: str, target_state: str, timeout_seconds: int) -> None:
