@@ -34,8 +34,8 @@ main.main.showing-webapps > #mainChat { display: none !important; }
 .humr-webapp-page-head {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding-bottom: 8px;
+  gap: 8px;
+  padding-bottom: 14px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -46,10 +46,27 @@ main.main.showing-webapps > #mainChat { display: none !important; }
   letter-spacing: -0.01em;
 }
 
-.humr-webapp-page-meta {
-  font-size: 12px;
+.humr-webapp-intro {
+  font-size: 14px;
   color: var(--muted);
-  line-height: 1.5;
+  line-height: 1.6;
+}
+
+.humr-webapp-intro p {
+  margin: 0 0 10px;
+}
+
+.humr-webapp-intro p:last-child {
+  margin-bottom: 0;
+}
+
+.humr-webapp-intro p[hidden] {
+  display: none;
+}
+
+.humr-webapp-intro-strong {
+  font-weight: 600;
+  color: var(--text);
 }
 
 .humr-webapp-list {
