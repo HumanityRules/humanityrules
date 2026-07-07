@@ -230,7 +230,10 @@ _HERMES_POLICY_PROXY_CONTAINER = {
     "container_port": 8788,
     "health_check_path": "/__policy_proxy/healthz",
     "health_check_command": "",
-    "health_check_grace_period": 0,
+    # healthz reports healthy only once the upstream accepts connections, so
+    # the ECS grace must cover worst-case Hermes boot (webui.sh alone allows
+    # the WebUI up to ~2 min) or ECS kills still-booting tasks.
+    "health_check_grace_period": 300,
     "depends_on": [
         {
             "name": "hermes",

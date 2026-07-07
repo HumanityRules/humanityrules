@@ -48,36 +48,28 @@
                 </div>
 
                 {# Options #}
-                <form id="remove-app-form" class="mt-4 ml-14 space-y-3">
-                    <label class="flex items-start gap-2 text-sm">
-                        <input type="checkbox" name="delete_secrets"
+                <form id="remove-app-form" class="mt-4 ml-14 text-sm">
+                    <label class="flex items-start gap-2">
+                        <input type="checkbox" name="delete_all_data"
                                class="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
                         <span class="text-gray-700 dark:text-gray-300">
-                            Also delete AWS Secrets Manager secrets
-                            (<code class="text-xs">humr/{env}/{{ app.slug }}/secrets</code>)
-                            in every environment this app is deployed in.
+                            Delete all associated data, in every environment this app is deployed in:
                         </span>
                     </label>
-                    {% if has_persistent_data %}
-                    <label class="flex items-start gap-2 text-sm">
-                        <input type="checkbox" name="delete_persistent_data"
-                               class="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
-                        <span class="text-gray-700 dark:text-gray-300">
-                            Also delete persistent data (EFS app data under
-                            <code class="text-xs">/deployments/{{ app.slug }}</code>
-                            and any EC2 host bind-mount directories for this app)
-                            in every environment this app is deployed in.
-                        </span>
-                    </label>
-                    {% endif %}
-                    <label class="flex items-start gap-2 text-sm">
-                        <input type="checkbox" name="delete_policies"
-                               class="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
-                        <span class="text-gray-700 dark:text-gray-300">
-                            Also delete policies targeting
-                            <code class="text-xs">app-name={{ app.slug }}</code>.
-                        </span>
-                    </label>
+                    <ul class="mt-2 ml-6 list-disc pl-4 space-y-1 text-gray-500 dark:text-gray-400">
+                        <li>
+                            AWS Secrets Manager secrets
+                        </li>
+                        {% if has_persistent_data %}
+                        <li>
+                            EFS Persistent data
+                        </li>
+                        {% endif %}
+                        <li>
+                            Policies targeting
+                            <code class="text-xs">app-name={{ app.slug }}</code>
+                        </li>
+                    </ul>
                 </form>
 
                 {# Actions #}

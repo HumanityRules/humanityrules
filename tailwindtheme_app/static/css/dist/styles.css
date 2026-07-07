@@ -637,6 +637,9 @@
   .ml-4 {
     margin-left: calc(var(--spacing) * 4);
   }
+  .ml-6 {
+    margin-left: calc(var(--spacing) * 6);
+  }
   .ml-9 {
     margin-left: calc(var(--spacing) * 9);
   }
@@ -1105,6 +1108,9 @@
   }
   .resize-y {
     resize: vertical;
+  }
+  .list-disc {
+    list-style-type: disc;
   }
   .list-none {
     list-style-type: none;

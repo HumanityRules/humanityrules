@@ -228,12 +228,103 @@ def test_healthz_returns_ok_without_auth(policy_proxy_config, fake_jwks_client) 
         raise AssertionError("PDP should not be called on health checks")
 
     async def upstream(request: httpx.Request) -> httpx.Response:
-        raise AssertionError("upstream should not be called on health checks")
+        return httpx.Response(200)
 
     client = _mk_client(policy_proxy_config, fake_jwks_client, pdp, upstream)
     response = client.get("/__policy_proxy/healthz")
     assert response.status_code == 200
     assert response.text == "ok"
+
+
+def test_healthz_tracks_upstream_readiness(policy_proxy_config, fake_jwks_client) -> None:
+    """healthz is 503 until the upstream accepts connections, then 200 — even on error statuses."""
+    upstream_up = False
+
+    async def pdp(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("PDP should not be called on health checks")
+
+    async def upstream(request: httpx.Request) -> httpx.Response:
+        if not upstream_up:
+            raise httpx.ConnectError("connection refused")
+        # A 500 still proves the app is listening; healthz only reports connectivity.
+        return httpx.Response(500)
+
+    client = _mk_client(policy_proxy_config, fake_jwks_client, pdp, upstream)
+
+    response = client.get("/__policy_proxy/healthz")
+    assert response.status_code == 503
+
+    upstream_up = True
+    response = client.get("/__policy_proxy/healthz")
+    assert response.status_code == 200
+
+
+def test_upstream_connect_error_serves_starting_page_to_navigations(
+    policy_proxy_config, fake_jwks_client, jwt_minter,
+) -> None:
+    async def pdp(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"decision": "allow", "reason": "ok"})
+
+    async def upstream(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    client = _mk_client(policy_proxy_config, fake_jwks_client, pdp, upstream)
+    token = jwt_minter()
+    response = client.get(
+        "/",
+        cookies={jwt_verify.SESSION_COOKIE_NAME: token},
+        headers={"sec-fetch-mode": "navigate"},
+    )
+
+    assert response.status_code == 503
+    assert response.headers["content-type"].startswith("text/html")
+    assert response.headers["retry-after"] == "3"
+    assert response.headers["cache-control"] == "no-store"
+    assert 'http-equiv="refresh"' in response.text
+    assert "Your agent is starting" in response.text
+
+
+def test_upstream_connect_error_returns_plaintext_503_to_fetch(
+    policy_proxy_config, fake_jwks_client, jwt_minter,
+) -> None:
+    async def pdp(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"decision": "allow", "reason": "ok"})
+
+    async def upstream(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    client = _mk_client(policy_proxy_config, fake_jwks_client, pdp, upstream)
+    token = jwt_minter()
+    response = client.get(
+        "/api/sessions",
+        cookies={jwt_verify.SESSION_COOKIE_NAME: token},
+        headers={"sec-fetch-mode": "cors"},
+    )
+
+    assert response.status_code == 503
+    assert response.headers["content-type"].startswith("text/plain")
+    assert response.headers["retry-after"] == "3"
+
+
+def test_upstream_non_connect_error_still_returns_502(
+    policy_proxy_config, fake_jwks_client, jwt_minter,
+) -> None:
+    async def pdp(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"decision": "allow", "reason": "ok"})
+
+    async def upstream(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadError("connection reset mid-response")
+
+    client = _mk_client(policy_proxy_config, fake_jwks_client, pdp, upstream)
+    token = jwt_minter()
+    response = client.get(
+        "/",
+        cookies={jwt_verify.SESSION_COOKIE_NAME: token},
+        headers={"sec-fetch-mode": "navigate"},
+    )
+
+    assert response.status_code == 502
+    assert response.text == "upstream unreachable"
 
 
 # -----------------------------------------------------------------------------
