@@ -638,6 +638,7 @@ def app_remove(request: HttpRequest, app_slug: str) -> HttpResponse:
         return HttpResponse(status=422)
 
     has_persistent_data = _app_has_persistent_data(app)
+    delete_all_data = request.POST.get("delete_all_data") == "on"
     with transaction.atomic():
         AppRemovalJob.objects.create(
             organization=request.user.current_organization,
@@ -645,9 +646,9 @@ def app_remove(request: HttpRequest, app_slug: str) -> HttpResponse:
             app_slug_snapshot=app.slug,
             app_name_snapshot=app.name,
             workspace_slug_snapshot=app.workspace.slug,
-            delete_secrets=request.POST.get("delete_secrets") == "on",
-            delete_persistent_data=has_persistent_data and request.POST.get("delete_persistent_data") == "on",
-            delete_policies=request.POST.get("delete_policies") == "on",
+            delete_secrets=delete_all_data,
+            delete_persistent_data=has_persistent_data and delete_all_data,
+            delete_policies=delete_all_data,
             created_by=request.user,
         )
         app.status = App.Status.PENDING_REMOVAL

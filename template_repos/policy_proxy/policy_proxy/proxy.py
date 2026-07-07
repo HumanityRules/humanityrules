@@ -11,7 +11,7 @@ import logging
 import httpx
 from fastapi import Request
 from starlette.background import BackgroundTask
-from starlette.responses import PlainTextResponse, StreamingResponse
+from starlette.responses import HTMLResponse, PlainTextResponse, Response, StreamingResponse
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 from websockets.asyncio.client import ClientConnection
 from websockets.asyncio.client import connect as ws_connect
@@ -24,6 +24,52 @@ logger = logging.getLogger(__name__)
 
 class WebSocketUpstreamUnavailable(Exception):
     """Raised when the upstream app cannot complete a WebSocket handshake."""
+
+
+# A connection-refused upstream normally means the app container is still
+# booting (the deployment goes green as soon as this sidecar is up — see
+# healthz in app.py), so browsers get a self-refreshing "starting" page
+# instead of a raw 502.
+UPSTREAM_STARTING_REFRESH_SECONDS = 3
+
+_AGENT_STARTING_PAGE_HTML = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="__REFRESH_SECONDS__">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Starting your agent</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    font-family: system-ui, -apple-system, sans-serif;
+    background: #fff; color: #1a1d23;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { background: #0b0d12; color: #e8eaf0; }
+  }
+  main { text-align: center; padding: 2rem; }
+  .spinner {
+    width: 28px; height: 28px; margin: 0 auto 1.25rem;
+    border: 3px solid color-mix(in srgb, currentColor 20%, transparent);
+    border-top-color: currentColor; border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  h1 { font-size: 1.15rem; font-weight: 600; margin: 0 0 0.5rem; }
+  p { margin: 0; opacity: 0.65; font-size: 0.95rem; }
+</style>
+</head>
+<body>
+<main>
+  <div class="spinner"></div>
+  <h1>Your agent is starting</h1>
+  <p>This usually takes a few seconds. The page refreshes on its own.</p>
+</main>
+</body>
+</html>
+""".replace("__REFRESH_SECONDS__", str(UPSTREAM_STARTING_REFRESH_SECONDS))
 
 
 # Hop-by-hop headers per RFC 7230 section 6.1; stripped in both directions.
@@ -72,6 +118,27 @@ def _filter_response_headers(headers: httpx.Headers) -> dict[str, str]:
     return out
 
 
+def is_fetch_request(request: Request) -> bool:
+    """Return true for fetch/XHR-style requests, false for browser navigations."""
+    sec_fetch_mode = request.headers.get("sec-fetch-mode", "").lower()
+    if sec_fetch_mode:
+        return sec_fetch_mode != "navigate"
+    if request.headers.get("x-requested-with", "").lower() == "xmlhttprequest":
+        return True
+    accept = request.headers.get("accept", "").lower()
+    return "application/json" in accept or "text/event-stream" in accept
+
+
+def _upstream_starting_response(request: Request) -> Response:
+    headers = {
+        "retry-after": str(UPSTREAM_STARTING_REFRESH_SECONDS),
+        "cache-control": "no-store",
+    }
+    if is_fetch_request(request=request):
+        return PlainTextResponse(content="agent is starting", status_code=503, headers=headers)
+    return HTMLResponse(content=_AGENT_STARTING_PAGE_HTML, status_code=503, headers=headers)
+
+
 async def proxy_to_upstream(
     request: Request,
     identity: jwt_verify.SessionIdentity,
@@ -109,6 +176,9 @@ async def proxy_to_upstream(
 
     try:
         upstream_response = await http_client.send(upstream_request, stream=True)
+    except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+        logger.error("proxy upstream not accepting connections url=%s err=%s", url, exc)
+        return _upstream_starting_response(request=request)
     except httpx.HTTPError as exc:
         logger.error("proxy upstream error url=%s err=%s", url, exc)
         return PlainTextResponse(content="upstream unreachable", status_code=502)

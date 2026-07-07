@@ -34,6 +34,9 @@ INTERNAL_PATH_PREFIX = "/__policy_proxy"
 SESSION_INSTALL_PATH = "/__humr_session_install"
 AUTH_URL_HEADER = "X-HUMR-Auth-URL"
 MIN_COOKIE_TTL_SECONDS = 60
+# Must answer inside the ALB health-check timeout (2s). On loopback a
+# not-yet-listening upstream refuses instantly, so this only caps pathological cases.
+UPSTREAM_PROBE_TIMEOUT_SECONDS = 1.0
 
 # WebSocket close codes used when we reject an upgrade.
 WS_CLOSE_AUTH_REQUIRED = 4401
@@ -145,22 +148,11 @@ def _session_cookie(*, jwt_value: str, env_domain: str, ttl_seconds: int) -> str
     )
 
 
-def _is_fetch_request(request: Request) -> bool:
-    """Return true for requests that should receive 401 instead of a 302."""
-    sec_fetch_mode = request.headers.get("sec-fetch-mode", "").lower()
-    if sec_fetch_mode:
-        return sec_fetch_mode != "navigate"
-    if request.headers.get("x-requested-with", "").lower() == "xmlhttprequest":
-        return True
-    accept = request.headers.get("accept", "").lower()
-    return "application/json" in accept or "text/event-stream" in accept
-
-
 def _auth_required_response(request: Request, cfg: config_mod.PolicyProxyConfig) -> Response:
     """Redirect navigations, but make API/fetch callers handle reauth explicitly."""
     return_url = _extract_reauth_return_url(request=request, cfg=cfg)
     target = _auth_start_url(return_url=return_url, cfg=cfg)
-    if _is_fetch_request(request=request):
+    if proxy_mod.is_fetch_request(request=request):
         return PlainTextResponse(
             content="authentication required",
             status_code=401,
@@ -198,7 +190,17 @@ def create_app(cfg: config_mod.PolicyProxyConfig) -> FastAPI:
     )
 
     @app.get(f"{INTERNAL_PATH_PREFIX}/healthz")
-    async def healthz() -> Response:
+    async def healthz(request: Request) -> Response:
+        # The ALB target-group check points here, and ECS stability / CFN
+        # completion / deployment SUCCEEDED all flow from target health — so
+        # "healthy" must mean "a click on the app URL reaches the app", not
+        # just "this sidecar booted". Any HTTP response counts as ready; only
+        # a connection-level failure means the app hasn't bound its port yet.
+        state = request.app.state
+        try:
+            await state.http_client.head(f"{state.upstream_base}/", timeout=UPSTREAM_PROBE_TIMEOUT_SECONDS)
+        except httpx.HTTPError:
+            return PlainTextResponse(content="upstream not ready", status_code=503)
         return PlainTextResponse(content="ok")
 
     @app.get(SESSION_INSTALL_PATH)
