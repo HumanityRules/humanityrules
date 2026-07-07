@@ -729,7 +729,7 @@ def deploy(
             logger.error("Could not find hosted zone '%(hosted_zone)s', HTTPS will not be configured", {"hosted_zone": shared_alb_hosted_zone})
             shared_alb_hosted_zone = None  # Fall back to HTTP-only
 
-    cdk_app = App(outdir=str(cdk_utils.CDK_OUT_DIR))
+    cdk_app = App(outdir=str(cdk_utils.create_synth_dir(name=f"humr-{env_slug}-base")))
 
     vpc_stack = VpcStack(cdk_app, vpc_stack_name, env_slug=env_slug, vpc_cidr=vpc_cidr)
 
