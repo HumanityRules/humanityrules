@@ -61,8 +61,7 @@
     return elem('div', { class: 'humr-webapp-empty' }, [
       elem('div', { class: 'humr-webapp-empty-title' }, ['No web apps yet']),
       elem('p', { class: 'humr-webapp-empty-hint' }, [
-        'Web apps are created by talking to the agent in chat. For example, you can ask the agent: ',
-        elem('span', null, ['Build me a San Francisco Weather dashboard webapp.']),
+        'Your first one will show up in this list.',
       ]),
     ]);
   }
@@ -137,6 +136,9 @@
 
   function renderPane(payload) {
     renderSummary(payload);
+
+    const note = document.getElementById('humrWebappsExamplesNote');
+    if (note) note.hidden = !payload || visibleItems(payload).length === 0;
 
     const list = document.getElementById('humrWebappsList');
     if (!list) return;
@@ -237,8 +239,18 @@
       elem('div', { class: 'humr-webapp-page-inner' }, [
         elem('div', { class: 'humr-webapp-page-head' }, [
           elem('div', { class: 'humr-webapp-page-title' }, ['Web Apps']),
-          elem('div', { class: 'humr-webapp-page-meta' }, [
-            'Apps the agent built, each at its own subdomain (<slug>.<hostname>).',
+          elem('div', { class: 'humr-webapp-intro' }, [
+            elem('p', null, [
+              'Web apps are tools your agent builds and runs for you, each at its own web address. They sit behind your login, so ',
+              elem('strong', { class: 'humr-webapp-intro-strong' }, ['only you can open them.']),
+            ]),
+            elem('p', null, [
+              'To build your first one, just ask in chat: “Make me a pomodoro timer that logs my focus sessions.” The agent writes the code, starts the app, and the link appears here. From there, describe the change you want and the agent updates the app.',
+            ]),
+            // Only true while apps are listed; renderPane toggles it.
+            elem('p', { id: 'humrWebappsExamplesNote', hidden: '' }, [
+              'The apps below shipped with your agent as examples. Try them out, or ask the agent to change or remove them.',
+            ]),
           ]),
         ]),
         elem('div', { class: 'humr-webapp-list', id: 'humrWebappsList' }),
