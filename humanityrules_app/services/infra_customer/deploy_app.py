@@ -197,23 +197,11 @@ def _missing_prebuilt_images(
     Hard-fails before CDK runs — a deploy with a dangling prebuilt reference
     would only surface as an ECS pull error hours later.
     """
-    from botocore.exceptions import ClientError
-
-    ecr_client = session.client("ecr")
     missing: list[str] = []
     for c in prebuilt_containers(app_config):
         repo_name = f"humr/{env_slug}/{c.prebuilt_ecr_repo}"
-        try:
-            ecr_client.describe_images(
-                repositoryName=repo_name,
-                imageIds=[{"imageTag": c.prebuilt_version}],
-            )
-        except ClientError as e:
-            code = e.response["Error"]["Code"]
-            if code in ("RepositoryNotFoundException", "ImageNotFoundException"):
-                missing.append(f"{repo_name}:{c.prebuilt_version}")
-                continue
-            raise
+        if not ecr_utils.image_tag_exists(session=session, ecr_repo_name=repo_name, image_tag=c.prebuilt_version):
+            missing.append(f"{repo_name}:{c.prebuilt_version}")
     return missing
 
 
@@ -1477,22 +1465,28 @@ def deploy(
             logger.error("CDK deployment failed (policy-proxy-ecr)")
             return DeployResult(success=False, error="CDK deployment failed (policy-proxy-ecr)", service_url="", alb_dns="")
 
-        # Push the HUMR-owned policy-proxy image into the per-env repo. This is
-        # idempotent: if the tag already exists in ECR the push is a no-op.
-        logger.info("Building and pushing policy-proxy image (%s)", POLICY_PROXY_IMAGE_VERSION)
-        policy_proxy_image_uri = ecr_utils.build_and_push_docker_image(
-            session=session,
-            account_id=account_id,
-            region=region,
-            env_slug=env_slug,
-            app_name="policy-proxy",
-            ecr_repo_name=policy_proxy_ecr_repo_name(env_slug),
-            app_source_path=POLICY_PROXY_SOURCE_DIR,
-            image_tag=POLICY_PROXY_IMAGE_VERSION,
-        )
-        if not policy_proxy_image_uri:
-            logger.error("Policy-proxy image build/push failed")
-            return DeployResult(success=False, error="Policy-proxy image build/push failed", service_url="", alb_dns="")
+        # Push the HUMR-owned policy-proxy image into the per-env repo, but only
+        # when the pinned version isn't there yet. Skipping when the tag exists
+        # keeps the version pin honest (source edits without a version bump can't
+        # silently overwrite a published tag) and avoids concurrent deployments
+        # racing on the builder's shared /build/{version} directory.
+        if ecr_utils.image_tag_exists(session=session, ecr_repo_name=policy_proxy_ecr_repo_name(env_slug), image_tag=POLICY_PROXY_IMAGE_VERSION):
+            logger.info("Policy-proxy image %s already in ECR, skipping build", POLICY_PROXY_IMAGE_VERSION)
+        else:
+            logger.info("Building and pushing policy-proxy image (%s)", POLICY_PROXY_IMAGE_VERSION)
+            policy_proxy_image_uri = ecr_utils.build_and_push_docker_image(
+                session=session,
+                account_id=account_id,
+                region=region,
+                env_slug=env_slug,
+                app_name="policy-proxy",
+                ecr_repo_name=policy_proxy_ecr_repo_name(env_slug),
+                app_source_path=POLICY_PROXY_SOURCE_DIR,
+                image_tag=POLICY_PROXY_IMAGE_VERSION,
+            )
+            if not policy_proxy_image_uri:
+                logger.error("Policy-proxy image build/push failed")
+                return DeployResult(success=False, error="Policy-proxy image build/push failed", service_url="", alb_dns="")
 
     # Phase 1b: Deploy stacks the App stack depends on. ECR must exist before
     # we push images. Aurora must exist before the App stack imports its

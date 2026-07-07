@@ -17,6 +17,18 @@ from . import ec2_builder_utils
 logger = logging.getLogger(__name__)
 
 
+def image_tag_exists(session: boto3.Session, ecr_repo_name: str, image_tag: str) -> bool:
+    """Return True when the tag exists in the ECR repo (False when the repo itself is missing)."""
+    ecr_client = session.client("ecr")
+    try:
+        ecr_client.describe_images(repositoryName=ecr_repo_name, imageIds=[{"imageTag": image_tag}])
+    except ClientError as e:
+        if e.response["Error"]["Code"] in ("RepositoryNotFoundException", "ImageNotFoundException"):
+            return False
+        raise
+    return True
+
+
 def apply_keep_last_n_lifecycle_policy(ecr_client, repository_name: str, max_image_count: int) -> None:
     """Put a keep-last-N-by-push-date lifecycle policy onto an existing ECR repo."""
     policy = {
