@@ -1,6 +1,7 @@
 <div class="max-w-3xl">
     <div class="mb-6">
         <nav class="text-sm text-gray-500 dark:text-gray-400 mb-2">
+            {% if agent_deployments_enabled %}
             <a href="{% url 'template_deploy_picker' %}"
                hx-get="{% url 'template_deploy_picker' %}"
                hx-target="#main-content"
@@ -8,6 +9,15 @@
                hx-push-url="true"
                class="hover:text-gray-700 dark:hover:text-gray-200">Templates</a>
             <span class="mx-1">/</span>
+            {% else %}
+            <a href="{% url 'workspaces' %}"
+               hx-get="{% url 'workspaces' %}"
+               hx-target="#main-content"
+               hx-swap="innerHTML"
+               hx-push-url="true"
+               class="hover:text-gray-700 dark:hover:text-gray-200">Workspaces</a>
+            <span class="mx-1">/</span>
+            {% endif %}
             <span class="text-gray-900 dark:text-white">{{ template.name }}</span>
         </nav>
         <div class="flex items-start gap-3">
@@ -33,33 +43,35 @@
         {% csrf_token %}
 
         <div>
-            <label for="app_name" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">App Name</label>
+            <label for="app_name" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Agent Name</label>
             <input type="text"
                    id="app_name"
                    name="app_name"
                    value="{{ default_app_name }}"
                    required
                    class="block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">A unique name for this app in your organization. Used as the URL slug.</p>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">A unique name for this agent in your organization. Used as the URL slug.</p>
         </div>
 
         <div>
             <label for="workspace_id" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Workspace</label>
             {% include "humanityrules_app/partials/_dropdown_select.html#dropdown_select" with dropdown_id="workspace_id" dropdown_name="workspace_id" dropdown_value=selected_workspace_id dropdown_selected_label=selected_workspace_label dropdown_options=workspace_options %}
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">The workspace this app belongs to (governance boundary).</p>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">The workspace this agent belongs to (governance boundary).</p>
         </div>
 
         <div>
             <label for="environment_id" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Environment</label>
             {% include "humanityrules_app/partials/_dropdown_select.html#dropdown_select" with dropdown_id="environment_id" dropdown_name="environment_id" dropdown_value=selected_environment_id dropdown_selected_label=selected_environment_label dropdown_options=environment_options %}
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Where the app will run. Only ready environments are shown.</p>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Where the agent will run. Only ready environments are shown.</p>
         </div>
 
+        {% if agent_deployments_enabled %}
         <div>
             <label for="compute_mode" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Compute</label>
             {% include "humanityrules_app/partials/_dropdown_select.html#dropdown_select" with dropdown_id="compute_mode" dropdown_name="compute_mode" dropdown_value=selected_compute_mode dropdown_selected_label=selected_compute_mode_label dropdown_options=compute_mode_options %}
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Fargate is serverless ECS. EC2 capacity uses customer-owned ECS container instances.</p>
         </div>
+        {% endif %}
 
         {% if requires_owner %}
         <div>
@@ -198,6 +210,7 @@
         </div>
 
         <div class="flex justify-end pt-2">
+            {% if agent_deployments_enabled %}
             <a href="{% url 'template_deploy_picker' %}"
                hx-get="{% url 'template_deploy_picker' %}"
                hx-target="#main-content"
@@ -206,6 +219,16 @@
                class="mr-3 rounded-lg px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
                 Cancel
             </a>
+            {% else %}
+            <a href="{% url 'workspaces' %}"
+               hx-get="{% url 'workspaces' %}"
+               hx-target="#main-content"
+               hx-swap="innerHTML"
+               hx-push-url="true"
+               class="mr-3 rounded-lg px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                Cancel
+            </a>
+            {% endif %}
             <button type="submit"
                     class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 transition-colors">
                 Deploy
