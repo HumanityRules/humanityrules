@@ -193,6 +193,7 @@ WORKOS_API_KEY = os.environ.get("WORKOS_API_KEY")
 
 # GitHub App Configuration
 GITHUB_APP_ID = os.environ.get("GITHUB_APP_ID")
+GITHUB_APP_SLUG = os.environ.get("GITHUB_APP_SLUG", "humanity-rules")
 GITHUB_APP_CLIENT_ID = os.environ.get("GITHUB_APP_CLIENT_ID")
 GITHUB_APP_CLIENT_SECRET = os.environ.get("GITHUB_APP_CLIENT_SECRET")
 GITHUB_APP_PRIVATE_KEY = os.environ.get("GITHUB_APP_PRIVATE_KEY", "").replace("\\n", "\n")
