@@ -1392,7 +1392,7 @@ def deploy(
         secrets_utils.ensure_env_policy_proxy_secrets_exist(session=session, env=environment)
         policy_proxy_auth_base_url = _resolve_control_plane_url()
 
-    cdk_app = App(outdir=str(cdk_utils.CDK_OUT_DIR))
+    cdk_app = App(outdir=str(cdk_utils.create_synth_dir(name=resource_prefix)))
 
     ecr_stack = EcrStack(
         cdk_app,

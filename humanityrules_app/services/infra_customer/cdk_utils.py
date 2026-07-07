@@ -5,7 +5,10 @@ CDK utility functions for deploying stacks.
 import logging
 import os
 from pathlib import Path
+import shutil
 import subprocess
+import time
+from uuid import uuid4
 
 import boto3
 from aws_cdk import App
@@ -14,7 +17,36 @@ from . import cloudformation_utils
 
 CDK_OUT_DIR = Path(__file__).parent / "cdk.out"
 
+# Deployments run in parallel worker threads. Two of them synthesizing into
+# the same assembly directory overwrite each other's manifest, and the slower
+# deploy then fails its `cdk deploy` with "No stacks match the name(s) ...".
+# Every synth therefore gets its own subdirectory; stale ones are pruned on
+# the next synth instead of a try/finally so an operator can still inspect
+# the assembly of a just-finished (or failed) deployment.
+_STALE_SYNTH_DIR_SECONDS = 24 * 3600
+
 logger = logging.getLogger(__name__)
+
+
+def create_synth_dir(name: str) -> Path:
+    """Create a fresh per-invocation synth dir under CDK_OUT_DIR and prune stale siblings."""
+    _prune_stale_synth_dirs()
+    synth_dir = CDK_OUT_DIR / f"{name}-{uuid4().hex[:8]}"
+    synth_dir.mkdir(parents=True, exist_ok=False)
+    return synth_dir
+
+
+def _prune_stale_synth_dirs() -> None:
+    """Best-effort removal of synth dirs older than _STALE_SYNTH_DIR_SECONDS."""
+    if not CDK_OUT_DIR.exists():
+        return
+    cutoff = time.time() - _STALE_SYNTH_DIR_SECONDS
+    for entry in CDK_OUT_DIR.iterdir():
+        try:
+            if entry.is_dir() and entry.stat().st_mtime < cutoff:
+                shutil.rmtree(entry, ignore_errors=True)
+        except OSError:
+            continue
 
 
 def _cdk_level_for_line(line: str) -> int:
