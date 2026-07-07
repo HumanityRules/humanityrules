@@ -42,7 +42,7 @@
 
     {# Apps section #}
     <div class="mb-8">
-        <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Apps</h2>
+        <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Agents</h2>
         <div class="grid gap-4 sm:grid-cols-2">
             {% for app in apps %}
             {% include "humanityrules_app/partials/_app_card.html" %}
@@ -55,11 +55,11 @@
                 <svg class="w-8 h-8 text-gray-400 group-hover:text-indigo-500 dark:group-hover:text-indigo-400 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
                 </svg>
-                <span class="mt-2 text-sm font-medium text-gray-500 dark:text-gray-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">New App</span>
+                <span class="mt-2 text-sm font-medium text-gray-500 dark:text-gray-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">New Agent</span>
             </button>
             {% else %}
-            <a href="{% url 'template_deploy_picker' %}"
-               hx-get="{% url 'template_deploy_picker' %}"
+            <a href="{% url 'template_deploy_form' template_slug='hermes-personal' %}"
+               hx-get="{% url 'template_deploy_form' template_slug='hermes-personal' %}"
                hx-target="#main-content"
                hx-swap="innerHTML"
                hx-push-url="true"
@@ -67,12 +67,13 @@
                 <svg class="w-8 h-8 text-gray-400 group-hover:text-indigo-500 dark:group-hover:text-indigo-400 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
                 </svg>
-                <span class="mt-2 text-sm font-medium text-gray-500 dark:text-gray-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">New App</span>
+                <span class="mt-2 text-sm font-medium text-gray-500 dark:text-gray-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">New Agent</span>
             </a>
             {% endif %}
         </div>
     </div>
 
+    {% if agent_deployments_enabled %}
     {# Datastores section #}
     <div class="mb-8">
         <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Datastores</h2>
@@ -101,6 +102,7 @@
         </div>
         {% endif %}
     </div>
+    {% endif %}
 
     {# Recent Deployments section #}
     <div>

@@ -245,11 +245,10 @@ _HERMES_POLICY_PROXY_CONTAINER = {
 # -- Hermes Personal (web only) ---------------------------------------------
 
 HERMES_PERSONAL_TEMPLATE = {
-    "name": "AI Assistant — Hermes (Personal)",
+    "name": "AI Assistant - Hermes",
     "slug": "hermes-personal",
     "description": (
-        "Personal AI assistant powered by Hermes Agent. Fronted by the policy "
-        "proxy for SSO + ABAC."
+        "Personal AI assistant powered by the Hermes Agent."
     ),
     "icon": "⚡",
     "category": "ai-assistant",

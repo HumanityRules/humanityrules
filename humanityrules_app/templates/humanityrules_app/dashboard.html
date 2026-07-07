@@ -3,7 +3,7 @@
 
     {# Apps section #}
     <div class="mb-8">
-        <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Apps</h2>
+        <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Your Agents</h2>
         {% if apps %}
         <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {% for app in apps %}
@@ -12,11 +12,12 @@
         </div>
         {% else %}
         <div class="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 border-dashed rounded-lg p-6 text-center">
-            <p class="text-sm text-gray-500 dark:text-gray-400">No apps yet. Go to a workspace and click "New App" to get started.</p>
+            <p class="text-sm text-gray-500 dark:text-gray-400">No agents yet. Go to a workspace and click "New Agent" to get started.</p>
         </div>
         {% endif %}
     </div>
 
+    {% if agent_deployments_enabled %}
     {# Datastores section #}
     <div>
         <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Datastores</h2>
@@ -48,4 +49,5 @@
         </div>
         {% endif %}
     </div>
+    {% endif %}
 </div>
