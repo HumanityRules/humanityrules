@@ -317,6 +317,7 @@ ENV MIX_OS_CONCURRENCY_LOCK=0 \
 # layers above instead of re-running uv pip install and Linuxbrew bootstrap.
 COPY skills/ /opt/hermes/agent/skills/
 COPY SOUL.md /opt/hermes/SOUL.md
+COPY ENVIRONMENT.md /opt/hermes/ENVIRONMENT.md
 COPY config.yaml.template /opt/hermes/config.yaml.template
 COPY humr_runtime /opt/humr/runtime
 

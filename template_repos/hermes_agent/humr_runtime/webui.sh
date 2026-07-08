@@ -32,6 +32,15 @@ set -euo pipefail
 export API_SERVER_ENABLED=true
 export API_SERVER_KEY=humr-loopback-gateway-key
 
+# Platform environment facts (integrations flow, GitHub auth proxy, package
+# managers) for the agent's system prompt, via Hermes's embedder hook. Kept
+# image-owned at /opt/hermes/ENVIRONMENT.md so every redeploy updates it —
+# unlike SOUL.md, which is seeded once into HERMES_HOME and user-editable.
+if [ -s /opt/hermes/ENVIRONMENT.md ]; then
+    HERMES_ENVIRONMENT_HINT="$(cat /opt/hermes/ENVIRONMENT.md)"
+    export HERMES_ENVIRONMENT_HINT
+fi
+
 # Point the WebUI at our extension bundle. EXTENSIONS.md-compliant same-origin
 # URLs — the upstream static handler serves $HERMES_WEBUI_EXTENSION_DIR under
 # /extensions/.
