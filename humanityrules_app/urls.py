@@ -13,6 +13,10 @@ urlpatterns = [
     path("devopshero-ai/", views.devopshero_landing, name="devopshero_landing"),
     path("waitlist/signup/", views.waitlist_signup, name="waitlist_signup"),
     path("dashboard/", views.dashboard, name="dashboard"),
+
+    # Staff-only platform fleet dashboard (cross-org by design; gated by is_staff)
+    path("platform/fleet/", views.fleet, name="fleet"),
+    path("platform/fleet/env/<uuid:environment_id>/live/", views.fleet_env_live_state, name="fleet_env_live_state"),
     path("workspaces/", views.workspaces, name="workspaces"),
     path("workspaces/create/", views.workspace_create, name="workspace_create"),
     path("workspaces/<slug:workspace_slug>/", views.workspace_detail, name="workspace_detail"),

@@ -32,6 +32,7 @@
     --color-amber-900: oklch(41.4% 0.112 45.904);
     --color-yellow-100: oklch(97.3% 0.071 103.193);
     --color-yellow-200: oklch(94.5% 0.129 101.54);
+    --color-yellow-300: oklch(90.5% 0.182 98.111);
     --color-yellow-400: oklch(85.2% 0.199 91.936);
     --color-yellow-500: oklch(79.5% 0.184 86.047);
     --color-yellow-600: oklch(68.1% 0.162 75.834);
@@ -934,6 +935,9 @@
   .w-56 {
     width: calc(var(--spacing) * 56);
   }
+  .w-64 {
+    width: calc(var(--spacing) * 64);
+  }
   .w-72 {
     width: calc(var(--spacing) * 72);
   }
@@ -1617,6 +1621,9 @@
       border-color: color-mix(in oklab, var(--color-white) 6%, transparent);
     }
   }
+  .border-yellow-300 {
+    border-color: var(--color-yellow-300);
+  }
   .bg-amber-50 {
     background-color: var(--color-amber-50);
   }
@@ -2208,6 +2215,9 @@
   }
   .pl-4 {
     padding-left: calc(var(--spacing) * 4);
+  }
+  .pl-6 {
+    padding-left: calc(var(--spacing) * 6);
   }
   .pl-8 {
     padding-left: calc(var(--spacing) * 8);
@@ -3733,6 +3743,16 @@
       }
     }
   }
+  .dark\:divide-white\/5 {
+    &:where(.dark, .dark *) {
+      :where(& > :not(:last-child)) {
+        border-color: color-mix(in srgb, #fff 5%, transparent);
+        @supports (color: color-mix(in lab, red, red)) {
+          border-color: color-mix(in oklab, var(--color-white) 5%, transparent);
+        }
+      }
+    }
+  }
   .dark\:divide-white\/10 {
     &:where(.dark, .dark *) {
       :where(& > :not(:last-child)) {
@@ -3853,6 +3873,14 @@
       border-color: color-mix(in srgb, #fff 20%, transparent);
       @supports (color: color-mix(in lab, red, red)) {
         border-color: color-mix(in oklab, var(--color-white) 20%, transparent);
+      }
+    }
+  }
+  .dark\:border-yellow-500\/30 {
+    &:where(.dark, .dark *) {
+      border-color: color-mix(in srgb, oklch(79.5% 0.184 86.047) 30%, transparent);
+      @supports (color: color-mix(in lab, red, red)) {
+        border-color: color-mix(in oklab, var(--color-yellow-500) 30%, transparent);
       }
     }
   }

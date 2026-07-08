@@ -1,5 +1,6 @@
 from .landing import devopshero_landing, landing
 from .dashboard import dashboard
+from .fleet import fleet, fleet_env_live_state
 from .workspaces import workspaces, workspace_detail, workspace_create, workspace_remove_confirm, workspace_remove, workspace_tag_add, workspace_tag_remove, workspace_tags_save
 from .apps import app_detail, app_deployment_teardown, app_deployment_redeploy, app_deployment_status, app_deployment_log, app_card_status, app_teardown_confirm, app_tag_add, app_tag_remove, app_tags_save, blueprint_row_status, app_remove_confirm, app_remove, app_cost_panel
 from .environments import environments, environment_detail, environment_setup_form, environment_provisioning_log, environment_status, environment_retry, environment_teardown_confirm, environment_teardown, environment_tag_add, environment_tag_remove, environment_tags_save

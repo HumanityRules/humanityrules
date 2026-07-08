@@ -484,9 +484,14 @@
       },
     });
     menuBtn.innerHTML = menuIcon + '<span>Permissions</span>';
+    // Hermes 0.51 wraps the menu buttons in `.settings-menu-items`, so System
+    // is no longer a direct child of #settingsMenu. Insert relative to System's
+    // real parent (the wrapper) — settingsMenu.insertBefore() would throw
+    // NotFoundError and abort the whole mount, dropping the Permissions section.
     const systemBtn = settingsMenu.querySelector('[data-settings-section="system"]');
-    if (systemBtn) settingsMenu.insertBefore(menuBtn, systemBtn);
-    else settingsMenu.appendChild(menuBtn);
+    const menuList = systemBtn ? systemBtn.parentNode : settingsMenu.querySelector('.settings-menu-items') || settingsMenu;
+    if (systemBtn) menuList.insertBefore(menuBtn, systemBtn);
+    else menuList.appendChild(menuBtn);
 
     _rootEl = elem('div', { class: 'humr-perm-root', id: 'humrPermissionsRoot' });
     const permPane = elem('div', { class: 'settings-pane', id: 'settingsPanePermissions' }, [_rootEl]);
