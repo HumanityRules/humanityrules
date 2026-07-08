@@ -290,6 +290,37 @@ class TestPermissionsApi(TestCase):
             AppPermissionRequest.objects.get(id=rid).status, AppPermissionRequest.Status.APPROVED_PENDING_APPLY,
         )
 
+    def test_apply_on_sandbox_account_blocked_for_non_platform_owner_org(self) -> None:
+        # ABAC allows (every signup is admin of their own org), but the env sits on
+        # HumR's shared sandbox account — the sandbox gate must win.
+        self.aws_account.is_humr_sandbox = True
+        self.aws_account.save(update_fields=["is_humr_sandbox"])
+        draft = self._open_draft()
+        rid = draft["request_id"]
+        with (
+            self.settings(HUMR_PLATFORM_OWNER_ORG_SLUG="humanity-rules"),
+            patch("humanityrules_app.views.permissions_api.abac_service.check_action", return_value=True),
+        ):
+            response = self._post("/api/permissions/draft/apply", {**self._identity(), "request_id": rid}, bearer=self.raw_token)
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("Humanity Rules", response.json()["error"])
+        self.assertEqual(AppPermissionRequest.objects.get(id=rid).status, AppPermissionRequest.Status.DRAFT)
+
+    def test_apply_on_sandbox_account_allowed_for_platform_owner_org(self) -> None:
+        self.aws_account.is_humr_sandbox = True
+        self.aws_account.save(update_fields=["is_humr_sandbox"])
+        draft = self._open_draft()
+        rid = draft["request_id"]
+        with (
+            self.settings(HUMR_PLATFORM_OWNER_ORG_SLUG="perm-org"),
+            patch("humanityrules_app.views.permissions_api.abac_service.check_action", return_value=True),
+        ):
+            response = self._post("/api/permissions/draft/apply", {**self._identity(), "request_id": rid}, bearer=self.raw_token)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            AppPermissionRequest.objects.get(id=rid).status, AppPermissionRequest.Status.APPROVED_PENDING_APPLY,
+        )
+
     # ── Catalog / resources ────────────────────────────────────────────────────
 
     def test_service_catalog(self) -> None:

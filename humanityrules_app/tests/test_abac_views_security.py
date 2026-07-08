@@ -429,6 +429,26 @@ class TestPermissionsEditorEndpoints(TestCase):
         response = self.client.post(f"/security/permissions/{self.apr.id}/apply/")
         self.assertEqual(response.status_code, 403)
 
+    def test_approver_on_sandbox_account_gets_403(self) -> None:
+        # ABAC allows, but the env sits on HumR's shared sandbox account and the
+        # org is not the platform owner — the sandbox gate must win.
+        self.aws_account.is_humr_sandbox = True
+        self.aws_account.save(update_fields=["is_humr_sandbox"])
+        self.client.force_login(self.approver_user)
+        with self.settings(HUMR_PLATFORM_OWNER_ORG_SLUG="humanity-rules"):
+            response = self.client.post(f"/security/permissions/{self.apr.id}/apply/")
+        self.assertEqual(response.status_code, 403)
+        self.apr.refresh_from_db()
+        self.assertEqual(self.apr.status, AppPermissionRequest.Status.DRAFT)
+
+    def test_platform_owner_org_approver_can_approve_on_sandbox_account(self) -> None:
+        self.aws_account.is_humr_sandbox = True
+        self.aws_account.save(update_fields=["is_humr_sandbox"])
+        self.client.force_login(self.approver_user)
+        with self.settings(HUMR_PLATFORM_OWNER_ORG_SLUG="pe-test-org"):
+            response = self.client.post(f"/security/permissions/{self.apr.id}/apply/")
+        self.assertEqual(response.status_code, 200)
+
     def test_permissions_editor_uses_per_user_conversations(self) -> None:
         # Two users from the same org open the editor for the same app+env.
         # Each must get their own Conversation — the second visitor must NOT

@@ -11,10 +11,25 @@ that turns that setting into a per-request gate. UI hiding is not enough — eve
 
 from django.conf import settings
 
-from humanityrules_app.models import Organization
+from humanityrules_app.models import Environment, Organization
+
+SANDBOX_APPROVAL_BLOCKED_MESSAGE = (
+    "Permission changes on the shared Humanity Rules sandbox require approval "
+    "by the Humanity Rules team. Your request stays saved as a draft."
+)
 
 
 def is_platform_owner_org(organization: Organization) -> bool:
     """Whether *organization* is the deployment's designated platform-owner org."""
     owner_slug = settings.HUMR_PLATFORM_OWNER_ORG_SLUG
     return bool(owner_slug) and organization.slug == owner_slug
+
+
+def is_sandbox_approval_gated(environment: Environment) -> bool:
+    """Whether permission approvals on *environment* are reserved for the platform owner.
+
+    Environments on HumR's shared sandbox account grant IAM permissions inside HumR's
+    own AWS account, so ABAC role alone cannot authorize the approval — every signup
+    is admin of their own org. Only the platform-owner org may approve there.
+    """
+    return environment.aws_account.is_humr_sandbox and not is_platform_owner_org(organization=environment.aws_account.organization)
