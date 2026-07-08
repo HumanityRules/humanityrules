@@ -22,7 +22,6 @@ creative/p5js
 creative/popular-web-designs
 data-science/jupyter-live-kernel
 github/codebase-inspection
-github/github-auth
 github/github-code-review
 github/github-issues
 github/github-pr-workflow
