@@ -20,7 +20,7 @@ def _task_definition_properties(template: Template) -> dict:
 SHARED_SECRETS_ARN = "arn:aws:secretsmanager:us-east-1:123456789012:secret:humr/staging/shared-secrets-abcdef"
 
 
-def _render_ec2(containers: list[ContainerConfig], cpu: int, alb_target_container: str) -> Template:
+def _render_ec2(containers: list[ContainerConfig], cpu: int, alb_target_container: str, serialize_task_replacement: bool) -> Template:
     cdk_app = App()
     stack = deploy_app.AppStack(
         scope=cdk_app,
@@ -33,6 +33,7 @@ def _render_ec2(containers: list[ContainerConfig], cpu: int, alb_target_containe
             alb_target_container=alb_target_container,
             containers=containers,
             owner_username=None,
+            serialize_task_replacement=serialize_task_replacement,
         ),
         image_tag="test",
         env_slug="staging",
@@ -53,6 +54,7 @@ class Ec2CpuReservationTests(SimpleTestCase):
         template = _render_ec2(
             cpu=2048,
             alb_target_container="policy-proxy",
+            serialize_task_replacement=True,
             containers=[
                 ContainerConfig(
                     name="hermes",
@@ -84,6 +86,7 @@ class Ec2CpuReservationTests(SimpleTestCase):
         template = _render_ec2(
             cpu=1024,
             alb_target_container="app",
+            serialize_task_replacement=False,
             containers=[
                 ContainerConfig(
                     name="app",
@@ -98,6 +101,47 @@ class Ec2CpuReservationTests(SimpleTestCase):
         props = _task_definition_properties(template=template)
         self.assertEqual(props["Cpu"], "1024")
         self.assertNotIn("Cpu", props["ContainerDefinitions"][0])
+
+    def test_serialized_service_binpacks_by_memory(self) -> None:
+        template = _render_ec2(
+            cpu=2048,
+            alb_target_container="app",
+            serialize_task_replacement=True,
+            containers=[
+                ContainerConfig(
+                    name="app",
+                    image_source="dockerfile",
+                    ecr_repo_name="humr/staging/my-app-app",
+                    container_port=8080,
+                    memory_limit_mib=512,
+                ),
+            ],
+        )
+
+        service = next(r for r in template.to_json()["Resources"].values() if r["Type"] == "AWS::ECS::Service")
+        self.assertEqual(service["Properties"]["PlacementStrategies"], [{"Type": "binpack", "Field": "MEMORY"}])
+
+    def test_unserialized_service_spreads_by_az_then_binpacks(self) -> None:
+        template = _render_ec2(
+            cpu=2048,
+            alb_target_container="app",
+            serialize_task_replacement=False,
+            containers=[
+                ContainerConfig(
+                    name="app",
+                    image_source="dockerfile",
+                    ecr_repo_name="humr/staging/my-app-app",
+                    container_port=8080,
+                    memory_limit_mib=512,
+                ),
+            ],
+        )
+
+        service = next(r for r in template.to_json()["Resources"].values() if r["Type"] == "AWS::ECS::Service")
+        self.assertEqual(service["Properties"]["PlacementStrategies"], [
+            {"Type": "spread", "Field": "attribute:ecs.availability-zone"},
+            {"Type": "binpack", "Field": "MEMORY"},
+        ])
 
     def test_hermes_template_packs_four_tasks_per_t4g_large(self) -> None:
         template = seed_app_templates.HERMES_PERSONAL_TEMPLATE

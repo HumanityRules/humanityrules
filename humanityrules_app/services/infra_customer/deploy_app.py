@@ -1088,12 +1088,23 @@ class AppStack(Stack):
         # conversation state). ECS rejects max<=100 with AZ Rebalancing on, so
         # we disable it in the same branch — acceptable for single-task
         # services, where "rebalanced across AZs" doesn't apply.
+        # Binpack instead of the default AZ spread: fill the fullest node
+        # first so idle nodes empty out and managed scaling can terminate
+        # them. Spread kept re-provisioning a node per AZ, doubling instance
+        # cost for single-task services. With AZ rebalancing ENABLED, CDK
+        # requires spread-by-AZ to come before binpack, so that branch packs
+        # only within the spread-chosen AZ.
         if app_config.serialize_task_replacement:
             max_healthy = 100
             az_rebalancing = ecs.AvailabilityZoneRebalancing.DISABLED
+            placement_strategies = [ecs.PlacementStrategy.packed_by(ecs.BinPackResource.MEMORY)]
         else:
             max_healthy = 200
             az_rebalancing = ecs.AvailabilityZoneRebalancing.ENABLED
+            placement_strategies = [
+                ecs.PlacementStrategy.spread_across(ecs.BuiltInAttributes.AVAILABILITY_ZONE),
+                ecs.PlacementStrategy.packed_by(ecs.BinPackResource.MEMORY),
+            ]
         service_props = {
             "service_name": resource_prefix[:255],
             "cluster": self.environment_infra.cluster,
@@ -1118,6 +1129,7 @@ class AppStack(Stack):
                         weight=1,
                     ),
                 ],
+                placement_strategies=placement_strategies,
                 **service_props,
             )
         else:
