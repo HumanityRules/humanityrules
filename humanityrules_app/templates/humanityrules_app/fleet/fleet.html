@@ -1,0 +1,104 @@
+{% extends "humanityrules_app/base.html" %}
+
+{% block title %}Fleet — Humanity Rules{% endblock %}
+
+{% block content %}
+<div class="min-h-full bg-white dark:bg-gray-900 px-6 py-8">
+    <div class="max-w-5xl mx-auto">
+        <div class="flex items-baseline justify-between mb-8">
+            <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Fleet</h1>
+            <span class="text-sm text-gray-500 dark:text-gray-400">Platform admin · DB state is intent; use “Query live state” for ground truth</span>
+        </div>
+
+        {% for group in env_groups %}
+        <section class="mb-10">
+            <div class="flex items-center justify-between border-b border-gray-200 dark:border-white/10 pb-2 mb-3">
+                <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+                    {{ group.organization.name }} <span class="text-gray-400 font-normal">/ {{ group.environment.slug }}</span>
+                    <span class="ml-2 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">{{ group.environment.get_status_display }}</span>
+                </h2>
+                <button hx-get="/platform/fleet/env/{{ group.environment.id }}/live/"
+                        hx-target="#live-{{ group.environment.id }}"
+                        hx-swap="innerHTML"
+                        hx-indicator="#live-spinner-{{ group.environment.id }}"
+                        class="text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:underline">
+                    Query live state
+                    <span id="live-spinner-{{ group.environment.id }}" class="htmx-indicator">…</span>
+                </button>
+            </div>
+
+            <ul class="divide-y divide-gray-100 dark:divide-white/5">
+                {% for deployment in group.deployments %}
+                <li class="py-2 flex items-center gap-4">
+                    <span class="font-mono text-sm text-gray-900 dark:text-white w-64 truncate">{{ deployment.app.slug }}</span>
+                    <span class="text-sm px-2 py-0.5 rounded-full
+                        {% if deployment.status == 'succeeded' %}bg-green-100 text-green-800 dark:bg-green-500/10 dark:text-green-400
+                        {% elif deployment.status == 'failed' or deployment.status == 'rolled_back' %}bg-red-100 text-red-800 dark:bg-red-500/10 dark:text-red-400
+                        {% elif deployment.is_transient %}bg-yellow-100 text-yellow-800 dark:bg-yellow-500/10 dark:text-yellow-400
+                        {% else %}bg-gray-100 text-gray-600 dark:bg-white/5 dark:text-gray-400{% endif %}">
+                        {{ deployment.get_status_display }}
+                    </span>
+                    <span class="text-sm text-gray-500 dark:text-gray-400">{{ deployment.updated_at|timesince }} ago</span>
+                    {% if deployment.service_url %}
+                    <a href="{{ deployment.service_url }}" target="_blank" class="text-sm text-indigo-600 dark:text-indigo-400 hover:underline truncate">{{ deployment.service_url }}</a>
+                    {% endif %}
+                </li>
+                {% empty %}
+                <li class="py-2 text-sm text-gray-400 dark:text-gray-500">No deployments</li>
+                {% endfor %}
+            </ul>
+
+            <div id="live-{{ group.environment.id }}"></div>
+        </section>
+        {% empty %}
+        <p class="text-gray-500 dark:text-gray-400">No deployments yet.</p>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}
+
+{% partialdef env_live_state %}
+{% if live_state.error %}
+<p class="mt-2 text-sm text-red-600 dark:text-red-400">{{ live_state.error }}</p>
+{% endif %}
+{% if live_state.services %}
+<div class="mt-3 rounded-lg border border-gray-200 dark:border-white/10 p-3">
+    <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Live ECS state</p>
+    <ul class="space-y-1">
+        {% for service in live_state.services %}
+        <li class="text-sm flex items-center gap-3">
+            {% if service.running_count >= service.desired_count and service.rollout_state != 'FAILED' %}
+            <span class="text-green-600 dark:text-green-400">●</span>
+            {% else %}
+            <span class="text-red-600 dark:text-red-400">●</span>
+            {% endif %}
+            <span class="font-mono text-gray-900 dark:text-white">{{ service.service_name }}</span>
+            <span class="text-gray-500 dark:text-gray-400">{{ service.running_count }}/{{ service.desired_count }} running{% if service.pending_count %}, {{ service.pending_count }} pending{% endif %}</span>
+            {% if service.rollout_state and service.rollout_state != 'COMPLETED' %}
+            <span class="text-yellow-600 dark:text-yellow-400">{{ service.rollout_state }}</span>
+            {% endif %}
+        </li>
+        {% for reason in service.failure_reasons %}
+        <li class="text-xs text-red-600 dark:text-red-400 pl-6 truncate">{{ reason }}</li>
+        {% endfor %}
+        {% endfor %}
+    </ul>
+</div>
+{% elif not live_state.error %}
+<p class="mt-2 text-sm text-gray-500 dark:text-gray-400">No ECS services found in this cluster.</p>
+{% endif %}
+{% if live_state.unhealthy_stacks %}
+<div class="mt-2 rounded-lg border border-yellow-300 dark:border-yellow-500/30 p-3">
+    <p class="text-xs uppercase tracking-wide text-yellow-700 dark:text-yellow-400 mb-2">CloudFormation stacks not settled</p>
+    <ul class="space-y-1">
+        {% for stack in live_state.unhealthy_stacks %}
+        <li class="text-sm">
+            <span class="font-mono text-gray-900 dark:text-white">{{ stack.stack_name }}</span>
+            <span class="text-yellow-700 dark:text-yellow-400 ml-2">{{ stack.stack_status }}</span>
+            {% if stack.status_reason %}<span class="text-gray-500 dark:text-gray-400 ml-2">{{ stack.status_reason }}</span>{% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+{% endpartialdef %}
