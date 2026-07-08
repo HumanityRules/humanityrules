@@ -143,19 +143,21 @@ class Ec2CpuReservationTests(SimpleTestCase):
             {"Type": "binpack", "Field": "MEMORY"},
         ])
 
-    def test_hermes_template_packs_four_tasks_per_t4g_large(self) -> None:
+    def test_hermes_template_packs_two_tasks_per_t4g_large(self) -> None:
+        # Two tasks per node is the awsvpc ENI ceiling on a .large (3 ENIs,
+        # one for the host), so each task claims half the node.
         template = seed_app_templates.HERMES_PERSONAL_TEMPLATE
 
         hermes = next(c for c in template["containers"] if c["name"] == "hermes")
         proxy = next(c for c in template["containers"] if c["name"] == "policy-proxy")
-        self.assertEqual(hermes["cpu_reservation"], 384)
+        self.assertEqual(hermes["cpu_reservation"], 896)
         self.assertEqual(proxy["cpu_reservation"], 128)
         # ECS sums every container's reservation for placement; the per-task
-        # total must be <= 512 so four tasks fit on one t4g.large (2048 units).
+        # total must be <= 1024 so two tasks fit on one t4g.large (2048 units).
         per_task_cpu = hermes["cpu_reservation"] + proxy["cpu_reservation"]
-        self.assertEqual(per_task_cpu, 512)
-        self.assertLessEqual(per_task_cpu * 4, 2048)
-        # Memory must also pack four per node: 4 x (1536 + 256) = 7168 MiB
-        # fits in a t4g.large's ~7600 MiB usable.
+        self.assertEqual(per_task_cpu, 1024)
+        self.assertLessEqual(per_task_cpu * 2, 2048)
+        # Memory: 2 x (3328 + 256) = 7168 MiB fits in a t4g.large's ~7600 MiB
+        # usable.
         per_task_mem = hermes["memory_reservation_mib"] + proxy["memory_limit_mib"]
-        self.assertLessEqual(per_task_mem * 4, 7600)
+        self.assertLessEqual(per_task_mem * 2, 7600)
