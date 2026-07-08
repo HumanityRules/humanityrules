@@ -72,10 +72,19 @@ def build_fleet_snapshot() -> list[EnvGroup]:
         .order_by("-created_at")
         .values("id")[:1]
     )
+    # The app's live URL comes from its latest SUCCEEDED deploy — a failed or
+    # in-progress redeploy must not hide the URL that is still serving.
+    latest_succeeded_url = (
+        models.Deployment.objects
+        .filter(app=OuterRef("app"), environment=OuterRef("environment"), status=models.Deployment.Status.SUCCEEDED)
+        .order_by("-created_at")
+        .values("service_url")[:1]
+    )
     deployments = (
         models.Deployment.objects
         .filter(id=Subquery(latest_per_app_env))
         .select_related("app", "environment")
+        .annotate(live_service_url=Subquery(latest_succeeded_url))
         .order_by("app__slug")
     )
     for deployment in deployments:

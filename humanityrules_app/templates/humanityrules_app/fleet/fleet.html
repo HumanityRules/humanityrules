@@ -10,6 +10,15 @@
             <span class="text-sm text-gray-500 dark:text-gray-400">Platform admin · DB state is intent; use “Query live state” for ground truth</span>
         </div>
 
+        {# DB tier refreshes continuously; live-state panels are hx-preserve'd so a refresh never wipes them. #}
+        <div id="fleet-list" hx-get="/platform/fleet/" hx-trigger="every 10s" hx-target="this" hx-swap="innerHTML">
+            {% partial fleet_list %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% partialdef fleet_list %}
         {% for group in env_groups %}
         <section class="mb-10">
             <div class="flex items-center justify-between border-b border-gray-200 dark:border-white/10 pb-2 mb-3">
@@ -29,7 +38,8 @@
 
             <ul class="divide-y divide-gray-100 dark:divide-white/5">
                 {% for deployment in group.deployments %}
-                <li class="py-2 flex items-center gap-4">
+                <li class="py-2">
+                    <div class="flex items-center gap-4">
                     <span class="font-mono text-sm text-gray-900 dark:text-white w-64 truncate">{{ deployment.app.slug }}</span>
                     <span class="text-sm px-2 py-0.5 rounded-full
                         {% if deployment.status == 'succeeded' %}bg-green-100 text-green-800 dark:bg-green-500/10 dark:text-green-400
@@ -39,23 +49,28 @@
                         {{ deployment.get_status_display }}
                     </span>
                     <span class="text-sm text-gray-500 dark:text-gray-400">{{ deployment.updated_at|timesince }} ago</span>
-                    {% if deployment.service_url %}
-                    <a href="{{ deployment.service_url }}" target="_blank" class="text-sm text-indigo-600 dark:text-indigo-400 hover:underline truncate">{{ deployment.service_url }}</a>
+                    {% if deployment.live_service_url %}
+                    <a href="{{ deployment.live_service_url }}" target="_blank" class="text-sm text-indigo-600 dark:text-indigo-400 hover:underline truncate">{{ deployment.live_service_url }}</a>
                     {% endif %}
+                    <button hx-get="{% url 'fleet_deployment_log' deployment_id=deployment.id %}"
+                            hx-target="#fleet-log-{{ deployment.id }}"
+                            hx-swap="innerHTML"
+                            class="ml-auto text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline shrink-0">log</button>
+                    </div>
+                    {% comment %} hx-preserve: an opened log panel must survive the 10s fleet-list refresh. {% endcomment %}
+                    <div id="fleet-log-{{ deployment.id }}" hx-preserve="true"></div>
                 </li>
                 {% empty %}
                 <li class="py-2 text-sm text-gray-400 dark:text-gray-500">No deployments</li>
                 {% endfor %}
             </ul>
 
-            <div id="live-{{ group.environment.id }}"></div>
+            <div id="live-{{ group.environment.id }}" hx-preserve="true"></div>
         </section>
         {% empty %}
-        <p class="text-gray-500 dark:text-gray-400">No deployments yet.</p>
+        <p class="text-gray-500 dark:text-gray-400">No environments yet.</p>
         {% endfor %}
-    </div>
-</div>
-{% endblock %}
+{% endpartialdef %}
 
 {% partialdef env_live_state %}
 {% if live_state.error %}

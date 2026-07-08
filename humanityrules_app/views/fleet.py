@@ -12,6 +12,8 @@ from django.shortcuts import get_object_or_404, render
 from humanityrules_app import models
 from humanityrules_app.services import fleet_status
 
+FLEET_LOG_MAX_LINES = 300
+
 
 def _staff_or_404(view_func):
     """Gate to staff, answering everyone else with a 404 so the page's existence isn't revealed."""
@@ -26,7 +28,24 @@ def _staff_or_404(view_func):
 @_staff_or_404
 def fleet(request: HttpRequest) -> HttpResponse:
     context = {"env_groups": fleet_status.build_fleet_snapshot()}
-    return render(request, "humanityrules_app/fleet/fleet.html", context=context)
+    template = "humanityrules_app/fleet/fleet.html"
+    if request.htmx:
+        template += "#fleet_list"
+    return render(request, template, context=context)
+
+
+@_staff_or_404
+def fleet_deployment_log(request: HttpRequest, deployment_id: str) -> HttpResponse:
+    deployment = get_object_or_404(models.Deployment.objects.select_related("app", "environment"), id=deployment_id)
+    # Fetch newest-first so the cap keeps the tail, then reverse to chronological for display.
+    recent = list(models.DeploymentLog.objects.filter(deployment=deployment).order_by("-created_at")[: FLEET_LOG_MAX_LINES + 1])
+    context = {
+        "deployment": deployment,
+        "logs": list(reversed(recent[:FLEET_LOG_MAX_LINES])),
+        "truncated": len(recent) > FLEET_LOG_MAX_LINES,
+        "max_lines": FLEET_LOG_MAX_LINES,
+    }
+    return render(request, "humanityrules_app/fleet/_fleet_deployment_log.html", context=context)
 
 
 @_staff_or_404
