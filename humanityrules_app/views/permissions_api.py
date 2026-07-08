@@ -22,6 +22,7 @@ from humanityrules_app.models import App, AppPermissionRequest, Environment, Use
 from humanityrules_app.services import abac_service
 from humanityrules_app.services import permissions_service
 from humanityrules_app.views.integrations import broker_request_context
+from humanityrules_app.views.integrations import platform_owner
 
 logger = logging.getLogger(__name__)
 
@@ -200,13 +201,16 @@ def permissions_cancel(request: HttpRequest) -> JsonResponse:
 @csrf_exempt
 @require_POST
 def permissions_apply(request: HttpRequest) -> JsonResponse:
-    """Approve the draft for async apply, enforcing the environment:approve ABAC check."""
+    """Approve the draft for async apply, enforcing the sandbox gate + environment:approve ABAC check."""
     deployment, error = _resolve_deployment(request=request)
     if error is not None:
         return error
     app_permission_request = _get_scoped_request(deployment=deployment, request_id=deployment.payload.get("request_id"))
     if app_permission_request is None:
         return JsonResponse({"error": "permission request not found"}, status=404)
+
+    if platform_owner.is_sandbox_approval_gated(environment=deployment.environment):
+        return JsonResponse({"error": platform_owner.SANDBOX_APPROVAL_BLOCKED_MESSAGE}, status=403)
 
     allowed = abac_service.check_action(
         organization=deployment.environment.aws_account.organization,

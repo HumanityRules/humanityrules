@@ -13,6 +13,7 @@ from ..services.agent import agent_service
 from ..services import permissions_service
 from . import abac_view_checks
 from . import base
+from .integrations import platform_owner
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +107,7 @@ def security_permissions_editor_apply(request: HttpRequest, app_permission_reque
     """Set AppPermissionRequest status to APPROVED_PENDING_APPLY. Statements are already in DB."""
     organization = request.user.current_organization
     app_permission_request = get_object_or_404(
-        models.AppPermissionRequest.objects.select_related("environment"),
+        models.AppPermissionRequest.objects.select_related("environment", "environment__aws_account"),
         id=app_permission_request_id,
         app__organization=organization,
     )
@@ -114,6 +115,8 @@ def security_permissions_editor_apply(request: HttpRequest, app_permission_reque
     denied = abac_view_checks.check_abac(request, app_permission_request.environment, "environment", "environment:approve")
     if denied:
         return denied
+    if platform_owner.is_sandbox_approval_gated(environment=app_permission_request.environment):
+        return JsonResponse({"error": platform_owner.SANDBOX_APPROVAL_BLOCKED_MESSAGE}, status=403)
 
     permissions_service.approve(app_permission_request)
 
