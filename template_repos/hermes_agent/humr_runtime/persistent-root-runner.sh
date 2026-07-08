@@ -6,6 +6,7 @@ set -euo pipefail
 CHECKPOINT_ARCHIVE_NAME="rootfs.tar.zst"
 RUNTIME_PID=""
 TERMINATION_REQUESTED=0
+SIGTERM_MS=""
 IMAGE_OWNED_DIRS=(
     /opt/humr
     /opt/hermes
@@ -24,6 +25,12 @@ format_duration_ms() {
     local duration_ms="$1"
 
     printf "%d.%03ds" "$((duration_ms / 1000))" "$((duration_ms % 1000))"
+}
+
+format_size_bytes() {
+    local bytes="$1"
+
+    printf "%d MiB (%d bytes)" "$((bytes / 1024 / 1024))" "$bytes"
 }
 
 persistent_root_initialized() {
@@ -154,7 +161,7 @@ restore_persistent_root_from_checkpoint() {
     fi
 
     start_ms="$(now_ms)"
-    echo "[persistent-root] Restoring ${HERMES_PERSISTENT_ROOT} from ${archive}..."
+    echo "[persistent-root] Restoring ${HERMES_PERSISTENT_ROOT} from ${archive} ($(format_size_bytes "$(stat -c %s "$archive")"))..."
     tar --extract \
         --zstd \
         --file "$archive" \
@@ -235,7 +242,26 @@ checkpoint_persistent_root() {
 
     end_ms="$(now_ms)"
     duration_ms="$((end_ms - start_ms))"
-    echo "[persistent-root] Checkpoint complete in $(format_duration_ms "$duration_ms") (${duration_ms} ms)."
+    echo "[persistent-root] Checkpoint complete in $(format_duration_ms "$duration_ms") (${duration_ms} ms); archive size $(format_size_bytes "$(stat -c %s "$archive")")."
+}
+
+# A leftover tmp archive means a previous shutdown was SIGKILLed mid-checkpoint
+# (its state was lost; the surviving rootfs.tar.zst is one generation older).
+# Without this sweep they also accumulate on EFS forever, since the checkpoint
+# path only removes the tmp file of the current PID.
+report_stale_checkpoint_tmp_files() {
+    local stale
+
+    if ! checkpoint_root_mounted; then
+        return
+    fi
+    for stale in "$(checkpoint_archive_path)".tmp.*; do
+        if [ ! -e "$stale" ]; then
+            continue
+        fi
+        echo "[persistent-root] WARNING: stale checkpoint temp file ${stale} ($(format_size_bytes "$(stat -c %s "$stale")")) — a previous shutdown was likely killed mid-checkpoint. Removing it."
+        rm -f "$stale"
+    done
 }
 
 request_termination() {
@@ -244,6 +270,7 @@ request_termination() {
     fi
 
     TERMINATION_REQUESTED=1
+    SIGTERM_MS="$(now_ms)"
     echo "[persistent-root] Termination requested; forwarding SIGTERM to runtime."
     if [ -n "$RUNTIME_PID" ] && kill -0 "$RUNTIME_PID" 2>/dev/null; then
         kill -TERM "-$RUNTIME_PID" 2>/dev/null \
@@ -254,6 +281,7 @@ request_termination() {
 
 main() {
     local exit_code
+    local shutdown_ms
 
     if [ "$#" -eq 0 ]; then
         die "no command supplied"
@@ -272,6 +300,7 @@ main() {
     fi
 
     mkdir -p "$HERMES_PERSISTENT_ROOT"
+    report_stale_checkpoint_tmp_files
     if persistent_root_initialized; then
         reuse_persistent_root
     else
@@ -297,7 +326,11 @@ main() {
     set -e
 
     if [ "$TERMINATION_REQUESTED" -eq 1 ]; then
+        shutdown_ms="$(($(now_ms) - SIGTERM_MS))"
+        echo "[persistent-root] Runtime exited with code ${exit_code} in $(format_duration_ms "$shutdown_ms") (${shutdown_ms} ms) after SIGTERM."
         checkpoint_persistent_root
+    else
+        echo "[persistent-root] Runtime exited on its own with code ${exit_code}; skipping checkpoint."
     fi
 
     exit "$exit_code"
