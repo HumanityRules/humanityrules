@@ -17,6 +17,30 @@ drafts and prepares, it never sends or decides.
 
     <div class="container-custom relative z-10">
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
+            <!-- Text column (right on desktop via lg:order-2, first on mobile by DOM order) -->
+            <div class="lg:order-2">
+                <h2 class="text-4xl sm:text-5xl font-bold text-white mb-6 leading-tight">
+                    A personal assistant,<br>
+                    <span class="gradient-text">always on.</span>
+                </h2>
+
+                <p class="text-2xl sm:text-3xl font-medium text-gray-200 mb-8 leading-tight">
+                    Close the laptop. It keeps working.
+                </p>
+
+                <p class="text-lg text-gray-400 mb-6 leading-relaxed">
+                    It has already sorted your inbox, caught up on Slack, and noticed what changed in Notion.
+                    Hand it something big on your way out: by morning the research is
+                    done, the replies are drafted, and a brief is waiting.
+                </p>
+
+                <p class="text-lg text-gray-400 leading-relaxed">
+                    Talk to it from wherever you are: Slack, the web, your phone. It's the same assistant in
+                    every channel, remembering your projects, your preferences, and where you left off. And
+                    everything it learns stays with you, not on another company's servers.
+                </p>
+            </div>
+
             <!-- Visual column: animated overnight activity feed (left on desktop) -->
             <div class="relative lg:order-1" id="overnight-feed">
                 <div class="absolute -inset-4 bg-gradient-to-r from-cyber-500/20 via-cyan-500/20 to-teal-500/20 rounded-3xl blur-2xl opacity-60"></div>
@@ -75,30 +99,6 @@ drafts and prepares, it never sends or decides.
                         </div>
                     </div>
                 </div>
-            </div>
-
-            <!-- Text column (right on desktop, first on mobile) -->
-            <div class="lg:order-2">
-                <h2 class="text-4xl sm:text-5xl font-bold text-white mb-6 leading-tight">
-                    A personal assistant,<br>
-                    <span class="gradient-text">always on.</span>
-                </h2>
-
-                <p class="text-2xl sm:text-3xl font-medium text-gray-200 mb-8 leading-tight">
-                    Close the laptop. It keeps working.
-                </p>
-
-                <p class="text-lg text-gray-400 mb-6 leading-relaxed">
-                    It has already sorted your inbox, caught up on Slack, and noticed what changed in Notion.
-                    Hand it something big on your way out: by morning the research is
-                    done, the replies are drafted, and a brief is waiting.
-                </p>
-
-                <p class="text-lg text-gray-400 leading-relaxed">
-                    Talk to it from wherever you are: Slack, the web, your phone. It's the same assistant in
-                    every channel, remembering your projects, your preferences, and where you left off. And
-                    everything it learns stays with you, not on another company's servers.
-                </p>
             </div>
         </div>
     </div>

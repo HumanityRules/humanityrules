@@ -84,43 +84,48 @@ does not depend on landing_page.html's script block.
                             </div>
                         </div>
 
-                        <!-- Approve / Deny buttons -->
-                        <div id="approval-actions" class="flex items-center gap-3 pt-1 transition-all duration-500">
-                            <button type="button" class="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-cyber-400 to-cyan-500 text-navy-950 text-sm font-semibold">
-                                <!-- Check icon -->
-                                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                                    <path d="M20 6 9 17l-5-5"/>
-                                </svg>
-                                Approve
-                            </button>
-                            <button type="button" class="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-red-500/10 border border-white/10 text-red-400 text-sm font-semibold">
-                                Deny
-                            </button>
-                        </div>
-
-                        <!-- Granted state (hidden by default) -->
-                        <div id="approval-success" class="hidden p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-lg animate-fade-in-landing">
-                            <div class="flex items-center gap-2 text-emerald-400 font-semibold">
-                                <!-- Check icon -->
-                                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                    <path d="M20 6 9 17l-5-5"/>
-                                </svg>
-                                Access granted by IT
+                        <!-- Approve/Deny and the granted state share one grid cell, so the card
+                             always has the height of the taller state and they cross-fade in
+                             place instead of toggling display (which shifted content below). -->
+                        <div class="grid">
+                            <!-- Approve / Deny buttons -->
+                            <div id="approval-actions" class="col-start-1 row-start-1 self-center flex items-center gap-3 transition-all duration-500">
+                                <button type="button" class="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-cyber-400 to-cyan-500 text-navy-950 text-sm font-semibold">
+                                    <!-- Check icon -->
+                                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M20 6 9 17l-5-5"/>
+                                    </svg>
+                                    Approve
+                                </button>
+                                <button type="button" class="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-red-500/10 border border-white/10 text-red-400 text-sm font-semibold">
+                                    Deny
+                                </button>
                             </div>
-                            <div class="mt-3 space-y-2">
-                                <div class="flex items-center gap-2 text-emerald-300 text-xs">
-                                    <!-- Target / scope icon -->
-                                    <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                        <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>
+
+                            <!-- Granted state (invisible until the approve beat) -->
+                            <div id="approval-success" class="col-start-1 row-start-1 invisible opacity-0 transition-opacity duration-500 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
+                                <div class="flex items-center gap-2 text-emerald-400 font-semibold">
+                                    <!-- Check icon -->
+                                    <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M20 6 9 17l-5-5"/>
                                     </svg>
-                                    Scoped to those two resources, nothing more
+                                    Access granted by IT
                                 </div>
-                                <div class="flex items-center gap-2 text-emerald-300 text-xs">
-                                    <!-- File-check / audit icon -->
-                                    <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                        <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="m9 15 2 2 4-4"/>
-                                    </svg>
-                                    Logged to the audit trail
+                                <div class="mt-3 space-y-2">
+                                    <div class="flex items-center gap-2 text-emerald-300 text-xs">
+                                        <!-- Target / scope icon -->
+                                        <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>
+                                        </svg>
+                                        Scoped to those two resources, nothing more
+                                    </div>
+                                    <div class="flex items-center gap-2 text-emerald-300 text-xs">
+                                        <!-- File-check / audit icon -->
+                                        <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="m9 15 2 2 4-4"/>
+                                        </svg>
+                                        Logged to the audit trail
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -139,9 +144,9 @@ does not depend on landing_page.html's script block.
         var success = document.getElementById('approval-success');
 
         function reset() {
-            if (success) success.classList.add('hidden');
+            if (success) success.classList.add('invisible', 'opacity-0');
             if (actions) {
-                actions.classList.remove('opacity-0');
+                actions.classList.remove('invisible', 'opacity-0');
                 actions.classList.add('opacity-100');
             }
         }
@@ -153,14 +158,13 @@ does not depend on landing_page.html's script block.
                 actions.classList.add('opacity-0');
             }
             setTimeout(function() {
-                if (actions) actions.classList.add('hidden');
-                if (success) success.classList.remove('hidden');
+                if (actions) actions.classList.add('invisible');
+                if (success) success.classList.remove('invisible', 'opacity-0');
             }, 500);
         }
 
         function loop() {
             reset();
-            if (actions) actions.classList.remove('hidden');
             // Beat before approving, hold on the granted state, then restart.
             setTimeout(grant, 2200);
             setTimeout(loop, 7000);

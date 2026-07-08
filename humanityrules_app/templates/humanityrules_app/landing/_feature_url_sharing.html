@@ -127,7 +127,8 @@ script block.
                                     </svg>
                                 </span>
 
-                                <div class="min-w-0">
+                                {# Fixed height (label + caption lines) so the row never resizes; centering keeps the label aligned with the icon while the caption is collapsed #}
+                                <div class="min-w-0 h-9 flex flex-col justify-center">
                                     <p id="access-label" class="text-sm font-medium text-white truncate">Just you</p>
                                     <p id="access-caption" class="text-xs text-gray-500 truncate h-0 opacity-0 transition-all duration-500"></p>
                                 </div>
