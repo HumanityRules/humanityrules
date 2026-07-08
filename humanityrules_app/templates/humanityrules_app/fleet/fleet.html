@@ -10,8 +10,14 @@
             <span class="text-sm text-gray-500 dark:text-gray-400">Platform admin · DB state is intent; use “Query live state” for ground truth</span>
         </div>
 
-        {# DB tier refreshes continuously; live-state panels are hx-preserve'd so a refresh never wipes them. #}
-        <div id="fleet-list" hx-get="/platform/fleet/" hx-trigger="every 10s" hx-target="this" hx-swap="innerHTML">
+        {% comment %} DB tier refreshes continuously; live-state and log panels are hx-preserve'd so a
+        refresh never wipes them. hx-preserve MOVES the panel nodes during the swap, which resets their
+        scroll position — so save every log console's scrollTop before the swap and restore it after
+        settle (the preserved nodes are the same JS objects, so properties survive the move). {% endcomment %}
+        <div id="fleet-list" hx-get="/platform/fleet/" hx-trigger="every 10s" hx-target="this" hx-swap="innerHTML"
+             hx-on::before-swap="this.querySelectorAll('.fleet-log-console').forEach(c => c._keepTop = c.scrollTop)"
+             hx-on::after-swap="this.querySelectorAll('.fleet-log-console').forEach(c => { if (c._keepTop !== undefined) c.scrollTop = c._keepTop })"
+             hx-on::after-settle="this.querySelectorAll('.fleet-log-console').forEach(c => { if (c._keepTop !== undefined) c.scrollTop = c._keepTop })">
             {% partial fleet_list %}
         </div>
     </div>
@@ -57,8 +63,12 @@
                             hx-swap="innerHTML"
                             class="ml-auto text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline shrink-0">log</button>
                     </div>
-                    {% comment %} hx-preserve: an opened log panel must survive the 10s fleet-list refresh. {% endcomment %}
-                    <div id="fleet-log-{{ deployment.id }}" hx-preserve="true"></div>
+                    {% comment %} hx-preserve: an opened log panel must survive the 10s fleet-list refresh.
+                    The before/after-swap handlers keep the console pinned to the tail across the 1s log
+                    polls unless the user scrolled up (same pattern as app_detail's #deployment-log-region). {% endcomment %}
+                    <div id="fleet-log-{{ deployment.id }}" hx-preserve="true"
+                         hx-on::before-swap="const c = this.querySelector('.fleet-log-console'); this._stick = !c || c.scrollHeight - c.scrollTop - c.clientHeight < 40; this._top = c ? c.scrollTop : 0;"
+                         hx-on::after-swap="const c = this.querySelector('.fleet-log-console'); if (c) c.scrollTop = this._stick ? c.scrollHeight : this._top;"></div>
                 </li>
                 {% empty %}
                 <li class="py-2 text-sm text-gray-400 dark:text-gray-500">No deployments</li>
