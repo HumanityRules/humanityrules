@@ -290,7 +290,11 @@ class EcsClusterStack(Stack):
             launch_template_name=f"{prefix}-ecs-container-instances",
             # Burstable Graviton: HA nodes idle at ~3% CPU, far under t4g.large's
             # 30% baseline, so credits never deplete; unlimited mode (the default)
-            # means worst case is surplus billing, not throttling.
+            # means worst case is surplus billing, not throttling. Packing is
+            # capped at 2 awsvpc tasks per node by the ENI limit (3 ENIs, one
+            # for the host) — denser packing needs ENI trunking, which the
+            # t-family doesn't support and which we won't require of customer
+            # accounts. Task reservations are therefore sized to half a node.
             instance_type=ec2.InstanceType.of(ec2.InstanceClass.T4G, ec2.InstanceSize.LARGE),
             machine_image=ecs.EcsOptimizedImage.amazon_linux2023(hardware_type=ecs.AmiHardwareType.ARM),
             role=self.container_instance_role,

@@ -235,8 +235,8 @@ class ContainerConfig:
     # placement reservation on EC2 tasks when a container has no hard cap
     # (memory_limit_mib=None); when both are set, memory_limit_mib is the
     # hard cap and memory_reservation_mib is a cgroup soft limit Docker
-    # squeezes toward under memory pressure. Lets several tasks share a node with
-    # bursty-but-usually-idle containers (e.g. four hermes tasks on one t4g.large).
+    # squeezes toward under memory pressure. Lets two tasks share a node with
+    # bursty-but-usually-idle containers (e.g. two hermes tasks on one t4g.large).
     memory_reservation_mib: int | None = None
 
     # Container-level CPU reservation in ECS CPU units (1024 = 1 vCPU). On EC2
