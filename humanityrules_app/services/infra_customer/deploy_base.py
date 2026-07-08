@@ -288,7 +288,10 @@ class EcsClusterStack(Stack):
         self.container_instance_launch_template = ec2.LaunchTemplate(
             self, "ContainerInstanceLaunchTemplate",
             launch_template_name=f"{prefix}-ecs-container-instances",
-            instance_type=ec2.InstanceType.of(ec2.InstanceClass.M8G, ec2.InstanceSize.LARGE),
+            # Burstable Graviton: HA nodes idle at ~3% CPU, far under t4g.large's
+            # 30% baseline, so credits never deplete; unlimited mode (the default)
+            # means worst case is surplus billing, not throttling.
+            instance_type=ec2.InstanceType.of(ec2.InstanceClass.T4G, ec2.InstanceSize.LARGE),
             machine_image=ecs.EcsOptimizedImage.amazon_linux2023(hardware_type=ecs.AmiHardwareType.ARM),
             role=self.container_instance_role,
             security_group=self.container_instance_security_group,
@@ -568,7 +571,7 @@ touch /tmp/builder_ready
             allow_all_outbound=True,
         )
 
-        # EC2 Instance - Amazon Linux 2023, t4g.medium (Graviton ARM64), 50GB root volume
+        # EC2 Instance - Amazon Linux 2023, m8g.large (Graviton ARM64), 50GB root volume
         # ARM64 so Docker builds natively match ECS Fargate ARM64 target
         self.instance = ec2.Instance(
             self, "BuilderInstance",
