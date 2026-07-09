@@ -169,7 +169,13 @@ RUN /tmp/check-vendor.sh "$HERMES_WEBUI_AGENT_DIR" /tmp/vendor/hermes-webui "${W
 
 # Curate the bundled agent skill set. (The submodule's .git pointer is excluded
 # from the build context by .dockerignore's **/.git, so it never arrives here.)
-RUN /tmp/prune-skills.sh "$HERMES_WEBUI_AGENT_DIR/skills" \
+# subagent-driven-development ships upstream under optional-skills/ (never
+# loaded from there); promote it into the bundled tree first — the kept
+# software-development skills (plan, requesting-code-review, ...) reference it,
+# and the allowlist keeps it.
+RUN cp -R "$HERMES_WEBUI_AGENT_DIR/optional-skills/software-development/subagent-driven-development" \
+        "$HERMES_WEBUI_AGENT_DIR/skills/software-development/subagent-driven-development" \
+    && /tmp/prune-skills.sh "$HERMES_WEBUI_AGENT_DIR/skills" \
     && rm -f /tmp/prune-skills.sh
 
 # WebUI lives in the base image at /apptoo/. Overlay the vendored fork onto it
