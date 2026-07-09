@@ -11,7 +11,6 @@ KEEP_MARKER=.humr-keep
 
 allowlisted_skills() {
     cat <<'EOF'
-autonomous-ai-agents/hermes-agent
 creative/architecture-diagram
 creative/ascii-art
 creative/ascii-video
@@ -20,7 +19,6 @@ creative/excalidraw
 creative/manim-video
 creative/p5js
 creative/popular-web-designs
-data-science/jupyter-live-kernel
 github/codebase-inspection
 github/github-code-review
 github/github-issues
