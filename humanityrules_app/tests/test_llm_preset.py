@@ -19,9 +19,11 @@ from humanityrules_app.views import template_deploy
 
 CODEX_MAIN_MODEL = "gpt-5.5"
 CODEX_AUX_MODEL = "gpt-5.4-mini"
+BEDROCK_MODEL = "global.anthropic.claude-sonnet-5"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 HERMES_CONFIG_TEMPLATE_PATH = PROJECT_ROOT / "template_repos/hermes_agent/config.yaml.template"
 HERMES_CONFIG_SOURCE_PATH = PROJECT_ROOT / "template_repos/hermes_agent/vendor/hermes-agent/hermes_cli/config.py"
+HERMES_SUPERVISOR_PATH = PROJECT_ROOT / "template_repos/hermes_agent/humr_runtime/supervisor.sh"
 MAIN_MODEL_AUXILIARY_SLOTS = (
     "kanban_decomposer",
     "curator",
@@ -75,6 +77,8 @@ class LlmPresetResolutionTests(SimpleTestCase):
         overrides = llm_preset_service.llm_overrides_for(organization=org)
         self.assertEqual(overrides["HUMR_LLM_PROVIDER"], "bedrock")
         self.assertEqual(overrides["HUMR_AUX_PROVIDER"], "bedrock")
+        self.assertEqual(overrides["HUMR_LLM_MODEL"], BEDROCK_MODEL)
+        self.assertEqual(overrides["HUMR_AUX_MODEL"], BEDROCK_MODEL)
 
     def test_unknown_preset_yields_no_overrides(self) -> None:
         org = models.Organization(llm_preset="gemini")
@@ -111,6 +115,8 @@ class LlmPresetDeployApplicationTests(SimpleTestCase):
         env = self._hermes_env(preset="bedrock", extra_overrides={})
         self.assertEqual(env["HUMR_LLM_PROVIDER"], "bedrock")
         self.assertEqual(env["HUMR_AUX_PROVIDER"], "bedrock")
+        self.assertEqual(env["HUMR_LLM_MODEL"], BEDROCK_MODEL)
+        self.assertEqual(env["HUMR_AUX_MODEL"], BEDROCK_MODEL)
 
     def test_explicit_runtime_override_wins_over_preset(self) -> None:
         env = self._hermes_env(preset="codex", extra_overrides={"HUMR_LLM_PROVIDER": "bedrock"})
@@ -142,6 +148,17 @@ class HermesAuxiliaryConfigTemplateTests(SimpleTestCase):
             expected_model = CODEX_MAIN_MODEL if slot in MAIN_MODEL_AUXILIARY_SLOTS else CODEX_AUX_MODEL
             self.assertEqual(slot_config["provider"], "openai-codex")
             self.assertEqual(slot_config["model"], expected_model)
+
+
+class HermesModelCatalogTests(SimpleTestCase):
+
+    def test_sonnet_5_is_the_only_curated_sonnet_model(self) -> None:
+        supervisor = HERMES_SUPERVISOR_PATH.read_text(encoding="utf-8")
+        render_config = supervisor.partition("providers_block_file=$(mktemp)")[2]
+        curated_models = render_config.partition("cat > \"$providers_block_file\" <<'EOF'\n")[2].partition("\nEOF")[0]
+        sonnet_lines = [line.strip() for line in curated_models.splitlines() if "sonnet" in line.lower()]
+
+        self.assertEqual(sonnet_lines, [f"'{BEDROCK_MODEL}': \"Sonnet 5\""])
 
 
 class LlmPresetDeployFormTests(SimpleTestCase):

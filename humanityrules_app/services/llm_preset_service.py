@@ -18,7 +18,7 @@ from humanityrules_app import models
 _DEFAULT_PRESET = models.Organization.LlmPreset.CODEX.value
 
 # Bedrock preset model — matches the template's own default.
-_BEDROCK_MODEL = "global.anthropic.claude-sonnet-4-6"
+_BEDROCK_MODEL = "global.anthropic.claude-sonnet-5"
 
 # Hermes' native ChatGPT-subscription provider. Inference flows through the
 # broker, which swaps the platform-shared token onto the wire. Confirm the model
