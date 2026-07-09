@@ -1,0 +1,4 @@
+/* Local development keeps Hermes' plugin and extension management visible. */
+
+#settingsMenu .side-menu-item[data-settings-section="plugins"],
+#settingsMenu .side-menu-item[data-settings-section="extensions"] { display: flex !important; }

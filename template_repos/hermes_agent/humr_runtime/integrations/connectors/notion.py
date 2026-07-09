@@ -122,7 +122,7 @@ def _make_backend(*, oauth_state, refresh_fn, persistent_dir: Path, on_config_ch
 SPEC = DCRConnectorSpec(
     slug="notion",
     label="Notion",
-    logo_url="/extensions/notion.svg",
+    logo_url="/extensions/humr/notion.svg",
     upstream_url="https://mcp.notion.com/mcp",
     oauth_metadata_url="https://mcp.notion.com/.well-known/oauth-authorization-server",
     default_scope=None,  # Notion's AS ignores scope.

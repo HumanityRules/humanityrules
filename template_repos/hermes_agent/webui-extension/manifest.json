@@ -1,0 +1,23 @@
+{
+  "version": "1.0.0",
+  "extensions": [
+    {
+      "id": "humr-integrations",
+      "name": "HumR Integrations",
+      "scripts": ["humr-integrations.js"],
+      "stylesheets": ["humr-integrations.css", "humr-model-picker.css"]
+    },
+    {
+      "id": "humr-webapps",
+      "name": "HumR Web Apps",
+      "scripts": ["humr-webapps.js"],
+      "stylesheets": ["humr-webapps.css"]
+    },
+    {
+      "id": "humr-permissions",
+      "name": "HumR Permissions",
+      "scripts": ["humr-permissions.js"],
+      "stylesheets": ["humr-permissions.css", "humr-local-overrides.css"]
+    }
+  ]
+}

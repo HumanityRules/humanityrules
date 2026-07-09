@@ -34,6 +34,9 @@ NOUS_OAUTH_CLIENT_ID = "hermes-cli"
 NOUS_SCOPE = "inference:invoke inference:mint_agent_key"
 NOUS_MARKER_EXPIRES_AT = "2999-01-01T00:00:00+00:00"
 SUPPORTED_AUTH_MARKER_PROVIDERS = frozenset({CODEX_PROVIDER, NOUS_PROVIDER})
+HUMR_WEBUI_EXTENSION_ID = "humr"
+HUMR_WEBUI_EXTENSION_SOURCE_DIR = Path("/opt/humr/webui-extension")
+WEBUI_EXTENSION_INSTALL_MANIFEST_FILENAME = "extension-install-manifest.json"
 
 
 def _required_env(name: str) -> str:
@@ -111,6 +114,80 @@ def seed_soul_file(hermes_home: Path) -> None:
     target = hermes_home / "SOUL.md"
     if source.is_file() and not target.exists():
         shutil.copy2(src=source, dst=target)
+
+
+def _load_extension_install_manifest(manifest_path: Path) -> dict[str, object]:
+    """Load the WebUI gallery install state without discarding valid entries."""
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {"version": 1, "installed": {}}
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
+        raise RuntimeError(f"cannot read WebUI extension install manifest {manifest_path}: {exc}") from exc
+
+    if not isinstance(payload, dict) or not isinstance(payload.get("installed"), dict):
+        raise RuntimeError(f"invalid WebUI extension install manifest at {manifest_path}")
+    return payload
+
+
+def _write_json_atomically(target: Path, payload: dict[str, object]) -> None:
+    """Write JSON through an fsynced same-directory temporary file."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+    try:
+        with temporary.open(mode="w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(src=temporary, dst=target)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def seed_humr_webui_extensions(source_dir: Path, webui_state_dir: Path) -> None:
+    """Refresh the HumR extension bundle and register it beside gallery installs."""
+    source_manifest = source_dir / "manifest.json"
+    try:
+        bundle_manifest = json.loads(source_manifest.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
+        raise RuntimeError(f"cannot read HumR WebUI extension manifest {source_manifest}: {exc}") from exc
+    if not isinstance(bundle_manifest, dict):
+        raise RuntimeError(f"invalid HumR WebUI extension manifest at {source_manifest}")
+    version = bundle_manifest.get("version")
+    if not isinstance(version, str) or not version.strip():
+        raise RuntimeError(f"HumR WebUI extension manifest has no version at {source_manifest}")
+
+    extension_root = webui_state_dir / "extensions"
+    target_dir = extension_root / HUMR_WEBUI_EXTENSION_ID
+    target_dir.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["rsync", "-a", "--delete", f"{source_dir}/", f"{target_dir}/"],
+        check=True,
+    )
+
+    installed_files = sorted(
+        path.relative_to(target_dir).as_posix()
+        for path in target_dir.rglob("*")
+        if path.is_file()
+    )
+    install_manifest_path = webui_state_dir / WEBUI_EXTENSION_INSTALL_MANIFEST_FILENAME
+    install_manifest = _load_extension_install_manifest(manifest_path=install_manifest_path)
+    installed = install_manifest["installed"]
+    if not isinstance(installed, dict):  # Kept explicit for type narrowing after validated load.
+        raise RuntimeError(f"invalid WebUI extension install manifest at {install_manifest_path}")
+    existing = installed.get(HUMR_WEBUI_EXTENSION_ID)
+    installed_at = existing.get("installed_at") if isinstance(existing, dict) else None
+    if not isinstance(installed_at, str) or not installed_at:
+        installed_at = dt.datetime.now(tz=dt.timezone.utc).isoformat()
+    installed[HUMR_WEBUI_EXTENSION_ID] = {
+        "version": version.strip(),
+        "files": installed_files,
+        "installed_at": installed_at,
+    }
+    install_manifest["version"] = 1
+    _write_json_atomically(target=install_manifest_path, payload=install_manifest)
+    print(f"[sandbox-seed] refreshed HumR WebUI extension bundle at {target_dir}")
 
 
 def configure_github_git_helper() -> None:
@@ -297,8 +374,13 @@ def run_boot_seed() -> int:
     """Run all sandbox-local boot seeds."""
     hermes_home = _hermes_home()
     workspace = Path(_required_env(name="HERMES_WEBUI_DEFAULT_WORKSPACE")).expanduser()
+    webui_state_dir = Path(_required_env(name="HERMES_WEBUI_STATE_DIR")).expanduser()
     aws_region = _required_env(name="AWS_DEFAULT_REGION")
 
+    seed_humr_webui_extensions(
+        source_dir=HUMR_WEBUI_EXTENSION_SOURCE_DIR,
+        webui_state_dir=webui_state_dir,
+    )
     write_child_aws_config(workspace=workspace, aws_region=aws_region)
     seed_soul_file(hermes_home=hermes_home)
     configure_github_git_helper()

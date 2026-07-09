@@ -1,6 +1,9 @@
 /* HUMR Permissions editor — Settings → Permissions pane.
    See humr-permissions.js. Colors use the WebUI's CSS variables. */
 
+#settingsMenu .side-menu-item[data-settings-section="plugins"],
+#settingsMenu .side-menu-item[data-settings-section="extensions"] { display: none !important; }
+
 .humr-perm-root { display: block; }
 
 #settingsPanePermissions .humr-perm-page-inner {
