@@ -17,7 +17,6 @@ set -euo pipefail
 : "${HERMES_WEBUI_AGENT_DIR:?HERMES_WEBUI_AGENT_DIR must be set}"
 : "${HERMES_WEBUI_DEFAULT_WORKSPACE:?HERMES_WEBUI_DEFAULT_WORKSPACE must be set}"
 : "${HERMES_WEBUI_DIR:?HERMES_WEBUI_DIR must be set}"
-: "${HERMES_WEBUI_EXTENSION_DIR:?HERMES_WEBUI_EXTENSION_DIR must be set}"
 : "${HERMES_WEBUI_PORT:?HERMES_WEBUI_PORT must be set}"
 : "${HERMES_WEBUI_PYTHON:?HERMES_WEBUI_PYTHON must be set}"
 
@@ -40,12 +39,6 @@ if [ -s /opt/hermes/ENVIRONMENT.md ]; then
     HERMES_ENVIRONMENT_HINT="$(cat /opt/hermes/ENVIRONMENT.md)"
     export HERMES_ENVIRONMENT_HINT
 fi
-
-# Point the WebUI at our extension bundle. EXTENSIONS.md-compliant same-origin
-# URLs — the upstream static handler serves $HERMES_WEBUI_EXTENSION_DIR under
-# /extensions/.
-export HERMES_WEBUI_EXTENSION_SCRIPT_URLS="/extensions/humr-integrations.js,/extensions/humr-webapps.js,/extensions/humr-permissions.js"
-export HERMES_WEBUI_EXTENSION_STYLESHEET_URLS="/extensions/humr-integrations.css,/extensions/humr-webapps.css,/extensions/humr-permissions.css,/extensions/humr-model-picker.css"
 
 CADDY_PORT=8787
 SYSTEM_PROCESS_COMPOSE_PORT=9956

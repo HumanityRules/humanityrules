@@ -170,7 +170,7 @@
     }
   }
 
-  // Provider logos are served by the WebUI's static handler (/extensions/*.svg).
+  // Provider logos are served from the HumR extension bundle.
   // Connecting/disconnecting a provider whose env the broker manages (e.g.
   // GitHub) restarts system.webui, so any <img> requested during that reboot
   // window fails and the browser never retries it on its own — leaving blank
@@ -224,7 +224,7 @@
   // WebUI-served asset (our own stylesheet) until it loads. Cache-busted so the
   // browser can't answer from a stale entry; capped by `timeoutMs`.
   function waitForWebui(timeoutMs) {
-    const probeUrl = '/extensions/humr-integrations.css';
+    const probeUrl = '/extensions/humr/humr-integrations.css';
     const start = Date.now();
     return new Promise((resolve) => {
       const attempt = () => {

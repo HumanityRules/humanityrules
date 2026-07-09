@@ -85,7 +85,6 @@ ENV HERMES_HOME=/workspace/.hermes
 ENV HERMES_WEBUI_STATE_DIR=/workspace/.hermes/webui-mvp
 ENV HERMES_WEBUI_DEFAULT_WORKSPACE=/workspace
 ENV HERMES_WEBUI_SKIP_ONBOARDING=1
-ENV HERMES_WEBUI_EXTENSION_DIR=/opt/humr/webui-extension
 ENV HERMES_WEBUI_TRUST_FORWARDED_HOST=1
 ENV HERMES_PERSISTENT_ROOT=/hermes-persistent-root
 ENV HERMES_CHECKPOINT_ROOT=/hermes-checkpoint
@@ -339,9 +338,8 @@ RUN chmod +x /opt/humr/runtime/webapps/webapps \
 # humr_runtime/webapps/seed_example_webapps.py.
 COPY webapps/examples /opt/humr/webapps/examples
 
-# HUMR-owned WebUI extension bundle. Loaded by Hermes WebUI per docs/EXTENSIONS.md
-# when the HERMES_WEBUI_EXTENSION_* env vars are set (see webui.sh).
-# The sandbox reads this directory so the WebUI can serve the extension bundle.
+# Image-owned source for the HUMR WebUI extension bundle. sandbox_seed.py syncs
+# it into the WebUI-managed extension root on every boot.
 COPY webui-extension /opt/humr/webui-extension
 
 WORKDIR ${HERMES_WEBUI_DEFAULT_WORKSPACE}

@@ -52,6 +52,7 @@ services:
     volumes:
       - hermes-data:/hermes-persistent-root
       - ${HOME}/.aws:/hermes-persistent-root/root/.aws:ro
+      - ./humr-local-overrides.css:/opt/humr/webui-extension/humr-local-overrides.css:ro
     cap_add:
       - SYS_ADMIN
     healthcheck:

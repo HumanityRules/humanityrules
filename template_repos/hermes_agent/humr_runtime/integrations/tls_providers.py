@@ -187,7 +187,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
             "www.googleapis.com",
             "oauth2.googleapis.com",
         ),
-        logo_url="/extensions/google-workspace.svg",
+        logo_url="/extensions/humr/google-workspace.svg",
         credential_method=OAuthHeader(auth_format=AUTH_FORMAT_BEARER),
         env_bindings=(),
         restart_gateway_after_save=False,
@@ -206,7 +206,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
             "api.github.com",
             "codeload.github.com",
         ),
-        logo_url="/extensions/github.svg",
+        logo_url="/extensions/humr/github.svg",
         credential_method=OAuthHeader(auth_format=AUTH_FORMAT_BASIC_X_ACCESS_TOKEN),
         env_bindings=(
             EnvBinding(env_var="GITHUB_TOKEN", value=HUMR_PLACEHOLDER_VALUE),
@@ -219,7 +219,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         slug="telegram",
         label="Telegram",
         hosts=("api.telegram.org",),
-        logo_url="/extensions/telegram.svg",
+        logo_url="/extensions/humr/telegram.svg",
         credential_method=VaultUrlRewrite(
             placeholder="000000:HUMR_PLACEHOLDER",
         ),
@@ -239,7 +239,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         # CONNECT tunnel — it carries only the short-lived ticket from
         # apps.connections.open, not a long-lived token.
         hosts=("slack.com", "www.slack.com"),
-        logo_url="/extensions/slack.svg",
+        logo_url="/extensions/humr/slack.svg",
         credential_method=VaultHeaderInject(
             placeholders={
                 "app_token": "xapp-HUMR_PLACEHOLDER",
@@ -267,7 +267,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         # The ChatGPT backend Codex talks to. api.openai.com is a different
         # surface (rejected for ChatGPT-subscription auth) and is not listed.
         hosts=("chatgpt.com",),
-        logo_url="/extensions/openai.svg",
+        logo_url="/extensions/humr/openai.svg",
         credential_method=OAuthHeaderMultiInject(
             bearer_secret="access_token",
             header_secrets={"chatgpt_account_id": "ChatGPT-Account-ID"},
@@ -281,7 +281,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         slug="nous",
         label="Nous Portal",
         hosts=("inference-api.nousresearch.com",),
-        logo_url="/extensions/nous.svg",
+        logo_url="/extensions/humr/nous.svg",
         credential_method=OAuthHeader(auth_format=AUTH_FORMAT_BEARER, connect_mode="device"),
         env_bindings=(),
         restart_gateway_after_save=False,
@@ -292,7 +292,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         slug="openrouter",
         label="OpenRouter",
         hosts=("openrouter.ai",),
-        logo_url="/extensions/openrouter.svg",
+        logo_url="/extensions/humr/openrouter.svg",
         credential_method=VaultHeaderInject(
             placeholders={"api_key": HUMR_PLACEHOLDER_VALUE},
         ),
@@ -309,7 +309,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         # The OpenAI API surface. chatgpt.com (ChatGPT-subscription auth) is the
         # separate Codex provider and is not listed here.
         hosts=("api.openai.com",),
-        logo_url="/extensions/openai.svg",
+        logo_url="/extensions/humr/openai.svg",
         credential_method=VaultHeaderInject(
             placeholders={"api_key": HUMR_PLACEHOLDER_VALUE},
         ),
@@ -324,7 +324,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         slug="anthropic",
         label="Anthropic",
         hosts=("api.anthropic.com",),
-        logo_url="/extensions/anthropic.svg",
+        logo_url="/extensions/humr/anthropic.svg",
         # Anthropic authenticates with x-api-key, not Authorization: Bearer.
         credential_method=VaultApiKeyHeader(
             header_name="x-api-key",
@@ -344,7 +344,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         # provider talks to api.browser-use.com; browser-use.com (marketing/UI)
         # is not an API host and is not intercepted.
         hosts=("api.browser-use.com",),
-        logo_url="/extensions/browser-use.svg",
+        logo_url="/extensions/humr/browser-use.svg",
         # Browser Use authenticates with the X-Browser-Use-API-Key header, not
         # Authorization: Bearer — same shape as Anthropic's x-api-key.
         credential_method=VaultApiKeyHeader(
@@ -370,7 +370,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         # authorize) happens HUMR-side, not from the sandbox, so x.com is not
         # intercepted — only the bearer-carrying API host is.
         hosts=("api.x.com",),
-        logo_url="/extensions/x.svg",
+        logo_url="/extensions/humr/x.svg",
         credential_method=OAuthHeader(auth_format=AUTH_FORMAT_BEARER),
         env_bindings=(),
         restart_gateway_after_save=False,
@@ -385,7 +385,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         # the same shape as OpenRouter/OpenAI, so the proxy swaps a placeholder
         # bearer for the real key in flight.
         hosts=("api.tavily.com",),
-        logo_url="/extensions/tavily.svg",
+        logo_url="/extensions/humr/tavily.svg",
         credential_method=VaultHeaderInject(
             placeholders={"api_key": "tvly-HUMR_PLACEHOLDER"},
         ),
