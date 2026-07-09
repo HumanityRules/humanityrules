@@ -24,7 +24,8 @@ _BEDROCK_MODEL = "global.anthropic.claude-sonnet-4-6"
 # broker, which swaps the platform-shared token onto the wire. Confirm the model
 # id against the live Codex connection if it ever stops resolving.
 _CODEX_PROVIDER = "openai-codex"
-_CODEX_MODEL = "gpt-5.5"
+_CODEX_MAIN_MODEL = "gpt-5.5"
+_CODEX_AUX_MODEL = "gpt-5.4-mini"
 
 # Env vars the deploy form omits: the model is an org-level preset, not a
 # per-deploy choice, so friends self-deploying never see (or can change) them.
@@ -47,9 +48,9 @@ _PRESET_ENV: dict[str, dict[str, str]] = {
     },
     models.Organization.LlmPreset.CODEX.value: {
         "HUMR_LLM_PROVIDER": _CODEX_PROVIDER,
-        "HUMR_LLM_MODEL": _CODEX_MODEL,
+        "HUMR_LLM_MODEL": _CODEX_MAIN_MODEL,
         "HUMR_AUX_PROVIDER": _CODEX_PROVIDER,
-        "HUMR_AUX_MODEL": _CODEX_MODEL,
+        "HUMR_AUX_MODEL": _CODEX_AUX_MODEL,
     },
 }
 

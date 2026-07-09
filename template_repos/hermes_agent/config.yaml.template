@@ -84,12 +84,6 @@ auxiliary:
     base_url: '__AUX_BASE_URL__'
     api_key: ''
     timeout: 120
-  session_search:
-    provider: __AUX_PROVIDER__
-    model: __AUX_MODEL__
-    base_url: '__AUX_BASE_URL__'
-    api_key: ''
-    timeout: 30
   skills_hub:
     provider: __AUX_PROVIDER__
     model: __AUX_MODEL__
@@ -108,18 +102,75 @@ auxiliary:
     base_url: '__AUX_BASE_URL__'
     api_key: ''
     timeout: 30
-  flush_memories:
-    provider: __AUX_PROVIDER__
-    model: __AUX_MODEL__
-    base_url: '__AUX_BASE_URL__'
-    api_key: ''
-    timeout: 30
   title_generation:
     provider: __AUX_PROVIDER__
     model: __AUX_MODEL__
     base_url: '__AUX_BASE_URL__'
     api_key: ''
     timeout: 30
+  tts_audio_tags:
+    provider: __AUX_PROVIDER__
+    model: __AUX_MODEL__
+    base_url: '__AUX_BASE_URL__'
+    api_key: ''
+    timeout: 30
+  triage_specifier:
+    provider: __AUX_PROVIDER__
+    model: __AUX_MODEL__
+    base_url: '__AUX_BASE_URL__'
+    api_key: ''
+    timeout: 120
+  profile_describer:
+    provider: __AUX_PROVIDER__
+    model: __AUX_MODEL__
+    base_url: '__AUX_BASE_URL__'
+    api_key: ''
+    timeout: 60
+  monitor:
+    provider: __AUX_PROVIDER__
+    model: __AUX_MODEL__
+    base_url: '__AUX_BASE_URL__'
+    api_key: ''
+    timeout: 60
+  moa_reference:
+    provider: __AUX_PROVIDER__
+    model: __AUX_MODEL__
+    base_url: '__AUX_BASE_URL__'
+    api_key: ''
+    timeout: 900
+  goal_judge:
+    provider: __AUX_PROVIDER__
+    model: __AUX_MODEL__
+    base_url: '__AUX_BASE_URL__'
+    api_key: ''
+    timeout: 30
+    max_tokens: 4096
+
+  # Higher-judgment auxiliary tasks stay on the main model.
+  kanban_decomposer:
+    provider: __CONFIG_PROVIDER__
+    model: __MODEL__
+    base_url: '__BASE_URL__'
+    api_key: ''
+    timeout: 180
+  curator:
+    provider: __CONFIG_PROVIDER__
+    model: __MODEL__
+    base_url: '__BASE_URL__'
+    api_key: ''
+    timeout: 600
+  background_review:
+    provider: __CONFIG_PROVIDER__
+    model: __MODEL__
+    base_url: '__BASE_URL__'
+    api_key: ''
+    timeout: 120
+  moa_aggregator:
+    provider: __CONFIG_PROVIDER__
+    model: __MODEL__
+    base_url: '__BASE_URL__'
+    api_key: ''
+    timeout: 900
 
 display:
   compact: false

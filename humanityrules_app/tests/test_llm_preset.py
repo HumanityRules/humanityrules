@@ -5,6 +5,10 @@ template_deploy_service.deploy_from_template's sequence), the deploy-form filter
 that hides the model vars, and the field default flowing through onboarding.
 """
 
+import ast
+from pathlib import Path
+
+import yaml
 from django.test import SimpleTestCase, TestCase
 
 from humanityrules_app import models
@@ -13,7 +17,38 @@ from humanityrules_app.services import llm_preset_service
 from humanityrules_app.services.app_templates import template_deploy_service
 from humanityrules_app.views import template_deploy
 
-CODEX_MODEL = "gpt-5.5"
+CODEX_MAIN_MODEL = "gpt-5.5"
+CODEX_AUX_MODEL = "gpt-5.4-mini"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+HERMES_CONFIG_TEMPLATE_PATH = PROJECT_ROOT / "template_repos/hermes_agent/config.yaml.template"
+HERMES_CONFIG_SOURCE_PATH = PROJECT_ROOT / "template_repos/hermes_agent/vendor/hermes-agent/hermes_cli/config.py"
+MAIN_MODEL_AUXILIARY_SLOTS = (
+    "kanban_decomposer",
+    "curator",
+    "background_review",
+    "moa_aggregator",
+)
+
+
+def _hermes_default_auxiliary_slots() -> set[str]:
+    """Read the vendored DEFAULT_CONFIG auxiliary keys without importing Hermes."""
+    config_module = ast.parse(HERMES_CONFIG_SOURCE_PATH.read_text(encoding="utf-8"))
+    for statement in config_module.body:
+        if not isinstance(statement, ast.Assign):
+            continue
+        if not any(isinstance(target, ast.Name) and target.id == "DEFAULT_CONFIG" for target in statement.targets):
+            continue
+        if not isinstance(statement.value, ast.Dict):
+            break
+        for key, value in zip(statement.value.keys, statement.value.values, strict=True):
+            if isinstance(key, ast.Constant) and key.value == "auxiliary" and isinstance(value, ast.Dict):
+                return {
+                    slot.value
+                    for slot in value.keys
+                    if isinstance(slot, ast.Constant) and isinstance(slot.value, str)
+                }
+        break
+    raise AssertionError("Could not find DEFAULT_CONFIG['auxiliary'] in vendored Hermes")
 
 
 class LlmPresetResolutionTests(SimpleTestCase):
@@ -30,9 +65,9 @@ class LlmPresetResolutionTests(SimpleTestCase):
         org = models.Organization(llm_preset="codex")
         self.assertEqual(llm_preset_service.llm_overrides_for(organization=org), {
             "HUMR_LLM_PROVIDER": "openai-codex",
-            "HUMR_LLM_MODEL": CODEX_MODEL,
+            "HUMR_LLM_MODEL": CODEX_MAIN_MODEL,
             "HUMR_AUX_PROVIDER": "openai-codex",
-            "HUMR_AUX_MODEL": CODEX_MODEL,
+            "HUMR_AUX_MODEL": CODEX_AUX_MODEL,
         })
 
     def test_bedrock_overrides_set_both_main_and_aux(self) -> None:
@@ -65,7 +100,8 @@ class LlmPresetDeployApplicationTests(SimpleTestCase):
         env = self._hermes_env(preset="codex", extra_overrides={})
         self.assertEqual(env["HUMR_LLM_PROVIDER"], "openai-codex")
         self.assertEqual(env["HUMR_AUX_PROVIDER"], "openai-codex")
-        self.assertEqual(env["HUMR_LLM_MODEL"], CODEX_MODEL)
+        self.assertEqual(env["HUMR_LLM_MODEL"], CODEX_MAIN_MODEL)
+        self.assertEqual(env["HUMR_AUX_MODEL"], CODEX_AUX_MODEL)
 
     def test_blank_preset_defaults_to_codex(self) -> None:
         env = self._hermes_env(preset="", extra_overrides={})
@@ -81,6 +117,31 @@ class LlmPresetDeployApplicationTests(SimpleTestCase):
         self.assertEqual(env["HUMR_LLM_PROVIDER"], "bedrock")
         # Aux is untouched by the override, so it still reflects the preset.
         self.assertEqual(env["HUMR_AUX_PROVIDER"], "openai-codex")
+
+
+class HermesAuxiliaryConfigTemplateTests(SimpleTestCase):
+
+    def test_template_pins_every_auxiliary_slot(self) -> None:
+        template = HERMES_CONFIG_TEMPLATE_PATH.read_text(encoding="utf-8")
+        rendered = (
+            template.replace("__CONFIG_PROVIDER__", "openai-codex")
+            .replace("__MODEL__", CODEX_MAIN_MODEL)
+            .replace("__BASE_URL__", "")
+            .replace("__AUX_PROVIDER__", "openai-codex")
+            .replace("__AUX_MODEL__", CODEX_AUX_MODEL)
+            .replace("__AUX_BASE_URL__", "")
+            .replace("__PROVIDERS_BLOCK__", "providers: {}")
+        )
+        config = yaml.safe_load(rendered)
+        auxiliary = config["auxiliary"]
+        expected_slots = _hermes_default_auxiliary_slots() | {"goal_judge"}
+
+        self.assertEqual(set(auxiliary), expected_slots)
+        self.assertEqual(list(auxiliary)[-len(MAIN_MODEL_AUXILIARY_SLOTS):], list(MAIN_MODEL_AUXILIARY_SLOTS))
+        for slot, slot_config in auxiliary.items():
+            expected_model = CODEX_MAIN_MODEL if slot in MAIN_MODEL_AUXILIARY_SLOTS else CODEX_AUX_MODEL
+            self.assertEqual(slot_config["provider"], "openai-codex")
+            self.assertEqual(slot_config["model"], expected_model)
 
 
 class LlmPresetDeployFormTests(SimpleTestCase):
