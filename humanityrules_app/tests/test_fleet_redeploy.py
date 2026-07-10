@@ -1,8 +1,9 @@
-"""Tests for the staff-only fleet-wide redeploy action."""
+"""Tests for staff-only fleet deployment actions."""
 
 from django.test import TestCase
 
 from humanityrules_app import models
+from humanityrules_app.services import fleet_recovery
 from humanityrules_app.services.jobs import job_worker
 
 
@@ -106,6 +107,91 @@ class TestFleetRedeployAll(TestCase):
         self.assertContains(response, "Redeploy all")
         self.assertContains(response, "/platform/fleet/redeploy-all/confirm/")
         self.assertContains(response, f"/platform/fleet/deployment/{self.succeeded_source.id}/redeploy/")
+
+    def test_staff_fleet_page_shows_fail_stuck_deployments_button(self) -> None:
+        response = self.client.get("/platform/fleet/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Fail stuck deployments")
+        self.assertContains(response, "/platform/fleet/fail-transient/confirm/")
+
+    def test_fail_transient_confirmation_shows_current_count(self) -> None:
+        self._create_deployment(
+            app=self.app,
+            environment=self.environment,
+            status=models.Deployment.Status.PENDING,
+            suffix="pending",
+        )
+
+        response = self.client.get("/platform/fleet/fail-transient/confirm/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "mark 1 deployment in a transient state as failed", html=False)
+        self.assertContains(response, "/platform/fleet/fail-transient/")
+
+    def test_fail_transient_marks_every_transient_status_failed(self) -> None:
+        transient_deployments = [
+            self._create_deployment(
+                app=self.app,
+                environment=self.environment,
+                status=status,
+                suffix=f"transient-{index}",
+            )
+            for index, status in enumerate(models.Deployment.TRANSIENT_STATUSES)
+        ]
+        terminal_deployments = [
+            self.succeeded_source,
+            self._create_deployment(
+                app=self.app,
+                environment=self.environment,
+                status=models.Deployment.Status.FAILED,
+                suffix="failed",
+            ),
+            self._create_deployment(
+                app=self.app,
+                environment=self.environment,
+                status=models.Deployment.Status.ROLLED_BACK,
+                suffix="rolled-back",
+            ),
+            self._create_deployment(
+                app=self.app,
+                environment=self.environment,
+                status=models.Deployment.Status.TORN_DOWN,
+                suffix="torn-down",
+            ),
+        ]
+        original_terminal_statuses = {deployment.id: deployment.status for deployment in terminal_deployments}
+
+        response = self.client.post("/platform/fleet/fail-transient/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, f"Marked {len(transient_deployments)} transient deployments as failed")
+        for deployment in transient_deployments:
+            deployment.refresh_from_db()
+            self.assertEqual(deployment.status, models.Deployment.Status.FAILED)
+            self.assertEqual(deployment.status_message, fleet_recovery.RECOVERY_STATUS_MESSAGE)
+            self.assertIsNotNone(deployment.completed_at)
+        for deployment in terminal_deployments:
+            deployment.refresh_from_db()
+            self.assertEqual(deployment.status, original_terminal_statuses[deployment.id])
+
+    def test_fail_transient_is_safe_to_repeat(self) -> None:
+        pending = self._create_deployment(
+            app=self.app,
+            environment=self.environment,
+            status=models.Deployment.Status.PENDING,
+            suffix="pending-repeat",
+        )
+
+        first_response = self.client.post("/platform/fleet/fail-transient/")
+        pending.refresh_from_db()
+        first_completed_at = pending.completed_at
+        second_response = self.client.post("/platform/fleet/fail-transient/")
+        pending.refresh_from_db()
+
+        self.assertContains(first_response, "Marked 1 transient deployment as failed")
+        self.assertContains(second_response, "Marked 0 transient deployments as failed")
+        self.assertEqual(pending.completed_at, first_completed_at)
 
     def test_per_ha_redeploy_queues_only_the_selected_environment(self) -> None:
         failed_source = self._add_failed_environment()
@@ -251,17 +337,23 @@ class TestFleetRedeployAll(TestCase):
         confirm_response = self.client.get("/platform/fleet/redeploy-all/confirm/")
         post_response = self.client.post("/platform/fleet/redeploy-all/")
         per_ha_response = self.client.post(f"/platform/fleet/deployment/{self.succeeded_source.id}/redeploy/")
+        recovery_confirm_response = self.client.get("/platform/fleet/fail-transient/confirm/")
+        recovery_response = self.client.post("/platform/fleet/fail-transient/")
 
         self.assertEqual(confirm_response.status_code, 404)
         self.assertEqual(post_response.status_code, 404)
         self.assertEqual(per_ha_response.status_code, 404)
+        self.assertEqual(recovery_confirm_response.status_code, 404)
+        self.assertEqual(recovery_response.status_code, 404)
 
     def test_redeploy_all_requires_post(self) -> None:
         all_response = self.client.get("/platform/fleet/redeploy-all/")
         per_ha_response = self.client.get(f"/platform/fleet/deployment/{self.succeeded_source.id}/redeploy/")
+        recovery_response = self.client.get("/platform/fleet/fail-transient/")
 
         self.assertEqual(all_response.status_code, 405)
         self.assertEqual(per_ha_response.status_code, 405)
+        self.assertEqual(recovery_response.status_code, 405)
 
     def test_worker_serializes_pending_deployments_for_the_same_app(self) -> None:
         self._add_failed_environment()
