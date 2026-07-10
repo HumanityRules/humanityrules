@@ -105,6 +105,56 @@ class TestFleetRedeployAll(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Redeploy all")
         self.assertContains(response, "/platform/fleet/redeploy-all/confirm/")
+        self.assertContains(response, f"/platform/fleet/deployment/{self.succeeded_source.id}/redeploy/")
+
+    def test_per_ha_redeploy_queues_only_the_selected_environment(self) -> None:
+        failed_source = self._add_failed_environment()
+
+        response = self.client.post(f"/platform/fleet/deployment/{self.succeeded_source.id}/redeploy/")
+
+        self.assertEqual(response.status_code, 200)
+        pending = models.Deployment.objects.get(status=models.Deployment.Status.PENDING)
+        self.assertEqual(pending.environment, self.environment)
+        self.assertEqual(pending.created_by, self.staff)
+        self.assertEqual(pending.status_message, "Fleet redeploy triggered via web UI")
+        self.assertEqual(models.Deployment.objects.filter(environment=failed_source.environment).count(), 1)
+        self.assertContains(response, "Queued 1 redeployment")
+
+    def test_per_ha_redeploy_allows_a_failed_latest_deployment(self) -> None:
+        failed_source = self._add_failed_environment()
+
+        response = self.client.post(f"/platform/fleet/deployment/{failed_source.id}/redeploy/")
+
+        self.assertEqual(response.status_code, 200)
+        pending = models.Deployment.objects.get(status=models.Deployment.Status.PENDING)
+        self.assertEqual(pending.environment, failed_source.environment)
+
+    def test_per_ha_redeploy_rejects_a_superseded_deployment(self) -> None:
+        newer_source = models.Deployment.objects.create(
+            blueprint=self.succeeded_source.blueprint,
+            app=self.app,
+            environment=self.environment,
+            subdomain=self.succeeded_source.subdomain,
+            git_ref="main",
+            image_tag="fleet-agent-main-newer",
+            status=models.Deployment.Status.SUCCEEDED,
+        )
+
+        page_response = self.client.get("/platform/fleet/")
+        post_response = self.client.post(f"/platform/fleet/deployment/{self.succeeded_source.id}/redeploy/")
+
+        self.assertContains(page_response, f"/platform/fleet/deployment/{newer_source.id}/redeploy/")
+        self.assertNotContains(page_response, f"/platform/fleet/deployment/{self.succeeded_source.id}/redeploy/")
+        self.assertEqual(models.Deployment.objects.filter(status=models.Deployment.Status.PENDING).count(), 0)
+        self.assertContains(post_response, "Newer deployment exists")
+
+    def test_per_ha_redeploy_button_is_hidden_when_ineligible(self) -> None:
+        self.succeeded_source.status = models.Deployment.Status.TORN_DOWN
+        self.succeeded_source.save(update_fields=["status", "updated_at"])
+
+        response = self.client.get("/platform/fleet/")
+
+        self.assertNotContains(response, f"/platform/fleet/deployment/{self.succeeded_source.id}/redeploy/")
 
     def test_confirmation_shows_failed_checkbox_and_current_counts(self) -> None:
         self._add_failed_environment()
@@ -200,14 +250,18 @@ class TestFleetRedeployAll(TestCase):
 
         confirm_response = self.client.get("/platform/fleet/redeploy-all/confirm/")
         post_response = self.client.post("/platform/fleet/redeploy-all/")
+        per_ha_response = self.client.post(f"/platform/fleet/deployment/{self.succeeded_source.id}/redeploy/")
 
         self.assertEqual(confirm_response.status_code, 404)
         self.assertEqual(post_response.status_code, 404)
+        self.assertEqual(per_ha_response.status_code, 404)
 
     def test_redeploy_all_requires_post(self) -> None:
-        response = self.client.get("/platform/fleet/redeploy-all/")
+        all_response = self.client.get("/platform/fleet/redeploy-all/")
+        per_ha_response = self.client.get(f"/platform/fleet/deployment/{self.succeeded_source.id}/redeploy/")
 
-        self.assertEqual(response.status_code, 405)
+        self.assertEqual(all_response.status_code, 405)
+        self.assertEqual(per_ha_response.status_code, 405)
 
     def test_worker_serializes_pending_deployments_for_the_same_app(self) -> None:
         self._add_failed_environment()

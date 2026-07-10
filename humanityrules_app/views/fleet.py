@@ -5,6 +5,7 @@ staff gate replaces the usual per-org query scoping.
 """
 
 import functools
+from uuid import UUID
 
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, render
@@ -52,6 +53,22 @@ def fleet_redeploy_all(request: HttpRequest) -> HttpResponse:
     redeploy_result = fleet_redeploy.queue_redeploy_all(
         created_by=request.user,
         include_failed=include_failed,
+    )
+    context = {
+        "env_groups": fleet_status.build_fleet_snapshot(),
+        "redeploy_result": redeploy_result,
+    }
+    return render(request, "humanityrules_app/fleet/fleet.html#fleet_list", context=context)
+
+
+@_staff_or_404
+@require_POST
+def fleet_deployment_redeploy(request: HttpRequest, deployment_id: UUID) -> HttpResponse:
+    """Queue a redeploy for one eligible HA row on the fleet page."""
+    deployment = get_object_or_404(models.Deployment.objects.only("id"), id=deployment_id)
+    redeploy_result = fleet_redeploy.queue_redeploy(
+        source_id=deployment.id,
+        created_by=request.user,
     )
     context = {
         "env_groups": fleet_status.build_fleet_snapshot(),
