@@ -183,6 +183,8 @@ urlpatterns = [
     path("api/github/webhook", views.github_webhook, name="github_webhook"),
     #  - pdp_evaluate: called by policy proxies to authorize each request against ABAC
     path("api/pdp/evaluate", views.pdp_evaluate, name="pdp_evaluate"),
+    #  - policy_proxy_activity: debounced last-authorized-traffic signal from each policy proxy
+    path("api/runtime/policy-proxy-activity", views.policy_proxy_activity, name="policy_proxy_activity"),
     
     #  - integrations_tokens_batch: the env-resident broker's single refresh endpoint, both for Refresh-all/bootstrap and for slug-targeted refresh after connect/disconnect
     path("api/integrations/tokens", views.integrations_tokens_batch, name="integrations_tokens_batch"),

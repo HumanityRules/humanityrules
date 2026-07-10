@@ -4,8 +4,8 @@ The sidecar verifies session JWTs via the central JWKS, calls the PDP, and
 proxies authorized traffic to a local upstream container.
 
 Required env: HUMR_APP_ID, HUMR_ENV_SLUG, HUMR_ENV_DOMAIN, HUMR_AUTH_BASE_URL,
-HUMR_JWKS_URL, HUMR_PDP_URL, HUMR_ENV_BEARER, HUMR_UPSTREAM_HOST, HUMR_UPSTREAM_PORT,
-HUMR_LISTEN_PORT.
+HUMR_CONTROL_PLANE_URL, HUMR_JWKS_URL, HUMR_PDP_URL, HUMR_ENV_BEARER,
+HUMR_UPSTREAM_HOST, HUMR_UPSTREAM_PORT, HUMR_LISTEN_PORT.
 """
 
 import os
@@ -18,6 +18,7 @@ class PolicyProxyConfig:
     env_slug: str
     env_domain: str
     auth_base_url: str
+    control_plane_url: str
     jwks_url: str
     pdp_url: str
     env_bearer_token: str
@@ -26,6 +27,8 @@ class PolicyProxyConfig:
     listen_port: int
     # Cache ttl for PDP allow/deny decisions, seconds. 0 disables caching.
     pdp_cache_ttl_seconds: int
+    # Authorized traffic reports are coalesced into one request per interval.
+    activity_report_interval_seconds: int
 
 
 def _required(name: str) -> str:
@@ -49,6 +52,7 @@ def load_proxy_config_from_env() -> PolicyProxyConfig:
         env_slug=_required("HUMR_ENV_SLUG"),
         env_domain=_required("HUMR_ENV_DOMAIN"),
         auth_base_url=_required("HUMR_AUTH_BASE_URL").rstrip("/"),
+        control_plane_url=_required("HUMR_CONTROL_PLANE_URL").rstrip("/"),
         jwks_url=_required("HUMR_JWKS_URL"),
         pdp_url=_required("HUMR_PDP_URL"),
         env_bearer_token=_required("HUMR_ENV_BEARER"),
@@ -56,4 +60,8 @@ def load_proxy_config_from_env() -> PolicyProxyConfig:
         upstream_port=int(_required("HUMR_UPSTREAM_PORT")),
         listen_port=int(_required("HUMR_LISTEN_PORT")),
         pdp_cache_ttl_seconds=_int_env(name="HUMR_PDP_CACHE_TTL_SECONDS", default=600),
+        activity_report_interval_seconds=_int_env(
+            name="HUMR_POLICY_PROXY_ACTIVITY_INTERVAL_SECONDS",
+            default=300,
+        ),
     )

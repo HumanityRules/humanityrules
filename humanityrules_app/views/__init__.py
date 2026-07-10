@@ -100,6 +100,7 @@ from .onboarding import onboarding, onboarding_agent
 from .invites import accept_invite, create_invite, revoke_invite
 from .health import health_check
 from .pdp import pdp_evaluate
+from .policy_proxy_activity import policy_proxy_activity
 from .chat import (
     chat_app_deploy,
     chat_list,
@@ -261,6 +262,7 @@ __all__ = [
     "aws_install_account_callback",
     "health_check",
     "pdp_evaluate",
+    "policy_proxy_activity",
     "integrations_org_github_connect",
     "integrations_org_github_callback",
     "integrations_org_github_setup",

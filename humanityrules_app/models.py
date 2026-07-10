@@ -1328,6 +1328,49 @@ class Deployment(models.Model):
         return self.status in self.TRANSIENT_STATUSES
 
 
+class AppEnvironmentActivity(models.Model):
+    """Latest runtime activity observed for one app in one environment."""
+
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid7,
+        editable=False,
+    )
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="app_environment_activities",
+    )
+    app = models.ForeignKey(
+        App,
+        on_delete=models.CASCADE,
+        related_name="environment_activities",
+    )
+    environment = models.ForeignKey(
+        Environment,
+        on_delete=models.CASCADE,
+        related_name="app_activities",
+    )
+    last_policy_proxy_activity_at = models.DateTimeField()
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "App Environment Activity"
+        verbose_name_plural = "App Environment Activities"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["app", "environment"],
+                name="unique_app_environment_activity",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["organization", "last_policy_proxy_activity_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.app.slug}/{self.environment.slug}: {self.last_policy_proxy_activity_at}"
+
+
 class DeploymentLog(models.Model):
     """Log entries from a deployment."""
 
