@@ -1,0 +1,202 @@
+"""Coordinate environment lifecycle transitions with app-scoped work."""
+
+from dataclasses import dataclass
+from uuid import UUID
+
+from django.db import transaction
+from django.utils import timezone
+
+from humanityrules_app import models
+
+
+TEARDOWNABLE_ENVIRONMENT_STATUSES = (
+    models.Environment.Status.READY,
+    models.Environment.Status.ERROR,
+)
+
+FORCE_TEARDOWNABLE_ENVIRONMENT_STATUSES = (
+    models.Environment.Status.PENDING,
+    models.Environment.Status.PROVISIONING,
+    *TEARDOWNABLE_ENVIRONMENT_STATUSES,
+)
+
+RUNNING_DEPLOYMENT_STATUSES = (
+    models.Deployment.Status.BUILDING,
+    models.Deployment.Status.PUSHING,
+    models.Deployment.Status.DEPLOYING,
+    models.Deployment.Status.STARTING,
+    models.Deployment.Status.TEARING_DOWN,
+)
+
+RUNNING_PERMISSION_STATUSES = (
+    models.AppPermissionRequest.Status.APPLYING,
+)
+
+ACTIVE_APP_REMOVAL_STATUSES = (
+    models.AppRemovalJob.Status.PENDING,
+    models.AppRemovalJob.Status.RUNNING,
+)
+
+REASON_ACTIVE_APP_OPERATIONS = "active_app_operations"
+REASON_ACTIVE_APP_REMOVAL = "active_app_removal"
+REASON_ALREADY_PENDING = "already_pending"
+REASON_ALREADY_RUNNING = "already_running"
+REASON_NOT_TEARDOWNABLE = "not_teardownable"
+
+FORCED_FAILURE_MESSAGE = "Force-failed by environment teardown"
+
+
+@dataclass(frozen=True)
+class EnvironmentTeardownQueueResult:
+    """Result of attempting the environment lifecycle transition."""
+
+    queued: bool
+    previous_status: str
+    reason: str
+
+
+def transition_environment_status(environment_id: UUID, expected_statuses: tuple[str, ...], new_status: str, status_message: str) -> bool:
+    """Change status only while the environment remains in an expected source state."""
+    updated = models.Environment.objects.filter(
+        id=environment_id,
+        status__in=expected_statuses,
+    ).update(
+        status=new_status,
+        status_message=status_message,
+        updated_at=timezone.now(),
+    )
+    return updated == 1
+
+
+async def atransition_environment_status(
+    environment_id: UUID,
+    expected_statuses: tuple[str, ...],
+    new_status: str,
+    status_message: str,
+) -> bool:
+    """Async form of the conditional environment status transition."""
+    updated = await models.Environment.objects.filter(
+        id=environment_id,
+        status__in=expected_statuses,
+    ).aupdate(
+        status=new_status,
+        status_message=status_message,
+        updated_at=timezone.now(),
+    )
+    return updated == 1
+
+
+def lock_app_environments_for_removal(app_id: UUID) -> list[models.Environment]:
+    """Lock every environment whose blueprint metadata is needed for app cleanup."""
+    environment_ids = models.DeploymentBlueprint.objects.filter(app_id=app_id).values("environment_id")
+    return list(
+        models.Environment.objects
+        .select_for_update()
+        .filter(id__in=environment_ids)
+        .order_by("id")
+    )
+
+
+def has_tearing_down_environment(environments: list[models.Environment]) -> bool:
+    """Return whether app cleanup is too late to start in any related environment."""
+    return any(environment.status == models.Environment.Status.TEARING_DOWN for environment in environments)
+
+
+def _has_running_deployment_or_permission(environment_id: UUID) -> bool:
+    """Return whether ordinary teardown must wait for running environment work."""
+    if models.Deployment.objects.filter(
+        environment_id=environment_id,
+        status__in=RUNNING_DEPLOYMENT_STATUSES,
+    ).exists():
+        return True
+    return models.AppPermissionRequest.objects.filter(
+        environment_id=environment_id,
+        status__in=RUNNING_PERMISSION_STATUSES,
+    ).exists()
+
+
+def _has_running_app_removal(environment_id: UUID) -> bool:
+    """Return whether app cleanup is currently running in the environment."""
+    running_removal_app_ids = models.AppRemovalJob.objects.filter(
+        status=models.AppRemovalJob.Status.RUNNING,
+    ).values("app_id_snapshot")
+    return models.DeploymentBlueprint.objects.filter(
+        environment_id=environment_id,
+        app_id__in=running_removal_app_ids,
+    ).exists()
+
+
+def _fail_running_deployments_and_permissions(environment_id: UUID) -> None:
+    """Conclude force-abandoned work before queuing environment teardown."""
+    now = timezone.now()
+    models.Deployment.objects.filter(
+        environment_id=environment_id,
+        status__in=RUNNING_DEPLOYMENT_STATUSES,
+    ).update(
+        status=models.Deployment.Status.FAILED,
+        status_message=FORCED_FAILURE_MESSAGE,
+        completed_at=now,
+        updated_at=now,
+    )
+    models.AppPermissionRequest.objects.filter(
+        environment_id=environment_id,
+        status__in=RUNNING_PERMISSION_STATUSES,
+    ).update(
+        status=models.AppPermissionRequest.Status.FAILED,
+        status_message=FORCED_FAILURE_MESSAGE,
+        updated_at=now,
+    )
+
+
+def queue_environment_teardown(environment_id: UUID, status_message: str, force: bool) -> EnvironmentTeardownQueueResult:
+    """Atomically queue teardown without racing environment-scoped worker claims."""
+    with transaction.atomic():
+        environment = models.Environment.objects.select_for_update().get(id=environment_id)
+        if environment.status == models.Environment.Status.TEARDOWN_PENDING:
+            return EnvironmentTeardownQueueResult(
+                queued=False,
+                previous_status=environment.status,
+                reason=REASON_ALREADY_PENDING,
+            )
+        if environment.status == models.Environment.Status.TEARING_DOWN:
+            return EnvironmentTeardownQueueResult(
+                queued=False,
+                previous_status=environment.status,
+                reason=REASON_ALREADY_RUNNING,
+            )
+
+        allowed_statuses = FORCE_TEARDOWNABLE_ENVIRONMENT_STATUSES if force else TEARDOWNABLE_ENVIRONMENT_STATUSES
+        if environment.status not in allowed_statuses:
+            return EnvironmentTeardownQueueResult(
+                queued=False,
+                previous_status=environment.status,
+                reason=REASON_NOT_TEARDOWNABLE,
+            )
+
+        if _has_running_app_removal(environment_id=environment.id):
+            return EnvironmentTeardownQueueResult(
+                queued=False,
+                previous_status=environment.status,
+                reason=REASON_ACTIVE_APP_REMOVAL,
+            )
+
+        has_running_work = _has_running_deployment_or_permission(environment_id=environment.id)
+        if has_running_work and not force:
+            return EnvironmentTeardownQueueResult(
+                queued=False,
+                previous_status=environment.status,
+                reason=REASON_ACTIVE_APP_OPERATIONS,
+            )
+        if force:
+            _fail_running_deployments_and_permissions(environment_id=environment.id)
+
+        previous_status = environment.status
+        environment.status = models.Environment.Status.TEARDOWN_PENDING
+        environment.status_message = status_message
+        environment.save(update_fields=["status", "status_message", "updated_at"])
+
+    return EnvironmentTeardownQueueResult(
+        queued=True,
+        previous_status=previous_status,
+        reason="",
+    )

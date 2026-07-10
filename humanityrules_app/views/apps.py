@@ -16,6 +16,7 @@ from django.views.decorators.http import require_GET, require_POST
 from humanityrules_app.models import App, AppRemovalJob, Deployment, DeploymentBlueprint, DeploymentLog, ResourceTag
 from humanityrules_app.services import abac_service
 from humanityrules_app.services.cost import panel as cost_panel
+from humanityrules_app.services.jobs import environment_operation_gate
 
 from . import abac_view_checks
 from . import base
@@ -640,6 +641,10 @@ def app_remove(request: HttpRequest, app_slug: str) -> HttpResponse:
     has_persistent_data = _app_has_persistent_data(app)
     delete_all_data = request.POST.get("delete_all_data") == "on"
     with transaction.atomic():
+        environments = environment_operation_gate.lock_app_environments_for_removal(app_id=app.id)
+        if environment_operation_gate.has_tearing_down_environment(environments=environments):
+            return HttpResponse(status=422)
+
         AppRemovalJob.objects.create(
             organization=request.user.current_organization,
             app_id_snapshot=app.id,

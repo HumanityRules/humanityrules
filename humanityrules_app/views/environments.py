@@ -13,6 +13,7 @@ from django.views.decorators.http import require_GET, require_POST
 import humanityrules_app.models as models
 from humanityrules_app.services import abac_service
 from humanityrules_app.services import infra_customer
+from humanityrules_app.services.jobs import environment_operation_gate
 
 from . import abac_view_checks
 from . import base
@@ -398,12 +399,16 @@ def environment_retry(request: HttpRequest, environment_id: UUID) -> HttpRespons
     if denied:
         return denied
 
-    if environment.status != models.Environment.Status.ERROR:
+    transitioned = environment_operation_gate.transition_environment_status(
+        environment_id=environment.id,
+        expected_statuses=(models.Environment.Status.ERROR,),
+        new_status=models.Environment.Status.PENDING,
+        status_message="Retry triggered via web UI",
+    )
+    if not transitioned:
         return HttpResponse(status=422)
 
-    environment.status = models.Environment.Status.PENDING
-    environment.status_message = "Retry triggered via web UI"
-    environment.save(update_fields=["status", "status_message", "updated_at"])
+    environment.refresh_from_db(fields=["status", "status_message", "updated_at"])
 
     context = build_environment_detail_context(request=request, environment=environment)
     return render(request, "humanityrules_app/environments/environment_detail.html", context=context)
@@ -442,16 +447,15 @@ def environment_teardown(request: HttpRequest, environment_id: UUID) -> HttpResp
     if _is_environment_teardown_blocked(environment=environment):
         return HttpResponse(status=403)
 
-    teardownable_statuses = {
-        models.Environment.Status.READY,
-        models.Environment.Status.ERROR,
-    }
-    if environment.status not in teardownable_statuses:
+    queue_result = environment_operation_gate.queue_environment_teardown(
+        environment_id=environment.id,
+        status_message="Teardown triggered via web UI",
+        force=False,
+    )
+    if not queue_result.queued:
         return HttpResponse(status=422)
 
-    environment.status = models.Environment.Status.TEARDOWN_PENDING
-    environment.status_message = "Teardown triggered via web UI"
-    environment.save(update_fields=["status", "status_message", "updated_at"])
+    environment.refresh_from_db(fields=["status", "status_message", "updated_at"])
 
     context = build_environment_detail_context(request=request, environment=environment)
     return render(request, "humanityrules_app/environments/environment_detail.html", context=context)
