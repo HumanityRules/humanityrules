@@ -633,31 +633,35 @@ def app_remove(request: HttpRequest, app_slug: str) -> HttpResponse:
     if denied:
         return denied
 
-    if app.status == App.Status.PENDING_REMOVAL:
-        return HttpResponse(status=422)
-    if app_is_live(app):
-        return HttpResponse(status=422)
-
-    has_persistent_data = _app_has_persistent_data(app)
     delete_all_data = request.POST.get("delete_all_data") == "on"
     with transaction.atomic():
-        environments = environment_operation_gate.lock_app_environments_for_removal(app_id=app.id)
+        locked_app = get_object_or_404(
+            App.objects.select_for_update().select_related("workspace"),
+            id=app.id,
+            organization=request.user.current_organization,
+        )
+        if locked_app.status == App.Status.PENDING_REMOVAL:
+            return HttpResponse(status=422)
+        if app_is_live(locked_app):
+            return HttpResponse(status=422)
+
+        environments = environment_operation_gate.lock_app_environments_for_removal(app_id=locked_app.id)
         if environment_operation_gate.has_tearing_down_environment(environments=environments):
             return HttpResponse(status=422)
 
         AppRemovalJob.objects.create(
             organization=request.user.current_organization,
-            app_id_snapshot=app.id,
-            app_slug_snapshot=app.slug,
-            app_name_snapshot=app.name,
-            workspace_slug_snapshot=app.workspace.slug,
+            app_id_snapshot=locked_app.id,
+            app_slug_snapshot=locked_app.slug,
+            app_name_snapshot=locked_app.name,
+            workspace_slug_snapshot=locked_app.workspace.slug,
             delete_secrets=delete_all_data,
-            delete_persistent_data=has_persistent_data and delete_all_data,
+            delete_persistent_data=_app_has_persistent_data(locked_app) and delete_all_data,
             delete_policies=delete_all_data,
             created_by=request.user,
         )
-        app.status = App.Status.PENDING_REMOVAL
-        app.save(update_fields=["status", "updated_at"])
+        locked_app.status = App.Status.PENDING_REMOVAL
+        locked_app.save(update_fields=["status", "updated_at"])
 
     response = HttpResponse(status=200)
     response["HX-Redirect"] = reverse(

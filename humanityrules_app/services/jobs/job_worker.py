@@ -244,39 +244,63 @@ def _run_environment_teardown_thread(environment_id: str) -> None:
 
 
 def _claim_pending_app_removal(label: str) -> AppRemovalJob | None:
-    """Claim app removal after locking every environment needed for cleanup.
+    """Claim one app removal after locking its App and cleanup environments.
 
     AppRemovalJob has no FK to App (only `app_id_snapshot`), so we filter via a
     subquery on App.id. The App row still exists at claim time — `app.delete()`
     runs at the very end of `run_removal`, long after the worker has claimed.
     """
-    with transaction.atomic():
-        apps_in_tearing_down_environments = DeploymentBlueprint.objects.filter(
-            environment__status=Environment.Status.TEARING_DOWN,
-        ).values("app_id")
-        job = (
-            AppRemovalJob.objects
-            .select_for_update(skip_locked=True)
-            .filter(
-                status=AppRemovalJob.Status.PENDING,
-                app_id_snapshot__in=App.objects.filter(label=label).values("id"),
+    try:
+        with transaction.atomic():
+            apps_with_running_removals = AppRemovalJob.objects.filter(
+                status=AppRemovalJob.Status.RUNNING,
+            ).values("app_id_snapshot")
+            apps_in_tearing_down_environments = DeploymentBlueprint.objects.filter(
+                environment__status=Environment.Status.TEARING_DOWN,
+            ).values("app_id")
+            matching_app = App.objects.filter(
+                id=OuterRef("app_id_snapshot"),
+                organization_id=OuterRef("organization_id"),
+                label=label,
             )
-            .exclude(app_id_snapshot__in=apps_in_tearing_down_environments)
-            .first()
-        )
-
-        if job:
-            environments = environment_operation_gate.lock_app_environments_for_removal(
-                app_id=job.app_id_snapshot,
+            job = (
+                AppRemovalJob.objects
+                .select_for_update(skip_locked=True)
+                .filter(status=AppRemovalJob.Status.PENDING)
+                .annotate(has_matching_app=Exists(matching_app))
+                .filter(has_matching_app=True)
+                .exclude(app_id_snapshot__in=apps_with_running_removals)
+                .exclude(app_id_snapshot__in=apps_in_tearing_down_environments)
+                .first()
             )
-            if environment_operation_gate.has_tearing_down_environment(environments=environments):
-                return None
 
-            job.status = AppRemovalJob.Status.RUNNING
-            job.status_message = "Claimed by worker"
-            job.save(update_fields=["status", "status_message", "updated_at"])
-            logger.info(f"Claimed app removal {job.id} for app '{job.app_slug_snapshot}'")
-            return job
+            if job:
+                app = App.objects.select_for_update().filter(
+                    id=job.app_id_snapshot,
+                    organization_id=job.organization_id,
+                    label=label,
+                ).first()
+                if app is None:
+                    return None
+                if AppRemovalJob.objects.filter(
+                    app_id_snapshot=job.app_id_snapshot,
+                    status=AppRemovalJob.Status.RUNNING,
+                ).exclude(id=job.id).exists():
+                    return None
+
+                environments = environment_operation_gate.lock_app_environments_for_removal(
+                    app_id=job.app_id_snapshot,
+                )
+                if environment_operation_gate.has_tearing_down_environment(environments=environments):
+                    return None
+
+                job.status = AppRemovalJob.Status.RUNNING
+                job.status_message = "Claimed by worker"
+                job.save(update_fields=["status", "status_message", "updated_at"])
+                logger.info(f"Claimed app removal {job.id} for app '{job.app_slug_snapshot}'")
+                return job
+    except IntegrityError:
+        logger.error("App removal claim lost a concurrent App claim")
 
     return None
 

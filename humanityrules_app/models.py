@@ -1666,6 +1666,13 @@ class AppRemovalJob(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["app_id_snapshot"],
+                condition=models.Q(status__in=("pending", "running")),
+                name="unique_active_app_removal_per_app",
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"AppRemovalJob {self.app_slug_snapshot} ({self.status})"

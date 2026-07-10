@@ -441,25 +441,31 @@ class Command(BaseCommand):
 
     def _queue_app_removal(self, app: models.App, delete_secrets: bool, delete_persistent_data: bool, delete_policies: bool) -> None:
         """Queue an AppRemovalJob with teardown_first=True; the worker tears down live deployments inline, then removes the app."""
-        if app.status == models.App.Status.PENDING_REMOVAL:
-            self.stdout.write(self.style.WARNING(f"App '{app.slug}' is already pending removal"))
-            return
-
-        old_label = app.label
         with transaction.atomic():
-            environments = environment_operation_gate.lock_app_environments_for_removal(app_id=app.id)
+            locked_app = (
+                models.App.objects
+                .select_for_update()
+                .select_related("organization", "workspace")
+                .get(id=app.id, organization_id=app.organization_id)
+            )
+            if locked_app.status == models.App.Status.PENDING_REMOVAL:
+                self.stdout.write(self.style.WARNING(f"App '{locked_app.slug}' is already pending removal"))
+                return
+
+            old_label = locked_app.label
+            environments = environment_operation_gate.lock_app_environments_for_removal(app_id=locked_app.id)
             if environment_operation_gate.has_tearing_down_environment(environments=environments):
                 self.stderr.write(self.style.ERROR(
-                    f"App '{app.slug}' cannot be removed after a related environment teardown has started."
+                    f"App '{locked_app.slug}' cannot be removed after a related environment teardown has started."
                 ))
                 return
 
             job = models.AppRemovalJob.objects.create(
-                organization=app.organization,
-                app_id_snapshot=app.id,
-                app_slug_snapshot=app.slug,
-                app_name_snapshot=app.name,
-                workspace_slug_snapshot=app.workspace.slug,
+                organization=locked_app.organization,
+                app_id_snapshot=locked_app.id,
+                app_slug_snapshot=locked_app.slug,
+                app_name_snapshot=locked_app.name,
+                workspace_slug_snapshot=locked_app.workspace.slug,
                 delete_secrets=delete_secrets,
                 delete_persistent_data=delete_persistent_data,
                 delete_policies=delete_policies,
@@ -467,19 +473,19 @@ class Command(BaseCommand):
                 created_by=None,
                 status_message="Queued via humr_control teardown-app --remove-app",
             )
-            app.status = models.App.Status.PENDING_REMOVAL
+            locked_app.status = models.App.Status.PENDING_REMOVAL
             # Clear App.label so the unscoped main worker picks up the removal.
             # The label scopes verification-time work to a specific run_job_worker;
             # by removal time that worker is typically gone, leaving the row stranded.
             update_fields = ["status", "updated_at"]
-            if app.label:
-                app.label = ""
+            if locked_app.label:
+                locked_app.label = ""
                 update_fields.append("label")
-            app.save(update_fields=update_fields)
+            locked_app.save(update_fields=update_fields)
 
-        self.stdout.write(self.style.SUCCESS(f"\nApp '{app.slug}' set to PENDING_REMOVAL"))
-        self.stdout.write(f"  App: {app.name}")
-        self.stdout.write(f"  Workspace: {app.workspace.name}")
+        self.stdout.write(self.style.SUCCESS(f"\nApp '{locked_app.slug}' set to PENDING_REMOVAL"))
+        self.stdout.write(f"  App: {locked_app.name}")
+        self.stdout.write(f"  Workspace: {locked_app.workspace.name}")
         self.stdout.write(f"  Removal job: {job.id}")
         self.stdout.write(f"  teardown_first: True")
         self.stdout.write(f"  delete_secrets: {delete_secrets}")
