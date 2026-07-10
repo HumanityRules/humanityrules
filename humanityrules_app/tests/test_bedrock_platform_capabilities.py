@@ -9,7 +9,7 @@ from humanityrules_app.services.infra_customer import deploy_app
 from humanityrules_app.services.infra_customer.appconfig import AppConfig, ContainerConfig
 
 
-def _app_config(provider: str, platform_capabilities: list[str]) -> AppConfig:
+def _app_config(preset: str, platform_capabilities: list[str]) -> AppConfig:
     return AppConfig(
         app_name="my-hermes",
         cpu=1024,
@@ -22,8 +22,7 @@ def _app_config(provider: str, platform_capabilities: list[str]) -> AppConfig:
                 ecr_repo_name="humr/staging/my-hermes-hermes",
                 container_port=8787,
                 environment_variables=[
-                    {"name": "HUMR_LLM_PROVIDER", "value": provider},
-                    {"name": "HUMR_LLM_MODEL", "value": "us.anthropic.claude-sonnet-4-6"},
+                    {"name": "HUMR_LLM_PRESET", "value": preset},
                 ],
             ),
         ],
@@ -64,26 +63,25 @@ def _bedrock_actions_from_stack(app_config: AppConfig) -> list[str]:
 
 class BedrockPlatformCapabilityTests(SimpleTestCase):
 
-    def test_bedrock_provider_gets_broad_platform_task_role_grant(self) -> None:
+    def test_bedrock_preset_gets_broad_platform_task_role_grant(self) -> None:
         actions = _bedrock_actions_from_stack(
-            _app_config(provider="bedrock", platform_capabilities=["bedrock-runtime"]),
+            _app_config(preset="bedrock", platform_capabilities=["bedrock-runtime"]),
         )
 
         self.assertEqual(actions, sorted(deploy_app.BEDROCK_RUNTIME_ACTIONS))
 
-    def test_custom_provider_still_gets_bedrock_grant_when_capability_present(self) -> None:
+    def test_codex_preset_still_gets_bedrock_grant_when_capability_present(self) -> None:
         # The WebUI model dropdown always offers Bedrock models regardless of
-        # the org's default provider, so the grant follows the template
-        # capability alone, not the effective LLM provider env var.
+        # the org's preset, so the grant follows the template capability alone.
         actions = _bedrock_actions_from_stack(
-            _app_config(provider="custom", platform_capabilities=["bedrock-runtime"]),
+            _app_config(preset="codex", platform_capabilities=["bedrock-runtime"]),
         )
 
         self.assertEqual(actions, sorted(deploy_app.BEDROCK_RUNTIME_ACTIONS))
 
-    def test_bedrock_provider_without_template_capability_does_not_get_bedrock_grant(self) -> None:
+    def test_bedrock_preset_without_template_capability_does_not_get_bedrock_grant(self) -> None:
         actions = _bedrock_actions_from_stack(
-            _app_config(provider="bedrock", platform_capabilities=[]),
+            _app_config(preset="bedrock", platform_capabilities=[]),
         )
 
         self.assertEqual(actions, [])
@@ -136,6 +134,7 @@ class BedrockPlatformCapabilityTests(SimpleTestCase):
 
         variable_names = {var["name"] for var in hermes["configurable_variables"]}
         self.assertNotIn("HERMES_WEBUI_PASSWORD", variable_names)
+        self.assertIn("HUMR_LLM_PRESET", variable_names)
         self.assertIn("AWS_DEFAULT_REGION", variable_names)
         # Tavily is a HUMR-managed shared credential injected by the integrations
         # broker, not a seeded per-app variable.

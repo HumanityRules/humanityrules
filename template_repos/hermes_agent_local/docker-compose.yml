@@ -34,8 +34,7 @@ services:
     environment:
       AWS_PROFILE: ${AWS_PROFILE:-bedrock_dev}
       AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-${AWS_BEDROCK_REGION:-us-east-1}}
-      HUMR_LLM_PROVIDER: ${HUMR_LLM_PROVIDER:-bedrock}
-      HUMR_LLM_MODEL: ${HUMR_LLM_MODEL:-global.anthropic.claude-sonnet-5}
+      HUMR_LLM_PRESET: ${HUMR_LLM_PRESET:-bedrock}
       HUMR_PUBLIC_HOSTNAME: localhost
       HERMES_WEBUI_SKIP_ONBOARDING: ${HERMES_WEBUI_SKIP_ONBOARDING:-1}
       # Control-plane app identity. supervisor.sh starts the integrations broker only
