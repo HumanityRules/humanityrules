@@ -41,16 +41,21 @@ _PALETTE = [
 def enqueue_refresh(app: App) -> None:
     """Ensure exactly one active ``CostRefreshJob`` exists for ``app`` (collapses rapid reloads)."""
     with transaction.atomic():
-        already_active = (
-            CostRefreshJob.objects.select_for_update(skip_locked=True)
-            .filter(app=app, status__in=CostRefreshJob.ACTIVE_STATUSES)
-            .exists()
+        locked_app = App.objects.select_for_update().get(
+            id=app.id,
+            organization_id=app.organization_id,
         )
+        if locked_app.status != App.Status.ACTIVE:
+            return
+        already_active = CostRefreshJob.objects.filter(
+            app=locked_app,
+            status__in=CostRefreshJob.ACTIVE_STATUSES,
+        ).exists()
         if already_active:
             return
         CostRefreshJob.objects.create(
-            app=app,
-            organization_id=app.organization_id,
+            app=locked_app,
+            organization_id=locked_app.organization_id,
             status=CostRefreshJob.Status.PENDING,
         )
 

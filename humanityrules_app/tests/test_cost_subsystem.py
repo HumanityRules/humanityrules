@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import patch
 
+from django.db import IntegrityError, transaction
 from django.template.loader import render_to_string
 from django.test import Client, TestCase
 
@@ -27,6 +28,7 @@ from humanityrules_app.models import (
 from humanityrules_app.services.cost import bedrock_pricing as pricing
 from humanityrules_app.services.cost import cost_refresh, panel
 from humanityrules_app.services.cost.cost_source import DailyCostRow
+from humanityrules_app.services.jobs import job_worker
 
 _REAL_RECORD_ARN = "arn:aws:bedrock:us-east-1:266117665083:inference-profile/us.anthropic.claude-sonnet-4-6"
 
@@ -259,6 +261,82 @@ class TestCostPanel(_CostFixtureMixin, TestCase):
         self.assertIn("Last 24h", html)
         self.assertIn(f"/apps/{self.app.slug}/cost-panel/?await=1", html)  # read-only self-poll url
         self.assertNotIn("{#", html)  # comments must be single-line, never rendered literally
+
+
+class TestCostRefreshCoordination(_CostFixtureMixin, TestCase):
+    """Enqueue and worker claims serialize refreshes by App."""
+
+    def setUp(self) -> None:
+        self._build_fixtures()
+
+    def _create_job(self, app: App, status: str) -> CostRefreshJob:
+        """Create a cost refresh job for a fixture App."""
+        return CostRefreshJob.objects.create(
+            organization=app.organization,
+            app=app,
+            status=status,
+        )
+
+    def test_enqueue_dedupes_running_job(self) -> None:
+        self._create_job(app=self.app, status=CostRefreshJob.Status.RUNNING)
+
+        panel.enqueue_refresh(app=self.app)
+
+        self.assertEqual(CostRefreshJob.objects.filter(app=self.app).count(), 1)
+
+    def test_enqueue_skips_app_pending_removal(self) -> None:
+        self.app.status = App.Status.PENDING_REMOVAL
+        self.app.save(update_fields=["status", "updated_at"])
+
+        panel.enqueue_refresh(app=self.app)
+
+        self.assertFalse(CostRefreshJob.objects.filter(app=self.app).exists())
+
+    def test_database_rejects_two_active_jobs_for_same_app(self) -> None:
+        self._create_job(app=self.app, status=CostRefreshJob.Status.PENDING)
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            self._create_job(app=self.app, status=CostRefreshJob.Status.RUNNING)
+
+    def test_database_allows_new_job_after_terminal_job(self) -> None:
+        self._create_job(app=self.app, status=CostRefreshJob.Status.SUCCEEDED)
+
+        panel.enqueue_refresh(app=self.app)
+
+        self.assertEqual(
+            CostRefreshJob.objects.filter(app=self.app, status=CostRefreshJob.Status.PENDING).count(),
+            1,
+        )
+
+    def test_worker_claims_pending_refresh(self) -> None:
+        pending = self._create_job(app=self.app, status=CostRefreshJob.Status.PENDING)
+
+        claimed = job_worker._claim_pending_cost_refresh(label="")
+
+        self.assertIsNotNone(claimed)
+        self.assertEqual(claimed.id, pending.id)
+        self.assertEqual(claimed.status, CostRefreshJob.Status.RUNNING)
+
+    def test_worker_claims_other_app_while_first_app_is_running(self) -> None:
+        self._create_job(app=self.app, status=CostRefreshJob.Status.RUNNING)
+        other_app = App.objects.create(
+            organization=self.org,
+            workspace=self.workspace,
+            repository=self.repository,
+            name="Other Hermes",
+            slug="other-hermes",
+            app_type=App.AppType.WEB,
+            build_strategy=App.BuildStrategy.DOCKERFILE,
+            branch="main",
+            container_port=8000,
+            health_check_path="/health",
+        )
+        pending = self._create_job(app=other_app, status=CostRefreshJob.Status.PENDING)
+
+        claimed = job_worker._claim_pending_cost_refresh(label="")
+
+        self.assertIsNotNone(claimed)
+        self.assertEqual(claimed.id, pending.id)
 
 
 class TestCostPanelView(_CostFixtureMixin, TestCase):
