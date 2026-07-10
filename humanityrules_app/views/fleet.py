@@ -12,6 +12,7 @@ from django.shortcuts import get_object_or_404, render
 from django.views.decorators.http import require_GET, require_POST
 
 from humanityrules_app import models
+from humanityrules_app.services import fleet_recovery
 from humanityrules_app.services import fleet_redeploy
 from humanityrules_app.services import fleet_status
 
@@ -57,6 +58,26 @@ def fleet_redeploy_all(request: HttpRequest) -> HttpResponse:
     context = {
         "env_groups": fleet_status.build_fleet_snapshot(),
         "redeploy_result": redeploy_result,
+    }
+    return render(request, "humanityrules_app/fleet/fleet.html#fleet_list", context=context)
+
+
+@_staff_or_404
+@require_GET
+def fleet_fail_transient_deployments_confirm(request: HttpRequest) -> HttpResponse:
+    """Return the confirmation modal for the fleet recovery action."""
+    context = {"transient_count": fleet_recovery.count_transient_deployments()}
+    return render(request, "humanityrules_app/fleet/_fleet_fail_transient_confirm.html", context=context)
+
+
+@_staff_or_404
+@require_POST
+def fleet_fail_transient_deployments(request: HttpRequest) -> HttpResponse:
+    """Mark all deployment jobs left in transient states as failed."""
+    recovery_result = fleet_recovery.fail_transient_deployments()
+    context = {
+        "env_groups": fleet_status.build_fleet_snapshot(),
+        "recovery_result": recovery_result,
     }
     return render(request, "humanityrules_app/fleet/fleet.html#fleet_list", context=context)
 

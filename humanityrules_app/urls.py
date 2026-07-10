@@ -218,6 +218,16 @@ urlpatterns = [
 
     # Staff-only platform fleet dashboard (cross-org by design; gated by is_staff)
     path("platform/fleet/", views.fleet, name="fleet"),
+    path(
+        "platform/fleet/fail-transient/confirm/",
+        views.fleet_fail_transient_deployments_confirm,
+        name="fleet_fail_transient_deployments_confirm",
+    ),
+    path(
+        "platform/fleet/fail-transient/",
+        views.fleet_fail_transient_deployments,
+        name="fleet_fail_transient_deployments",
+    ),
     path("platform/fleet/redeploy-all/confirm/", views.fleet_redeploy_all_confirm, name="fleet_redeploy_all_confirm"),
     path("platform/fleet/redeploy-all/", views.fleet_redeploy_all, name="fleet_redeploy_all"),
     path("platform/fleet/env/<uuid:environment_id>/live/", views.fleet_env_live_state, name="fleet_env_live_state"),

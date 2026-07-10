@@ -4527,6 +4527,14 @@
       }
     }
   }
+  .dark\:ring-red-500\/40 {
+    &:where(.dark, .dark *) {
+      --tw-ring-color: color-mix(in srgb, oklch(63.7% 0.237 25.331) 40%, transparent);
+      @supports (color: color-mix(in lab, red, red)) {
+        --tw-ring-color: color-mix(in oklab, var(--color-red-500) 40%, transparent);
+      }
+    }
+  }
   .dark\:ring-white\/10 {
     &:where(.dark, .dark *) {
       --tw-ring-color: color-mix(in srgb, #fff 10%, transparent);
