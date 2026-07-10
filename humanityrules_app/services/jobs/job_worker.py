@@ -327,22 +327,33 @@ def _run_permissions_apply_thread(app_permission_request_id: str) -> None:
 
 
 def _claim_pending_cost_refresh(label: str) -> CostRefreshJob | None:
-    """Atomically claim a pending cost refresh whose App matches `label`."""
-    with transaction.atomic():
-        job = (
-            CostRefreshJob.objects
-            .select_for_update(skip_locked=True)
-            .filter(status=CostRefreshJob.Status.PENDING, app__label=label)
-            .select_related("app")
-            .first()
-        )
+    """Claim one pending cost refresh per App."""
+    try:
+        with transaction.atomic():
+            apps_with_running_refreshes = CostRefreshJob.objects.filter(
+                status=CostRefreshJob.Status.RUNNING,
+            ).values("app_id")
+            job = (
+                CostRefreshJob.objects
+                .select_for_update(skip_locked=True, of=("self", "app"))
+                .filter(
+                    status=CostRefreshJob.Status.PENDING,
+                    app__label=label,
+                    app__status=App.Status.ACTIVE,
+                )
+                .exclude(app_id__in=apps_with_running_refreshes)
+                .select_related("app")
+                .first()
+            )
 
-        if job:
-            job.status = CostRefreshJob.Status.RUNNING
-            job.status_message = "Claimed by worker"
-            job.save(update_fields=["status", "status_message", "updated_at"])
-            logger.info(f"Claimed cost refresh {job.id} for app '{job.app.slug}'")
-            return job
+            if job:
+                job.status = CostRefreshJob.Status.RUNNING
+                job.status_message = "Claimed by worker"
+                job.save(update_fields=["status", "status_message", "updated_at"])
+                logger.info(f"Claimed cost refresh {job.id} for app '{job.app.slug}'")
+                return job
+    except IntegrityError:
+        logger.error("Cost refresh claim lost a concurrent App claim")
 
     return None
 

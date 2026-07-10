@@ -2208,6 +2208,13 @@ class CostRefreshJob(models.Model):
         verbose_name = "Cost Refresh Job"
         verbose_name_plural = "Cost Refresh Jobs"
         ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["app"],
+                condition=models.Q(status__in=("pending", "running")),
+                name="unique_active_cost_refresh_per_app",
+            ),
+        ]
         indexes = [
             models.Index(fields=["app", "status"]),
             models.Index(fields=["status"]),
