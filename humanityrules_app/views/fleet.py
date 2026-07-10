@@ -8,8 +8,10 @@ import functools
 
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, render
+from django.views.decorators.http import require_GET, require_POST
 
 from humanityrules_app import models
+from humanityrules_app.services import fleet_redeploy
 from humanityrules_app.services import fleet_status
 
 FLEET_LOG_MAX_LINES = 300
@@ -32,6 +34,30 @@ def fleet(request: HttpRequest) -> HttpResponse:
     if request.htmx:
         template += "#fleet_list"
     return render(request, template, context=context)
+
+
+@_staff_or_404
+@require_GET
+def fleet_redeploy_all_confirm(request: HttpRequest) -> HttpResponse:
+    """Return the fleet-wide redeploy confirmation modal."""
+    context = {"preview": fleet_redeploy.build_redeploy_all_preview()}
+    return render(request, "humanityrules_app/fleet/_fleet_redeploy_all_confirm.html", context=context)
+
+
+@_staff_or_404
+@require_POST
+def fleet_redeploy_all(request: HttpRequest) -> HttpResponse:
+    """Queue redeployments for the eligible current fleet rows."""
+    include_failed = request.POST.get("include_failed") == "on"
+    redeploy_result = fleet_redeploy.queue_redeploy_all(
+        created_by=request.user,
+        include_failed=include_failed,
+    )
+    context = {
+        "env_groups": fleet_status.build_fleet_snapshot(),
+        "redeploy_result": redeploy_result,
+    }
+    return render(request, "humanityrules_app/fleet/fleet.html#fleet_list", context=context)
 
 
 @_staff_or_404

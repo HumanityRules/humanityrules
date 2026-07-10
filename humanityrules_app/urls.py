@@ -14,10 +14,7 @@ urlpatterns = [
     path("waitlist/signup/", views.waitlist_signup, name="waitlist_signup"),
     path("dashboard/", views.dashboard, name="dashboard"),
 
-    # Staff-only platform fleet dashboard (cross-org by design; gated by is_staff)
-    path("platform/fleet/", views.fleet, name="fleet"),
-    path("platform/fleet/env/<uuid:environment_id>/live/", views.fleet_env_live_state, name="fleet_env_live_state"),
-    path("platform/fleet/deployment/<uuid:deployment_id>/log/", views.fleet_deployment_log, name="fleet_deployment_log"),
+
     path("workspaces/", views.workspaces, name="workspaces"),
     path("workspaces/create/", views.workspace_create, name="workspace_create"),
     path("workspaces/<slug:workspace_slug>/", views.workspace_detail, name="workspace_detail"),
@@ -218,6 +215,13 @@ urlpatterns = [
     path("api/permissions/draft/refresh-resources", views.permissions_refresh_resources, name="permissions_refresh_resources"),
     path("api/permissions/resources", views.permissions_resources, name="permissions_resources"),
     path("api/permissions/service-catalog", views.permissions_service_catalog, name="permissions_service_catalog"),
+
+    # Staff-only platform fleet dashboard (cross-org by design; gated by is_staff)
+    path("platform/fleet/", views.fleet, name="fleet"),
+    path("platform/fleet/redeploy-all/confirm/", views.fleet_redeploy_all_confirm, name="fleet_redeploy_all_confirm"),
+    path("platform/fleet/redeploy-all/", views.fleet_redeploy_all, name="fleet_redeploy_all"),
+    path("platform/fleet/env/<uuid:environment_id>/live/", views.fleet_env_live_state, name="fleet_env_live_state"),
+    path("platform/fleet/deployment/<uuid:deployment_id>/log/", views.fleet_deployment_log, name="fleet_deployment_log"),
 
     # Chat / Agent
     path("chat/app_deploy/<slug:workspace_slug>/<str:repo_owner>/<str:repo_name>/", views.chat_app_deploy, name="chat_app_deploy_with_owner"),

@@ -1,0 +1,82 @@
+<div class="relative z-50" role="dialog" aria-modal="true" aria-labelledby="fleet-redeploy-title"
+     x-data="{ includeFailed: false }">
+    <div class="fixed inset-0 bg-gray-500/75 dark:bg-gray-900/80 transition-opacity"></div>
+
+    <div class="fixed inset-0 z-10 w-screen overflow-y-auto">
+        <div class="flex min-h-full items-center justify-center p-4 text-center">
+            <div class="relative transform overflow-hidden rounded-lg bg-white dark:bg-gray-800 p-6 text-left shadow-xl transition-all my-8 w-full max-w-lg">
+                <div class="absolute right-0 top-0 pr-4 pt-4">
+                    <button type="button"
+                            onclick="document.getElementById('modal-container').innerHTML = ''"
+                            class="rounded-md bg-white dark:bg-gray-800 text-gray-400 hover:text-gray-500 dark:hover:text-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800">
+                        <span class="sr-only">Close</span>
+                        <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
+
+                <div class="flex items-start gap-4">
+                    <div class="flex-shrink-0 flex items-center justify-center h-10 w-10 rounded-full bg-red-100 dark:bg-red-500/10">
+                        <svg class="h-5 w-5 text-red-600 dark:text-red-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+                        </svg>
+                    </div>
+                    <div>
+                        <h3 id="fleet-redeploy-title" class="text-lg font-semibold text-gray-900 dark:text-white">Queue this batch?</h3>
+                        <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                            For {{ preview.succeeded_count }} entr{{ preview.succeeded_count|pluralize:"y,ies" }}, the latest deployment succeeded.
+                        </p>
+                    </div>
+                </div>
+
+                <form id="fleet-redeploy-all-options" class="mt-5 ml-14 text-sm">
+                    <label class="flex items-start gap-2 {% if not preview.failed_count %}opacity-60{% endif %}">
+                        <input type="checkbox"
+                               name="include_failed"
+                               x-model="includeFailed"
+                               {% if not preview.failed_count %}disabled{% endif %}
+                               class="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+                        <span class="text-gray-700 dark:text-gray-300">
+                            Include {{ preview.failed_count }} entr{{ preview.failed_count|pluralize:"y,ies" }} whose latest deployment failed
+                        </span>
+                    </label>
+                </form>
+
+                <div class="mt-4 ml-14 text-sm text-gray-500 dark:text-gray-400 space-y-2">
+                    <p>Torn-down services stay off. Apps won't enter the queue while a deployment is in progress or removal is pending. It also skips environments that aren't ready.</p>
+                    {% if preview.skipped_count %}
+                    <div>
+                        <p>The queue will skip {{ preview.skipped_count }} other entr{{ preview.skipped_count|pluralize:"y,ies" }}:</p>
+                        <ul class="mt-1 space-y-1">
+                            {% for reason, count in preview.skipped_counts.items %}
+                            <li>{{ reason }}: {{ count }}</li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <div class="mt-6 ml-14 flex justify-end gap-3">
+                    <button type="button"
+                            onclick="document.getElementById('modal-container').innerHTML = ''"
+                            class="rounded-md bg-white dark:bg-gray-700 px-3 py-2 text-sm font-semibold text-gray-900 dark:text-white shadow-xs ring-1 ring-inset ring-gray-300 dark:ring-white/10 hover:bg-gray-50 dark:hover:bg-gray-600">
+                        Cancel
+                    </button>
+                    <button type="button"
+                            hx-post="{% url 'fleet_redeploy_all' %}"
+                            hx-include="#fleet-redeploy-all-options"
+                            hx-target="#fleet-list"
+                            hx-swap="innerHTML"
+                            hx-on::after-request="if (event.detail.successful) document.getElementById('modal-container').innerHTML = ''"
+                            :disabled="{{ preview.succeeded_count }} + (includeFailed ? {{ preview.failed_count }} : 0) === 0"
+                            class="rounded-md bg-red-600 px-3 py-2 text-sm font-semibold text-white shadow-xs hover:bg-red-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-red-500 dark:hover:bg-red-400">
+                        <span x-text="'Redeploy ' + ({{ preview.succeeded_count }} + (includeFailed ? {{ preview.failed_count }} : 0))">
+                            Redeploy {{ preview.succeeded_count }}
+                        </span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

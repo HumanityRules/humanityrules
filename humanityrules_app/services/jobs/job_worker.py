@@ -36,14 +36,25 @@ _worker_thread: threading.Thread | None = None
 # unscoped main worker).
 _worker_label: str = ""
 
+_APP_DEPLOYMENT_RUNNING_STATUSES = (
+    Deployment.Status.BUILDING,
+    Deployment.Status.PUSHING,
+    Deployment.Status.DEPLOYING,
+    Deployment.Status.STARTING,
+)
+
 
 def _claim_pending_app_deployment(label: str) -> Deployment | None:
-    """Atomically claim a pending app deployment whose App matches `label`."""
+    """Claim a pending deployment without overlapping work for the same app."""
     with transaction.atomic():
+        apps_with_running_deployments = Deployment.objects.filter(
+            status__in=_APP_DEPLOYMENT_RUNNING_STATUSES,
+        ).values("app_id")
         deployment = (
             Deployment.objects
             .select_for_update(skip_locked=True)
             .filter(status=Deployment.Status.PENDING, app__label=label)
+            .exclude(app_id__in=apps_with_running_deployments)
             .select_related(
                 "app",
                 "app__workspace",
