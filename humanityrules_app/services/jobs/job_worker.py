@@ -41,8 +41,8 @@ _worker_label: str = ""
 def _claim_pending_app_deployment(label: str) -> Deployment | None:
     """Claim a pending deployment without overlapping work for the same app."""
     with transaction.atomic():
-        apps_with_running_deployments = Deployment.objects.filter(
-            status__in=environment_operation_gate.RUNNING_DEPLOYMENT_STATUSES,
+        apps_with_executing_deployments = Deployment.objects.filter(
+            status__in=environment_operation_gate.EXECUTING_DEPLOYMENT_STATUSES,
         ).values("app_id")
         deployment = (
             Deployment.objects
@@ -53,7 +53,7 @@ def _claim_pending_app_deployment(label: str) -> Deployment | None:
                 app__status=App.Status.ACTIVE,
                 environment__status=Environment.Status.READY,
             )
-            .exclude(app_id__in=apps_with_running_deployments)
+            .exclude(app_id__in=apps_with_executing_deployments)
             .select_related(
                 "app",
                 "app__workspace",
@@ -192,13 +192,13 @@ def _claim_pending_permissions_apply(label: str) -> AppPermissionRequest | None:
 def _claim_pending_environment_teardown() -> Environment | None:
     """Atomically claim a pending environment teardown. Unscoped only."""
     with transaction.atomic():
-        running_deployments = Deployment.objects.filter(
+        executing_deployments = Deployment.objects.filter(
             environment_id=OuterRef("pk"),
-            status__in=environment_operation_gate.RUNNING_DEPLOYMENT_STATUSES,
+            status__in=environment_operation_gate.EXECUTING_DEPLOYMENT_STATUSES,
         )
-        running_permission_applies = AppPermissionRequest.objects.filter(
+        executing_permission_applies = AppPermissionRequest.objects.filter(
             environment_id=OuterRef("pk"),
-            status__in=environment_operation_gate.RUNNING_PERMISSION_STATUSES,
+            status__in=environment_operation_gate.EXECUTING_PERMISSION_STATUSES,
         )
         active_removal_app_ids = AppRemovalJob.objects.filter(
             status__in=environment_operation_gate.ACTIVE_APP_REMOVAL_STATUSES,
@@ -212,12 +212,12 @@ def _claim_pending_environment_teardown() -> Environment | None:
             .filter(status=Environment.Status.TEARDOWN_PENDING)
             .exclude(id__in=environments_with_active_app_removals)
             .annotate(
-                has_running_deployment=Exists(running_deployments),
-                has_running_permission_apply=Exists(running_permission_applies),
+                has_executing_deployment=Exists(executing_deployments),
+                has_executing_permission_apply=Exists(executing_permission_applies),
             )
             .filter(
-                has_running_deployment=False,
-                has_running_permission_apply=False,
+                has_executing_deployment=False,
+                has_executing_permission_apply=False,
             )
             .select_related("aws_account")
             .first()
