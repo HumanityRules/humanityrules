@@ -20,7 +20,7 @@ FORCE_TEARDOWNABLE_ENVIRONMENT_STATUSES = (
     *TEARDOWNABLE_ENVIRONMENT_STATUSES,
 )
 
-RUNNING_DEPLOYMENT_STATUSES = (
+EXECUTING_DEPLOYMENT_STATUSES = (
     models.Deployment.Status.BUILDING,
     models.Deployment.Status.PUSHING,
     models.Deployment.Status.DEPLOYING,
@@ -28,7 +28,7 @@ RUNNING_DEPLOYMENT_STATUSES = (
     models.Deployment.Status.TEARING_DOWN,
 )
 
-RUNNING_PERMISSION_STATUSES = (
+EXECUTING_PERMISSION_STATUSES = (
     models.AppPermissionRequest.Status.APPLYING,
 )
 
@@ -102,16 +102,16 @@ def has_tearing_down_environment(environments: list[models.Environment]) -> bool
     return any(environment.status == models.Environment.Status.TEARING_DOWN for environment in environments)
 
 
-def _has_running_deployment_or_permission(environment_id: UUID) -> bool:
-    """Return whether ordinary teardown must wait for running environment work."""
+def _has_executing_deployment_or_permission(environment_id: UUID) -> bool:
+    """Return whether ordinary teardown must wait for executing environment work."""
     if models.Deployment.objects.filter(
         environment_id=environment_id,
-        status__in=RUNNING_DEPLOYMENT_STATUSES,
+        status__in=EXECUTING_DEPLOYMENT_STATUSES,
     ).exists():
         return True
     return models.AppPermissionRequest.objects.filter(
         environment_id=environment_id,
-        status__in=RUNNING_PERMISSION_STATUSES,
+        status__in=EXECUTING_PERMISSION_STATUSES,
     ).exists()
 
 
@@ -126,12 +126,12 @@ def _has_running_app_removal(environment_id: UUID) -> bool:
     ).exists()
 
 
-def _fail_running_deployments_and_permissions(environment_id: UUID) -> None:
+def _fail_executing_deployments_and_permissions(environment_id: UUID) -> None:
     """Conclude force-abandoned work before queuing environment teardown."""
     now = timezone.now()
     models.Deployment.objects.filter(
         environment_id=environment_id,
-        status__in=RUNNING_DEPLOYMENT_STATUSES,
+        status__in=EXECUTING_DEPLOYMENT_STATUSES,
     ).update(
         status=models.Deployment.Status.FAILED,
         status_message=FORCED_FAILURE_MESSAGE,
@@ -140,7 +140,7 @@ def _fail_running_deployments_and_permissions(environment_id: UUID) -> None:
     )
     models.AppPermissionRequest.objects.filter(
         environment_id=environment_id,
-        status__in=RUNNING_PERMISSION_STATUSES,
+        status__in=EXECUTING_PERMISSION_STATUSES,
     ).update(
         status=models.AppPermissionRequest.Status.FAILED,
         status_message=FORCED_FAILURE_MESSAGE,
@@ -180,15 +180,15 @@ def queue_environment_teardown(environment_id: UUID, status_message: str, force:
                 reason=REASON_ACTIVE_APP_REMOVAL,
             )
 
-        has_running_work = _has_running_deployment_or_permission(environment_id=environment.id)
-        if has_running_work and not force:
+        has_executing_work = _has_executing_deployment_or_permission(environment_id=environment.id)
+        if has_executing_work and not force:
             return EnvironmentTeardownQueueResult(
                 queued=False,
                 previous_status=environment.status,
                 reason=REASON_ACTIVE_APP_OPERATIONS,
             )
         if force:
-            _fail_running_deployments_and_permissions(environment_id=environment.id)
+            _fail_executing_deployments_and_permissions(environment_id=environment.id)
 
         previous_status = environment.status
         environment.status = models.Environment.Status.TEARDOWN_PENDING
