@@ -1611,6 +1611,13 @@ class AppPermissionRequest(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["app", "environment"],
+                condition=models.Q(status="applying"),
+                name="unique_applying_permission_request_per_target",
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"AppPermissionRequest {self.id} ({self.status})"

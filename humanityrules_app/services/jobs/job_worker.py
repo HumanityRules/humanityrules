@@ -10,7 +10,7 @@ import logging
 import threading
 import time
 
-from django.db import connections, transaction
+from django.db import IntegrityError, connections, transaction
 from django.db.models import Exists, OuterRef
 
 from humanityrules_app.models import App, AppPermissionRequest, AppRemovalJob, CostRefreshJob, Deployment, DeploymentBlueprint, Environment
@@ -154,27 +154,37 @@ def _run_app_deployment_teardown_thread(deployment_id: str) -> None:
 
 
 def _claim_pending_permissions_apply(label: str) -> AppPermissionRequest | None:
-    """Atomically claim a pending permissions apply whose App matches `label`."""
-    with transaction.atomic():
-        apr = (
-            AppPermissionRequest.objects
-            .select_for_update(skip_locked=True)
-            .filter(
-                status=AppPermissionRequest.Status.APPROVED_PENDING_APPLY,
-                app__label=label,
-                app__status=App.Status.ACTIVE,
-                environment__status=Environment.Status.READY,
+    """Claim one permission apply per app/environment target."""
+    try:
+        with transaction.atomic():
+            applying_for_same_target = AppPermissionRequest.objects.filter(
+                status=AppPermissionRequest.Status.APPLYING,
+                app_id=OuterRef("app_id"),
+                environment_id=OuterRef("environment_id"),
             )
-            .select_related("app", "environment")
-            .first()
-        )
+            apr = (
+                AppPermissionRequest.objects
+                .select_for_update(skip_locked=True, of=("self", "app", "environment"))
+                .filter(
+                    status=AppPermissionRequest.Status.APPROVED_PENDING_APPLY,
+                    app__label=label,
+                    app__status=App.Status.ACTIVE,
+                    environment__status=Environment.Status.READY,
+                )
+                .annotate(has_applying_for_target=Exists(applying_for_same_target))
+                .filter(has_applying_for_target=False)
+                .select_related("app", "environment")
+                .first()
+            )
 
-        if apr:
-            apr.status = AppPermissionRequest.Status.APPLYING
-            apr.status_message = "Claimed by worker"
-            apr.save(update_fields=["status", "status_message", "updated_at"])
-            logger.info(f"Claimed permissions apply {apr.id} for app '{apr.app.name}'")
-            return apr
+            if apr:
+                apr.status = AppPermissionRequest.Status.APPLYING
+                apr.status_message = "Claimed by worker"
+                apr.save(update_fields=["status", "status_message", "updated_at"])
+                logger.info(f"Claimed permissions apply {apr.id} for app '{apr.app.name}'")
+                return apr
+    except IntegrityError:
+        logger.error("Permission apply claim lost a concurrent target claim")
 
     return None
 

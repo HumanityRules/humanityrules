@@ -118,7 +118,10 @@ def security_permissions_editor_apply(request: HttpRequest, app_permission_reque
     if platform_owner.is_sandbox_approval_gated(environment=app_permission_request.environment):
         return JsonResponse({"error": platform_owner.SANDBOX_APPROVAL_BLOCKED_MESSAGE}, status=403)
 
-    permissions_service.approve(app_permission_request)
+    if not permissions_service.approve(app_permission_request=app_permission_request):
+        return JsonResponse({
+            "error": f"Permission request is already {app_permission_request.get_status_display().lower()}.",
+        }, status=409)
 
     return JsonResponse({"status": "approved_pending_apply", "request_id": str(app_permission_request.id)})
 
