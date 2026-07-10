@@ -221,6 +221,7 @@ urlpatterns = [
     path("platform/fleet/redeploy-all/confirm/", views.fleet_redeploy_all_confirm, name="fleet_redeploy_all_confirm"),
     path("platform/fleet/redeploy-all/", views.fleet_redeploy_all, name="fleet_redeploy_all"),
     path("platform/fleet/env/<uuid:environment_id>/live/", views.fleet_env_live_state, name="fleet_env_live_state"),
+    path("platform/fleet/deployment/<uuid:deployment_id>/redeploy/", views.fleet_deployment_redeploy, name="fleet_deployment_redeploy"),
     path("platform/fleet/deployment/<uuid:deployment_id>/log/", views.fleet_deployment_log, name="fleet_deployment_log"),
 
     # Chat / Agent

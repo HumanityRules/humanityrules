@@ -13,6 +13,7 @@ from django.conf import settings
 from django.db.models import OuterRef, Subquery
 
 from humanityrules_app import models
+from humanityrules_app.services import fleet_redeploy
 from humanityrules_app.services.infra_customer import iam_utils
 
 logger = logging.getLogger(__name__)
@@ -99,7 +100,12 @@ def build_fleet_snapshot() -> list[EnvGroup]:
         )
         .order_by("app__slug")
     )
+    apps_with_in_progress_deployments = fleet_redeploy.get_apps_with_in_progress_deployments()
     for deployment in deployments:
+        deployment.redeploy_skip_reason = fleet_redeploy.get_redeploy_skip_reason(
+            source=deployment,
+            apps_with_in_progress_deployments=apps_with_in_progress_deployments,
+        )
         groups[deployment.environment_id].deployments.append(deployment)
 
     for group in groups.values():

@@ -93,10 +93,20 @@
                     {% if deployment.live_service_url %}
                     <a href="{{ deployment.live_service_url }}" target="_blank" class="text-sm text-indigo-600 dark:text-indigo-400 hover:underline truncate">{{ deployment.live_service_url }}</a>
                     {% endif %}
-                    <button hx-get="{% url 'fleet_deployment_log' deployment_id=deployment.id %}"
-                            hx-target="#fleet-log-{{ deployment.id }}"
-                            hx-swap="innerHTML"
-                            class="ml-auto text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline shrink-0">log</button>
+                    <div class="ml-auto flex items-center gap-3 shrink-0">
+                        {% if not deployment.redeploy_skip_reason %}
+                        <button type="button"
+                                hx-post="{% url 'fleet_deployment_redeploy' deployment_id=deployment.id %}"
+                                hx-target="#fleet-list"
+                                hx-swap="innerHTML"
+                                class="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:underline">Redeploy</button>
+                        {% endif %}
+                        <button type="button"
+                                hx-get="{% url 'fleet_deployment_log' deployment_id=deployment.id %}"
+                                hx-target="#fleet-log-{{ deployment.id }}"
+                                hx-swap="innerHTML"
+                                class="text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline">log</button>
+                    </div>
                     </div>
                     {% comment %} hx-preserve: an opened log panel must survive the 10s fleet-list refresh.
                     The before/after-swap handlers keep the console pinned to the tail across the 1s log

@@ -2,6 +2,7 @@
 
 from collections import Counter
 from dataclasses import dataclass
+from uuid import UUID
 
 from django.db import transaction
 from django.db.models import OuterRef, QuerySet, Subquery
@@ -14,6 +15,7 @@ SKIP_APP_BUSY = "Deployment already in progress"
 SKIP_APP_PENDING_REMOVAL = "App pending removal"
 SKIP_ENVIRONMENT_NOT_READY = "Environment not ready"
 SKIP_FAILED_NOT_INCLUDED = "Failed not included"
+SKIP_NEWER_DEPLOYMENT = "Newer deployment exists"
 SKIP_NOT_REDEPLOYABLE = "Not redeployable"
 SKIP_TORN_DOWN = "Torn down"
 
@@ -76,28 +78,42 @@ def _latest_deployment_per_app_environment() -> QuerySet[models.Deployment]:
     )
 
 
+def get_apps_with_in_progress_deployments() -> set[UUID]:
+    """Return app IDs that currently have a deployment attempt in progress."""
+    return set(
+        models.Deployment.objects.filter(status__in=models.Deployment.IN_PROGRESS_STATUSES).values_list("app_id", flat=True)
+    )
+
+
+def get_redeploy_skip_reason(source: models.Deployment, apps_with_in_progress_deployments: set[UUID]) -> str | None:
+    """Return why a current fleet row cannot redeploy, or None when eligible."""
+    if source.app.status == models.App.Status.PENDING_REMOVAL:
+        return SKIP_APP_PENDING_REMOVAL
+    if source.app_id in apps_with_in_progress_deployments:
+        return SKIP_APP_BUSY
+    if source.status == models.Deployment.Status.TORN_DOWN:
+        return SKIP_TORN_DOWN
+    if source.status not in (models.Deployment.Status.SUCCEEDED, models.Deployment.Status.FAILED):
+        return SKIP_NOT_REDEPLOYABLE
+    if source.environment.status != models.Environment.Status.READY:
+        return SKIP_ENVIRONMENT_NOT_READY
+    return None
+
+
 def _collect_candidates() -> _FleetRedeployCandidates:
     """Classify current fleet rows without mutating them."""
-    apps_with_in_progress_deployments = set(
-        models.Deployment.objects
-        .filter(status__in=models.Deployment.IN_PROGRESS_STATUSES)
-        .values_list("app_id", flat=True)
-    )
+    apps_with_in_progress_deployments = get_apps_with_in_progress_deployments()
     succeeded: list[models.Deployment] = []
     failed: list[models.Deployment] = []
     skipped_counts: Counter[str] = Counter()
 
     for source in _latest_deployment_per_app_environment():
-        if source.app.status == models.App.Status.PENDING_REMOVAL:
-            skipped_counts[SKIP_APP_PENDING_REMOVAL] += 1
-        elif source.app_id in apps_with_in_progress_deployments:
-            skipped_counts[SKIP_APP_BUSY] += 1
-        elif source.status == models.Deployment.Status.TORN_DOWN:
-            skipped_counts[SKIP_TORN_DOWN] += 1
-        elif source.status not in (models.Deployment.Status.SUCCEEDED, models.Deployment.Status.FAILED):
-            skipped_counts[SKIP_NOT_REDEPLOYABLE] += 1
-        elif source.environment.status != models.Environment.Status.READY:
-            skipped_counts[SKIP_ENVIRONMENT_NOT_READY] += 1
+        skip_reason = get_redeploy_skip_reason(
+            source=source,
+            apps_with_in_progress_deployments=apps_with_in_progress_deployments,
+        )
+        if skip_reason is not None:
+            skipped_counts[skip_reason] += 1
         elif source.status == models.Deployment.Status.SUCCEEDED:
             succeeded.append(source)
         else:
@@ -140,7 +156,7 @@ def _build_image_tag(source: models.Deployment) -> str:
     return f"{source.app.slug}-{short_ref}-{timestamp}-{source.id.hex[:8]}"
 
 
-def _queue_source(source: models.Deployment, created_by: models.User) -> None:
+def _queue_source(source: models.Deployment, created_by: models.User, status_message: str) -> None:
     """Clone a source deployment into the normal pending deployment queue."""
     models.Deployment.objects.create(
         blueprint_id=source.blueprint_id,
@@ -150,8 +166,51 @@ def _queue_source(source: models.Deployment, created_by: models.User) -> None:
         git_ref=source.git_ref or source.app.branch,
         image_tag=_build_image_tag(source=source),
         status=models.Deployment.Status.PENDING,
-        status_message="Fleet redeploy all triggered via web UI",
+        status_message=status_message,
         created_by=created_by,
+    )
+
+
+def queue_redeploy(source_id: UUID, created_by: models.User) -> FleetRedeployResult:
+    """Queue one current fleet row when it remains eligible."""
+    with transaction.atomic():
+        source_identity = models.Deployment.objects.only("app_id", "environment_id").get(id=source_id)
+        models.App.objects.select_for_update().get(id=source_identity.app_id)
+        source = (
+            models.Deployment.objects
+            .filter(app_id=source_identity.app_id, environment_id=source_identity.environment_id)
+            .select_related("app", "environment")
+            .order_by("-created_at")
+            .first()
+        )
+        if source is None or source.id != source_id:
+            return FleetRedeployResult(
+                queued_count=0,
+                skipped_counts={SKIP_NEWER_DEPLOYMENT: 1},
+                included_failed=False,
+            )
+
+        skip_reason = get_redeploy_skip_reason(
+            source=source,
+            apps_with_in_progress_deployments=get_apps_with_in_progress_deployments(),
+        )
+        if skip_reason is not None:
+            return FleetRedeployResult(
+                queued_count=0,
+                skipped_counts={skip_reason: 1},
+                included_failed=False,
+            )
+
+        _queue_source(
+            source=source,
+            created_by=created_by,
+            status_message="Fleet redeploy triggered via web UI",
+        )
+
+    return FleetRedeployResult(
+        queued_count=1,
+        skipped_counts={},
+        included_failed=source.status == models.Deployment.Status.FAILED,
     )
 
 
@@ -169,7 +228,11 @@ def queue_redeploy_all(created_by: models.User, include_failed: bool) -> FleetRe
             skipped_counts[SKIP_FAILED_NOT_INCLUDED] += len(candidates.failed)
 
         for source in selected_sources:
-            _queue_source(source=source, created_by=created_by)
+            _queue_source(
+                source=source,
+                created_by=created_by,
+                status_message="Fleet redeploy all triggered via web UI",
+            )
 
     return FleetRedeployResult(
         queued_count=len(selected_sources),
