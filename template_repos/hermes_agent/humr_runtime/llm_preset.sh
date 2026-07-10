@@ -14,7 +14,7 @@ resolve_humr_llm_preset() {
             HUMR_LLM_MODEL="gpt-5.5"
             HUMR_LLM_BASE_URL=""
             HUMR_AUX_PROVIDER="openai-codex"
-            HUMR_AUX_MODEL="gpt-5.4-mini"
+            HUMR_AUX_MODEL="gpt-5.5"
             HUMR_AUX_BASE_URL=""
             ;;
         bedrock)

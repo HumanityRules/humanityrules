@@ -5,7 +5,7 @@ must stay outside the sandbox. This started with ChatGPT-subscription Codex auth
 and now also covers Nous Portal. Companion to `integrations_broker_design.md`
 for TLS-intercept mechanics.
 
-Status: implemented (backend + WebUI device dialog). Deploy-time selection is wired through `HUMR_LLM_PRESET=codex|bedrock`: `Organization.llm_preset` (per-customer, defaults to `codex`; `bedrock` selectable in the Django admin) is persisted as that single blueprint env var, then expanded into concrete model configuration by the container supervisor. The `codex` preset uses `openai-codex` for both routes, with `gpt-5.5` as the main model and `gpt-5.4-mini` for lightweight auxiliary slots. The higher-judgment `kanban_decomposer`, `curator`, `background_review`, and `moa_aggregator` slots stay on the main model.
+Status: implemented (backend + WebUI device dialog). Deploy-time selection is wired through `HUMR_LLM_PRESET=codex|bedrock`: `Organization.llm_preset` (per-customer, defaults to `codex`; `bedrock` selectable in the Django admin) is persisted as that single blueprint env var, then expanded into concrete model configuration by the container supervisor. The `codex` preset uses `openai-codex/gpt-5.5` for the main model and every auxiliary slot.
 
 ## Decisions
 
