@@ -5,7 +5,7 @@ must stay outside the sandbox. This started with ChatGPT-subscription Codex auth
 and now also covers Nous Portal. Companion to `integrations_broker_design.md`
 for TLS-intercept mechanics.
 
-Status: implemented (backend + WebUI device dialog). Deploy-time selection of `HUMR_LLM_PROVIDER=openai-codex` is now wired via the LLM-preset mechanism: `Organization.llm_preset` (per-customer, defaults to `codex`; `bedrock` selectable in the Django admin), resolved in `services/llm_preset_service.py` and applied as a deploy override in `template_deploy_service.deploy_from_template`. The `codex` preset uses `openai-codex` for both routes, with `gpt-5.5` as the main model and `gpt-5.4-mini` for lightweight auxiliary slots. The higher-judgment `kanban_decomposer`, `curator`, `background_review`, and `moa_aggregator` slots stay on the main model. There is no env/global configuration — the per-org field is the only knob.
+Status: implemented (backend + WebUI device dialog). Deploy-time selection is wired through `HUMR_LLM_PRESET=codex|bedrock`: `Organization.llm_preset` (per-customer, defaults to `codex`; `bedrock` selectable in the Django admin) is persisted as that single blueprint env var, then expanded into concrete model configuration by the container supervisor. The `codex` preset uses `openai-codex` for both routes, with `gpt-5.5` as the main model and `gpt-5.4-mini` for lightweight auxiliary slots. The higher-judgment `kanban_decomposer`, `curator`, `background_review`, and `moa_aggregator` slots stay on the main model.
 
 ## Decisions
 
@@ -13,7 +13,7 @@ Status: implemented (backend + WebUI device dialog). Deploy-time selection of `H
 - **Credential model A: TLS-intercept.** Sandbox holds a placeholder; broker swaps the real token on the wire to `chatgpt.com`. Refresh token never enters the sandbox.
 - **Device flow, not redirect.** Codex uses OpenAI's first-party public client on an Auth0 tenant we don't administer, so we can't register a `humanityrules.io` callback. Device flow needs no callback of ours.
 - **Broker polls, HUMR stores.** The minutes-long poll loop fits the always-on broker, not stateless Django. On success the broker hands the refresh token to HUMR, which owns storage, refresh, revoke, and cross-app reuse. Cost: refresh token transits broker memory once (acceptable — broker is outside the sandbox).
-- **Provider selection: set `HUMR_LLM_PROVIDER=openai-codex`.** Hermes ships this provider and the Responses dialect natively; no agent code needed.
+- **Provider selection: set `HUMR_LLM_PRESET=codex`.** The container expands it to Hermes's native `openai-codex` provider and Responses dialect.
 - **Broker injects `ChatGPT-Account-ID`** (not a JWT-shaped placeholder). Account-id never enters the sandbox; placeholder stays a plain non-JWT sentinel.
 
 ## Wire contract

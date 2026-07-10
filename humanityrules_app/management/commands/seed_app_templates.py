@@ -123,71 +123,16 @@ OPENCLAW_TEMPLATE = {
 
 # -- Hermes shared building blocks ------------------------------------------
 
-_HERMES_LLM_VARS = [
+_HERMES_LLM_PRESET_VAR = [
     {
-        "name": "HUMR_LLM_PROVIDER",
-        "group": "Main LLM",
+        "name": "HUMR_LLM_PRESET",
+        "group": "LLM",
         "category": "config",
-        "description": "Hermes provider name: bedrock, custom, anthropic, openrouter, or nous",
+        "description": "HumR-managed LLM preset: codex or bedrock",
         "required": True,
         "auto_generate": False,
-        "default_value": "bedrock",
-        "value": "bedrock",
-        "user_editable": True,
-    },
-    {
-        "name": "HUMR_LLM_MODEL",
-        "group": "Main LLM",
-        "category": "config",
-        "description": "LLM model identifier (e.g. global.anthropic.claude-sonnet-5, global.anthropic.claude-opus-4-8, gpt-5.4-mini)",
-        "required": True,
-        "auto_generate": False,
-        "default_value": "global.anthropic.claude-sonnet-5",
-        "value": "global.anthropic.claude-sonnet-5",
-        "user_editable": True,
-    },
-    {
-        "name": "HUMR_LLM_BASE_URL",
-        "group": "Main LLM",
-        "category": "config",
-        "description": "Provider API base URL (required for custom provider, auto-derived for bedrock and nous, empty otherwise)",
-        "required": False,
-        "auto_generate": False,
-        "default_value": "",
-        "value": "",
-        "user_editable": True,
-    },
-    {
-        "name": "HUMR_AUX_PROVIDER",
-        "group": "Auxiliary LLM",
-        "category": "config",
-        "description": "Provider for lightweight Hermes auxiliary tasks; higher-judgment slots use the main provider",
-        "required": False,
-        "auto_generate": False,
-        "default_value": "bedrock",
-        "value": "bedrock",
-        "user_editable": True,
-    },
-    {
-        "name": "HUMR_AUX_MODEL",
-        "group": "Auxiliary LLM",
-        "category": "config",
-        "description": "Model for lightweight Hermes auxiliary tasks (e.g. global.anthropic.claude-sonnet-5, gpt-5.4-mini)",
-        "required": False,
-        "auto_generate": False,
-        "default_value": "global.anthropic.claude-sonnet-5",
-        "value": "global.anthropic.claude-sonnet-5",
-        "user_editable": True,
-    },
-    {
-        "name": "HUMR_AUX_BASE_URL",
-        "group": "Auxiliary LLM",
-        "category": "config",
-        "description": "Auxiliary provider API base URL (required for custom, auto-derived for bedrock, empty otherwise)",
-        "required": False,
-        "auto_generate": False,
-        "default_value": "",
-        "value": "",
+        "default_value": "codex",
+        "value": "codex",
         "user_editable": True,
     },
 ]
@@ -314,7 +259,7 @@ HERMES_PERSONAL_TEMPLATE = {
             "memory_reservation_mib": 3328,
             "memory_limit_mib": 4096,
             "configurable_variables": (
-                _HERMES_LLM_VARS + _HERMES_AWS_DEFAULT_REGION_VAR
+                _HERMES_LLM_PRESET_VAR + _HERMES_AWS_DEFAULT_REGION_VAR
             ),
             # Supervisor process (outside the nono sandbox) refreshes provider
             # access tokens by POSTing to HUMR /api/integrations/tokens.

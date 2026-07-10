@@ -223,9 +223,9 @@ async def deploy_from_template(
         owner_username=owner_username,
     )
 
-    # The org's LLM preset replaces the template's hard-coded Bedrock model
-    # defaults; explicit caller overrides (CLI --var) are applied afterward so
-    # they still win. Templates without HUMR_LLM_* vars are unaffected.
+    # Persist the org's stable LLM preset name; the Hermes container expands it
+    # into concrete provider/model settings during startup. Explicit caller
+    # overrides (CLI --var) are applied afterward so they still win.
     preset_overrides = llm_preset_service.llm_overrides_for(organization=organization)
     containers_with_preset = _apply_variable_overrides(template.containers, preset_overrides)
     containers_with_overrides = _apply_variable_overrides(containers_with_preset, runtime_variable_overrides)

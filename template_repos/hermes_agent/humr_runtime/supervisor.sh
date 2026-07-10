@@ -46,6 +46,8 @@ export AWS_EC2_METADATA_DISABLED=true
 : "${HERMES_WEBUI_STATE_DIR:?HERMES_WEBUI_STATE_DIR must be set}"
 : "${HOMEBREW_PREFIX:?HOMEBREW_PREFIX must be set}"
 
+. "${HUMR_RUNTIME_DIR}/llm_preset.sh"
+
 INTEGRATIONS_BROKER_CA_DIR="${HUMR_RUN_DIR}/integrations-broker/ca"
 INTEGRATIONS_BROKER_PRIVATE_DIR="${HUMR_RUN_DIR}/integrations-broker/private"
 INTEGRATIONS_BROKER_PROXY_PORT=9950
@@ -72,8 +74,11 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 require_llm_config() {
-    if [ -z "${HUMR_LLM_PROVIDER:-}" ] || [ -z "${HUMR_LLM_MODEL:-}" ]; then
-        die "HUMR_LLM_PROVIDER and HUMR_LLM_MODEL must be set"
+    if [ -z "${HUMR_LLM_PRESET:-}" ]; then
+        die "HUMR_LLM_PRESET must be set (supported: codex, bedrock)"
+    fi
+    if ! resolve_humr_llm_preset "$HUMR_LLM_PRESET"; then
+        die "Unsupported HUMR_LLM_PRESET '$HUMR_LLM_PRESET' (supported: codex, bedrock)"
     fi
 }
 

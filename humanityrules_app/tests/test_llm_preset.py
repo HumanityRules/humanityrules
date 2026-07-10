@@ -6,6 +6,7 @@ that hides the model vars, and the field default flowing through onboarding.
 """
 
 import ast
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -24,6 +25,15 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 HERMES_CONFIG_TEMPLATE_PATH = PROJECT_ROOT / "template_repos/hermes_agent/config.yaml.template"
 HERMES_CONFIG_SOURCE_PATH = PROJECT_ROOT / "template_repos/hermes_agent/vendor/hermes-agent/hermes_cli/config.py"
 HERMES_SUPERVISOR_PATH = PROJECT_ROOT / "template_repos/hermes_agent/humr_runtime/supervisor.sh"
+HERMES_LLM_PRESET_RESOLVER_PATH = PROJECT_ROOT / "template_repos/hermes_agent/humr_runtime/llm_preset.sh"
+LEGACY_LLM_ENV_VARS = {
+    "HUMR_LLM_PROVIDER",
+    "HUMR_LLM_MODEL",
+    "HUMR_LLM_BASE_URL",
+    "HUMR_AUX_PROVIDER",
+    "HUMR_AUX_MODEL",
+    "HUMR_AUX_BASE_URL",
+}
 MAIN_MODEL_AUXILIARY_SLOTS = (
     "kanban_decomposer",
     "curator",
@@ -53,6 +63,35 @@ def _hermes_default_auxiliary_slots() -> set[str]:
     raise AssertionError("Could not find DEFAULT_CONFIG['auxiliary'] in vendored Hermes")
 
 
+def _run_container_preset_resolver(preset: str) -> subprocess.CompletedProcess[str]:
+    """Run the container's shell resolver and return its captured result."""
+    script = """
+source "$1"
+resolve_humr_llm_preset "$2" || exit $?
+printf '%s\n' \
+  "HUMR_LLM_PROVIDER=$HUMR_LLM_PROVIDER" \
+  "HUMR_LLM_MODEL=$HUMR_LLM_MODEL" \
+  "HUMR_LLM_BASE_URL=$HUMR_LLM_BASE_URL" \
+  "HUMR_AUX_PROVIDER=$HUMR_AUX_PROVIDER" \
+  "HUMR_AUX_MODEL=$HUMR_AUX_MODEL" \
+  "HUMR_AUX_BASE_URL=$HUMR_AUX_BASE_URL"
+"""
+    return subprocess.run(
+        ["bash", "-c", script, "bash", str(HERMES_LLM_PRESET_RESOLVER_PATH), preset],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _resolve_container_preset(preset: str) -> dict[str, str]:
+    """Return the concrete environment produced by the container resolver."""
+    result = _run_container_preset_resolver(preset=preset)
+    if result.returncode != 0:
+        raise AssertionError(result.stderr or f"Preset resolver failed with exit {result.returncode}")
+    return dict(line.split("=", 1) for line in result.stdout.splitlines())
+
+
 class LlmPresetResolutionTests(SimpleTestCase):
 
     def test_blank_preset_resolves_to_codex(self) -> None:
@@ -63,26 +102,24 @@ class LlmPresetResolutionTests(SimpleTestCase):
         org = models.Organization(llm_preset="bedrock")
         self.assertEqual(llm_preset_service.resolve_preset_name(organization=org), "bedrock")
 
-    def test_codex_overrides_set_both_main_and_aux(self) -> None:
+    def test_codex_override_persists_only_the_preset(self) -> None:
         org = models.Organization(llm_preset="codex")
-        self.assertEqual(llm_preset_service.llm_overrides_for(organization=org), {
-            "HUMR_LLM_PROVIDER": "openai-codex",
-            "HUMR_LLM_MODEL": CODEX_MAIN_MODEL,
-            "HUMR_AUX_PROVIDER": "openai-codex",
-            "HUMR_AUX_MODEL": CODEX_AUX_MODEL,
-        })
+        self.assertEqual(
+            llm_preset_service.llm_overrides_for(organization=org),
+            {"HUMR_LLM_PRESET": "codex"},
+        )
 
-    def test_bedrock_overrides_set_both_main_and_aux(self) -> None:
+    def test_bedrock_override_persists_only_the_preset(self) -> None:
         org = models.Organization(llm_preset="bedrock")
-        overrides = llm_preset_service.llm_overrides_for(organization=org)
-        self.assertEqual(overrides["HUMR_LLM_PROVIDER"], "bedrock")
-        self.assertEqual(overrides["HUMR_AUX_PROVIDER"], "bedrock")
-        self.assertEqual(overrides["HUMR_LLM_MODEL"], BEDROCK_MODEL)
-        self.assertEqual(overrides["HUMR_AUX_MODEL"], BEDROCK_MODEL)
+        self.assertEqual(
+            llm_preset_service.llm_overrides_for(organization=org),
+            {"HUMR_LLM_PRESET": "bedrock"},
+        )
 
-    def test_unknown_preset_yields_no_overrides(self) -> None:
+    def test_unknown_preset_is_rejected(self) -> None:
         org = models.Organization(llm_preset="gemini")
-        self.assertEqual(llm_preset_service.llm_overrides_for(organization=org), {})
+        with self.assertRaisesMessage(ValueError, "Unknown LLM preset: 'gemini'"):
+            llm_preset_service.llm_overrides_for(organization=org)
 
 
 class LlmPresetDeployApplicationTests(SimpleTestCase):
@@ -102,40 +139,65 @@ class LlmPresetDeployApplicationTests(SimpleTestCase):
 
     def test_codex_preset_reaches_blueprint_env(self) -> None:
         env = self._hermes_env(preset="codex", extra_overrides={})
-        self.assertEqual(env["HUMR_LLM_PROVIDER"], "openai-codex")
-        self.assertEqual(env["HUMR_AUX_PROVIDER"], "openai-codex")
-        self.assertEqual(env["HUMR_LLM_MODEL"], CODEX_MAIN_MODEL)
-        self.assertEqual(env["HUMR_AUX_MODEL"], CODEX_AUX_MODEL)
+        self.assertEqual(env["HUMR_LLM_PRESET"], "codex")
+        self.assertTrue(LEGACY_LLM_ENV_VARS.isdisjoint(env))
 
     def test_blank_preset_defaults_to_codex(self) -> None:
         env = self._hermes_env(preset="", extra_overrides={})
-        self.assertEqual(env["HUMR_LLM_PROVIDER"], "openai-codex")
+        self.assertEqual(env["HUMR_LLM_PRESET"], "codex")
 
     def test_bedrock_preset_reaches_blueprint_env(self) -> None:
         env = self._hermes_env(preset="bedrock", extra_overrides={})
-        self.assertEqual(env["HUMR_LLM_PROVIDER"], "bedrock")
-        self.assertEqual(env["HUMR_AUX_PROVIDER"], "bedrock")
-        self.assertEqual(env["HUMR_LLM_MODEL"], BEDROCK_MODEL)
-        self.assertEqual(env["HUMR_AUX_MODEL"], BEDROCK_MODEL)
+        self.assertEqual(env["HUMR_LLM_PRESET"], "bedrock")
+        self.assertTrue(LEGACY_LLM_ENV_VARS.isdisjoint(env))
 
     def test_explicit_runtime_override_wins_over_preset(self) -> None:
-        env = self._hermes_env(preset="codex", extra_overrides={"HUMR_LLM_PROVIDER": "bedrock"})
-        self.assertEqual(env["HUMR_LLM_PROVIDER"], "bedrock")
-        # Aux is untouched by the override, so it still reflects the preset.
-        self.assertEqual(env["HUMR_AUX_PROVIDER"], "openai-codex")
+        env = self._hermes_env(preset="codex", extra_overrides={"HUMR_LLM_PRESET": "bedrock"})
+        self.assertEqual(env["HUMR_LLM_PRESET"], "bedrock")
+
+
+class HermesPresetResolverTests(SimpleTestCase):
+
+    def test_codex_resolves_main_and_lightweight_auxiliary_models(self) -> None:
+        resolved = _resolve_container_preset(preset="codex")
+
+        self.assertEqual(resolved["HUMR_LLM_PROVIDER"], "openai-codex")
+        self.assertEqual(resolved["HUMR_LLM_MODEL"], CODEX_MAIN_MODEL)
+        self.assertEqual(resolved["HUMR_AUX_PROVIDER"], "openai-codex")
+        self.assertEqual(resolved["HUMR_AUX_MODEL"], CODEX_AUX_MODEL)
+
+    def test_bedrock_resolves_main_and_auxiliary_to_sonnet(self) -> None:
+        resolved = _resolve_container_preset(preset="bedrock")
+
+        self.assertEqual(resolved["HUMR_LLM_PROVIDER"], "bedrock")
+        self.assertEqual(resolved["HUMR_LLM_MODEL"], BEDROCK_MODEL)
+        self.assertEqual(resolved["HUMR_AUX_PROVIDER"], "bedrock")
+        self.assertEqual(resolved["HUMR_AUX_MODEL"], BEDROCK_MODEL)
+
+    def test_resolver_supports_every_control_plane_preset(self) -> None:
+        for preset in models.Organization.LlmPreset.values:
+            with self.subTest(preset=preset):
+                result = _run_container_preset_resolver(preset=preset)
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_unknown_preset_is_rejected(self) -> None:
+        result = _run_container_preset_resolver(preset="gemini")
+
+        self.assertNotEqual(result.returncode, 0)
 
 
 class HermesAuxiliaryConfigTemplateTests(SimpleTestCase):
 
     def test_template_pins_every_auxiliary_slot(self) -> None:
         template = HERMES_CONFIG_TEMPLATE_PATH.read_text(encoding="utf-8")
+        resolved = _resolve_container_preset(preset="codex")
         rendered = (
-            template.replace("__CONFIG_PROVIDER__", "openai-codex")
-            .replace("__MODEL__", CODEX_MAIN_MODEL)
-            .replace("__BASE_URL__", "")
-            .replace("__AUX_PROVIDER__", "openai-codex")
-            .replace("__AUX_MODEL__", CODEX_AUX_MODEL)
-            .replace("__AUX_BASE_URL__", "")
+            template.replace("__CONFIG_PROVIDER__", resolved["HUMR_LLM_PROVIDER"])
+            .replace("__MODEL__", resolved["HUMR_LLM_MODEL"])
+            .replace("__BASE_URL__", resolved["HUMR_LLM_BASE_URL"])
+            .replace("__AUX_PROVIDER__", resolved["HUMR_AUX_PROVIDER"])
+            .replace("__AUX_MODEL__", resolved["HUMR_AUX_MODEL"])
+            .replace("__AUX_BASE_URL__", resolved["HUMR_AUX_BASE_URL"])
             .replace("__PROVIDERS_BLOCK__", "providers: {}")
         )
         config = yaml.safe_load(rendered)
@@ -175,8 +237,8 @@ class LlmPresetDeployFormTests(SimpleTestCase):
         shown = {v["name"] for v in template_deploy._editable_variables(template)}
 
         self.assertEqual(raw_editable - shown, raw_editable & llm_preset_service.DEPLOY_FORM_HIDDEN_VARS)
-        self.assertNotIn("HUMR_LLM_PROVIDER", shown)
-        self.assertNotIn("HUMR_AUX_MODEL", shown)
+        self.assertNotIn("HUMR_LLM_PRESET", shown)
+        self.assertTrue(LEGACY_LLM_ENV_VARS.isdisjoint(raw_editable))
 
 
 class LlmPresetOnboardingDefaultTests(TestCase):

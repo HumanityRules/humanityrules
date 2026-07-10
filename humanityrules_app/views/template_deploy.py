@@ -30,7 +30,7 @@ def _editable_variables(template: models.AppTemplate) -> list[dict]:
     container declares it; at deploy time, overrides are applied by name to
     every container that has a matching variable.
 
-    LLM provider/model vars are omitted: the model is an org-level preset
+    The LLM preset var is omitted: model routing is an org-level policy
     (Organization.llm_preset, applied in template_deploy_service), not a
     per-deploy choice, so they never surface in the form.
     """
