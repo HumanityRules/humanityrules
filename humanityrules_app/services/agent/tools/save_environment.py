@@ -7,6 +7,7 @@ If context_environment is already set, updates the existing draft/error environm
 
 from dataclasses import asdict, dataclass
 
+from django.utils import timezone
 from django.utils.text import slugify
 
 import humanityrules_app.models as models
@@ -77,20 +78,40 @@ async def save_environment(
             )
 
         attempted_provisioning = environment.status == models.Environment.Status.ERROR
-        environment.name = environment_name
-        environment.aws_region = aws_region
-        environment.shared_alb_hosted_zone = normalized_hosted_zone_name
-        environment.status = models.Environment.Status.DRAFT
-        environment.status_message = "Ready to provision"
-        environment.vpc_id = ""
-        environment.cluster_arn = ""
+        previous_status = environment.status
+        updates = {
+            "name": environment_name,
+            "aws_region": aws_region,
+            "shared_alb_hosted_zone": normalized_hosted_zone_name,
+            "status": models.Environment.Status.DRAFT,
+            "status_message": "Ready to provision",
+            "vpc_id": "",
+            "cluster_arn": "",
+        }
 
         if not attempted_provisioning:
-            environment.slug = slug
-            environment.vpc_stack_name = _build_stack_name(slug=slug, stack_kind="vpc")
-            environment.cluster_stack_name = _build_stack_name(slug=slug, stack_kind="cluster")
+            updates.update({
+                "slug": slug,
+                "vpc_stack_name": _build_stack_name(slug=slug, stack_kind="vpc"),
+                "cluster_stack_name": _build_stack_name(slug=slug, stack_kind="cluster"),
+            })
 
-        await environment.asave()
+        updated = await models.Environment.objects.filter(
+            id=environment.id,
+            status=previous_status,
+        ).aupdate(
+            **updates,
+            updated_at=timezone.now(),
+        )
+        if updated != 1:
+            current_status = await models.Environment.objects.values_list("status", flat=True).aget(id=environment.id)
+            raise ValueError(
+                f"Environment '{environment.name}' changed to '{current_status}' while the draft was being saved. "
+                "Review its current state and try again."
+            )
+
+        for field_name, value in updates.items():
+            setattr(environment, field_name, value)
         created = False
     else:
         existing_environment = await models.Environment.objects.filter(

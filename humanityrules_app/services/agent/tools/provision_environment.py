@@ -9,6 +9,7 @@ environment_executor.
 from dataclasses import dataclass, asdict
 
 import humanityrules_app.models as models
+from humanityrules_app.services.jobs import environment_operation_gate
 
 
 @dataclass
@@ -84,9 +85,22 @@ async def provision_environment(
             "Only draft or error environments can be queued."
         )
 
+    previous_status = environment.status
+    transitioned = await environment_operation_gate.atransition_environment_status(
+        environment_id=environment.id,
+        expected_statuses=(previous_status,),
+        new_status=models.Environment.Status.PENDING,
+        status_message="Queued for provisioning",
+    )
+    if not transitioned:
+        current_status = await models.Environment.objects.values_list("status", flat=True).aget(id=environment.id)
+        raise ValueError(
+            f"Environment '{environment.name}' changed to '{current_status}' while provisioning was being queued. "
+            "Review its current state and try again."
+        )
+
     environment.status = models.Environment.Status.PENDING
     environment.status_message = "Queued for provisioning"
-    await environment.asave(update_fields=["status", "status_message", "updated_at"])
 
     return EnvironmentSummary(
         id=str(environment.id),

@@ -8,11 +8,13 @@ This is the main entry point called by the job worker.
 import logging
 
 from django.conf import settings
+from django.utils import timezone
 
 from humanityrules_app import models
 from humanityrules_app.services import infra_customer
 from humanityrules_app.services.infra_customer import cloudformation_utils
 
+from . import environment_operation_gate
 from . import job_logging
 
 logger = logging.getLogger(__name__)
@@ -72,6 +74,13 @@ def run_provisioning(environment_id: str) -> bool:
         logger.error("Environment %(environment_id)s not found", {"environment_id": environment_id})
         return False
 
+    if environment.status != models.Environment.Status.PROVISIONING:
+        logger.error(
+            "Environment %(environment_id)s is no longer claimed for provisioning (status: %(status)s)",
+            {"environment_id": environment_id, "status": environment.status},
+        )
+        return False
+
     aws_account = environment.aws_account
 
     with job_logging.EnvironmentLogContext(
@@ -83,10 +92,15 @@ def run_provisioning(environment_id: str) -> bool:
             {"environment_name": environment.name, "account_name": aws_account.name},
         )
 
-        # Update status to PROVISIONING
-        environment.status = models.Environment.Status.PROVISIONING
-        environment.status_message = "Provisioning started"
-        environment.save()
+        started = environment_operation_gate.transition_environment_status(
+            environment_id=environment.id,
+            expected_statuses=(models.Environment.Status.PROVISIONING,),
+            new_status=models.Environment.Status.PROVISIONING,
+            status_message="Provisioning started",
+        )
+        if not started:
+            logger.error("Environment %(environment_id)s provisioning claim was superseded", {"environment_id": environment_id})
+            return False
 
         try:
             # Get AWS session
@@ -116,9 +130,22 @@ def run_provisioning(environment_id: str) -> bool:
 
             if success:
                 _sync_outputs_from_cloudformation(session=session, environment=environment)
-                environment.status = models.Environment.Status.READY
-                environment.status_message = "Provisioning completed successfully"
-                environment.save()
+                updated = models.Environment.objects.filter(
+                    id=environment.id,
+                    status=models.Environment.Status.PROVISIONING,
+                ).update(
+                    status=models.Environment.Status.READY,
+                    status_message="Provisioning completed successfully",
+                    vpc_id=environment.vpc_id,
+                    cluster_arn=environment.cluster_arn,
+                    updated_at=timezone.now(),
+                )
+                if updated != 1:
+                    logger.error(
+                        "Environment %(environment_id)s provisioning result was superseded",
+                        {"environment_id": environment_id},
+                    )
+                    return False
 
                 logger.info(
                     "Environment '%(environment_name)s' provisioned successfully",
@@ -126,9 +153,12 @@ def run_provisioning(environment_id: str) -> bool:
                 )
                 return True
 
-            environment.status = models.Environment.Status.ERROR
-            environment.status_message = "Infrastructure deployment failed. Check CloudFormation console for details."
-            environment.save()
+            environment_operation_gate.transition_environment_status(
+                environment_id=environment.id,
+                expected_statuses=(models.Environment.Status.PROVISIONING,),
+                new_status=models.Environment.Status.ERROR,
+                status_message="Infrastructure deployment failed. Check CloudFormation console for details.",
+            )
 
             logger.error(
                 "Environment '%(environment_name)s' provisioning failed",
@@ -139,7 +169,10 @@ def run_provisioning(environment_id: str) -> bool:
         except Exception as e:
             logger.exception("Provisioning error: %(error)s", {"error": str(e)})
 
-            environment.status = models.Environment.Status.ERROR
-            environment.status_message = f"Provisioning error: {e}"
-            environment.save()
+            environment_operation_gate.transition_environment_status(
+                environment_id=environment.id,
+                expected_statuses=(models.Environment.Status.PROVISIONING,),
+                new_status=models.Environment.Status.ERROR,
+                status_message=f"Provisioning error: {e}",
+            )
             return False

@@ -4,6 +4,7 @@ Control plane operations for environment provisioning and app deployments.
 Usage:
     uv run manage.py humr_control create-env --aws-account "Name" --name default --region us-east-1 --hosted-zone example.com
     uv run manage.py humr_control teardown-env --slug default --aws-account "Name"
+    uv run manage.py humr_control teardown-env --slug default --aws-account "Name" --force
     uv run manage.py humr_control teardown-app --app ai-detector-and-humanizer
     uv run manage.py humr_control teardown-app --app foo --remove-app --delete-secrets --delete-persistent-data --delete-policies
     uv run manage.py humr_control deploy-app-template --template hermes-agent --org acme-corp --workspace default --env default --app-name hermes-vmendi
@@ -25,19 +26,20 @@ from uuid import UUID
 from asgiref.sync import async_to_sync
 from botocore.exceptions import ClientError
 from django.conf import settings
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandParser
 from django.db import transaction
 from django.utils.text import slugify
 
 from humanityrules_app import models
 from humanityrules_app.services.app_templates import template_deploy_service
 from humanityrules_app.services.infra_customer import iam_utils
+from humanityrules_app.services.jobs import environment_operation_gate
 
 
 class Command(BaseCommand):
     help = "Control plane operations for environments and deployments"
 
-    def add_arguments(self, parser):
+    def add_arguments(self, parser: CommandParser) -> None:
         subparsers = parser.add_subparsers(dest="operation", help="Operation to perform")
 
         # create-env
@@ -52,6 +54,11 @@ class Command(BaseCommand):
         teardown_env = subparsers.add_parser("teardown-env", help="Tear down an environment")
         teardown_env.add_argument("--slug", required=True, help="Environment slug")
         teardown_env.add_argument("--aws-account", required=True, help="AWS account name")
+        teardown_env.add_argument(
+            "--force",
+            action="store_true",
+            help="Recover stuck pending/provisioning or app-operation states before queuing teardown.",
+        )
 
         # teardown-app
         teardown_app = subparsers.add_parser("teardown-app", help="Tear down an app's deployment (and optionally remove the app)")
@@ -228,7 +235,7 @@ class Command(BaseCommand):
         self.stdout.write(self.style.WARNING("\nProvisioning will start automatically (job worker picks up pending environments)"))
         self.stdout.write("")
 
-    def _handle_redeploy_env(self, options):
+    def _handle_redeploy_env(self, options: dict[str, object]) -> None:
         """Re-queue an environment for CloudFormation provisioning by flipping status to PENDING.
 
         Allowed source statuses: DRAFT, ERROR, READY (re-converge a working env).
@@ -282,9 +289,18 @@ class Command(BaseCommand):
             return
 
         old_status = env.status
-        env.status = models.Environment.Status.PENDING
-        env.status_message = f"Redeploy triggered via humr_control (was: {old_status})"
-        env.save(update_fields=["status", "status_message", "updated_at"])
+        transitioned = environment_operation_gate.transition_environment_status(
+            environment_id=env.id,
+            expected_statuses=(old_status,),
+            new_status=models.Environment.Status.PENDING,
+            status_message=f"Redeploy triggered via humr_control (was: {old_status})",
+        )
+        if not transitioned:
+            current_status = models.Environment.objects.filter(id=env.id).values_list("status", flat=True).first()
+            self.stderr.write(self.style.ERROR(
+                f"Environment '{slug}' changed to '{current_status}' while redeploy was being queued; try again."
+            ))
+            return
 
         self.stdout.write(self.style.SUCCESS(f"\nEnvironment '{slug}' queued for redeploy"))
         self.stdout.write(f"  AWS Account: {aws_account.name}")
@@ -292,10 +308,11 @@ class Command(BaseCommand):
         self.stdout.write(self.style.WARNING("Provisioning will restart automatically (job worker picks up pending environments)"))
         self.stdout.write("")
 
-    def _handle_teardown_env(self, options):
+    def _handle_teardown_env(self, options: dict[str, object]) -> None:
         """Tear down an environment by setting status to TEARDOWN_PENDING."""
         slug = options["slug"]
         account_name = options["aws_account"]
+        force = bool(options.get("force", False))
 
         # Find AWS account
         try:
@@ -311,23 +328,39 @@ class Command(BaseCommand):
             self.stderr.write(self.style.ERROR(f"Environment '{slug}' not found for account '{account_name}'"))
             return
 
-        # Check current status
-        if env.status == models.Environment.Status.TEARDOWN_PENDING:
+        queue_result = environment_operation_gate.queue_environment_teardown(
+            environment_id=env.id,
+            status_message="Force teardown triggered via humr_control" if force else "Teardown triggered via humr_control",
+            force=force,
+        )
+        if queue_result.reason == environment_operation_gate.REASON_ALREADY_PENDING:
             self.stdout.write(self.style.WARNING(f"Environment '{slug}' is already queued for teardown"))
             return
-
-        if env.status == models.Environment.Status.TEARING_DOWN:
+        if queue_result.reason == environment_operation_gate.REASON_ALREADY_RUNNING:
             self.stderr.write(self.style.ERROR(f"Environment '{slug}' is already being torn down"))
             return
-
-        # Set to teardown pending
-        old_status = env.status
-        env.status = models.Environment.Status.TEARDOWN_PENDING
-        env.status_message = f"Teardown triggered (was: {old_status})"
-        env.save(update_fields=["status", "status_message", "updated_at"])
+        if queue_result.reason == environment_operation_gate.REASON_ACTIVE_APP_OPERATIONS:
+            self.stderr.write(self.style.ERROR(
+                f"You cannot tear down environment '{env.name}' while an app deployment, app teardown, "
+                "or permissions update is running. Retry with --force only if that work is stranded."
+            ))
+            return
+        if queue_result.reason == environment_operation_gate.REASON_ACTIVE_APP_REMOVAL:
+            self.stderr.write(self.style.ERROR(
+                f"You cannot tear down environment '{env.name}' until its running app removal finishes; "
+                "--force cannot skip required app cleanup."
+            ))
+            return
+        if not queue_result.queued:
+            self.stderr.write(self.style.ERROR(
+                f"Environment '{slug}' is in '{queue_result.previous_status}' state - cannot tear down"
+            ))
+            return
 
         self.stdout.write(self.style.SUCCESS(f"\nEnvironment '{slug}' set to TEARDOWN_PENDING"))
-        self.stdout.write(f"  Previous status: {old_status}")
+        self.stdout.write(f"  Previous status: {queue_result.previous_status}")
+        if force:
+            self.stdout.write("  Force recovery: yes")
         self.stdout.write(self.style.WARNING("Teardown will start automatically (job worker picks up pending teardowns)"))
         self.stdout.write("")
 
@@ -414,6 +447,13 @@ class Command(BaseCommand):
 
         old_label = app.label
         with transaction.atomic():
+            environments = environment_operation_gate.lock_app_environments_for_removal(app_id=app.id)
+            if environment_operation_gate.has_tearing_down_environment(environments=environments):
+                self.stderr.write(self.style.ERROR(
+                    f"App '{app.slug}' cannot be removed after a related environment teardown has started."
+                ))
+                return
+
             job = models.AppRemovalJob.objects.create(
                 organization=app.organization,
                 app_id_snapshot=app.id,

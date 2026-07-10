@@ -11,13 +11,15 @@ import threading
 import time
 
 from django.db import connections, transaction
+from django.db.models import Exists, OuterRef
 
-from humanityrules_app.models import App, AppPermissionRequest, AppRemovalJob, CostRefreshJob, Deployment, Environment
+from humanityrules_app.models import App, AppPermissionRequest, AppRemovalJob, CostRefreshJob, Deployment, DeploymentBlueprint, Environment
 
 from . import app_deployment_executor
 from . import app_deployment_teardown_executor
 from . import app_remove_executor
 from . import environment_provisioning_executor
+from . import environment_operation_gate
 from . import environment_teardown_executor
 from . import permissions_apply_executor
 from humanityrules_app.services.cost import cost_refresh
@@ -36,24 +38,21 @@ _worker_thread: threading.Thread | None = None
 # unscoped main worker).
 _worker_label: str = ""
 
-_APP_DEPLOYMENT_RUNNING_STATUSES = (
-    Deployment.Status.BUILDING,
-    Deployment.Status.PUSHING,
-    Deployment.Status.DEPLOYING,
-    Deployment.Status.STARTING,
-)
-
-
 def _claim_pending_app_deployment(label: str) -> Deployment | None:
     """Claim a pending deployment without overlapping work for the same app."""
     with transaction.atomic():
         apps_with_running_deployments = Deployment.objects.filter(
-            status__in=_APP_DEPLOYMENT_RUNNING_STATUSES,
+            status__in=environment_operation_gate.RUNNING_DEPLOYMENT_STATUSES,
         ).values("app_id")
         deployment = (
             Deployment.objects
             .select_for_update(skip_locked=True)
-            .filter(status=Deployment.Status.PENDING, app__label=label)
+            .filter(
+                status=Deployment.Status.PENDING,
+                app__label=label,
+                app__status=App.Status.ACTIVE,
+                environment__status=Environment.Status.READY,
+            )
             .exclude(app_id__in=apps_with_running_deployments)
             .select_related(
                 "app",
@@ -100,7 +99,12 @@ def _claim_pending_app_deployment_teardown(label: str) -> Deployment | None:
         deployment = (
             Deployment.objects
             .select_for_update(skip_locked=True)
-            .filter(status=Deployment.Status.TEARDOWN_PENDING, app__label=label)
+            .filter(
+                status=Deployment.Status.TEARDOWN_PENDING,
+                app__label=label,
+                app__status=App.Status.ACTIVE,
+                environment__status=Environment.Status.READY,
+            )
             .select_related(
                 "app",
                 "app__workspace",
@@ -155,7 +159,12 @@ def _claim_pending_permissions_apply(label: str) -> AppPermissionRequest | None:
         apr = (
             AppPermissionRequest.objects
             .select_for_update(skip_locked=True)
-            .filter(status=AppPermissionRequest.Status.APPROVED_PENDING_APPLY, app__label=label)
+            .filter(
+                status=AppPermissionRequest.Status.APPROVED_PENDING_APPLY,
+                app__label=label,
+                app__status=App.Status.ACTIVE,
+                environment__status=Environment.Status.READY,
+            )
             .select_related("app", "environment")
             .first()
         )
@@ -173,10 +182,33 @@ def _claim_pending_permissions_apply(label: str) -> AppPermissionRequest | None:
 def _claim_pending_environment_teardown() -> Environment | None:
     """Atomically claim a pending environment teardown. Unscoped only."""
     with transaction.atomic():
+        running_deployments = Deployment.objects.filter(
+            environment_id=OuterRef("pk"),
+            status__in=environment_operation_gate.RUNNING_DEPLOYMENT_STATUSES,
+        )
+        running_permission_applies = AppPermissionRequest.objects.filter(
+            environment_id=OuterRef("pk"),
+            status__in=environment_operation_gate.RUNNING_PERMISSION_STATUSES,
+        )
+        active_removal_app_ids = AppRemovalJob.objects.filter(
+            status__in=environment_operation_gate.ACTIVE_APP_REMOVAL_STATUSES,
+        ).values("app_id_snapshot")
+        environments_with_active_app_removals = DeploymentBlueprint.objects.filter(
+            app_id__in=active_removal_app_ids,
+        ).values("environment_id")
         environment = (
             Environment.objects
             .select_for_update(skip_locked=True)
             .filter(status=Environment.Status.TEARDOWN_PENDING)
+            .exclude(id__in=environments_with_active_app_removals)
+            .annotate(
+                has_running_deployment=Exists(running_deployments),
+                has_running_permission_apply=Exists(running_permission_applies),
+            )
+            .filter(
+                has_running_deployment=False,
+                has_running_permission_apply=False,
+            )
             .select_related("aws_account")
             .first()
         )
@@ -202,13 +234,16 @@ def _run_environment_teardown_thread(environment_id: str) -> None:
 
 
 def _claim_pending_app_removal(label: str) -> AppRemovalJob | None:
-    """Atomically claim a pending app removal job whose App matches `label`.
+    """Claim app removal after locking every environment needed for cleanup.
 
     AppRemovalJob has no FK to App (only `app_id_snapshot`), so we filter via a
     subquery on App.id. The App row still exists at claim time — `app.delete()`
     runs at the very end of `run_removal`, long after the worker has claimed.
     """
     with transaction.atomic():
+        apps_in_tearing_down_environments = DeploymentBlueprint.objects.filter(
+            environment__status=Environment.Status.TEARING_DOWN,
+        ).values("app_id")
         job = (
             AppRemovalJob.objects
             .select_for_update(skip_locked=True)
@@ -216,10 +251,17 @@ def _claim_pending_app_removal(label: str) -> AppRemovalJob | None:
                 status=AppRemovalJob.Status.PENDING,
                 app_id_snapshot__in=App.objects.filter(label=label).values("id"),
             )
+            .exclude(app_id_snapshot__in=apps_in_tearing_down_environments)
             .first()
         )
 
         if job:
+            environments = environment_operation_gate.lock_app_environments_for_removal(
+                app_id=job.app_id_snapshot,
+            )
+            if environment_operation_gate.has_tearing_down_environment(environments=environments):
+                return None
+
             job.status = AppRemovalJob.Status.RUNNING
             job.status_message = "Claimed by worker"
             job.save(update_fields=["status", "status_message", "updated_at"])
