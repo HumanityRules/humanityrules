@@ -1,12 +1,15 @@
 """End-to-end tests for the FastAPI policy-proxy app, with PDP + upstream mocked."""
 
+from collections.abc import Awaitable, Callable
 from dataclasses import replace
+from unittest import mock
 from urllib.parse import parse_qs, urlparse
 
 import httpx
 from fastapi.testclient import TestClient
 
 from policy_proxy import app as app_mod
+from policy_proxy import config as config_mod
 from policy_proxy import jwt_verify
 
 
@@ -18,13 +21,20 @@ def _streamed_body(*chunks: bytes):
     return _gen()
 
 
-def _mk_client(cfg, fake_jwks_client, pdp_handler, upstream_handler) -> TestClient:
+def _mk_client(
+    cfg: config_mod.PolicyProxyConfig,
+    fake_jwks_client: object,
+    pdp_handler: Callable[[httpx.Request], Awaitable[httpx.Response]],
+    upstream_handler: Callable[[httpx.Request], Awaitable[httpx.Response]],
+) -> TestClient:
     """Build a real create_app() + swap http_client and jwks_client on app.state."""
 
     async def _router(request: httpx.Request) -> httpx.Response:
         url = str(request.url)
         if url.startswith(cfg.pdp_url):
             return await pdp_handler(request)
+        if url.startswith(f"{cfg.control_plane_url}/api/runtime/policy-proxy-activity"):
+            return httpx.Response(200, json={"ok": True})
         upstream_prefix = f"http://{cfg.upstream_host}:{cfg.upstream_port}"
         if url.startswith(upstream_prefix):
             return await upstream_handler(request)
@@ -106,6 +116,29 @@ def test_allow_proxies_to_upstream(policy_proxy_config, fake_jwks_client, jwt_mi
     assert response.text == "hello from upstream"
 
 
+def test_allow_observes_policy_proxy_activity(
+    policy_proxy_config: config_mod.PolicyProxyConfig,
+    fake_jwks_client: object,
+    jwt_minter: Callable[..., str],
+) -> None:
+    async def pdp(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"decision": "allow", "reason": "ok"})
+
+    async def upstream(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=_streamed_body(b"ok"))
+
+    client = _mk_client(policy_proxy_config, fake_jwks_client, pdp, upstream)
+    client.app.state.activity_reporter.observe = mock.Mock()
+
+    response = client.get(
+        "/chat/new",
+        cookies={jwt_verify.SESSION_COOKIE_NAME: jwt_minter()},
+    )
+
+    assert response.status_code == 200
+    client.app.state.activity_reporter.observe.assert_called_once_with()
+
+
 def test_deny_returns_403(policy_proxy_config, fake_jwks_client, jwt_minter) -> None:
     async def pdp(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"decision": "deny", "reason": "no-match"})
@@ -120,6 +153,29 @@ def test_deny_returns_403(policy_proxy_config, fake_jwks_client, jwt_minter) -> 
         cookies={jwt_verify.SESSION_COOKIE_NAME: token},
     )
     assert response.status_code == 403
+
+
+def test_deny_does_not_observe_policy_proxy_activity(
+    policy_proxy_config: config_mod.PolicyProxyConfig,
+    fake_jwks_client: object,
+    jwt_minter: Callable[..., str],
+) -> None:
+    async def pdp(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"decision": "deny", "reason": "no-match"})
+
+    async def upstream(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("upstream should not be called on deny")
+
+    client = _mk_client(policy_proxy_config, fake_jwks_client, pdp, upstream)
+    client.app.state.activity_reporter.observe = mock.Mock()
+
+    response = client.get(
+        "/chat/new",
+        cookies={jwt_verify.SESSION_COOKIE_NAME: jwt_minter()},
+    )
+
+    assert response.status_code == 403
+    client.app.state.activity_reporter.observe.assert_not_called()
 
 
 def test_pdp_unreachable_returns_503(policy_proxy_config, fake_jwks_client, jwt_minter) -> None:

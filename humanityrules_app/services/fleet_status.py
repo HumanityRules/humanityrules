@@ -80,11 +80,23 @@ def build_fleet_snapshot() -> list[EnvGroup]:
         .order_by("-created_at")
         .values("service_url")[:1]
     )
+    latest_policy_proxy_activity = (
+        models.AppEnvironmentActivity.objects
+        .filter(
+            organization_id=OuterRef("app__organization_id"),
+            app_id=OuterRef("app_id"),
+            environment_id=OuterRef("environment_id"),
+        )
+        .values("last_policy_proxy_activity_at")[:1]
+    )
     deployments = (
         models.Deployment.objects
         .filter(id=Subquery(latest_per_app_env))
         .select_related("app", "environment")
-        .annotate(live_service_url=Subquery(latest_succeeded_url))
+        .annotate(
+            live_service_url=Subquery(latest_succeeded_url),
+            last_policy_proxy_activity_at=Subquery(latest_policy_proxy_activity),
+        )
         .order_by("app__slug")
     )
     for deployment in deployments:

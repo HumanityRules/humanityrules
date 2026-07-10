@@ -11,6 +11,7 @@ and bounces the browser to the original ``rd`` URL.
 
 import logging
 import time
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any
@@ -21,6 +22,7 @@ import jwt
 from fastapi import FastAPI, Request, WebSocket
 from fastapi.responses import PlainTextResponse, RedirectResponse, Response
 
+from . import activity_reporter as activity_reporter_mod
 from . import config as config_mod
 from . import jwt_verify
 from . import pdp as pdp_mod
@@ -169,8 +171,9 @@ def create_app(cfg: config_mod.PolicyProxyConfig) -> FastAPI:
 
 
     @asynccontextmanager
-    async def lifespan(app: FastAPI):
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
+        await app.state.activity_reporter.close()
         await app.state.http_client.aclose()
 
     app = FastAPI(lifespan=lifespan)
@@ -187,6 +190,13 @@ def create_app(cfg: config_mod.PolicyProxyConfig) -> FastAPI:
     )
     app.state.pdp_cache = pdp_cache_mod.PdpDecisionCache(
         ttl_seconds=cfg.pdp_cache_ttl_seconds,
+    )
+    app.state.activity_reporter = activity_reporter_mod.PolicyProxyActivityReporter(
+        http_client_provider=lambda: app.state.http_client,
+        endpoint_url=f"{cfg.control_plane_url}/api/runtime/policy-proxy-activity",
+        env_bearer_token=cfg.env_bearer_token,
+        app_id=cfg.app_id,
+        interval_seconds=cfg.activity_report_interval_seconds,
     )
 
     @app.get(f"{INTERNAL_PATH_PREFIX}/healthz")
@@ -264,6 +274,7 @@ def create_app(cfg: config_mod.PolicyProxyConfig) -> FastAPI:
             )
 
         assert result.identity is not None
+        state.activity_reporter.observe()
         return await proxy_mod.proxy_to_upstream(
             request=request,
             identity=result.identity,
@@ -296,6 +307,7 @@ def create_app(cfg: config_mod.PolicyProxyConfig) -> FastAPI:
             return
 
         assert result.identity is not None
+        state.activity_reporter.observe()
         try:
             await proxy_mod.proxy_to_upstream_ws(
                 websocket=websocket,

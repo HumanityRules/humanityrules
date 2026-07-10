@@ -23,12 +23,15 @@ requests still receive the `302` directly.
 | `HUMR_ENV_SLUG` | `humr-sandbox` | For log lines only. |
 | `HUMR_ENV_DOMAIN` | `humr-sandbox.humrsandbox.com` | Parent domain the session cookie is scoped to. |
 | `HUMR_AUTH_BASE_URL` | `https://humanityrules.io` | Control-plane base URL; the sidecar bounces unauthenticated requests to `<base>/auth/env-start`. |
+| `HUMR_CONTROL_PLANE_URL` | `https://humanityrules.io` | Control-plane base URL for runtime activity reports. |
 | `HUMR_JWKS_URL` | `https://humanityrules.io/.well-known/jwks.json` | Central JWKS endpoint for verifying session JWTs. |
 | `HUMR_PDP_URL` | `https://humanityrules.io/api/pdp/evaluate` | Central authorization endpoint. |
 | `HUMR_ENV_BEARER` | 64 random chars | Environment bearer token. From Secrets Manager. Used by any env component calling the HUMR control plane. |
 | `HUMR_UPSTREAM_HOST` | `127.0.0.1` | The app container. |
 | `HUMR_UPSTREAM_PORT` | `8787` | The app container's port. |
 | `HUMR_LISTEN_PORT` | `8443` | Port the policy proxy listens on. ALB routes here. |
+
+`HUMR_POLICY_PROXY_ACTIVITY_INTERVAL_SECONDS` optionally controls the authorized-traffic reporting interval. It defaults to 300 seconds.
 
 ## Local development
 

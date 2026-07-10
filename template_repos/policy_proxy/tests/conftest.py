@@ -58,6 +58,7 @@ def policy_proxy_config() -> config_mod.PolicyProxyConfig:
         env_slug="humr-sandbox",
         env_domain="humr-sandbox.humrsandbox.com",
         auth_base_url="https://auth.humr-sandbox.humrsandbox.com",
+        control_plane_url="https://humanityrules.io",
         jwks_url="https://auth.humr-sandbox.humrsandbox.com/.well-known/jwks.json",
         pdp_url="https://humanityrules.io/api/pdp/evaluate",
         env_bearer_token="t" * 64,
@@ -65,6 +66,7 @@ def policy_proxy_config() -> config_mod.PolicyProxyConfig:
         upstream_port=8787,
         listen_port=8443,
         pdp_cache_ttl_seconds=0,  # disabled by default; tests opt in explicitly
+        activity_report_interval_seconds=300,
     )
 
 

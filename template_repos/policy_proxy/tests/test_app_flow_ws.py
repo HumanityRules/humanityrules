@@ -36,6 +36,8 @@ def _mk_app(
         url = str(request.url)
         if url.startswith(cfg.pdp_url):
             return await pdp_handler(request)
+        if url.startswith(f"{cfg.control_plane_url}/api/runtime/policy-proxy-activity"):
+            return httpx.Response(200, json={"ok": True})
         raise AssertionError(f"unexpected outbound URL: {url}")
 
     fastapi_app = app_mod.create_app(cfg=cfg)
