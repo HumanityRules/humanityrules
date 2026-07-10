@@ -19,7 +19,6 @@ from humanityrules_app.services.app_templates import template_deploy_service
 from humanityrules_app.views import template_deploy
 
 CODEX_MAIN_MODEL = "gpt-5.5"
-CODEX_AUX_MODEL = "gpt-5.4-mini"
 BEDROCK_MODEL = "global.anthropic.claude-sonnet-5"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 HERMES_CONFIG_TEMPLATE_PATH = PROJECT_ROOT / "template_repos/hermes_agent/config.yaml.template"
@@ -158,13 +157,13 @@ class LlmPresetDeployApplicationTests(SimpleTestCase):
 
 class HermesPresetResolverTests(SimpleTestCase):
 
-    def test_codex_resolves_main_and_lightweight_auxiliary_models(self) -> None:
+    def test_codex_resolves_main_and_auxiliary_to_gpt_5_5(self) -> None:
         resolved = _resolve_container_preset(preset="codex")
 
         self.assertEqual(resolved["HUMR_LLM_PROVIDER"], "openai-codex")
         self.assertEqual(resolved["HUMR_LLM_MODEL"], CODEX_MAIN_MODEL)
         self.assertEqual(resolved["HUMR_AUX_PROVIDER"], "openai-codex")
-        self.assertEqual(resolved["HUMR_AUX_MODEL"], CODEX_AUX_MODEL)
+        self.assertEqual(resolved["HUMR_AUX_MODEL"], CODEX_MAIN_MODEL)
 
     def test_bedrock_resolves_main_and_auxiliary_to_sonnet(self) -> None:
         resolved = _resolve_container_preset(preset="bedrock")
@@ -207,9 +206,8 @@ class HermesAuxiliaryConfigTemplateTests(SimpleTestCase):
         self.assertEqual(set(auxiliary), expected_slots)
         self.assertEqual(list(auxiliary)[-len(MAIN_MODEL_AUXILIARY_SLOTS):], list(MAIN_MODEL_AUXILIARY_SLOTS))
         for slot, slot_config in auxiliary.items():
-            expected_model = CODEX_MAIN_MODEL if slot in MAIN_MODEL_AUXILIARY_SLOTS else CODEX_AUX_MODEL
             self.assertEqual(slot_config["provider"], "openai-codex")
-            self.assertEqual(slot_config["model"], expected_model)
+            self.assertEqual(slot_config["model"], CODEX_MAIN_MODEL)
 
 
 class HermesModelCatalogTests(SimpleTestCase):
