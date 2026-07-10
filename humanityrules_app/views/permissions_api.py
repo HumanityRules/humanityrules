@@ -222,7 +222,10 @@ def permissions_apply(request: HttpRequest) -> JsonResponse:
     if not allowed:
         return JsonResponse({"error": "not authorized to approve permission changes"}, status=403)
 
-    permissions_service.approve(app_permission_request)
+    if not permissions_service.approve(app_permission_request=app_permission_request):
+        return JsonResponse({
+            "error": f"permission request is already {app_permission_request.get_status_display().lower()}",
+        }, status=409)
     return JsonResponse({"status": "approved_pending_apply", "request_id": str(app_permission_request.id)})
 
 

@@ -290,6 +290,21 @@ class TestPermissionsApi(TestCase):
             AppPermissionRequest.objects.get(id=rid).status, AppPermissionRequest.Status.APPROVED_PENDING_APPLY,
         )
 
+    def test_apply_does_not_requeue_applying_request(self) -> None:
+        draft = self._open_draft()
+        rid = draft["request_id"]
+        AppPermissionRequest.objects.filter(id=rid).update(status=AppPermissionRequest.Status.APPLYING)
+
+        with patch("humanityrules_app.views.permissions_api.abac_service.check_action", return_value=True):
+            response = self._post(
+                "/api/permissions/draft/apply",
+                {**self._identity(), "request_id": rid},
+                bearer=self.raw_token,
+            )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(AppPermissionRequest.objects.get(id=rid).status, AppPermissionRequest.Status.APPLYING)
+
     def test_apply_on_sandbox_account_blocked_for_non_platform_owner_org(self) -> None:
         # ABAC allows (every signup is admin of their own org), but the env sits on
         # HumR's shared sandbox account — the sandbox gate must win.

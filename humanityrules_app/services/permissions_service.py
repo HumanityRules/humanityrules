@@ -3,6 +3,7 @@ import logging
 import uuid
 from typing import Any
 
+from django.db import transaction
 from django.utils import timezone
 from policy_sentry.shared import iam_data as policy_sentry_iam_data
 
@@ -219,14 +220,26 @@ async def amerge_description(app_permission_request, text):
     await app_permission_request.asave(update_fields=["description", "updated_at"])
 
 
-def approve(app_permission_request):
-    """Set AppPermissionRequest status to APPROVED_PENDING_APPLY.
+def approve(app_permission_request: models.AppPermissionRequest) -> bool:
+    """Queue a draft once without moving an in-flight request backward.
 
     The baseline (AppPermissions) is updated by the executor after the IAM policy is
     successfully applied, not here — so the baseline always reflects what's in AWS.
     """
-    app_permission_request.status = models.AppPermissionRequest.Status.APPROVED_PENDING_APPLY
-    app_permission_request.save(update_fields=["status", "updated_at"])
+    with transaction.atomic():
+        locked_request = models.AppPermissionRequest.objects.select_for_update().get(id=app_permission_request.id)
+        if locked_request.status == models.AppPermissionRequest.Status.APPROVED_PENDING_APPLY:
+            app_permission_request.status = locked_request.status
+            return True
+        if locked_request.status != models.AppPermissionRequest.Status.DRAFT:
+            app_permission_request.status = locked_request.status
+            return False
+
+        locked_request.status = models.AppPermissionRequest.Status.APPROVED_PENDING_APPLY
+        locked_request.save(update_fields=["status", "updated_at"])
+
+    app_permission_request.status = locked_request.status
+    return True
 
 
 def cancel(app_permission_request, app_permissions):

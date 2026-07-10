@@ -424,6 +424,17 @@ class TestPermissionsEditorEndpoints(TestCase):
         response = self.client.post(f"/security/permissions/{self.apr.id}/apply/")
         self.assertEqual(response.status_code, 200)
 
+    def test_approver_cannot_requeue_applying_request(self) -> None:
+        self.apr.status = AppPermissionRequest.Status.APPLYING
+        self.apr.save(update_fields=["status", "updated_at"])
+        self.client.force_login(self.approver_user)
+
+        response = self.client.post(f"/security/permissions/{self.apr.id}/apply/")
+
+        self.apr.refresh_from_db()
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(self.apr.status, AppPermissionRequest.Status.APPLYING)
+
     def test_non_approver_gets_403_on_approve(self) -> None:
         self.client.force_login(self.non_approver_user)
         response = self.client.post(f"/security/permissions/{self.apr.id}/apply/")
