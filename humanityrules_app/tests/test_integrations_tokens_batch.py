@@ -206,7 +206,11 @@ class TestConnectedProvidersReturnHasToken(_BatchTokensEndpointTestBase):
             owner_user=self.user, environment=self.env, app_slug="hermes",
             provider=IntegrationUserCredential.Provider.GOOGLE,
             credentials={"refresh_token": "existing-refresh"},
-            config={"scope": "gmail.readonly"},
+            config={"scope": (
+                "https://www.googleapis.com/auth/gmail.modify "
+                "https://www.googleapis.com/auth/calendar.readonly openid email"
+            )},
+            metadata={"google_email": "vmendi@gmail.com"},
         )
         http_response = MagicMock()
         http_response.status_code = 200
@@ -228,7 +232,48 @@ class TestConnectedProvidersReturnHasToken(_BatchTokensEndpointTestBase):
         self.assertEqual(google_result["secrets"], {"access_token": "ya29.fresh"})
         self.assertEqual(google_result["expires_in"], 3599)
         self.assertEqual(google_result["config"], {})
-        self.assertEqual(google_result["metadata"], {})
+        # The granted-capability projection rides the metadata channel to the card.
+        grants = google_result["metadata"]["google_grants"]
+        self.assertEqual(grants["google_email"], "vmendi@gmail.com")
+        self.assertEqual(grants["products"]["gmail"], "write")
+        self.assertEqual(grants["products"]["calendar"], "read")
+        self.assertEqual(grants["products"]["drive"], "off")
+        self.assertIn("https://www.googleapis.com/auth/gmail.modify", grants["raw_scopes"])
+
+    def test_google_refresh_response_scope_supersedes_stored_scope(self) -> None:
+        """Google's refresh response reports the token's effective scope — the
+        authoritative grant. A widening (e.g. project-wide merge from another
+        app) must update the row and the projection the card renders."""
+        row = IntegrationUserCredential.objects.create(
+            owner_user=self.user, environment=self.env, app_slug="hermes",
+            provider=IntegrationUserCredential.Provider.GOOGLE,
+            credentials={"refresh_token": "existing-refresh"},
+            config={"scope": "https://www.googleapis.com/auth/gmail.readonly"},
+        )
+        http_response = MagicMock()
+        http_response.status_code = 200
+        http_response.json.return_value = {
+            "access_token": "ya29.fresh", "expires_in": 3599, "token_type": "Bearer",
+            "scope": (
+                "https://www.googleapis.com/auth/gmail.readonly "
+                "https://www.googleapis.com/auth/calendar.events"
+            ),
+        }
+        with patch(
+            "humanityrules_app.views.integrations.provider_google.httpx.post",
+            return_value=http_response,
+        ):
+            status, body = self._post(
+                body={"owner_username": "vmendi", "app_slug": "hermes", "providers": ["google"]},
+                token=self.raw_token,
+            )
+
+        self.assertEqual(status, 200)
+        grants = body["results"]["google"]["metadata"]["google_grants"]
+        self.assertEqual(grants["products"]["gmail"], "read")
+        self.assertEqual(grants["products"]["calendar"], "write")
+        row.refresh_from_db()
+        self.assertIn("calendar.events", row.config["scope"])
 
     def test_telegram_passes_config_and_metadata_through(self) -> None:
         # The base seeds app "hermes" owned by vmendi, so the ownership guard passes; this

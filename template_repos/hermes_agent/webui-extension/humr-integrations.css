@@ -572,3 +572,111 @@ main.main.showing-integrations > #mainChat { display: none !important; }
 .humr-slack-steps b {
   color: var(--text);
 }
+
+/* ── Google Workspace scope picker ─────────────────────────────── */
+
+.humr-scope-modal {
+  /* Keep the picker comfortably wider than its controls without letting the
+     row labels and segmented buttons drift to opposite sides of the modal. */
+  max-width: 380px;
+  min-width: min(380px, calc(100vw - 48px));
+}
+
+.humr-scope-account {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.humr-scope-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  margin: 18px 0 0;
+}
+
+.humr-scope-row {
+  display: grid;
+  grid-template-columns: 82px 1fr;
+  align-items: center;
+  gap: 14px;
+  padding: 0 16px;
+}
+
+.humr-scope-row-label {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.humr-scope-seg {
+  display: inline-flex;
+  justify-self: end;
+  border: 1px solid var(--border2);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--code-bg) 72%, transparent);
+  overflow: hidden;
+}
+
+.humr-scope-seg-btn {
+  padding: 6px 11px;
+  font-size: 12px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s, filter 0.15s;
+}
+
+.humr-scope-seg-btn + .humr-scope-seg-btn {
+  border-left: 1px solid var(--border2);
+}
+
+.humr-scope-seg-btn:first-child {
+  border-radius: 6px 0 0 6px;
+}
+
+.humr-scope-seg-btn:last-child {
+  border-radius: 0 6px 6px 0;
+}
+
+.humr-scope-seg-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 8%, var(--code-bg));
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.humr-scope-seg-btn[aria-pressed="true"] {
+  background: var(--accent);
+  color: #000;
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.humr-scope-seg-btn[aria-pressed="true"]:hover:not(:disabled) {
+  background: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  filter: brightness(1.1);
+}
+
+.humr-scope-seg-btn:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+
+.humr-scope-seg-btn:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.humr-scope-modal .humr-modal-actions {
+  justify-content: center;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.humr-scope-modal .humr-modal-actions .humr-integration-btn {
+  align-self: auto;
+  min-width: 112px;
+  padding: 7px 16px;
+}

@@ -93,6 +93,7 @@ def _build_codex_secrets(access_token: str) -> provider_common.RefreshSecrets | 
         secrets={"access_token": access_token, "chatgpt_account_id": account_id},
         expires_in=provider_common.expires_in_from_access_token(access_token=access_token, fallback=CODEX_DEFAULT_EXPIRES_IN),
         row_metadata={"chatgpt_account_id": account_id},
+        row_config={},
     )
 
 
@@ -277,6 +278,8 @@ def refresh_outcome(environment: Environment, owner_user: User, app_slug: str) -
         app_slug=app_slug,
         exchange=_exchange_refresh_token,
         build_secrets=build_secrets,
+        outcome_metadata=None,
+        tombstone_on_revoke=False,
     )
 
 

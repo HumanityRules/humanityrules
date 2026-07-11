@@ -129,6 +129,28 @@ class TestUserOAuthDisconnectApi(TestCase):
         )
         revoke_mock.assert_called_once_with(refresh_token="stored-refresh-token")
 
+    def test_google_disconnect_tombstones_instead_of_deleting(self) -> None:
+        """Google keeps a revocation tombstone so pending OAuth callbacks can't resurrect the grant."""
+        self.integration.provider = IntegrationUserCredential.Provider.GOOGLE
+        self.integration.save(update_fields=["provider", "updated_at"])
+
+        with patch(
+            "humanityrules_app.views.integrations.provider_google.revoke"
+        ) as revoke_mock:
+            response = self._post({
+                "owner_username": "vmendi",
+                "app_slug": "hermes",
+                "provider": "google",
+            }, bearer=self.raw_token)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"ok": True, "status": "not_connected"})
+        row = IntegrationUserCredential.objects.get(id=self.integration.id)
+        self.assertEqual(row.credentials, {})
+        self.assertEqual(row.config, {"scope": ""})
+        self.assertIn("revoked_at_epoch", row.metadata)
+        revoke_mock.assert_called_once_with(refresh_token="stored-refresh-token")
+
     def test_missing_bearer_returns_401(self) -> None:
         response = self.client.post(
             "/api/integrations/credentials/disconnect",
@@ -146,3 +168,4 @@ class TestUserOAuthDisconnectApi(TestCase):
             "provider": "bogus-provider",
         }, bearer=self.raw_token)
         self.assertEqual(response.status_code, 400)
+

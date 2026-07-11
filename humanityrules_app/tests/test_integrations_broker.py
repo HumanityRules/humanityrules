@@ -1807,6 +1807,42 @@ class TestFetchProviderTokensBatch(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(results["telegram"].config, {"allowed_users": ["42", "7"]})
         self.assertEqual(results["telegram"].metadata, {"bot_username": "humr_bot"})
 
+    async def test_has_token_with_non_dict_config_or_metadata_is_coerced_empty(self) -> None:
+        """Malformed config/metadata must not poison durable connection state."""
+        results = await self._run_with_response(payload={
+            "results": {
+                "google": {
+                    "outcome": "has_token",
+                    "secrets": {"access_token": "tok"},
+                    "expires_in": 3600,
+                    "config": "nope",
+                    "metadata": ["nope"],
+                },
+                "github": {"outcome": "absent"},
+                "telegram": {"outcome": "absent"},
+            },
+        })
+        self.assertEqual(results["google"].outcome, broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN)
+        self.assertEqual(results["google"].config, {})
+        self.assertEqual(results["google"].metadata, {})
+
+    async def test_google_grants_metadata_passes_through(self) -> None:
+        """The scope-picker capability projection rides metadata to _ConnState/the card."""
+        grants = {"products": {"gmail": "write"}, "raw_scopes": ["x"], "google_email": "v@x.com"}
+        results = await self._run_with_response(payload={
+            "results": {
+                "google": {
+                    "outcome": "has_token",
+                    "secrets": {"access_token": "tok"},
+                    "expires_in": 3600,
+                    "metadata": {"google_grants": grants},
+                },
+                "github": {"outcome": "absent"},
+                "telegram": {"outcome": "absent"},
+            },
+        })
+        self.assertEqual(results["google"].metadata, {"google_grants": grants})
+
     async def test_slug_missing_from_response_is_transient(self) -> None:
         """A partial server response must NOT clear the broker's cache for the missing slug."""
         results = await self._run_with_response(payload={"results": {"google": {"outcome": "absent"}}})

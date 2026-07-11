@@ -151,6 +151,7 @@ def refresh_outcome(environment: Environment, owner_user: User, app_slug: str) -
             secrets={"access_token": access_token},
             expires_in=provider_common.expires_in_from_access_token(access_token=access_token, fallback=NOUS_DEFAULT_EXPIRES_IN),
             row_metadata={},
+            row_config={},
         )
 
     return provider_common.run_refresh_exchange(
@@ -161,6 +162,8 @@ def refresh_outcome(environment: Environment, owner_user: User, app_slug: str) -
         app_slug=app_slug,
         exchange=_exchange_refresh_token,
         build_secrets=build_secrets,
+        outcome_metadata=None,
+        tombstone_on_revoke=False,
     )
 
 
@@ -176,6 +179,7 @@ def refresh_outcome_from_shared(credential: IntegrationSharedCredential | Platfo
             secrets={"access_token": access_token},
             expires_in=provider_common.expires_in_from_access_token(access_token=access_token, fallback=NOUS_DEFAULT_EXPIRES_IN),
             row_metadata={},
+            row_config={},
         )
 
     return provider_common.run_shared_refresh_exchange(

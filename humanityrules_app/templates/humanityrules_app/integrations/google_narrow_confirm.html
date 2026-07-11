@@ -1,0 +1,45 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reduce Google access - Humanity Rules</title>
+    <link rel="stylesheet" href="{% static 'css/dist/styles.css' %}">
+</head>
+<body class="h-full" style="background-color: #0f1623;">
+    <div class="flex min-h-full flex-col justify-center px-8 py-12">
+        <div class="mx-auto w-full max-w-md">
+            <div class="text-center">
+                <img class="mx-auto h-12 w-auto" src="{% static 'humanityrules_app/humr-logo-large-dark.png' %}" alt="Humanity Rules">
+                <h2 class="mt-6 text-2xl font-bold text-white">Reduce Google Workspace access?</h2>
+                <p class="mt-2 text-sm text-gray-400">
+                    You're removing access to:
+                    {% for label in reduced_labels %}{% if not forloop.first %}, {% endif %}<span class="text-gray-200">{{ label }}</span>{% endfor %}.
+                </p>
+            </div>
+
+            <div class="mt-6 rounded-md bg-amber-400/10 px-4 py-3 text-sm text-amber-200 ring-1 ring-inset ring-amber-400/30">
+                Reducing access revokes the current Google grant
+                {% if google_email %}for <span class="font-medium">{{ google_email }}</span>{% endif %}
+                and asks you to approve the smaller set.
+            </div>
+
+            <form method="post" action="{% url 'integrations_user_google_narrow' %}" class="mt-8 flex gap-3">
+                {% csrf_token %}
+                <input type="hidden" name="rd" value="{{ rd }}">
+                <input type="hidden" name="app_slug" value="{{ app_slug }}">
+                <input type="hidden" name="products" value="{{ products }}">
+                <a href="{{ rd }}"
+                   class="flex w-1/2 items-center justify-center rounded-md bg-white/5 px-4 py-2.5 text-sm font-semibold text-gray-200 ring-1 ring-inset ring-white/10 hover:bg-white/10 transition-colors">
+                    Cancel
+                </a>
+                <button type="submit"
+                        class="flex w-1/2 items-center justify-center rounded-md bg-indigo-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-400 transition-colors">
+                    Reduce access
+                </button>
+            </form>
+        </div>
+    </div>
+</body>
+</html>

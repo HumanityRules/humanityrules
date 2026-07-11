@@ -223,13 +223,17 @@ class RefreshSecrets:
     """The usable product of a refresh exchange: what to inject + what to persist.
 
     `secrets`/`expires_in` go to the broker `has_token` outcome; `row_metadata`
-    is merged into the credential row before saving (empty when the provider
-    keeps no derived metadata).
+    and `row_config` are merged into the credential row before saving (empty
+    when the provider keeps no derived values). `row_config` exists for
+    providers whose refresh response carries authoritative config — e.g.
+    Google returns the access token's effective `scope`, which supersedes the
+    scope stored at connect time (project-wide grant merging can change it).
     """
 
     secrets: dict
     expires_in: int
     row_metadata: dict
+    row_config: dict
 
 
 def run_refresh_exchange(
@@ -241,14 +245,29 @@ def run_refresh_exchange(
     app_slug: str,
     exchange: Callable[[str], ExchangeResult],
     build_secrets: Callable[[str, dict], RefreshSecrets | None],
+    outcome_metadata: Callable[[IntegrationUserCredential], dict] | None,
+    tombstone_on_revoke: bool,
 ) -> dict:
-    """Run the standard refresh-token exchange for one device-flow OAuth credential.
+    """Run the standard refresh-token exchange for one OAuth credential row.
 
-    Fetches the row, exchanges its stored refresh_token via *exchange*, handles
+    Used by all OAuth providers: redirect-OAuth (Google, X) and device-flow
+    (Codex, Nous).
+
+    Fetches the row, exchanges its stored refresh_token via exchange(), handles
     the revoked/transient/missing-access_token branches uniformly, rotates a
-    returned refresh_token, then asks *build_secrets* to turn the access token +
-    response into the broker `has_token` payload (returning None → `transient`,
-    for a token the provider deems unusable).
+    returned refresh_token, then asks *build_secrets* to turn the access token
+    + response into the broker `has_token` payload (returning None →
+    `transient`, for a token the provider deems unusable).
+
+    outcome_metadata() (or None) builds the `has_token` outcome's metadata from
+    the refreshed row — the channel the WebUI card reads for provider-derived
+    status such as grants.
+
+    Row writes are compare-and-swap CAS on the exchanged refresh_token: the
+    exchange holds a stale instance across a network call, and a concurrent
+    reconnect (OAuth callback) may replace the row's token meanwhile. Without
+    the guard, a stale `invalid_grant` would delete the freshly reconnected
+    credential, and a stale success would write the old token back over it.
     """
     integration = IntegrationUserCredential.objects.filter(
         owner_user=owner_user,
@@ -259,6 +278,10 @@ def run_refresh_exchange(
     if integration is None:
         return absent_outcome()
 
+    if not integration.credentials:
+        # A tombstone row (credentials deliberately blanked, e.g. Google's
+        # narrow flow awaiting re-consent): disconnected, but not an anomaly.
+        return absent_outcome()
     refresh_token = integration.credentials.get("refresh_token", "")
     if not refresh_token:
         logger.error("%s token refresh: row missing refresh_token env=%s owner=%s app=%s", provider, environment.slug, owner_user.username, app_slug)
@@ -266,9 +289,33 @@ def run_refresh_exchange(
 
     exchange_result = exchange(refresh_token)
     if exchange_result.revoked:
-        logger.info("%s token refresh: revoked upstream, deleting row env=%s owner=%s app=%s", provider, environment.slug, owner_user.username, app_slug)
-        integration.delete()
+        # Same CAS (Compare-and-Swap) on both branches: only touch the row if it still holds the
+        # token upstream just rejected. `tombstone_on_revoke` providers (Google) blank the
+        # row and stamp `revoked_at_epoch` instead of deleting, preserving the generation
+        # marker that stops a pending OAuth flow started before the revocation from
+        # recreating the credential as if nothing happened.
+        revoked_row = IntegrationUserCredential.objects.filter(
+            pk=integration.pk, credentials__refresh_token=refresh_token,
+        )
+        if tombstone_on_revoke:
+            changed_count = revoked_row.update(
+                credentials={},
+                config={"scope": ""},
+                metadata={**integration.metadata, "revoked_at_epoch": time.time()},
+                updated_at=now(),
+            )
+        else:
+            changed_count, _ = revoked_row.delete()
+        if not changed_count:
+            # Lost CAS: a reconnect replaced the token while this exchange ran.
+            # The revoked verdict applies to the OLD token only — an
+            # authoritative `absent` would wrongly flip the fresh credential
+            # to disconnected on the broker.
+            logger.info("%s token refresh: revoked upstream but row was reconnected meanwhile env=%s owner=%s app=%s", provider, environment.slug, owner_user.username, app_slug)
+            return transient_outcome()
+        logger.info("%s token refresh: revoked upstream, disconnecting row env=%s owner=%s app=%s", provider, environment.slug, owner_user.username, app_slug)
         return absent_outcome()
+    
     if exchange_result.error is not None:
         logger.error("%s token refresh failed env=%s owner=%s app=%s error=%s", provider, environment.slug, owner_user.username, app_slug, exchange_result.error)
         return transient_outcome()
@@ -282,17 +329,35 @@ def run_refresh_exchange(
     if built is None:
         return transient_outcome()
 
+    updates: dict = {"last_refreshed_at": now(), "updated_at": now()}
+    
     new_refresh = exchange_result.response.get("refresh_token")
     if new_refresh and new_refresh != refresh_token:
         integration.credentials = {**integration.credentials, "refresh_token": new_refresh}
-    update_fields = ["credentials", "last_refreshed_at", "updated_at"]
+        updates["credentials"] = integration.credentials
+
     if built.row_metadata:
         integration.metadata = {**integration.metadata, **built.row_metadata}
-        update_fields.append("metadata")
-    integration.last_refreshed_at = now()
-    integration.save(update_fields=update_fields)
+        updates["metadata"] = integration.metadata
 
-    return has_token_outcome(secrets=built.secrets, expires_in=built.expires_in, config={}, metadata={})
+    if built.row_config:
+        integration.config = {**integration.config, **built.row_config}
+        updates["config"] = integration.config
+
+    # `updated_at` is set explicitly because queryset .update() bypasses
+    # auto_now. 
+    # Zero rows matched means a concurrent reconnect replaced the
+    # row — skip the write; the token we just exchanged is still valid to
+    # serve this one outcome.
+    updated_count = IntegrationUserCredential.objects.filter(
+        pk=integration.pk, credentials__refresh_token=refresh_token,
+    ).update(**updates)
+
+    # On a lost CAS the row now belongs to a different grant — publishing
+    # metadata derived from OUR stale view would misstate it. Empty metadata
+    # self-heals on the next refresh cycle.
+    metadata = outcome_metadata(integration) if outcome_metadata is not None and updated_count else {}
+    return has_token_outcome(secrets=built.secrets, expires_in=built.expires_in, config={}, metadata=metadata)
 
 
 # Refresh a shared credential's access token slightly before it lapses, so a
