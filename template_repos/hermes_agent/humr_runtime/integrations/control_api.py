@@ -136,13 +136,16 @@ def build_control_app(
         Route(path="/healthz", endpoint=_handle_healthz, methods=["GET"]),
         Route(path="/integrations", endpoint=status_route, methods=["GET"]),
         Route(path="/integrations/refresh_all", endpoint=refresh_all_route, methods=["POST"]),
+
         Route(path=f"{tls}/invalidate", endpoint=credentials_invalidate_route, methods=["POST"]),
         Route(path=f"{tls}/setup-session", endpoint=credentials_setup_session_route, methods=["POST"]),
         Route(path=f"{tls}/disconnect", endpoint=credentials_disconnect_route, methods=["POST"]),
+
         # Device login: broker-run OAuth device flows (no redirect callback).
         Route(path=f"{tls}/device/start", endpoint=device_start_route, methods=["POST"]),
         Route(path=f"{tls}/device/status", endpoint=device_status_route, methods=["GET"]),
         Route(path=f"{tls}/device/cancel", endpoint=device_cancel_route, methods=["POST"]),
+
         *mcp_aggregator.routes(prefix="/integrations"),
         *permissions_control.routes(prefix="/permissions", humr_client=humr_client),
     ]
