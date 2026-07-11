@@ -12,7 +12,9 @@ user clicks Disconnect in the Hermes WebUI, for every provider kind.
 """
 
 import logging
+import time
 
+from django.db import transaction
 from django.http import HttpRequest, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
@@ -30,28 +32,44 @@ def disconnect_user_integration(
     app_slug: str,
     spec: provider_registry.ProviderSpec,
 ) -> bool:
-    """Delete the credential row; for OAuth providers, best-effort revoke upstream.
+    """Disconnect the credential row; for OAuth providers, best-effort revoke upstream.
 
-    Returns True when a row existed and was deleted.
+    Providers that set `TOMBSTONE_ON_DISCONNECT` (Google) keep the row as a
+    blanked tombstone stamped with `revoked_at_epoch` instead of deleting it:
+    the marker is the durable generation check that stops a still-pending
+    OAuth callback (whose consent predates this revocation) from silently
+    recreating the credential. Everyone else deletes as before.
+
+    Returns True when a row existed and was disconnected.
     """
-    integration = IntegrationUserCredential.objects.filter(
-        owner_user=owner_user,
-        environment=environment,
-        app_slug=app_slug,
-        provider=spec.provider,
-    ).first()
-    if integration is None:
-        logger.info(
-            "integration disconnect no-op (no row) provider=%s env=%s owner=%s app=%s",
-            spec.provider,
-            environment.slug,
-            owner_user.username,
-            app_slug,
-        )
-        return False
+    # Row-locked so the write serializes against a concurrent OAuth callback's
+    # guarded write (google) — the tombstone can't be overwritten by a
+    # callback that read pre-disconnect state.
+    with transaction.atomic():
+        integration = IntegrationUserCredential.objects.select_for_update().filter(
+            owner_user=owner_user,
+            environment=environment,
+            app_slug=app_slug,
+            provider=spec.provider,
+        ).first()
+        if integration is None:
+            logger.info(
+                "integration disconnect no-op (no row) provider=%s env=%s owner=%s app=%s",
+                spec.provider,
+                environment.slug,
+                owner_user.username,
+                app_slug,
+            )
+            return False
 
-    refresh_token = integration.credentials.get("refresh_token", "")
-    integration.delete()
+        refresh_token = integration.credentials.get("refresh_token", "")
+        if getattr(spec.module, "TOMBSTONE_ON_DISCONNECT", False):
+            integration.credentials = {}
+            integration.config = {"scope": ""}
+            integration.metadata = {**integration.metadata, "revoked_at_epoch": time.time()}
+            integration.save(update_fields=["credentials", "config", "metadata", "updated_at"])
+        else:
+            integration.delete()
     if spec.kind == provider_registry.ProviderKind.OAUTH and refresh_token:
         spec.module.revoke(refresh_token=refresh_token)
 

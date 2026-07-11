@@ -304,6 +304,135 @@
     return elem('div', { class: 'humr-integration-org-shared' }, [label]);
   }
 
+  // ── Google Workspace scope picker ─────────────────────────────────
+  // The CP owns all scope semantics. The card renders the capability
+  // projection it receives via item.metadata.google_grants (per-product
+  // off|read|write plus google_email) and submits the user's selection as a
+  // `products` query param on the Connect URL — raw Google scopes are never
+  // interpreted here. Expanding access goes straight to Google's consent;
+  // reducing it makes the CP interpose its own confirmation page (revoking
+  // is irreversible and project-global), so this modal needs no
+  // narrow-vs-expand awareness.
+
+  const GOOGLE_SCOPE_PRODUCTS = [
+    { key: 'gmail', label: 'Gmail' },
+    { key: 'calendar', label: 'Calendar' },
+    { key: 'contacts', label: 'Contacts' },
+    { key: 'drive', label: 'Drive' },
+    { key: 'sheets', label: 'Sheets' },
+    { key: 'docs', label: 'Docs' },
+  ];
+  const GOOGLE_SCOPE_LEVELS = [
+    { key: 'off', label: 'Off' },
+    { key: 'read', label: 'Read' },
+    { key: 'write', label: 'Read & write' },
+  ];
+  const GOOGLE_LEVEL_RANK = { off: 0, read: 1, write: 2 };
+  // Google's Drive scopes also authorize the Docs and Sheets content APIs,
+  // so those two can never sit below Drive's level. The CP applies the same
+  // closure server-side; the modal mirrors it so what you see is what you get.
+  const GOOGLE_FLOORED_BY_DRIVE = ['docs', 'sheets'];
+
+  function googleGrants(item) {
+    const grants = item && item.metadata && item.metadata.google_grants;
+    return (grants && typeof grants === 'object' && grants.products) ? grants : null;
+  }
+
+  function showGoogleScopeModal(item, payload, returnTo, revert) {
+    const grants = googleGrants(item);
+    const isConnected = item.status === 'connected';
+    // Pre-check from what Google actually granted; a never-connected card
+    // defaults to everything readable, nothing writable.
+    const selection = {};
+    for (const product of GOOGLE_SCOPE_PRODUCTS) {
+      const level = grants ? grants.products[product.key] : null;
+      selection[product.key] = (level === 'read' || level === 'write') ? level : (grants ? 'off' : 'read');
+    }
+
+    const backdrop = elem('div', { class: 'humr-modal-backdrop' });
+    const cancel = () => { backdrop.remove(); if (revert) revert(); };
+
+    const applyBtn = elem('button', {
+      class: 'humr-integration-btn humr-integration-btn-primary',
+      type: 'button',
+    }, [isConnected ? 'Update access' : 'Connect']);
+    const syncApply = () => {
+      applyBtn.disabled = GOOGLE_SCOPE_PRODUCTS.every((p) => selection[p.key] === 'off');
+    };
+
+    // Mirror the CP's implied closure: bump docs/sheets up to drive's level
+    // and disable their sub-drive buttons ("included with Drive access").
+    const segByProduct = {};
+    const syncSegs = () => {
+      const driveRank = GOOGLE_LEVEL_RANK[selection.drive];
+      for (const floored of GOOGLE_FLOORED_BY_DRIVE) {
+        if (GOOGLE_LEVEL_RANK[selection[floored]] < driveRank) selection[floored] = selection.drive;
+      }
+      for (const product of GOOGLE_SCOPE_PRODUCTS) {
+        const floor = GOOGLE_FLOORED_BY_DRIVE.includes(product.key) ? driveRank : 0;
+        for (const btn of segByProduct[product.key].children) {
+          btn.setAttribute('aria-pressed', String(btn.dataset.level === selection[product.key]));
+          const belowFloor = GOOGLE_LEVEL_RANK[btn.dataset.level] < floor;
+          btn.disabled = belowFloor;
+          btn.title = belowFloor ? 'Included with Drive access' : '';
+        }
+      }
+      syncApply();
+    };
+
+    const rows = [];
+    for (const product of GOOGLE_SCOPE_PRODUCTS) {
+      const seg = elem('div', { class: 'humr-scope-seg', role: 'radiogroup', 'aria-label': product.label });
+      segByProduct[product.key] = seg;
+      for (const level of GOOGLE_SCOPE_LEVELS) {
+        seg.appendChild(elem('button', {
+          type: 'button',
+          class: 'humr-scope-seg-btn',
+          dataset: { level: level.key },
+          onclick: () => {
+            selection[product.key] = level.key;
+            syncSegs();
+          },
+        }, [level.label]));
+      }
+      rows.push(elem('div', { class: 'humr-scope-row' }, [
+        elem('div', { class: 'humr-scope-row-label' }, [product.label]),
+        seg,
+      ]));
+    }
+    syncSegs();
+
+    applyBtn.addEventListener('click', () => {
+      const productsParam = GOOGLE_SCOPE_PRODUCTS
+        .filter((p) => selection[p.key] !== 'off')
+        .map((p) => p.key + ':' + selection[p.key])
+        .join(',');
+      window.location.href = buildTlsConnectUrl(payload, item.slug, returnTo) +
+        '&products=' + encodeURIComponent(productsParam);
+    });
+
+    const bodyLines = [
+      'Pick what this agent may access. Google will show a consent screen for your selection.',
+    ];
+    const modal = elem('div', { class: 'humr-modal humr-scope-modal' }, [
+      elem('div', { class: 'humr-modal-title' }, [(isConnected ? 'Configure ' : 'Connect ') + (item.label || item.slug)]),
+      elem('div', { class: 'humr-modal-body' }, [
+        bodyLines.join(' '),
+        (grants && grants.google_email)
+          ? elem('div', { class: 'humr-scope-account' }, ['Connected as ' + grants.google_email])
+          : null,
+      ]),
+      elem('div', { class: 'humr-scope-rows' }, rows),
+      elem('div', { class: 'humr-modal-actions' }, [
+        elem('button', { class: 'humr-integration-btn', type: 'button', onclick: cancel }, ['Cancel']),
+        applyBtn,
+      ]),
+    ]);
+    backdrop.appendChild(modal);
+    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) cancel(); });
+    document.body.appendChild(backdrop);
+  }
+
   function configureButton(item, connectBtnForRevert) {
     const canConfigure = item.connect_mode === 'vault';
     const props = { class: 'humr-integration-btn' };
@@ -1323,9 +1452,17 @@
           'Last refreshed: ' + formatDate(item.last_refreshed_at),
         ]));
       }
-      // Configure is always shown; only vault providers can open the config modal.
+      // Configure is always shown; vault providers open the credential modal,
+      // Google opens the scope picker, everyone else renders it disabled.
       const actions = elem('div', { class: 'humr-integration-actions' });
-      actions.appendChild(configureButton(item));
+      if (item.slug === 'google') {
+        actions.appendChild(elem('button', {
+          class: 'humr-integration-btn',
+          onclick: () => showGoogleScopeModal(item, payload, returnTo, undefined),
+        }, ['Configure']));
+      } else {
+        actions.appendChild(configureButton(item));
+      }
       actions.appendChild(disconnectButton(item.slug, () => { disconnectTlsProvider(item); }));
       body.appendChild(actions);
       card.appendChild(body);
@@ -1335,6 +1472,7 @@
     appendConnectFooter(card, titleRow, statusPill, item, (revert) => {
       if (usesVault) startVaultConfig(item, revert);
       else if (usesDevice) startDeviceConnect(item, revert);
+      else if (item.slug === 'google') showGoogleScopeModal(item, payload, returnTo, revert);
       else window.location.href = buildTlsConnectUrl(payload, item.slug, returnTo);
     });
     return card;
@@ -1475,22 +1613,65 @@
     );
   }
 
-  // Drop any ?connected=/?disconnected= sentinel once we've acted on it,
-  // so a reload doesn't replay the refresh.
+  // Error sentinels the CP appends to `rd` when an OAuth flow dies after the
+  // consent redirect (cancelled at Google, exchange failure, missing refresh
+  // token). Only codes listed here are consumed — an unknown ?error= belongs
+  // to someone else and is left alone.
+  const OAUTH_ERROR_MESSAGES = {
+    google_denied: 'Google connection was cancelled — nothing was changed.',
+    google_exchange_failed: 'Google sign-in could not be completed. Try connecting again.',
+    google_no_refresh_token: 'Google did not issue new credentials. Remove Humanity Rules under ' +
+      'myaccount.google.com › Security › Third-party access, then reconnect.',
+    google_narrow_incomplete: 'Your previous Google access was revoked, but the new connection was ' +
+      'not completed — the agent is now disconnected from Google. Connect again to restore access.',
+    google_stale_flow: 'This Google connection attempt was superseded by a newer change to the ' +
+      'connection — nothing was stored. Check the card and connect again if needed.',
+  };
+
+  // Drop any ?connected=/?disconnected=/?error= sentinel once we've acted on
+  // it, so a reload doesn't replay the refresh (or re-show the error). A
+  // failed narrow arrives as disconnected+error TOGETHER: the state really
+  // changed (grant revoked, row gone) AND the user needs to hear why, so the
+  // transition sentinel carries the error code along.
   function consumeReturnSentinel() {
     const params = new URLSearchParams(window.location.search);
     const connected = params.get('connected');
     const disconnected = params.get('disconnected');
-    if (!connected && !disconnected) return null;
+    const errorCode = params.get('error');
+    const knownError = errorCode && OAUTH_ERROR_MESSAGES[errorCode] ? errorCode : null;
+    if (!connected && !disconnected && !knownError) return null;
     params.delete('connected');
     params.delete('disconnected');
+    if (knownError) params.delete('error');
     const qs = params.toString();
     const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash;
     window.history.replaceState({}, '', newUrl);
+    if (!connected && !disconnected) {
+      return { transition: 'error', code: knownError };
+    }
     return {
       transition: connected ? 'connected' : 'disconnected',
       provider: connected || disconnected,
+      errorCode: knownError,
     };
+  }
+
+  function showOauthErrorModal(code) {
+    const backdrop = elem('div', { class: 'humr-modal-backdrop' });
+    const modal = elem('div', { class: 'humr-modal' }, [
+      elem('div', { class: 'humr-modal-title' }, ['Connection not completed']),
+      elem('div', { class: 'humr-modal-body' }, [OAUTH_ERROR_MESSAGES[code]]),
+      elem('div', { class: 'humr-modal-actions' }, [
+        elem('button', {
+          class: 'humr-integration-btn humr-integration-btn-primary',
+          type: 'button',
+          onclick: () => backdrop.remove(),
+        }, ['OK']),
+      ]),
+    ]);
+    backdrop.appendChild(modal);
+    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
+    document.body.appendChild(backdrop);
   }
 
   function ensureSidebarTabAndPane() {
@@ -1639,7 +1820,13 @@
     wrapSwitchPanel();
 
     const sentinel = consumeReturnSentinel();
-    if (sentinel) {
+    if (sentinel && sentinel.transition === 'error') {
+      // The flow died after the consent redirect; nothing changed broker-side,
+      // so a plain render + explanation is enough (no cache invalidate).
+      if (typeof window.switchPanel === 'function') window.switchPanel('integrations');
+      refreshAndRender();
+      showOauthErrorModal(sentinel.code);
+    } else if (sentinel) {
       // User just came back from HUMR's start/disconnect via a full page load.
       // Show the dialog first thing so it covers everything (incl. the panel-
       // switch animation), then do all the work behind it:
@@ -1672,7 +1859,12 @@
             ? _current.items.find((it) => it && it.slug === sentinel.provider)
             : null,
         ))
-        .finally(() => { transitionModal.remove(); });
+        .finally(() => {
+          transitionModal.remove();
+          // A failed narrow rides the disconnected transition with an error
+          // code attached — explain it once the card reflects reality.
+          if (sentinel.errorCode) showOauthErrorModal(sentinel.errorCode);
+        });
     } else {
       refreshAndRender();
     }

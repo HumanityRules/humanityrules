@@ -165,6 +165,7 @@ urlpatterns = [
     # Persists IntegrationUserCredential keyed by (owner_user, environment, app_slug, provider).
     # No long-lived secrets ever reach the customer env.
     path("integrations/user/google/start/", views.integrations_user_google_start, name="integrations_user_google_start"),
+    path("integrations/user/google/narrow/", views.integrations_user_google_narrow, name="integrations_user_google_narrow"),
     path("integrations/user/google/callback/", views.integrations_user_google_callback, name="integrations_user_google_callback"),
     path("integrations/user/github/start/", views.integrations_user_github_start, name="integrations_user_github_start"),
     path("integrations/user/github/callback/", views.integrations_user_github_callback, name="integrations_user_github_callback"),
@@ -173,6 +174,30 @@ urlpatterns = [
     # Connect is the browser OAuth round-trip above (start → provider → callback).
     # Disconnect is broker-only: the Hermes WebUI POSTs to /__humr_broker/integrations/tls_intercept/{slug}/disconnect,
     # which forwards here with the env bearer — see the disconnect handler under api/integrations below.
+    
+    #  - integrations_tokens_batch: the env-resident broker's single refresh endpoint, both for Refresh-all/bootstrap and for slug-targeted refresh after connect/disconnect
+    path("api/integrations/tokens", views.integrations_tokens_batch, name="integrations_tokens_batch"),
+
+    #  - integrations_credential_setup_session & submit: broker-assisted, browser-direct vault flows for API Keys (paste-style) credentials
+    path("api/integrations/credentials/setup-session", views.integrations_credential_setup_session, name="integrations_credential_setup_session"),
+    path("api/integrations/credentials/submit", views.integrations_credential_submit, name="integrations_credential_submit"),
+
+    #  - integrations_credential_poll: browser-direct poll for link-driven vault setups (e.g. Telegram managed bots)
+    path("api/integrations/credentials/poll", views.integrations_credential_poll, name="integrations_credential_poll"),
+    #  - device-complete: the broker posts device-flow refresh tokens here after the user approves; HUMR validates + stores them
+    path("api/integrations/credentials/<slug:provider>/device-complete", views.integrations_device_complete, name="integrations_device_complete"),
+
+    #  - disconnect: one handler for every provider kind — deletes the IntegrationUserCredential row and, for
+    #    OAuth providers, best-effort revokes upstream. The broker posts all disconnects here.
+    path("api/integrations/credentials/disconnect", views.integrations_credential_disconnect, name="integrations_credential_disconnect"),
+
+    #  - Merge.dev Agent Handler: env-resident components (Hermes broker / MCP aggregator) reach Merge through these. Tenant-wide Merge API key lives only on HUMR.
+    path("api/integrations/merge/ensure-registered-user", views.integrations_merge_ensure_registered_user, name="integrations_merge_ensure_registered_user"),
+    path("api/integrations/merge/link-token", views.integrations_merge_link_token, name="integrations_merge_link_token"),
+    path("api/integrations/merge/connectors", views.integrations_merge_connectors, name="integrations_merge_connectors"),
+    path("api/integrations/merge/connector-status", views.integrations_merge_connector_status, name="integrations_merge_connector_status"),
+    path("api/integrations/merge/disconnect", views.integrations_merge_disconnect, name="integrations_merge_disconnect"),
+    path("api/integrations/merge/mcp", views.integrations_merge_mcp, name="integrations_merge_mcp"),
 
     # API endpoints (view implementations live under views/integrations/ or views/pdp.py)
     path("api/aws/install-account-callback", views.aws_install_account_callback, name="aws_install_account_callback"),
@@ -182,27 +207,6 @@ urlpatterns = [
     path("api/pdp/evaluate", views.pdp_evaluate, name="pdp_evaluate"),
     #  - policy_proxy_activity: debounced last-authorized-traffic signal from each policy proxy
     path("api/runtime/policy-proxy-activity", views.policy_proxy_activity, name="policy_proxy_activity"),
-    
-    #  - integrations_tokens_batch: the env-resident broker's single refresh endpoint, both for Refresh-all/bootstrap and for slug-targeted refresh after connect/disconnect
-    path("api/integrations/tokens", views.integrations_tokens_batch, name="integrations_tokens_batch"),
-    #  - integrations_credential_setup_session / submit: broker-assisted, browser-direct vault flows for paste-style credentials
-    path("api/integrations/credentials/setup-session", views.integrations_credential_setup_session, name="integrations_credential_setup_session"),
-    path("api/integrations/credentials/submit", views.integrations_credential_submit, name="integrations_credential_submit"),
-    #  - integrations_credential_poll: browser-direct poll for link-driven vault setups (e.g. Telegram managed bots)
-    path("api/integrations/credentials/poll", views.integrations_credential_poll, name="integrations_credential_poll"),
-    #  - disconnect: one handler for every provider kind — deletes the IntegrationUserCredential row and, for
-    #    OAuth providers, best-effort revokes upstream. The broker posts all disconnects here.
-    path("api/integrations/credentials/disconnect", views.integrations_credential_disconnect, name="integrations_credential_disconnect"),
-    #  - device-complete: the broker posts device-flow refresh tokens here after the user approves; HUMR validates + stores them
-    path("api/integrations/credentials/<slug:provider>/device-complete", views.integrations_device_complete, name="integrations_device_complete"),
-
-    #  - Merge.dev Agent Handler: env-resident components (Hermes broker / MCP aggregator) reach Merge through these. Tenant-wide Merge API key lives only on HUMR.
-    path("api/integrations/merge/ensure-registered-user", views.integrations_merge_ensure_registered_user, name="integrations_merge_ensure_registered_user"),
-    path("api/integrations/merge/link-token", views.integrations_merge_link_token, name="integrations_merge_link_token"),
-    path("api/integrations/merge/connectors", views.integrations_merge_connectors, name="integrations_merge_connectors"),
-    path("api/integrations/merge/connector-status", views.integrations_merge_connector_status, name="integrations_merge_connector_status"),
-    path("api/integrations/merge/disconnect", views.integrations_merge_disconnect, name="integrations_merge_disconnect"),
-    path("api/integrations/merge/mcp", views.integrations_merge_mcp, name="integrations_merge_mcp"),
 
     #  - Permissions editor (self-referential): the env-resident humr_broker relays the Hermes WebUI's
     #    /permissions/* calls here with the env bearer. Target (app, environment) is resolved from the

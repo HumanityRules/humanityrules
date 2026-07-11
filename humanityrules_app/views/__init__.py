@@ -76,6 +76,7 @@ from .integrations.org_shared_keys import (
 )
 from .integrations.provider_google import (
     integrations_user_google_start,
+    integrations_user_google_narrow,
     integrations_user_google_callback,
 )
 from .integrations.provider_github import (
@@ -244,6 +245,7 @@ __all__ = [
     "integrations_org_shared_keys_edit",
     "integrations_org_shared_keys_delete",
     "integrations_user_google_start",
+    "integrations_user_google_narrow",
     "integrations_user_google_callback",
     "integrations_user_github_start",
     "integrations_user_github_callback",

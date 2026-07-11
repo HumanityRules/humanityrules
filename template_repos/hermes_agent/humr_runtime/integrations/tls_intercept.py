@@ -187,12 +187,17 @@ def _refresh_result_from_entry(entry: object) -> RefreshResult:
         ):
             logger.error("refresh has_token entry has non-string/empty secret name or value")
             return _transient_result()
+        # config/metadata flow into _ConnState and out to the WebUI card;
+        # coerce non-dict values (a malformed CP response) to {} rather than
+        # letting them poison the durable connection state.
+        config = entry.get("config", {})
+        metadata = entry.get("metadata", {})
         return RefreshResult(
             outcome=REFRESH_OUTCOME_HAS_TOKEN,
             secrets=dict(secrets),
             expires_in=int(entry.get("expires_in", 0)),
-            config=entry.get("config", {}),
-            metadata=entry.get("metadata", {}),
+            config=config if isinstance(config, dict) else {},
+            metadata=metadata if isinstance(metadata, dict) else {},
         )
     if outcome == REFRESH_OUTCOME_ABSENT:
         return RefreshResult(outcome=REFRESH_OUTCOME_ABSENT, secrets=None, expires_in=None, config={}, metadata={})

@@ -21,15 +21,17 @@ down:
   deep link the browser polls to completion (Telegram managed bots).
 
 Uniform module interface by kind:
-- all providers: `refresh_outcome(environment, owner_user, app_slug) -> dict`
-- VAULT only: `schema(existing) -> dict`,
-  `save_credentials(owner_user, environment, app_slug, credentials_payload,
-  config_payload) -> (IntegrationUserCredential | None, error | None)`
-- link+poll VAULT only: `poll_setup(owner_user, environment, app_slug,
-  state) -> (result | None, error | None)`
-- OAUTH only: `revoke(refresh_token) -> None`
-- device-flow OAUTH only: `store_device_credentials(environment, owner_user,
-  app_slug, payload) -> (status, body)`
+- all providers:
+    refresh_outcome(environment, owner_user, app_slug) -> dict
+- OAUTH only:
+    revoke(refresh_token) -> None
+- device-flow OAUTH only:
+    store_device_credentials(environment, owner_user, app_slug, payload) -> (status, body)
+- VAULT only:
+    schema(existing) -> dict
+    save_credentials(owner_user, environment, app_slug, credentials_payload, config_payload) -> (IntegrationUserCredential | None, error | None)
+- link+poll VAULT only:
+    poll_setup(owner_user, environment, app_slug, state) -> (result | None, error | None)
 
 The spec stores the *module*, not bound functions, so endpoints resolve
 `spec.module.<fn>` at call time. That late binding is deliberate: it keeps
@@ -76,14 +78,15 @@ class ProviderSpec:
 _SPECS = [
     ProviderSpec(provider=IntegrationUserCredential.Provider.GOOGLE, kind=ProviderKind.OAUTH, module=provider_google),
     ProviderSpec(provider=IntegrationUserCredential.Provider.GITHUB, kind=ProviderKind.OAUTH, module=provider_github),
-    ProviderSpec(provider=IntegrationUserCredential.Provider.SLACK, kind=ProviderKind.VAULT, module=provider_slack),
-    ProviderSpec(provider=IntegrationUserCredential.Provider.TELEGRAM, kind=ProviderKind.VAULT, module=provider_telegram),
     ProviderSpec(provider=IntegrationUserCredential.Provider.OPENAI_CODEX, kind=ProviderKind.OAUTH, module=provider_openai_codex),
-    ProviderSpec(provider=IntegrationUserCredential.Provider.OPENROUTER, kind=ProviderKind.VAULT, module=provider_openrouter),
     ProviderSpec(provider=IntegrationUserCredential.Provider.NOUS, kind=ProviderKind.OAUTH, module=provider_nous),
-    ProviderSpec(provider=IntegrationUserCredential.Provider.OPENAI, kind=ProviderKind.VAULT, module=provider_openai),
-    ProviderSpec(provider=IntegrationUserCredential.Provider.ANTHROPIC, kind=ProviderKind.VAULT, module=provider_anthropic),
     ProviderSpec(provider=IntegrationUserCredential.Provider.X, kind=ProviderKind.OAUTH, module=provider_x),
+
+    ProviderSpec(provider=IntegrationUserCredential.Provider.SLACK, kind=ProviderKind.VAULT, module=provider_slack),
+    ProviderSpec(provider=IntegrationUserCredential.Provider.TELEGRAM, kind=ProviderKind.VAULT, module=provider_telegram),    
+    ProviderSpec(provider=IntegrationUserCredential.Provider.OPENROUTER, kind=ProviderKind.VAULT, module=provider_openrouter),
+    ProviderSpec(provider=IntegrationUserCredential.Provider.OPENAI, kind=ProviderKind.VAULT, module=provider_openai),
+    ProviderSpec(provider=IntegrationUserCredential.Provider.ANTHROPIC, kind=ProviderKind.VAULT, module=provider_anthropic),    
     ProviderSpec(provider=IntegrationUserCredential.Provider.BROWSERUSE, kind=ProviderKind.VAULT, module=provider_browseruse),
     ProviderSpec(provider=IntegrationUserCredential.Provider.TAVILY, kind=ProviderKind.VAULT, module=provider_tavily),
 ]
