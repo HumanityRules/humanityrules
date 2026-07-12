@@ -2,7 +2,7 @@
 (() => {
   'use strict';
 
-  const { page, util, flows, cardActions, cardSpecs } = window.HumrIntegrations;
+  const { util, flows, cardActions, cardSpecs } = window.HumrIntegrations;
   const { elem } = util;
   const { throwForErrorResponse } = flows;
 
@@ -78,11 +78,7 @@
           if (s.status === 'connected') {
             stopped = true;
             waiting.remove();
-            try {
-              await page.refreshAndRender();
-            } finally {
-              connectOutcome.finish('changed');
-            }
+            connectOutcome.finish('changed');
             return;
           }
         }
