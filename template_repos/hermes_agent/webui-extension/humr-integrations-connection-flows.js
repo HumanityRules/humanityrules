@@ -1,4 +1,10 @@
-// HUMR integration connection flows: provider-neutral vault, device, and disconnect machinery plus connector adapters.
+// HUMR integration connection flows: provider-neutral vault, device, and
+// disconnect machinery plus connector adapters.
+//
+// TLS-intercept Connect (Google, GitHub, …) is a top-level navigation to HUMR's
+// control plane; Disconnect goes through the broker so the Integrations pane
+// stays open. MCP-aggregator providers (Notion) flow entirely through the
+// broker.
 (() => {
   'use strict';
 

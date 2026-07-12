@@ -1,15 +1,9 @@
 // The extension is split across the humr-integrations-*.js scripts listed in
 // manifest.json (load order matters). This first-loaded runtime bootstraps the
-// shared window.HumrIntegrations namespace.
-// HUMR integrations runtime: shared namespace, state, registries, broker, WebUI helpers, modals, and oauth sentinels.
+// shared window.HumrIntegrations namespace: state, registries, broker client
+// helpers, WebUI helpers, modals, and oauth sentinels. 
+// Broker calls go same-origin via Caddy's /__humr_broker/* route.
 //
-// Adds an "Integrations" tab to the WebUI's main left sidebar nav, rendering
-// per-provider cards from the integrations broker's unified control API. The
-// broker is reached same-origin via the Caddy /__humr_broker/* route. Connect /
-// Disconnect for TLS-intercept providers (Google, GitHub) are top-level
-// navigations to HUMR's control plane for Connect; Disconnect goes through the
-// broker so the Integrations pane stays open. MCP-aggregator providers (Notion)
-// flow entirely through the broker.
 (() => {
   'use strict';
 

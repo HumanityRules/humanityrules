@@ -1,6 +1,6 @@
-// HUMR integrations page controller: card and page rendering, panel
-// registration (shell integration lives in humr-panel.js), oauth-sentinel
-// orchestration, and bootstrap.
+// HUMR integrations page controller: mounts the Integrations tab (via
+// humr-panel.js), renders per-provider cards from the broker's unified control
+// API, orchestrates oauth-sentinel returns, and bootstraps.
 (() => {
   'use strict';
 
