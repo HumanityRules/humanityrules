@@ -99,9 +99,8 @@
 
   // ── Registries ────────────────────────────────────────────────────────
 
-  // Factories register by broker kind, with optional kind+slug overrides for
-  // providers such as Google and Slack. resolve() combines the selected
-  // factory's details/actions with the broker's shared presentation data.
+  // Kind factories build complete cardSpecs. Optional kind+slug factories add
+  // provider overrides for cases such as Google and Slack.
   const _cardSpecFactories = new Map();
 
   function cardSpecSelectorKey(selector) {
@@ -123,15 +122,15 @@
 
     resolve(integration) {
       if (!integration || !integration.kind) return null;
-      const exact = integration.slug
+      const overrideFactory = integration.slug
         ? _cardSpecFactories.get(cardSpecSelectorKey({ kind: integration.kind, slug: integration.slug }))
         : null;
-      const fallback = _cardSpecFactories.get(cardSpecSelectorKey({ kind: integration.kind }));
-      const factory = exact || fallback;
-      if (!factory) return null;
+      const baseFactory = _cardSpecFactories.get(cardSpecSelectorKey({ kind: integration.kind }));
+      if (!baseFactory) return null;
 
-      const cardSpec = factory(integration);
+      const cardSpec = baseFactory(integration);
       if (!cardSpec) return null;
+      const overrides = overrideFactory ? overrideFactory(integration) : null;
       const metadata = integration.metadata || {};
       let provisionLabel = null;
       // Platform is the lowest-priority shared credential source, so if it
@@ -149,6 +148,7 @@
         canConfigure: false,
         provisionLabel,
         ...cardSpec,
+        ...(overrides || {}),
       };
     },
   };

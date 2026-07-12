@@ -415,27 +415,28 @@
     return details;
   }
 
-  function createTlsCardSpec(integration, customization) {
-    const custom = customization || {};
+  function createTlsCardSpec(integration) {
     const usesVault = integration.connect_mode === 'vault';
     const usesDevice = integration.connect_mode === 'device';
-    const oauthConnectUrl = (!usesVault && !usesDevice)
-      ? buildTlsConnectUrl(integration.slug)
-      : null;
-    const openVault = () => startVaultConfig(integration, custom.vaultRenderer);
+    const openVault = () => startVaultConfig(integration);
+
     const defaultConnect = () => {
       if (usesVault) return openVault();
       if (usesDevice) return startDeviceConnect(integration);
-      window.location.href = oauthConnectUrl;
+
+      window.location.href = buildTlsConnectUrl(integration.slug);
       return { outcome: 'navigating' };
     };
+
+    const defaultDisconnect = async () => {
+      await disconnectTlsProvider(integration);
+    };
+
     return {
       details: tlsCardDetails(integration),
-      connect: custom.connect || defaultConnect,
-      canConfigure: usesVault || !!custom.canConfigure,
-      async disconnect() {
-        await disconnectTlsProvider(integration);
-      },
+      connect: defaultConnect,
+      canConfigure: usesVault,
+      disconnect: defaultDisconnect,
     };
   }
 
@@ -456,9 +457,9 @@
   cardSpecs.register({ kind: 'tls_intercept' }, createTlsCardSpec);
   cardSpecs.register({ kind: 'mcp_aggregator' }, createMcpCardSpec);
 
-  cardSpecs.createTls = createTlsCardSpec;
   window.HumrIntegrations.vaultForm = {
     fieldInputFor,
+    open: startVaultConfig,
     wireSubmit: wireVaultSubmit,
   };
   window.HumrIntegrations.loadedExtensionScripts.add('connection-flows');

@@ -4,7 +4,7 @@
 
   const { util, vaultForm, cardActions, cardSpecs } = window.HumrIntegrations;
   const { elem } = util;
-  const { fieldInputFor, wireSubmit } = vaultForm;
+  const { fieldInputFor, open: openVaultForm, wireSubmit } = vaultForm;
 
   // Slack manifest name rules (https://docs.slack.dev/reference/app-manifest):
   // display_information.name is <=35 chars (any character); bot_user.display_name
@@ -208,7 +208,11 @@
   }
 
   cardSpecs.register({ kind: 'tls_intercept', slug: 'slack' }, (integration) => {
-    return cardSpecs.createTls(integration, { vaultRenderer: showSlackConfigModal });
+    return {
+      connect() {
+        return openVaultForm(integration, showSlackConfigModal);
+      },
+    };
   });
   window.HumrIntegrations.loadedExtensionScripts.add('slack');
 })();

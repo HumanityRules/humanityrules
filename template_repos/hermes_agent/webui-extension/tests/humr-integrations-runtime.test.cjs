@@ -78,6 +78,7 @@ test('configurable cards reuse the connection action', () => {
   const { context, window } = createBrowserContext();
   loadScript(context, 'humr-integrations-runtime.js');
   loadScript(context, 'humr-integrations-connection-flows.js');
+  loadScript(context, 'humr-integrations-slack.js');
 
   const cardSpec = window.HumrIntegrations.cardSpecs.resolve({
     kind: 'tls_intercept',
@@ -92,7 +93,9 @@ test('configurable cards reuse the connection action', () => {
 
   assert.equal(cardSpec.canConfigure, true);
   assert.equal(typeof cardSpec.connect, 'function');
+  assert.equal(typeof cardSpec.disconnect, 'function');
   assert.equal('configure' in cardSpec, false);
+  assert.equal(window.HumrIntegrations.cardSpecs.createTls, undefined);
 });
 
 test('connect outcomes settle once', async () => {
