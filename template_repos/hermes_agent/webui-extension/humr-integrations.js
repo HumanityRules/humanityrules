@@ -1,5 +1,6 @@
-// HUMR integrations page controller: card and page rendering, WebUI shell integration,
-// oauth-sentinel orchestration, and bootstrap.
+// HUMR integrations page controller: card and page rendering, panel
+// registration (shell integration lives in humr-panel.js), oauth-sentinel
+// orchestration, and bootstrap.
 (() => {
   'use strict';
 
@@ -335,7 +336,7 @@
   // Append a titled section (heading + responsive card grid) to `container`.
   // Sections always render their heading so users learn the two groups exist;
   // an empty section shows `emptyHint` instead of a grid.
-  function appendSection(container, title, items, ctx, emptyHint) {
+  function appendSection(container, ctx, title, emptyHint, items) {
     const section = elem('div', { class: 'humr-integration-section' }, [
       elem('div', { class: 'humr-integration-section-title' }, [title]),
     ]);
@@ -348,7 +349,7 @@
   // sub-heading + its own card grid. Sub-groups with no cards are skipped; if
   // none have cards, `emptyHint` shows instead. Used by "Not connected" to make
   // the Model Providers → Connectors ordering explicit rather than implied.
-  function appendGroupedSection(container, title, subGroups, ctx, emptyHint) {
+  function appendGroupedSection(container, ctx, title, emptyHint, subGroups) {
     const section = elem('div', { class: 'humr-integration-section' }, [
       elem('div', { class: 'humr-integration-section-title' }, [title]),
     ]);
@@ -402,11 +403,14 @@
       .sort(byCategoryThenLabel);
     const notConnected = items.filter((it) => it.status !== 'connected');
 
-    appendSection(list, 'Connected', connected, ctx, 'Nothing connected yet.');
-    appendGroupedSection(list, 'Not connected', [
-      { title: 'Model Providers', items: notConnected.filter(isModelProvider).slice().sort(byLabel) },
-      { title: 'Connectors', items: notConnected.filter((it) => !isModelProvider(it)).slice().sort(byLabel) },
-    ], ctx, 'Everything is connected.');
+    appendSection(list, ctx, 'Connected', 'Nothing connected yet.', connected);
+    appendGroupedSection(
+      list, ctx, 'Not connected', 'Everything is connected.',
+      [
+        { title: 'Model Providers', items: notConnected.filter(isModelProvider).slice().sort(byLabel) },
+        { title: 'Connectors', items: notConnected.filter((it) => !isModelProvider(it)).slice().sort(byLabel) },
+      ],
+    );
   }
 
   async function refreshAndRender() {
@@ -414,68 +418,7 @@
     renderPane(state.current);
   }
 
-  function ensureSidebarTabAndPane() {
-    const sidebar = document.querySelector('.sidebar');
-    const sidebarNav = sidebar && sidebar.querySelector('.sidebar-nav');
-    const mainEl = document.querySelector('main.main');
-    // Hermes 0.51+ added a desktop primary `<nav class="rail">` alongside the
-    // legacy `.sidebar-nav`. CSS hides `.sidebar-nav` at ≥641px and shows
-    // `.rail` instead, so we have to register a button in BOTH so the entry
-    // is visible on every viewport. Older versions without `.rail` just have
-    // the sidebar-nav button — that's fine.
-    const rail = document.querySelector('nav.rail');
-    if (!sidebar || !sidebarNav || !mainEl) return false;
-    if (document.getElementById('mainIntegrations')) return true;
-
-    const onActivate = () => {
-      // Pass `fromRailClick: true` so we get the same rail behaviour as
-      // other top-level entries — second click on the active rail icon
-      // collapses the sidebar, click while collapsed re-expands it.
-      if (typeof window.switchPanel === 'function') {
-        window.switchPanel('integrations', { fromRailClick: true });
-      }
-    };
-
-    // Plug icon — 20×20 in the rail (matches upstream rail icons),
-    // 18×18 in the sidebar-nav (matches upstream nav-tab icons).
-    const railIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0zM12 18v4"/></svg>';
-    const navIcon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0zM12 18v4"/></svg>';
-
-    if (rail && !document.getElementById('humrIntegrationsRailBtn')) {
-      const railBtn = elem('button', {
-        type: 'button',
-        class: 'rail-btn nav-tab has-tooltip',
-        id: 'humrIntegrationsRailBtn',
-        'aria-label': 'Integrations',
-        dataset: { panel: 'integrations', tooltip: 'Integrations' },
-        onclick: onActivate,
-      });
-      railBtn.innerHTML = railIcon;
-      // Insert before `.rail-spacer` so the button sits with primary panels,
-      // not below the spacer where Settings lives.
-      const spacer = rail.querySelector('.rail-spacer');
-      if (spacer) rail.insertBefore(railBtn, spacer);
-      else rail.appendChild(railBtn);
-    }
-
-    if (!document.getElementById('humrIntegrationsTab')) {
-      const navBtn = elem('button', {
-        type: 'button',
-        class: 'nav-tab has-tooltip has-tooltip--bottom',
-        id: 'humrIntegrationsTab',
-        dataset: { panel: 'integrations', label: 'Integrations', tooltip: 'Integrations' },
-        onclick: onActivate,
-      });
-      navBtn.innerHTML = navIcon;
-      sidebarNav.appendChild(navBtn);
-    }
-
-    // Integrations is a top-level destination, not a sidebar drawer. Mount
-    // it as a `#main<Name>.main-view` sibling inside <main>, matching the
-    // upstream view-switching contract (see hermes-webui static/style.css —
-    // "Generalized main-view switching"). The wrapper around switchPanel adds
-    // `showing-integrations` on <main>; our CSS reveals this view and hides
-    // `#mainChat` when the class is present.
+  function populateView(view) {
     const refreshButton = elem('button', {
       class: 'humr-integration-btn humr-integration-page-refresh-btn',
       id: 'humrIntegrationRefreshBtn',
@@ -487,71 +430,36 @@
       id: 'humrIntegrationRefreshNote',
       style: { display: 'none' },
     });
-    const view = elem('section', { class: 'main-view humr-integration-page', id: 'mainIntegrations' }, [
-      elem('div', { class: 'humr-integration-page-inner' }, [
-        elem('div', { class: 'humr-integration-page-head' }, [
-          elem('div', { class: 'humr-integration-page-head-row' }, [
-            elem('div', { class: 'humr-integration-page-title' }, ['Integrations']),
-            refreshButton,
-          ]),
-          elem('div', { class: 'humr-integration-page-meta' }, [
-            'Third-party accounts the agent can act on.',
-          ]),
-          refreshNote,
+    view.appendChild(elem('div', { class: 'humr-integration-page-inner' }, [
+      elem('div', { class: 'humr-integration-page-head' }, [
+        elem('div', { class: 'humr-integration-page-head-row' }, [
+          elem('div', { class: 'humr-integration-page-title' }, ['Integrations']),
+          refreshButton,
         ]),
-        elem('div', { class: 'humr-integration-list', id: 'humrIntegrationList' }),
+        elem('div', { class: 'humr-integration-page-meta' }, [
+          'Third-party accounts the agent can act on.',
+        ]),
+        refreshNote,
       ]),
-    ]);
-    mainEl.appendChild(view);
-
-    // Sidebar panel-view: upstream's switchPanel activates `#panel<Name>`
-    // and deactivates the rest, so without our own panel the sidebar would
-    // appear empty when Integrations is active. We give it a title and a
-    // connected-count summary updated each time we refresh from the broker.
-    const sidebarPane = elem('div', { class: 'panel-view', id: 'panelIntegrations' }, [
-      elem('div', { class: 'panel-head' }, [
-        elem('span', null, ['Integrations']),
-      ]),
-      elem('div', { class: 'humr-integration-summary', id: 'humrIntegrationSummary' }, [
-        'Loading…',
-      ]),
-    ]);
-    const sidebarBottom = sidebar.querySelector('.sidebar-bottom');
-    if (sidebarBottom) sidebar.insertBefore(sidebarPane, sidebarBottom);
-    else sidebar.appendChild(sidebarPane);
-    return true;
+      elem('div', { class: 'humr-integration-list', id: 'humrIntegrationList' }),
+    ]));
   }
 
-  // Wrap upstream switchPanel so:
-  //   1. Opening our tab refreshes the broker view.
-  //   2. <main> gets `showing-integrations` while we're active and loses it
-  //      when leaving — upstream's loop only toggles classes for known panels,
-  //      so we apply ours after upstream has run. CSS gated on this class
-  //      hides the sidebar while Integrations owns the screen, so our page
-  //      isn't sitting next to an empty/confusing sidebar drawer.
-  //
-  // The refresh fetch is intentionally NOT awaited: a sibling wrapper (e.g.
-  // humr-webapps.js) is waiting for us to return before it toggles its own
-  // `showing-<panel>` class off, and a multi-second broker fetch in between
-  // would leave both panels' classes set simultaneously, so both views would
-  // render on top of each other until the fetch resolved.
-  function wrapSwitchPanel() {
-    if (typeof window.switchPanel !== 'function') return;
-    if (window.__humrPanelWrapped) return;
-    window.__humrPanelWrapped = true;
-    const orig = window.switchPanel;
-    window.switchPanel = async function (name) {
-      const result = await orig.apply(this, arguments);
-      const mainEl = document.querySelector('main.main');
-      if (mainEl) mainEl.classList.toggle('showing-integrations', name === 'integrations');
-      if (name === 'integrations') refreshAndRender();
-      return result;
-    };
+  // Connected-count summary for the sidebar pane, updated on every broker
+  // refresh (see renderSummary).
+  function populatePane(pane) {
+    pane.appendChild(elem('div', { class: 'humr-integration-summary', id: 'humrIntegrationSummary' }, [
+      'Loading…',
+    ]));
   }
 
   function init() {
     if (!window.HumrIntegrations) {
       console.error('[humr-integrations] runtime failed to load; not mounting.');
+      return;
+    }
+    if (!window.HumrPanel) {
+      console.error('[humr-integrations] humr-panel.js failed to load; not mounting.');
       return;
     }
     // The six scripts are independent deferred fetches: one can 404 or throw during a deploy/restart window
@@ -564,20 +472,31 @@
       console.error('[humr-integrations] extension script(s) failed to load: ' + fileNames.join(', ') + ' — not mounting.');
       return;
     }
-    if (!ensureSidebarTabAndPane()) {
-      // Sidebar DOM not ready yet; retry on the next animation frame.
-      // Happens on fresh page loads where the extension script runs before
-      // the sidebar renders.
-      requestAnimationFrame(init);
-      return;
-    }
-    wrapSwitchPanel();
 
+    // Plug icon: 24×24 stroke paths; humr-panel.js sizes it per slot (rail/nav).
+    const PLUG_ICON = '<path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0zM12 18v4"/>';
+
+    window.HumrPanel.register({
+      id: 'integrations',
+      title: 'Integrations',
+      icon: PLUG_ICON,
+      viewClass: 'humr-integration-page',
+      populateView,
+      populatePane,
+      onShow: refreshAndRender, // opening the tab re-syncs from the broker
+      onMount: handleOauthReturnAndRender,
+    });
+  }
+
+  // First render, once humr-panel.js has the shell DOM mounted. A HUMR
+  // connect/disconnect flow returns to the WebUI via a full page load and
+  // leaves an oauth sentinel behind; consume it and pick the matching flow.
+  function handleOauthReturnAndRender() {
     const oauthSentinel = consumeOAuthSentinel();
     if (oauthSentinel && oauthSentinel.transition === 'error') {
       // The flow died after the consent redirect; nothing changed broker-side,
       // so a plain render + explanation is enough (no cache invalidate).
-      if (typeof window.switchPanel === 'function') window.switchPanel('integrations');
+      window.switchPanel('integrations');
       refreshAndRender();
       showOauthErrorModal(oauthErrorMessage(oauthSentinel.code));
     } else if (oauthSentinel) {
@@ -593,7 +512,7 @@
       // Yield a frame so the dialog actually paints before the render work
       // below blocks the main thread — otherwise it'd appear only after.
       new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
-        .then(() => { if (typeof window.switchPanel === 'function') window.switchPanel('integrations'); })
+        .then(() => window.switchPanel('integrations'))
         .then(refreshAndRender)
         .then(() => waitForLogos(10000))
         // Cache-hint only — if the broker is unreachable or returns 5xx, the
@@ -624,9 +543,5 @@
     }
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
-  }
+  init();
 })();
