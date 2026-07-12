@@ -2,7 +2,7 @@
 (() => {
   'use strict';
 
-  const { page, util, broker, oauthSentinel, flows, cardSpecs } = window.HumrIntegrations;
+  const { util, broker, oauthSentinel, flows, cardSpecs } = window.HumrIntegrations;
   const { elem } = util;
   const { buildTlsConnectUrl } = broker;
   const { registerOauthErrors } = oauthSentinel;
@@ -42,7 +42,7 @@
     return (grants && typeof grants === 'object' && grants.products) ? grants : null;
   }
 
-  function showGoogleScopeModal(integration, catalog, returnTo, revert) {
+  function showGoogleScopeModal(integration, connectUrl, revert) {
     const grants = googleGrants(integration);
     const isConnected = integration.status === 'connected';
     // Pre-check from what Google actually granted; a never-connected card
@@ -111,7 +111,7 @@
         .filter((p) => selection[p.key] !== 'off')
         .map((p) => p.key + ':' + selection[p.key])
         .join(',');
-      window.location.href = buildTlsConnectUrl(catalog, integration.slug, returnTo) +
+      window.location.href = connectUrl +
         '&products=' + encodeURIComponent(productsParam);
     });
 
@@ -138,13 +138,13 @@
   }
 
   cardSpecs.register({ kind: 'tls_intercept', slug: 'google' }, (integration) => {
-    const catalog = page.catalog;
+    const connectUrl = buildTlsConnectUrl(integration.slug);
     return createTlsCardSpec(integration, {
       connect(revert) {
-        showGoogleScopeModal(integration, catalog, page.returnTo, revert);
+        showGoogleScopeModal(integration, connectUrl, revert);
       },
       configure() {
-        showGoogleScopeModal(integration, catalog, page.returnTo);
+        showGoogleScopeModal(integration, connectUrl);
       },
     });
   });

@@ -10,14 +10,11 @@
   const INTEGRATIONS_URL = '/__humr_broker/integrations';
   const state = { current: null, disconnecting: new Set() };
 
-  // Stable page-level collaborator shared by the split integration scripts.
-  // The runtime owns catalog access and navigation data; the page controller
-  // supplies its render lifecycle once it has loaded.
+  // Stable render-lifecycle collaborator shared by the split integration
+  // scripts. The page controller supplies its callbacks once it has loaded.
   let _rerender = null;
   let _refreshAndRender = null;
   const page = {
-    get catalog() { return state.current; },
-    returnTo: window.location.origin + window.location.pathname,
     configure({ rerender, refreshAndRender }) {
       if (typeof rerender !== 'function' || typeof refreshAndRender !== 'function') {
         throw new Error('[humr-integrations] page.configure() needs render lifecycle functions.');
@@ -159,7 +156,12 @@
 
   // TLS-intercept providers expose /integrations/user/<slug>/start/ for Connect
   // (top-level navigation to HUMR). Disconnect goes through the broker.
-  function buildTlsConnectUrl(catalog, slug, returnTo) {
+  function buildTlsConnectUrl(slug) {
+    const catalog = state.current;
+    if (!catalog || !catalog.humr_control_plane_url) {
+      throw new Error('[humr-integrations] integration catalog is unavailable.');
+    }
+    const returnTo = window.location.origin + window.location.pathname;
     const rd = encodeURIComponent(returnTo);
     return catalog.humr_control_plane_url.replace(/\/$/, '') + '/integrations/user/' + slug + '/start/?rd=' + rd + '&app_slug=' + encodeURIComponent(catalog.app_slug || '');
   }

@@ -9,7 +9,7 @@
 
   const { state, page, util, broker, webui, flows, cardSpecs } = window.HumrIntegrations;
   const { elem, formatDate } = util;
-  const { tlsInterceptPath, mcpPath, buildMcpConnectUrl, invalidateTlsCache } = broker;
+  const { tlsInterceptPath, mcpPath, buildTlsConnectUrl, buildMcpConnectUrl, invalidateTlsCache } = broker;
   const { refreshModelDropdownsIfProviderAffectsPicker } = webui;
 
   const VAULT_NETWORK_ERROR = (
@@ -466,14 +466,16 @@
 
   function createTlsCardSpec(integration, customization) {
     const custom = customization || {};
-    const catalog = page.catalog;
     const usesVault = integration.connect_mode === 'vault';
     const usesDevice = integration.connect_mode === 'device';
+    const oauthConnectUrl = (!usesVault && !usesDevice)
+      ? buildTlsConnectUrl(integration.slug)
+      : null;
     const openVault = (revert) => startVaultConfig(integration, revert, custom.vaultRenderer);
     const defaultConnect = (revert) => {
       if (usesVault) openVault(revert);
       else if (usesDevice) startDeviceConnect(integration, revert);
-      else window.location.href = buildTlsConnectUrl(catalog, integration.slug, page.returnTo);
+      else window.location.href = oauthConnectUrl;
     };
     const configure = Object.prototype.hasOwnProperty.call(custom, 'configure')
       ? custom.configure
