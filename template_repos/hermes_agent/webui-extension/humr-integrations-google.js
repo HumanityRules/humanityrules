@@ -42,7 +42,7 @@
     return (grants && typeof grants === 'object' && grants.products) ? grants : null;
   }
 
-  function showGoogleScopeModal(integration, connectUrl, revert) {
+  function showGoogleScopeModal(integration, connectUrl, release) {
     const grants = googleGrants(integration);
     const isConnected = integration.status === 'connected';
     // Pre-check from what Google actually granted; a never-connected card
@@ -54,7 +54,7 @@
     }
 
     const backdrop = elem('div', { class: 'humr-modal-backdrop' });
-    const cancel = () => { backdrop.remove(); if (revert) revert(); };
+    const cancel = () => { backdrop.remove(); if (release) release(); };
 
     const applyBtn = elem('button', {
       class: 'humr-integration-btn humr-integration-btn-primary',
@@ -140,8 +140,8 @@
   cardSpecs.register({ kind: 'tls_intercept', slug: 'google' }, (integration) => {
     const connectUrl = buildTlsConnectUrl(integration.slug);
     return createTlsCardSpec(integration, {
-      connect(revert) {
-        showGoogleScopeModal(integration, connectUrl, revert);
+      connect(release) {
+        showGoogleScopeModal(integration, connectUrl, release);
       },
       configure() {
         showGoogleScopeModal(integration, connectUrl);
