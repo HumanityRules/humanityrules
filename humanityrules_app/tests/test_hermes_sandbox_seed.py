@@ -103,7 +103,17 @@ class TestHermesSandboxSeed(unittest.TestCase):
             set(extensions),
             {"humr-integrations", "humr-webapps", "humr-permissions"},
         )
-        self.assertEqual(extensions["humr-integrations"]["scripts"], ["humr-integrations.js"])
+        self.assertEqual(
+            extensions["humr-integrations"]["scripts"],
+            [
+                "humr-integrations-runtime.js",
+                "humr-integrations-connection-flows.js",
+                "humr-integrations-google.js",
+                "humr-integrations-slack.js",
+                "humr-integrations-merge.js",
+                "humr-integrations.js",
+            ],
+        )
         self.assertIn("humr-model-picker.css", extensions["humr-integrations"]["stylesheets"])
         self.assertEqual(extensions["humr-webapps"]["scripts"], ["humr-webapps.js"])
         self.assertEqual(extensions["humr-permissions"]["scripts"], ["humr-permissions.js"])
@@ -118,4 +128,3 @@ class TestHermesSandboxSeed(unittest.TestCase):
         self.assertNotIn("HERMES_WEBUI_EXTENSION_STYLESHEET_URLS", webui_script)
         self.assertNotIn("HERMES_WEBUI_EXTENSION_DIR must be set", webui_script)
         self.assertNotIn("HERMES_WEBUI_EXTENSION_DIR must be set", supervisor_script)
-

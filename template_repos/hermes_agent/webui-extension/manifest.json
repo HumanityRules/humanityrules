@@ -4,7 +4,7 @@
     {
       "id": "humr-integrations",
       "name": "HumR Integrations",
-      "scripts": ["humr-integrations.js"],
+      "scripts": ["humr-integrations-runtime.js", "humr-integrations-connection-flows.js", "humr-integrations-google.js", "humr-integrations-slack.js", "humr-integrations-merge.js", "humr-integrations.js"],
       "stylesheets": ["humr-integrations.css", "humr-model-picker.css"]
     },
     {
