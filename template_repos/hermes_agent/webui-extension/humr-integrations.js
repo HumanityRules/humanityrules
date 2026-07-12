@@ -12,7 +12,6 @@
     webui = {},
     modals = {},
     oauthSentinel: oauthSentinelApi = {},
-    flows = {},
     cardActions = {},
     cardSpecs = {},
     page = {},
@@ -22,8 +21,6 @@
   const { logoImg, waitForLogos, waitForWebui, refreshModelDropdownsIfProviderAffectsPicker } = webui;
   const { showTransitionModal, showOauthErrorModal } = modals;
   const { consumeOAuthSentinel, oauthErrorMessage } = oauthSentinelApi;
-  const { markConnecting } = flows;
-
   let _refreshInflight = false;
 
   async function startRefreshCatalog() {
@@ -152,14 +149,16 @@
 
   // Append the not-connected footer: a head row (title + status pill) plus a
   // body holding the Connect button, which the card CSS pins to the bottom so
-  // buttons align across a grid row. `onConnect` receives the markConnecting
-  // revert fn, which modal flows (vault, Merge) call to restore the button on
-  // cancel/error and navigation flows simply let persist as the page leaves.
+  // buttons align across a grid row. cardActions owns the pending state; modal
+  // flows release it on cancellation/error, while navigation flows let it
+  // persist until the page leaves.
   function appendConnectFooter(card, titleRow, statusPill, cardSpec) {
+    const pending = cardActions.isConnecting(cardSpec);
     const connectBtn = elem('button', {
       class: 'humr-integration-btn',
-      onclick: () => { cardSpec.connect(markConnecting(connectBtn)); },
-    }, ['Connect']);
+      onclick: () => cardActions.connect(cardSpec),
+      disabled: pending,
+    }, [pending ? 'Connecting…' : 'Connect']);
     if (cardSpec.status === 'not_connected') {
       // Compact single-row card: logo + name on the left, Connect on the right.
       // These cards have nothing else to show, so we drop the redundant

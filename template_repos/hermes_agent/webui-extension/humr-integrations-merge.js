@@ -28,8 +28,8 @@
     return backdrop;
   }
 
-  async function startMergeConnect(integration, revert) {
-    const revertOnce = () => { if (revert) { revert(); revert = null; } };
+  async function startMergeConnect(integration, release) {
+    const releaseOnce = () => { if (release) { release(); release = null; } };
     let resp;
     try {
       resp = await fetch('/__humr_broker/integrations/merge/link-token', {
@@ -39,24 +39,24 @@
       });
     } catch (_) {
       alert('Could not reach the integrations broker. Try again.');
-      revertOnce();
+      releaseOnce();
       return;
     }
     if (!resp.ok) {
       alert('Merge link-token request failed.');
-      revertOnce();
+      releaseOnce();
       return;
     }
     const data = await resp.json();
     if (!data.magic_link_url) {
       alert('Merge did not return a magic link.');
-      revertOnce();
+      releaseOnce();
       return;
     }
     window.open(data.magic_link_url, '_blank');
 
     let stopped = false;
-    const waiting = showMergeWaitingModal(integration, () => { stopped = true; revertOnce(); });
+    const waiting = showMergeWaitingModal(integration, () => { stopped = true; releaseOnce(); });
     const start = Date.now();
     const intervalMs = 3000;
     const timeoutMs = 30 * 60 * 1000;
@@ -65,7 +65,7 @@
       if (Date.now() - start > timeoutMs) {
         stopped = true;
         waiting.remove();
-        revertOnce();
+        releaseOnce();
         return;
       }
       try {
@@ -78,7 +78,11 @@
           if (s.status === 'connected') {
             stopped = true;
             waiting.remove();
-            await page.refreshAndRender();
+            try {
+              await page.refreshAndRender();
+            } finally {
+              releaseOnce();
+            }
             return;
           }
         }
@@ -91,8 +95,8 @@
   cardSpecs.register({ kind: 'merge_connector' }, (integration) => {
     return {
       details: [],
-      connect(revert) {
-        startMergeConnect(integration, revert);
+      connect(release) {
+        startMergeConnect(integration, release);
       },
       configure: null,
       async disconnect() {

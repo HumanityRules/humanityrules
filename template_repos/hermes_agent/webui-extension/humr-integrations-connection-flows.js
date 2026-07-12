@@ -17,21 +17,6 @@
     'If this keeps happening, ask an admin to check this Hermes deployment.'
   );
 
-  // Put a Connect button into its in-flight "Connecting…" state and return a
-  // revert function. For navigation flows (TLS-OAuth, MCP) the page leaves
-  // before revert is ever called, so the label simply persists. For modal
-  // flows (vault, Merge) the caller reverts when the user cancels or it errors.
-  function markConnecting(btn) {
-    if (!btn) return () => {};
-    const original = btn.textContent;
-    btn.disabled = true;
-    btn.textContent = 'Connecting…';
-    return () => {
-      btn.disabled = false;
-      btn.textContent = original;
-    };
-  }
-
   async function throwForErrorResponse(response, fallbackMessage) {
     if (response.ok) return;
     let message = fallbackMessage;
@@ -314,8 +299,8 @@
 
   const DEVICE_POLL_MS = 3000;
 
-  async function startDeviceConnect(integration, revert) {
-    const revertOnce = () => { if (revert) { revert(); revert = null; } };
+  async function startDeviceConnect(integration, release) {
+    const releaseOnce = () => { if (release) { release(); release = null; } };
     let session;
     try {
       const base = tlsInterceptPath(integration.slug, 'device');
@@ -324,10 +309,10 @@
       if (!resp.ok || !session.ok) throw new Error(session.error || 'Could not start the login.');
     } catch (err) {
       alert(err.message || 'Could not start the login.');
-      revertOnce();
+      releaseOnce();
       return;
     }
-    showDeviceModal(integration, session, revertOnce);
+    showDeviceModal(integration, session, releaseOnce);
   }
 
   function showDeviceModal(integration, session, onClose) {
@@ -384,9 +369,12 @@
       if (cancelled) return;
       if (st.phase === 'completed') {
         backdrop.remove();
-        await page.refreshAndRender();
-        await refreshModelDropdownsIfProviderAffectsPicker(integration);
-        if (onClose) onClose();
+        try {
+          await page.refreshAndRender();
+          await refreshModelDropdownsIfProviderAffectsPicker(integration);
+        } finally {
+          if (onClose) onClose();
+        }
         return;
       }
       if (st.phase === 'failed' || st.phase === null) {
@@ -403,20 +391,18 @@
 
   // Open the shared vault setup plumbing with either the generic schema-driven
   // modal or a card specification's custom modal renderer.
-  async function startVaultConfig(integration, revert, modalRenderer) {
-    // `revert` (from markConnecting) restores the Connect button. Fire it if we
-    // never open the modal (error), or when the user dismisses it without
-    // connecting; a successful save re-renders the card from scratch so the
-    // button is replaced regardless. revert may be omitted (e.g. the Configure
-    // button on an already-connected provider reuses this path).
-    const revertOnce = () => { if (revert) { revert(); revert = null; } };
+  async function startVaultConfig(integration, release, modalRenderer) {
+    // `release` clears cardActions' pending Connect state. Fire it if we never
+    // open the modal (error), or when the user dismisses it. It may be omitted
+    // when Configure on an already-connected provider reuses this path.
+    const releaseOnce = () => { if (release) { release(); release = null; } };
     try {
       const session = await requestVaultSetupSession(integration);
       const renderer = modalRenderer || showGenericVaultConfigModal;
-      renderer(integration, session, revertOnce);
+      renderer(integration, session, releaseOnce);
     } catch (err) {
       alert(err.message || 'Could not open the vault dialog.');
-      revertOnce();
+      releaseOnce();
     }
   }
 
@@ -453,10 +439,10 @@
     const oauthConnectUrl = (!usesVault && !usesDevice)
       ? buildTlsConnectUrl(integration.slug)
       : null;
-    const openVault = (revert) => startVaultConfig(integration, revert, custom.vaultRenderer);
-    const defaultConnect = (revert) => {
-      if (usesVault) openVault(revert);
-      else if (usesDevice) startDeviceConnect(integration, revert);
+    const openVault = (release) => startVaultConfig(integration, release, custom.vaultRenderer);
+    const defaultConnect = (release) => {
+      if (usesVault) openVault(release);
+      else if (usesDevice) startDeviceConnect(integration, release);
       else window.location.href = oauthConnectUrl;
     };
     const configure = Object.prototype.hasOwnProperty.call(custom, 'configure')
@@ -491,7 +477,6 @@
   cardSpecs.register({ kind: 'mcp_aggregator' }, createMcpCardSpec);
 
   Object.assign(flows, {
-    markConnecting,
     throwForErrorResponse,
     createTlsCardSpec,
     fieldInputFor,
