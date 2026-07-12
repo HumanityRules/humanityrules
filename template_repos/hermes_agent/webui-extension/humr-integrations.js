@@ -14,6 +14,7 @@
     oauthSentinel: oauthSentinelApi = {},
     flows = {},
     cardSpecs = {},
+    page = {},
   } = namespace;
   const { elem, statusLabelFor, byCategoryThenLabel } = util;
   const { fetchIntegrations, refreshAll, invalidateTlsCache } = broker;
@@ -26,15 +27,6 @@
   } = flows;
 
   let _refreshInflight = false;
-
-  // Stable collaborator shared by every resolved cardSpec. It always exposes
-  // the current catalog while keeping page lifecycle operations in one place.
-  const page = {
-    get catalog() { return state.current; },
-    returnTo: window.location.origin + window.location.pathname,
-    rerender: renderMainViewAndLeftPane,
-    refreshAndRender,
-  };
 
   async function startRefreshCatalog() {
     if (_refreshInflight) return;
@@ -219,7 +211,7 @@
     if (typeof cardSpec.disconnect === 'function') {
       actions.appendChild(disconnectButton(
         cardSpec.key,
-        () => runDisconnect(cardSpec.key, page, cardSpec.disconnect),
+        () => runDisconnect(cardSpec.key, cardSpec.disconnect),
       ));
     }
     
@@ -250,7 +242,7 @@
   // Resolve one normalized card specification. Exact kind+slug specializations
   // win over kind defaults; the renderer itself is mechanism-agnostic.
   function renderCard(integration) {
-    const cardSpec = cardSpecs.resolve(integration, page);
+    const cardSpec = cardSpecs.resolve(integration);
     return cardSpec ? renderIntegrationCard(cardSpec) : null;
   }
 
@@ -401,6 +393,8 @@
       console.error('[humr-integrations] extension script(s) failed to load: ' + fileNames.join(', ') + ' — not mounting.');
       return;
     }
+
+    page.configure({ rerender: renderMainViewAndLeftPane, refreshAndRender });
 
     // Plug icon: 24×24 stroke paths; humr-panel.js sizes it per slot (rail/nav).
     const PLUG_ICON = '<path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0zM12 18v4"/>';

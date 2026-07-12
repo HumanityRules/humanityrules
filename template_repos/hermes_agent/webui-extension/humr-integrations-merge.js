@@ -2,7 +2,7 @@
 (() => {
   'use strict';
 
-  const { util, flows, cardSpecs } = window.HumrIntegrations;
+  const { page, util, flows, cardSpecs } = window.HumrIntegrations;
   const { elem } = util;
   const { throwForErrorResponse } = flows;
 
@@ -28,7 +28,7 @@
     return backdrop;
   }
 
-  async function startMergeConnect(integration, page, revert) {
+  async function startMergeConnect(integration, revert) {
     const revertOnce = () => { if (revert) { revert(); revert = null; } };
     let resp;
     try {
@@ -88,11 +88,11 @@
     setTimeout(tick, intervalMs);
   }
 
-  cardSpecs.register({ kind: 'merge_connector' }, (integration, page) => {
+  cardSpecs.register({ kind: 'merge_connector' }, (integration) => {
     return {
       details: [],
       connect(revert) {
-        startMergeConnect(integration, page, revert);
+        startMergeConnect(integration, revert);
       },
       configure: null,
       async disconnect() {
