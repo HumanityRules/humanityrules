@@ -18,13 +18,12 @@
   } = namespace;
   const { elem, statusLabelFor, byCategoryThenLabel } = util;
   const { fetchIntegrations, refreshAll, invalidateTlsCache } = broker;
-  const { logoImg, waitForLogos, waitForWebui, refreshModelDropdownsIfProviderAffectsPicker } = webui;
+  const { logoImg, waitForLogos, waitForWebui, refreshModelDropdowns } = webui;
   const { showTransitionModal, showOauthErrorModal } = modals;
   const { consumeOAuthSentinel, oauthErrorMessage } = oauthSentinelApi;
 
-
   let _refreshInflight = false;
-  
+
   async function startRefreshCatalog() {
     if (_refreshInflight) return;
     const btn = document.getElementById('humrIntegrationRefreshBtn');
@@ -35,16 +34,10 @@
       btn.disabled = true;
       btn.textContent = 'Refreshing…';
     }
-    // state.current is already populated (the pane renders on open), so we can tell
-    // up front whether this Refresh will rebuild the model picker. Gate on the
-    // catalog actually carrying a model provider so deployments with only non-
-    // model connectors skip the /api/models round-trip. When it will rebuild,
-    // hold the same full-screen dialog the connect-return path uses: refresh_all
-    // restarts the model gateway, and blocking interaction until the picker is
-    // rebuilt stops the user opening a new chat against the stale dropdown
-    // mid-rebuild — the very symptom this whole change fixes.
+    // Model-provider refreshes restart model state. Keep the transition modal up
+    // until the picker is rebuilt so the user cannot select a stale model.
     const affectsModels = !!(state.current && Array.isArray(state.current.items)
-      && state.current.items.some((it) => it && it.affects_model_picker));
+      && state.current.items.some((integration) => integration && integration.affects_model_picker));
     const modal = affectsModels
       ? showTransitionModal({
         title: 'Refreshing integrations…',
@@ -52,11 +45,8 @@
       })
       : null;
     try {
-      // One round-trip: the broker reloads the MCP catalog AND invalidates the
-      // all-providers TLS cache (which refetches from HUMR and, for vault
-      // providers, restarts the gateway). Cooldown 429 short-circuits before
-      // the TLS side runs, so repeated clicks while the cooldown is active
-      // can't keep kicking the gateway.
+      // The broker reloads MCP state and invalidates every TLS provider. A 429
+      // returns before invalidation, preventing repeated gateway restarts.
       const response = await refreshAll();
       if (response.status === 429) {
         let retry = 30;
@@ -77,17 +67,9 @@
         return;
       }
       await refreshAndRender();
-      // Refresh-all can flip a model provider's connection — e.g. an org-shared
-      // OpenRouter key provisioned on the control plane. That never goes through
-      // the per-connector vault flow, which is what rebuilds the composer's model
-      // picker via refreshModelDropdownsIfProviderAffectsPicker(). We need to call 
-      // that after Refresh-all too, or the dropdown keeps its boot-time catalog until a full
-      // page reload even though the broker now reports the provider connected.
-      // Covers connect AND disconnect (the rebuild re-reads /api/models, so a
-      // revoked shared key also drops out live).
-      if (affectsModels) {
-        await refreshModelDropdownsIfProviderAffectsPicker({ affects_model_picker: true });
-      }
+      // Refresh-all can change org-shared provider state without cardActions, so
+      // make the live model picker match the refreshed broker state.
+      if (affectsModels) await refreshModelDropdowns();
     } catch (_) {
       if (note) {
         note.textContent = 'Could not reach the integrations broker.';
@@ -125,14 +107,12 @@
   }
 
   function configureButton(cardSpec) {
-    const canConfigure = typeof cardSpec.configure === 'function';
-    const props = { class: 'humr-integration-btn' };
-    if (canConfigure) {
-      props.onclick = cardSpec.configure;
-    } else {
-      props.disabled = true;
-    }
-    return elem('button', props, ['Configure']);
+    const pending = cardActions.isConnecting(cardSpec);
+    return elem('button', {
+      class: 'humr-integration-btn',
+      onclick: () => cardActions.connect(cardSpec),
+      disabled: !cardSpec.canConfigure || pending,
+    }, [pending ? 'Configuring…' : 'Configure']);
   }
 
   // Build the shared card shell for the grid: a vertical card with a title row
@@ -441,18 +421,14 @@
         .then(() => invalidateTlsCache(oauthSentinel.provider).catch(() => {}))
         .then(() => waitForWebui(15000))
         .then(refreshAndRender)
-        // If the provider returning through HUMR's start/disconnect feeds the
-        // model picker (a model provider — e.g. a future OAuth-based Gemini),
-        // rebuild the composer dropdown the same way the vault connect and
-        // Refresh-all paths do. No OAuth provider is a model provider today, so
-        // this is a no-op for now: the lookup finds the integration in the just-
-        // refreshed catalog and refreshModelDropdownsIfProviderAffectsPicker()
-        // self-guards on its affects_model_picker flag.
-        .then(() => refreshModelDropdownsIfProviderAffectsPicker(
-          (state.current && Array.isArray(state.current.items))
-            ? state.current.items.find((it) => it && it.slug === oauthSentinel.provider)
-            : null,
-        ))
+        // No OAuth provider affects models today; keep the return path correct
+        // if one does later.
+        .then(() => {
+          const integration = (state.current && Array.isArray(state.current.items))
+            ? state.current.items.find((integration) => integration && integration.slug === oauthSentinel.provider)
+            : null;
+          if (integration && integration.affects_model_picker) return refreshModelDropdowns();
+        })
         .finally(() => {
           transitionModal.remove();
           // A failed narrow rides the disconnected transition with an error

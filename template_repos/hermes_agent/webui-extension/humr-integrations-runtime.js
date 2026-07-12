@@ -1,7 +1,6 @@
 // The extension is split across the humr-integrations-*.js scripts listed in
-// manifest.json (load order matters). This first-loaded runtime bootstraps the
-// shared window.HumrIntegrations namespace: state, registries, broker client
-// helpers, WebUI helpers, modals, and oauth sentinels. 
+// manifest.json (load order matters). This first-loaded file owns their shared
+// namespace and helpers.
 // Broker calls go same-origin via Caddy's /__humr_broker/* route.
 //
 (() => {
@@ -32,11 +31,10 @@
     },
   };
 
-  // Cross-cutting lifecycle for invoking actions exposed by resolved cardSpecs.
-  // Provider-specific network behavior remains on the cardSpec; catalog/model
-  // reconciliation lives here as shared action aftermath.
-  // Connect resolves with outcome `navigating`, `cancelled`, or `changed`; only
-  // `navigating` keeps the pending state because the page is about to unload.
+  // Provider behavior stays on cardSpec; cardActions owns pending state and the
+  // shared refresh afterward. Connect and Configure use the same action.
+  // `changed` refreshes, `cancelled` does not, and `navigating` keeps the pending
+  // state because the page is about to unload.
   const _connecting = new Set();
   const _disconnecting = new Set();
 
@@ -101,20 +99,15 @@
 
   // ── Registries ────────────────────────────────────────────────────────
 
-  // Card behavior is registered once per broker kind, with optional
-  // kind+slug specializations for integrations whose UI differs from the kind
-  // default (Google's scope picker, Slack's custom vault form). Resolution
-  // prefers the exact specialization and otherwise falls back to the kind
-  // factory.
+  // Factories register by broker kind, with optional kind+slug overrides for
+  // providers such as Google and Slack. resolve() combines the selected
+  // factory's details/actions with the broker's shared presentation data.
   const _cardSpecFactories = new Map();
 
   function cardSpecSelectorKey(selector) {
     return selector.kind + '\u0000' + (selector.slug || '');
   }
 
-  // Registry of cardSpec factories. Each factory contributes provider- or
-  // mechanism-specific details and actions; resolve() binds those to the
-  // integration's shared presentation data and returns one complete cardSpec.
   const cardSpecs = {
     register(selector, factory) {
       if (!selector || !selector.kind || typeof factory !== 'function') {
@@ -127,7 +120,7 @@
       }
       _cardSpecFactories.set(key, factory);
     },
-  
+
     resolve(integration) {
       if (!integration || !integration.kind) return null;
       const exact = integration.slug
@@ -146,10 +139,6 @@
       if (metadata.platform_shared) provisionLabel = 'Provided by Humanity Rules';
       else if (metadata.org_shared) provisionLabel = 'Provided by your organization';
 
-      // Factories supply mechanism/provider-specific details and actions. The
-      // registry binds those to the common presentation data so consumers deal
-      // with one resolved cardSpec rather than separate integration data and
-      // behavior objects.
       return {
         key: integrationKey(integration),
         label: integration.label || integration.slug,
@@ -157,6 +146,7 @@
         status: integration.status,
         isConnected: integration.status === 'connected',
         affectsModelPicker: !!integration.affects_model_picker,
+        canConfigure: false,
         provisionLabel,
         ...cardSpec,
       };
@@ -213,6 +203,13 @@
     } catch (_) {
       return null;
     }
+  }
+
+  async function throwForErrorResponse(response, fallbackMessage) {
+    if (response.ok) return;
+    let message = fallbackMessage;
+    try { message = (await response.json()).error || message; } catch (_) { /* ignore */ }
+    throw new Error(message);
   }
 
   async function refreshAll() {
@@ -461,11 +458,6 @@
     } catch (_) { /* best-effort */ }
   }
 
-  async function refreshModelDropdownsIfProviderAffectsPicker(integration) {
-    if (!integration || !integration.affects_model_picker) return;
-    await refreshModelDropdowns();
-  }
-
   // Floating "in progress" dialog shown after an oauth-sentinel return, while
   // the broker primes its cache (and any managed-env WebUI restart settles).
   // status_items() reads cache-only, so the first render after a connect would
@@ -579,7 +571,14 @@
     loadedExtensionScripts: new Set(),
     state,
     page,
-    util: { integrationKey, elem, formatDate, statusLabelFor, byCategoryThenLabel },
+    util: {
+      integrationKey,
+      elem,
+      formatDate,
+      statusLabelFor,
+      byCategoryThenLabel,
+      throwForErrorResponse,
+    },
     broker: {
       fetchIntegrations,
       refreshAll,
@@ -593,11 +592,10 @@
       logoImg,
       waitForLogos,
       waitForWebui,
-      refreshModelDropdownsIfProviderAffectsPicker,
+      refreshModelDropdowns,
     },
     modals: { showTransitionModal, showOauthErrorModal },
     oauthSentinel: { consumeOAuthSentinel, registerOauthErrors, oauthErrorMessage },
-    flows: {},
     cardActions,
     cardSpecs,
   };

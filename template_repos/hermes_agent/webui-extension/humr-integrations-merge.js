@@ -2,9 +2,8 @@
 (() => {
   'use strict';
 
-  const { util, flows, cardActions, cardSpecs } = window.HumrIntegrations;
-  const { elem } = util;
-  const { throwForErrorResponse } = flows;
+  const { util, cardActions, cardSpecs } = window.HumrIntegrations;
+  const { elem, throwForErrorResponse } = util;
 
   // ── Merge connector flow ──────────────────────────────────────────
 
@@ -95,7 +94,6 @@
       connect() {
         return startMergeConnect(integration);
       },
-      configure: null,
       async disconnect() {
         const response = await fetch('/__humr_broker/integrations/merge/disconnect', {
           method: 'POST',
