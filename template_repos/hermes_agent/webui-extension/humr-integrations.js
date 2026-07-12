@@ -13,6 +13,7 @@
     modals = {},
     oauthSentinel: oauthSentinelApi = {},
     flows = {},
+    cardActions = {},
     cardSpecs = {},
     page = {},
   } = namespace;
@@ -21,10 +22,7 @@
   const { logoImg, waitForLogos, waitForWebui, refreshModelDropdownsIfProviderAffectsPicker } = webui;
   const { showTransitionModal, showOauthErrorModal } = modals;
   const { consumeOAuthSentinel, oauthErrorMessage } = oauthSentinelApi;
-  const {
-    markConnecting,
-    runDisconnect,
-  } = flows;
+  const { markConnecting } = flows;
 
   let _refreshInflight = false;
 
@@ -111,9 +109,12 @@
   // A Disconnect button with the shared in-flight treatment: disabled and
   // labelled "Disconnecting…" while the integration's canonical key is in the
   // pending set.
-  function disconnectButton(key, onclick) {
-    const pending = state.disconnecting.has(key);
-    const props = { class: 'humr-integration-btn humr-integration-btn-secondary', onclick };
+  function disconnectButton(cardSpec) {
+    const pending = cardActions.isDisconnecting(cardSpec);
+    const props = {
+      class: 'humr-integration-btn humr-integration-btn-secondary',
+      onclick: () => cardActions.disconnect(cardSpec),
+    };
     if (pending) props.disabled = true;
     return elem('button', props, [pending ? 'Disconnecting…' : 'Disconnect']);
   }
@@ -209,10 +210,7 @@
     actions.appendChild(configureButton(cardSpec));
 
     if (typeof cardSpec.disconnect === 'function') {
-      actions.appendChild(disconnectButton(
-        cardSpec.key,
-        () => runDisconnect(cardSpec.key, cardSpec.disconnect),
-      ));
+      actions.appendChild(disconnectButton(cardSpec));
     }
     
     body.appendChild(actions);
