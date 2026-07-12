@@ -2,7 +2,7 @@
 (() => {
   'use strict';
 
-  const { page, util, flows, cardSpecs } = window.HumrIntegrations;
+  const { page, util, flows, cardActions, cardSpecs } = window.HumrIntegrations;
   const { elem } = util;
   const { throwForErrorResponse } = flows;
 
@@ -28,8 +28,7 @@
     return backdrop;
   }
 
-  async function startMergeConnect(integration, release) {
-    const releaseOnce = () => { if (release) { release(); release = null; } };
+  async function startMergeConnect(integration) {
     let resp;
     try {
       resp = await fetch('/__humr_broker/integrations/merge/link-token', {
@@ -39,24 +38,25 @@
       });
     } catch (_) {
       alert('Could not reach the integrations broker. Try again.');
-      releaseOnce();
-      return;
+      return { outcome: 'cancelled' };
     }
     if (!resp.ok) {
       alert('Merge link-token request failed.');
-      releaseOnce();
-      return;
+      return { outcome: 'cancelled' };
     }
     const data = await resp.json();
     if (!data.magic_link_url) {
       alert('Merge did not return a magic link.');
-      releaseOnce();
-      return;
+      return { outcome: 'cancelled' };
     }
     window.open(data.magic_link_url, '_blank');
 
+    const connectOutcome = cardActions.createConnectOutcome();
     let stopped = false;
-    const waiting = showMergeWaitingModal(integration, () => { stopped = true; releaseOnce(); });
+    const waiting = showMergeWaitingModal(integration, () => {
+      stopped = true;
+      connectOutcome.finish('cancelled');
+    });
     const start = Date.now();
     const intervalMs = 3000;
     const timeoutMs = 30 * 60 * 1000;
@@ -65,7 +65,7 @@
       if (Date.now() - start > timeoutMs) {
         stopped = true;
         waiting.remove();
-        releaseOnce();
+        connectOutcome.finish('cancelled');
         return;
       }
       try {
@@ -81,7 +81,7 @@
             try {
               await page.refreshAndRender();
             } finally {
-              releaseOnce();
+              connectOutcome.finish('changed');
             }
             return;
           }
@@ -90,13 +90,14 @@
       setTimeout(tick, intervalMs);
     };
     setTimeout(tick, intervalMs);
+    return connectOutcome.promise;
   }
 
   cardSpecs.register({ kind: 'merge_connector' }, (integration) => {
     return {
       details: [],
-      connect(release) {
-        startMergeConnect(integration, release);
+      connect() {
+        return startMergeConnect(integration);
       },
       configure: null,
       async disconnect() {

@@ -149,9 +149,8 @@
 
   // Append the not-connected footer: a head row (title + status pill) plus a
   // body holding the Connect button, which the card CSS pins to the bottom so
-  // buttons align across a grid row. cardActions owns the pending state; modal
-  // flows release it on cancellation/error, while navigation flows let it
-  // persist until the page leaves.
+  // buttons align across a grid row. cardActions owns the pending state: modal
+  // outcomes clear it, while navigation outcomes keep it until the page leaves.
   function appendConnectFooter(card, titleRow, statusPill, cardSpec) {
     const pending = cardActions.isConnecting(cardSpec);
     const connectBtn = elem('button', {

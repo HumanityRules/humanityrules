@@ -7,7 +7,7 @@
 (() => {
   'use strict';
 
-  const { page, util, broker, webui, flows, cardSpecs } = window.HumrIntegrations;
+  const { page, util, broker, webui, flows, cardActions, cardSpecs } = window.HumrIntegrations;
   const { elem, formatDate } = util;
   const { tlsInterceptPath, mcpPath, buildTlsConnectUrl, buildMcpConnectUrl, invalidateTlsCache } = broker;
   const { refreshModelDropdownsIfProviderAffectsPicker } = webui;
@@ -143,6 +143,8 @@
   // save/restart/refresh flow is single-sourced.
   function wireVaultSubmit(opts) {
     const { form, session, integration, saveBtn, actions, errorBox, successBox, close } = opts;
+    let resolveChanged;
+    const changed = new Promise((resolve) => { resolveChanged = resolve; });
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
       let saved = false;
@@ -154,6 +156,7 @@
         await submitVaultForm(session, form);
         saved = true;
         await applyVaultCredentials({ integration, statusEl: successBox, actions, close, verb: 'Saved' });
+        resolveChanged();
       } catch (err) {
         errorBox.textContent = err.message || 'Save failed.';
         errorBox.style.display = '';
@@ -164,16 +167,17 @@
         }
       }
     });
+    return changed;
   }
 
-  function showGenericVaultConfigModal(integration, session, onClose) {
+  function showGenericVaultConfigModal(integration, session) {
     if (session.schema && session.schema.mode === 'link_poll') {
-      showLinkPollConnectModal(integration, session, onClose);
-      return;
+      return showLinkPollConnectModal(integration, session);
     }
+    const connectOutcome = cardActions.createConnectOutcome();
     const schema = session.schema;
     const backdrop = elem('div', { class: 'humr-modal-backdrop humr-vault-backdrop' });
-    const close = () => { backdrop.remove(); if (onClose) onClose(); };
+    const close = () => { backdrop.remove(); connectOutcome.finish('cancelled'); };
     const errorBox = elem('div', { class: 'humr-vault-error', style: { display: 'none' } });
     const successBox = elem('div', { class: 'humr-vault-success', style: { display: 'none' } });
     const form = elem('form', { class: 'humr-vault-form' });
@@ -193,7 +197,8 @@
       saveBtn,
     ]);
     form.appendChild(actions);
-    wireVaultSubmit({ form, session, integration, saveBtn, actions, errorBox, successBox, close });
+    wireVaultSubmit({ form, session, integration, saveBtn, actions, errorBox, successBox, close })
+      .then(() => connectOutcome.finish('changed'));
     const modal = elem('div', { class: 'humr-modal humr-vault-modal' }, [
       elem('div', { class: 'humr-modal-title' }, [(schema.status === 'connected' ? 'Configure ' : 'Connect ') + (schema.label || integration.label)]),
       elem('div', { class: 'humr-modal-body' }, [schema.message || 'Credentials are sent directly to the Humanity Rules vault.']),
@@ -204,6 +209,7 @@
     backdrop.appendChild(modal);
     backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
     document.body.appendChild(backdrop);
+    return connectOutcome.promise;
   }
 
   // ── Link+poll vault flow ──────────────────────────────────────────
@@ -218,11 +224,12 @@
   // each poll is one getUpdates on the HUMR side, and sessions cap at 30 min.
   const LINK_POLL_MS = 1000;
 
-  function showLinkPollConnectModal(integration, session, onClose) {
+  function showLinkPollConnectModal(integration, session) {
+    const connectOutcome = cardActions.createConnectOutcome();
     const schema = session.schema;
     const backdrop = elem('div', { class: 'humr-modal-backdrop humr-vault-backdrop' });
     let stopped = false;
-    const close = () => { stopped = true; backdrop.remove(); if (onClose) onClose(); };
+    const close = () => { stopped = true; backdrop.remove(); connectOutcome.finish('cancelled'); };
 
     const errorBox = elem('div', { class: 'humr-vault-error', style: { display: 'none' } });
     const statusBox = elem('div', { class: 'humr-vault-success' }, [schema.pending_message || 'Waiting for confirmation…']);
@@ -280,6 +287,7 @@
       if (response.ok && payload.status === 'connected') {
         stopped = true;
         await applyVaultCredentials({ integration, statusEl: statusBox, actions, close, verb: 'Connected' });
+        connectOutcome.finish('changed');
         return;
       }
       if (response.ok) {
@@ -290,6 +298,7 @@
       fail(payload.error); // expired session or provider error: terminal
     };
     if (!stopped) setTimeout(poll, LINK_POLL_MS);
+    return connectOutcome.promise;
   }
 
   // ── OAuth device-login flow ───────────────────────────────────────
@@ -299,8 +308,7 @@
 
   const DEVICE_POLL_MS = 3000;
 
-  async function startDeviceConnect(integration, release) {
-    const releaseOnce = () => { if (release) { release(); release = null; } };
+  async function startDeviceConnect(integration) {
     let session;
     try {
       const base = tlsInterceptPath(integration.slug, 'device');
@@ -309,13 +317,13 @@
       if (!resp.ok || !session.ok) throw new Error(session.error || 'Could not start the login.');
     } catch (err) {
       alert(err.message || 'Could not start the login.');
-      releaseOnce();
-      return;
+      return { outcome: 'cancelled' };
     }
-    showDeviceModal(integration, session, releaseOnce);
+    return showDeviceModal(integration, session);
   }
 
-  function showDeviceModal(integration, session, onClose) {
+  function showDeviceModal(integration, session) {
+    const connectOutcome = cardActions.createConnectOutcome();
     const backdrop = elem('div', { class: 'humr-modal-backdrop' });
     let cancelled = false;
     const base = tlsInterceptPath(integration.slug, 'device');
@@ -324,7 +332,7 @@
       backdrop.remove();
       // Best-effort: tell the broker to drop the in-flight session.
       fetch(base + '/cancel', { method: 'POST' }).catch(() => {});
-      if (onClose) onClose();
+      connectOutcome.finish('cancelled');
     };
 
     const codeEl = elem('div', { class: 'humr-device-code' }, [session.user_code || '—']);
@@ -373,7 +381,7 @@
           await page.refreshAndRender();
           await refreshModelDropdownsIfProviderAffectsPicker(integration);
         } finally {
-          if (onClose) onClose();
+          connectOutcome.finish('changed');
         }
         return;
       }
@@ -387,22 +395,19 @@
       setTimeout(poll, DEVICE_POLL_MS);
     };
     setTimeout(poll, DEVICE_POLL_MS);
+    return connectOutcome.promise;
   }
 
   // Open the shared vault setup plumbing with either the generic schema-driven
   // modal or a card specification's custom modal renderer.
-  async function startVaultConfig(integration, release, modalRenderer) {
-    // `release` clears cardActions' pending Connect state. Fire it if we never
-    // open the modal (error), or when the user dismisses it. It may be omitted
-    // when Configure on an already-connected provider reuses this path.
-    const releaseOnce = () => { if (release) { release(); release = null; } };
+  async function startVaultConfig(integration, modalRenderer) {
     try {
       const session = await requestVaultSetupSession(integration);
       const renderer = modalRenderer || showGenericVaultConfigModal;
-      renderer(integration, session, releaseOnce);
+      return await renderer(integration, session);
     } catch (err) {
       alert(err.message || 'Could not open the vault dialog.');
-      releaseOnce();
+      return { outcome: 'cancelled' };
     }
   }
 
@@ -439,11 +444,12 @@
     const oauthConnectUrl = (!usesVault && !usesDevice)
       ? buildTlsConnectUrl(integration.slug)
       : null;
-    const openVault = (release) => startVaultConfig(integration, release, custom.vaultRenderer);
-    const defaultConnect = (release) => {
-      if (usesVault) openVault(release);
-      else if (usesDevice) startDeviceConnect(integration, release);
-      else window.location.href = oauthConnectUrl;
+    const openVault = () => startVaultConfig(integration, custom.vaultRenderer);
+    const defaultConnect = () => {
+      if (usesVault) return openVault();
+      if (usesDevice) return startDeviceConnect(integration);
+      window.location.href = oauthConnectUrl;
+      return { outcome: 'navigating' };
     };
     const configure = Object.prototype.hasOwnProperty.call(custom, 'configure')
       ? custom.configure
@@ -463,6 +469,7 @@
       details: [],
       connect() {
         window.location.href = buildMcpConnectUrl(integration.slug);
+        return { outcome: 'navigating' };
       },
       configure: null,
       async disconnect() {

@@ -2,7 +2,7 @@
 (() => {
   'use strict';
 
-  const { util, broker, oauthSentinel, flows, cardSpecs } = window.HumrIntegrations;
+  const { util, broker, oauthSentinel, flows, cardActions, cardSpecs } = window.HumrIntegrations;
   const { elem } = util;
   const { buildTlsConnectUrl } = broker;
   const { registerOauthErrors } = oauthSentinel;
@@ -42,7 +42,8 @@
     return (grants && typeof grants === 'object' && grants.products) ? grants : null;
   }
 
-  function showGoogleScopeModal(integration, connectUrl, release) {
+  function showGoogleScopeModal(integration, connectUrl) {
+    const connectOutcome = cardActions.createConnectOutcome();
     const grants = googleGrants(integration);
     const isConnected = integration.status === 'connected';
     // Pre-check from what Google actually granted; a never-connected card
@@ -54,7 +55,7 @@
     }
 
     const backdrop = elem('div', { class: 'humr-modal-backdrop' });
-    const cancel = () => { backdrop.remove(); if (release) release(); };
+    const cancel = () => { backdrop.remove(); connectOutcome.finish('cancelled'); };
 
     const applyBtn = elem('button', {
       class: 'humr-integration-btn humr-integration-btn-primary',
@@ -111,6 +112,7 @@
         .filter((p) => selection[p.key] !== 'off')
         .map((p) => p.key + ':' + selection[p.key])
         .join(',');
+      connectOutcome.finish('navigating');
       window.location.href = connectUrl +
         '&products=' + encodeURIComponent(productsParam);
     });
@@ -135,13 +137,14 @@
     backdrop.appendChild(modal);
     backdrop.addEventListener('click', (e) => { if (e.target === backdrop) cancel(); });
     document.body.appendChild(backdrop);
+    return connectOutcome.promise;
   }
 
   cardSpecs.register({ kind: 'tls_intercept', slug: 'google' }, (integration) => {
     const connectUrl = buildTlsConnectUrl(integration.slug);
     return createTlsCardSpec(integration, {
-      connect(release) {
-        showGoogleScopeModal(integration, connectUrl, release);
+      connect() {
+        return showGoogleScopeModal(integration, connectUrl);
       },
       configure() {
         showGoogleScopeModal(integration, connectUrl);

@@ -34,35 +34,43 @@
 
   // Cross-cutting lifecycle for invoking actions exposed by resolved cardSpecs.
   // Provider-specific network and refresh behavior remains on the cardSpec.
+  // Connect resolves with outcome `navigating`, `cancelled`, or `changed`; only
+  // `navigating` keeps the pending state because the page is about to unload.
   const _connecting = new Set();
   const _disconnecting = new Set();
   const cardActions = {
+    createConnectOutcome() {
+      let resolveOutcome;
+      const promise = new Promise((resolve) => { resolveOutcome = resolve; });
+      let settled = false;
+      return {
+        promise,
+        finish(outcome) {
+          if (settled) return;
+          settled = true;
+          resolveOutcome({ outcome });
+        },
+      };
+    },
     isConnecting(cardSpec) {
       return _connecting.has(cardSpec.key);
     },
-    connect(cardSpec) {
+    async connect(cardSpec) {
       if (cardActions.isConnecting(cardSpec)) return;
       _connecting.add(cardSpec.key);
       page.rerender();
-      let released = false;
-      const release = () => {
-        if (released) return;
-        released = true;
-        _connecting.delete(cardSpec.key);
-        page.rerender();
-      };
-      const fail = (err) => {
-        release();
-        alert(err.message || 'Connect failed. Please try again.');
-      };
+      let result = null;
       try {
-        const result = cardSpec.connect(release);
-        return result && typeof result.catch === 'function'
-          ? result.catch(fail)
-          : result;
+        result = await cardSpec.connect();
       } catch (err) {
-        fail(err);
+        alert(err.message || 'Connect failed. Please try again.');
+      } finally {
+        if (!result || result.outcome !== 'navigating') {
+          _connecting.delete(cardSpec.key);
+          page.rerender();
+        }
       }
+      return result;
     },
     isDisconnecting(cardSpec) {
       return _disconnecting.has(cardSpec.key);

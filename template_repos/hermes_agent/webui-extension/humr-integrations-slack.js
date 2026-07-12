@@ -2,7 +2,7 @@
 (() => {
   'use strict';
 
-  const { util, flows, cardSpecs } = window.HumrIntegrations;
+  const { util, flows, cardActions, cardSpecs } = window.HumrIntegrations;
   const { elem } = util;
   const { createTlsCardSpec, fieldInputFor, wireVaultSubmit } = flows;
 
@@ -37,10 +37,11 @@
       encodeURIComponent(JSON.stringify(manifest));
   }
 
-  function showSlackConfigModal(integration, session, onClose) {
+  function showSlackConfigModal(integration, session) {
+    const connectOutcome = cardActions.createConnectOutcome();
     const schema = session.schema;
     const backdrop = elem('div', { class: 'humr-modal-backdrop humr-vault-backdrop' });
-    const close = () => { backdrop.remove(); if (onClose) onClose(); };
+    const close = () => { backdrop.remove(); connectOutcome.finish('cancelled'); };
     const errorBox = elem('div', { class: 'humr-vault-error', style: { display: 'none' } });
     const successBox = elem('div', { class: 'humr-vault-success', style: { display: 'none' } });
     const form = elem('form', { class: 'humr-vault-form' });
@@ -190,7 +191,8 @@
       saveBtn,
     ]);
     form.appendChild(actions);
-    wireVaultSubmit({ form, session, integration, saveBtn, actions, errorBox, successBox, close });
+    wireVaultSubmit({ form, session, integration, saveBtn, actions, errorBox, successBox, close })
+      .then(() => connectOutcome.finish('changed'));
 
     const modal = elem('div', { class: 'humr-modal humr-vault-modal' }, [
       elem('div', { class: 'humr-modal-title' }, [(schema.status === 'connected' ? 'Configure ' : 'Connect ') + (schema.label || integration.label)]),
@@ -202,6 +204,7 @@
     backdrop.appendChild(modal);
     backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
     document.body.appendChild(backdrop);
+    return connectOutcome.promise;
   }
 
   cardSpecs.register({ kind: 'tls_intercept', slug: 'slack' }, (integration) => {
