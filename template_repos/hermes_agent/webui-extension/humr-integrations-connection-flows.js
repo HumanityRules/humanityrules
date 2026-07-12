@@ -7,21 +7,14 @@
 (() => {
   'use strict';
 
-  const { util, broker, flows, cardActions, cardSpecs } = window.HumrIntegrations;
-  const { elem, formatDate } = util;
+  const { util, broker, cardActions, cardSpecs } = window.HumrIntegrations;
+  const { elem, formatDate, throwForErrorResponse } = util;
   const { tlsInterceptPath, mcpPath, buildTlsConnectUrl, buildMcpConnectUrl, invalidateTlsCache } = broker;
 
   const VAULT_NETWORK_ERROR = (
     'Could not reach the Humanity Rules vault. Try again. ' +
     'If this keeps happening, ask an admin to check this Hermes deployment.'
   );
-
-  async function throwForErrorResponse(response, fallbackMessage) {
-    if (response.ok) return;
-    let message = fallbackMessage;
-    try { message = (await response.json()).error || message; } catch (_) { /* ignore */ }
-    throw new Error(message);
-  }
 
   function fieldInputFor(field) {
     const id = 'humrVaultField_' + field.name;
@@ -436,13 +429,10 @@
       window.location.href = oauthConnectUrl;
       return { outcome: 'navigating' };
     };
-    const configure = Object.prototype.hasOwnProperty.call(custom, 'configure')
-      ? custom.configure
-      : (usesVault ? () => openVault() : null);
     return {
       details: tlsCardDetails(integration),
       connect: custom.connect || defaultConnect,
-      configure,
+      canConfigure: usesVault || !!custom.canConfigure,
       async disconnect() {
         await disconnectTlsProvider(integration);
       },
@@ -456,7 +446,6 @@
         window.location.href = buildMcpConnectUrl(integration.slug);
         return { outcome: 'navigating' };
       },
-      configure: null,
       async disconnect() {
         const response = await fetch(mcpPath(integration.slug, 'disconnect'), { method: 'POST' });
         await throwForErrorResponse(response, 'Disconnect failed. Please try again.');
@@ -467,11 +456,10 @@
   cardSpecs.register({ kind: 'tls_intercept' }, createTlsCardSpec);
   cardSpecs.register({ kind: 'mcp_aggregator' }, createMcpCardSpec);
 
-  Object.assign(flows, {
-    throwForErrorResponse,
-    createTlsCardSpec,
+  cardSpecs.createTls = createTlsCardSpec;
+  window.HumrIntegrations.vaultForm = {
     fieldInputFor,
-    wireVaultSubmit,
-  });
+    wireSubmit: wireVaultSubmit,
+  };
   window.HumrIntegrations.loadedExtensionScripts.add('connection-flows');
 })();

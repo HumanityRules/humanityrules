@@ -2,11 +2,10 @@
 (() => {
   'use strict';
 
-  const { util, broker, oauthSentinel, flows, cardActions, cardSpecs } = window.HumrIntegrations;
+  const { util, broker, oauthSentinel, cardActions, cardSpecs } = window.HumrIntegrations;
   const { elem } = util;
   const { buildTlsConnectUrl } = broker;
   const { registerOauthErrors } = oauthSentinel;
-  const { createTlsCardSpec } = flows;
 
   // ── Google Workspace scope picker ─────────────────────────────────
   // The CP owns all scope semantics. The card renders the capability
@@ -142,12 +141,10 @@
 
   cardSpecs.register({ kind: 'tls_intercept', slug: 'google' }, (integration) => {
     const connectUrl = buildTlsConnectUrl(integration.slug);
-    return createTlsCardSpec(integration, {
+    return cardSpecs.createTls(integration, {
+      canConfigure: true,
       connect() {
         return showGoogleScopeModal(integration, connectUrl);
-      },
-      configure() {
-        showGoogleScopeModal(integration, connectUrl);
       },
     });
   });
