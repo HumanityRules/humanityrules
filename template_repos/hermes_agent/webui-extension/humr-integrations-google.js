@@ -10,7 +10,7 @@
 
   // ── Google Workspace scope picker ─────────────────────────────────
   // The CP owns all scope semantics. The card renders the capability
-  // projection it receives via item.metadata.google_grants (per-product
+  // projection it receives via integration.metadata.google_grants (per-product
   // off|read|write plus google_email) and submits the user's selection as a
   // `products` query param on the Connect URL — raw Google scopes are never
   // interpreted here. Expanding access goes straight to Google's consent;
@@ -37,14 +37,14 @@
   // closure server-side; the modal mirrors it so what you see is what you get.
   const GOOGLE_FLOORED_BY_DRIVE = ['docs', 'sheets'];
 
-  function googleGrants(item) {
-    const grants = item && item.metadata && item.metadata.google_grants;
+  function googleGrants(integration) {
+    const grants = integration && integration.metadata && integration.metadata.google_grants;
     return (grants && typeof grants === 'object' && grants.products) ? grants : null;
   }
 
-  function showGoogleScopeModal(item, payload, returnTo, revert) {
-    const grants = googleGrants(item);
-    const isConnected = item.status === 'connected';
+  function showGoogleScopeModal(integration, catalog, returnTo, revert) {
+    const grants = googleGrants(integration);
+    const isConnected = integration.status === 'connected';
     // Pre-check from what Google actually granted; a never-connected card
     // defaults to everything readable, nothing writable.
     const selection = {};
@@ -111,7 +111,7 @@
         .filter((p) => selection[p.key] !== 'off')
         .map((p) => p.key + ':' + selection[p.key])
         .join(',');
-      window.location.href = buildTlsConnectUrl(payload, item.slug, returnTo) +
+      window.location.href = buildTlsConnectUrl(catalog, integration.slug, returnTo) +
         '&products=' + encodeURIComponent(productsParam);
     });
 
@@ -119,7 +119,7 @@
       'Pick what this agent may access. Google will show a consent screen for your selection.',
     ];
     const modal = elem('div', { class: 'humr-modal humr-scope-modal' }, [
-      elem('div', { class: 'humr-modal-title' }, [(isConnected ? 'Configure ' : 'Connect ') + (item.label || item.slug)]),
+      elem('div', { class: 'humr-modal-title' }, [(isConnected ? 'Configure ' : 'Connect ') + (integration.label || integration.slug)]),
       elem('div', { class: 'humr-modal-body' }, [
         bodyLines.join(' '),
         (grants && grants.google_email)
@@ -137,13 +137,14 @@
     document.body.appendChild(backdrop);
   }
 
-  cardSpecs.register({ kind: 'tls_intercept', slug: 'google' }, (item, ctx) => {
-    return createTlsCardSpec(item, ctx, {
+  cardSpecs.register({ kind: 'tls_intercept', slug: 'google' }, (integration, page) => {
+    const catalog = page.catalog;
+    return createTlsCardSpec(integration, page, {
       connect(revert) {
-        showGoogleScopeModal(item, ctx.payload, ctx.returnTo, revert);
+        showGoogleScopeModal(integration, catalog, page.returnTo, revert);
       },
       configure() {
-        showGoogleScopeModal(item, ctx.payload, ctx.returnTo);
+        showGoogleScopeModal(integration, catalog, page.returnTo);
       },
     });
   });

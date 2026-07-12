@@ -15,7 +15,7 @@
     flows = {},
     cardSpecs = {},
   } = namespace;
-  const { elem, statusLabelFor, integrationKey, byCategoryThenLabel } = util;
+  const { elem, statusLabelFor, byCategoryThenLabel } = util;
   const { fetchIntegrations, refreshAll, invalidateTlsCache } = broker;
   const { logoImg, waitForLogos, waitForWebui, refreshModelDropdownsIfProviderAffectsPicker } = webui;
   const { showTransitionModal, showOauthErrorModal } = modals;
@@ -26,6 +26,15 @@
   } = flows;
 
   let _refreshInflight = false;
+
+  // Stable collaborator shared by every resolved cardSpec. It always exposes
+  // the current catalog while keeping page lifecycle operations in one place.
+  const page = {
+    get catalog() { return state.current; },
+    returnTo: window.location.origin + window.location.pathname,
+    rerender: renderMainViewAndLeftPane,
+    refreshAndRender,
+  };
 
   async function startRefreshCatalog() {
     if (_refreshInflight) return;
@@ -117,33 +126,17 @@
     return elem('button', props, [pending ? 'Disconnecting…' : 'Disconnect']);
   }
 
-  // The provisioned source of this provider's active credential, when it is not
-  // the user's own connection: an org admin's share (metadata.org_shared) or a
-  // platform-wide default (metadata.platform_shared) — both stamped by the
-  // control plane's token_refresh_batch. Such credentials are not user-managed
-  // (they cannot be reconfigured or disconnected here), so the card shows a
-  // read-only note instead of Configure/Disconnect. Returns the note text, or
-  // null when the user owns the connection. Platform is checked first: it is the
-  // lowest-priority token source, so if it stamped the outcome no org/personal
-  // credential applied.
-  function sharedProvisionLabel(item) {
-    const meta = item.metadata || {};
-    if (meta.platform_shared) return 'Provided by Humanity Rules';
-    if (meta.org_shared) return 'Provided by your organization';
-    return null;
-  }
-
   // Read-only footer for a provisioned (org- or platform-shared) connection:
   // replaces the Configure / Disconnect actions. Wording mirrors the CP user panel.
   function sharedProvisionNote(label) {
     return elem('div', { class: 'humr-integration-org-shared' }, [label]);
   }
 
-  function configureButton(spec) {
-    const canConfigure = typeof spec.configure === 'function';
+  function configureButton(cardSpec) {
+    const canConfigure = typeof cardSpec.configure === 'function';
     const props = { class: 'humr-integration-btn' };
     if (canConfigure) {
-      props.onclick = spec.configure;
+      props.onclick = cardSpec.configure;
     } else {
       props.disabled = true;
     }
@@ -152,14 +145,16 @@
 
   // Build the shared card shell for the grid: a vertical card with a title row
   // (optional logo + title) and a status pill in the head.
-  function buildCardScaffold(item) {
-    const isConnected = item.status === 'connected';
+  function buildCardScaffold(cardSpec) {
     const card = elem('div', { class: 'humr-integration-card' });
     const titleRow = elem('div', { class: 'humr-integration-card-title-row' });
-    if (item.logo_url) titleRow.appendChild(logoImg(item.logo_url));
-    titleRow.appendChild(elem('div', { class: 'humr-integration-card-title' }, [item.label || item.slug]));
-    const statusPill = elem('div', { class: 'humr-integration-card-status', dataset: { status: item.status } }, [statusLabelFor(item.status)]);
-    return { card, titleRow, statusPill, isConnected };
+    if (cardSpec.logoUrl) titleRow.appendChild(logoImg(cardSpec.logoUrl));
+    titleRow.appendChild(elem('div', { class: 'humr-integration-card-title' }, [cardSpec.label]));
+    const statusPill = elem('div', {
+      class: 'humr-integration-card-status',
+      dataset: { status: cardSpec.status },
+    }, [statusLabelFor(cardSpec.status)]);
+    return { card, titleRow, statusPill };
   }
 
   // Append the not-connected footer: a head row (title + status pill) plus a
@@ -167,12 +162,12 @@
   // buttons align across a grid row. `onConnect` receives the markConnecting
   // revert fn, which modal flows (vault, Merge) call to restore the button on
   // cancel/error and navigation flows simply let persist as the page leaves.
-  function appendConnectFooter(card, titleRow, statusPill, item, onConnect) {
+  function appendConnectFooter(card, titleRow, statusPill, cardSpec) {
     const connectBtn = elem('button', {
       class: 'humr-integration-btn',
-      onclick: () => { onConnect(markConnecting(connectBtn)); },
+      onclick: () => { cardSpec.connect(markConnecting(connectBtn)); },
     }, ['Connect']);
-    if (item.status === 'not_connected') {
+    if (cardSpec.status === 'not_connected') {
       // Compact single-row card: logo + name on the left, Connect on the right.
       // These cards have nothing else to show, so we drop the redundant
       // "Not connected" pill (Connect already says as much) and the empty
@@ -201,30 +196,33 @@
     }
   }
 
-  function renderIntegrationCard(item, ctx, spec) {
-    const key = integrationKey(item);
-    const { card, titleRow, statusPill, isConnected } = buildCardScaffold(item);
+  function renderIntegrationCard(cardSpec) {
+    const { card, titleRow, statusPill } = buildCardScaffold(cardSpec);
 
-    if (!isConnected) {
-      appendConnectFooter(card, titleRow, statusPill, item, spec.connect);
+    if (!cardSpec.isConnected) {
+      appendConnectFooter(card, titleRow, statusPill, cardSpec);
       return card;
     }
 
     card.appendChild(elem('div', { class: 'humr-integration-card-head' }, [titleRow, statusPill]));
     const body = elem('div', { class: 'humr-integration-card-body' });
-    const sharedLabel = sharedProvisionLabel(item);
-    appendCardDetails(body, spec.details, !!sharedLabel);
-    if (sharedLabel) {
-      body.appendChild(sharedProvisionNote(sharedLabel));
+    appendCardDetails(body, cardSpec.details, !!cardSpec.provisionLabel);
+    if (cardSpec.provisionLabel) {
+      body.appendChild(sharedProvisionNote(cardSpec.provisionLabel));
       card.appendChild(body);
       return card;
     }
 
     const actions = elem('div', { class: 'humr-integration-actions' });
-    actions.appendChild(configureButton(spec));
-    if (typeof spec.disconnect === 'function') {
-      actions.appendChild(disconnectButton(key, () => runDisconnect(key, ctx, spec.disconnect)));
+    actions.appendChild(configureButton(cardSpec));
+
+    if (typeof cardSpec.disconnect === 'function') {
+      actions.appendChild(disconnectButton(
+        cardSpec.key,
+        () => runDisconnect(cardSpec.key, page, cardSpec.disconnect),
+      ));
     }
+    
     body.appendChild(actions);
     card.appendChild(body);
     return card;
@@ -234,14 +232,14 @@
     const summary = document.getElementById('humrIntegrationSummary');
     if (!summary) return;
     summary.innerHTML = '';
-    const payload = state.current;
-    if (!payload) {
+    const catalog = state.current;
+    if (!catalog) {
       summary.appendChild(document.createTextNode('Status unavailable.'));
       return;
     }
-    const items = payload.items || [];
-    const connected = items.filter((it) => it.status === 'connected').length;
-    const total = items.length;
+    const integrations = catalog.items || [];
+    const connected = integrations.filter((integration) => integration.status === 'connected').length;
+    const total = integrations.length;
     summary.appendChild(document.createTextNode(
       total === 0
         ? 'No integrations configured.'
@@ -251,16 +249,16 @@
 
   // Resolve one normalized card specification. Exact kind+slug specializations
   // win over kind defaults; the renderer itself is mechanism-agnostic.
-  function renderCard(item, ctx) {
-    const spec = cardSpecs.resolve(item, ctx);
-    return spec ? renderIntegrationCard(item, ctx, spec) : null;
+  function renderCard(integration) {
+    const cardSpec = cardSpecs.resolve(integration, page);
+    return cardSpec ? renderIntegrationCard(cardSpec) : null;
   }
 
-  // Build a responsive card grid for `items`, or null if none render.
-  function buildCardGrid(items, ctx) {
+  // Build a responsive card grid for `integrations`, or null if none render.
+  function buildCardGrid(integrations) {
     const grid = elem('div', { class: 'humr-integration-grid' });
-    for (const item of items) {
-      const card = renderCard(item, ctx);
+    for (const integration of integrations) {
+      const card = renderCard(integration);
       if (card) grid.appendChild(card);
     }
     return grid.children.length ? grid : null;
@@ -269,11 +267,11 @@
   // Append a titled section (heading + responsive card grid) to `container`.
   // Sections always render their heading so users learn the two groups exist;
   // an empty section shows `emptyHint` instead of a grid.
-  function appendSection(container, ctx, title, emptyHint, items) {
+  function appendSection(container, title, emptyHint, integrations) {
     const section = elem('div', { class: 'humr-integration-section' }, [
       elem('div', { class: 'humr-integration-section-title' }, [title]),
     ]);
-    const grid = buildCardGrid(items, ctx);
+    const grid = buildCardGrid(integrations);
     section.appendChild(grid || elem('div', { class: 'humr-integration-empty' }, [emptyHint]));
     container.appendChild(section);
   }
@@ -282,13 +280,13 @@
   // sub-heading + its own card grid. Sub-groups with no cards are skipped; if
   // none have cards, `emptyHint` shows instead. Used by "Not connected" to make
   // the Model Providers → Connectors ordering explicit rather than implied.
-  function appendGroupedSection(container, ctx, title, emptyHint, subGroups) {
+  function appendGroupedSection(container, title, emptyHint, subGroups) {
     const section = elem('div', { class: 'humr-integration-section' }, [
       elem('div', { class: 'humr-integration-section-title' }, [title]),
     ]);
     let any = false;
     for (const sub of subGroups) {
-      const grid = buildCardGrid(sub.items, ctx);
+      const grid = buildCardGrid(sub.integrations);
       if (!grid) continue;
       any = true;
       section.appendChild(elem('div', { class: 'humr-integration-section' }, [
@@ -303,19 +301,13 @@
   function renderMainViewAndLeftPane() {
     renderSummary();
 
-    const payload = state.current;
-    const ctx = {
-      payload,
-      returnTo: window.location.origin + window.location.pathname,
-      rerender: renderMainViewAndLeftPane,
-      refreshAndRender,
-    };
+    const catalog = state.current;
 
     const list = document.getElementById('humrIntegrationList');
     if (!list) return;
     list.innerHTML = '';
 
-    if (!payload) {
+    if (!catalog) {
       list.appendChild(elem('div', { class: 'humr-integration-empty' }, [
         'Integration status is unavailable. If this persists, the platform broker may not be running.',
       ]));
@@ -326,25 +318,25 @@
     // connected. The Connected grid stays a single grid sorted model-providers-
     // first; the Not-connected section is split into explicit "Model Providers"
     // and "Connectors" sub-groups so that ordering is labeled, not just implied.
-    const items = payload.items || [];
-    const isModelProvider = (it) => it.category === 'model_provider';
-    const isConnector = (it) => it.category === 'connector';
+    const integrations = catalog.items || [];
+    const isModelProvider = (integration) => integration.category === 'model_provider';
+    const isConnector = (integration) => integration.category === 'connector';
     const byLabel = (a, b) =>
       (a.label || a.slug || '').toLowerCase().localeCompare((b.label || b.slug || '').toLowerCase());
 
-    const connected = items
-      .filter((it) => it.status === 'connected')
+    const connected = integrations
+      .filter((integration) => integration.status === 'connected')
       .slice()
       .sort(byCategoryThenLabel);
 
-    const notConnected = items.filter((it) => it.status !== 'connected');
+    const notConnected = integrations.filter((integration) => integration.status !== 'connected');
 
-    appendSection(list, ctx, 'Connected', 'Nothing connected yet.', connected);
+    appendSection(list, 'Connected', 'Nothing connected yet.', connected);
     appendGroupedSection(
-      list, ctx, 'Not connected', 'Everything is connected.',
+      list, 'Not connected', 'Everything is connected.',
       [
-        { title: 'Model Providers', items: notConnected.filter(isModelProvider).slice().sort(byLabel) },
-        { title: 'Connectors', items: notConnected.filter(isConnector).slice().sort(byLabel) },
+        { title: 'Model Providers', integrations: notConnected.filter(isModelProvider).slice().sort(byLabel) },
+        { title: 'Connectors', integrations: notConnected.filter(isConnector).slice().sort(byLabel) },
       ],
     );
   }
@@ -461,7 +453,7 @@
         // model picker (a model provider — e.g. a future OAuth-based Gemini),
         // rebuild the composer dropdown the same way the vault connect and
         // Refresh-all paths do. No OAuth provider is a model provider today, so
-        // this is a no-op for now: the lookup finds the item in the just-
+        // this is a no-op for now: the lookup finds the integration in the just-
         // refreshed catalog and refreshModelDropdownsIfProviderAffectsPicker()
         // self-guards on its affects_model_picker flag.
         .then(() => refreshModelDropdownsIfProviderAffectsPicker(
