@@ -2,7 +2,7 @@
 (() => {
   'use strict';
 
-  const { util, broker, oauthSentinel, flows, cardSpecs } = window.HumrIntegrations;
+  const { page, util, broker, oauthSentinel, flows, cardSpecs } = window.HumrIntegrations;
   const { elem } = util;
   const { buildTlsConnectUrl } = broker;
   const { registerOauthErrors } = oauthSentinel;
@@ -137,9 +137,9 @@
     document.body.appendChild(backdrop);
   }
 
-  cardSpecs.register({ kind: 'tls_intercept', slug: 'google' }, (integration, page) => {
+  cardSpecs.register({ kind: 'tls_intercept', slug: 'google' }, (integration) => {
     const catalog = page.catalog;
-    return createTlsCardSpec(integration, page, {
+    return createTlsCardSpec(integration, {
       connect(revert) {
         showGoogleScopeModal(integration, catalog, page.returnTo, revert);
       },

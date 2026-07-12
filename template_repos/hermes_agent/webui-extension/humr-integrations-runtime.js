@@ -10,6 +10,31 @@
   const INTEGRATIONS_URL = '/__humr_broker/integrations';
   const state = { current: null, disconnecting: new Set() };
 
+  // Stable page-level collaborator shared by the split integration scripts.
+  // The runtime owns catalog access and navigation data; the page controller
+  // supplies its render lifecycle once it has loaded.
+  let _rerender = null;
+  let _refreshAndRender = null;
+  const page = {
+    get catalog() { return state.current; },
+    returnTo: window.location.origin + window.location.pathname,
+    configure({ rerender, refreshAndRender }) {
+      if (typeof rerender !== 'function' || typeof refreshAndRender !== 'function') {
+        throw new Error('[humr-integrations] page.configure() needs render lifecycle functions.');
+      }
+      _rerender = rerender;
+      _refreshAndRender = refreshAndRender;
+    },
+    rerender() {
+      if (!_rerender) throw new Error('[humr-integrations] page is not configured.');
+      return _rerender();
+    },
+    refreshAndRender() {
+      if (!_refreshAndRender) throw new Error('[humr-integrations] page is not configured.');
+      return _refreshAndRender();
+    },
+  };
+
   // ── Registries ────────────────────────────────────────────────────────
 
   // Card behavior is registered once per broker kind, with optional
@@ -39,7 +64,7 @@
       _cardSpecFactories.set(key, factory);
     },
   
-    resolve(integration, page) {
+    resolve(integration) {
       if (!integration || !integration.kind) return null;
       const exact = integration.slug
         ? _cardSpecFactories.get(cardSpecSelectorKey({ kind: integration.kind, slug: integration.slug }))
@@ -48,7 +73,7 @@
       const factory = exact || fallback;
       if (!factory) return null;
 
-      const cardSpec = factory(integration, page);
+      const cardSpec = factory(integration);
       if (!cardSpec) return null;
       const metadata = integration.metadata || {};
       let provisionLabel = null;
@@ -59,7 +84,8 @@
 
       // Factories supply mechanism/provider-specific details and actions. The
       // registry binds those to the common presentation data so consumers deal
-      // with one resolved cardSpec rather than integration + page + behavior.
+      // with one resolved cardSpec rather than separate integration data and
+      // behavior objects.
       return {
         key: integrationKey(integration),
         label: integration.label || integration.slug,
@@ -478,6 +504,7 @@
   window.HumrIntegrations = {
     loadedExtensionScripts: new Set(),
     state,
+    page,
     util: { integrationKey, elem, formatDate, statusLabelFor, byCategoryThenLabel },
     broker: {
       fetchIntegrations,
