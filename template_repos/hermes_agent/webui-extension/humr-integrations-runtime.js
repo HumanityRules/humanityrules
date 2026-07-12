@@ -31,6 +31,8 @@
     },
   };
 
+  // ── cardActions ───────────────────────────────────────────────────────
+
   // Provider behavior stays on cardSpec; cardActions owns pending state and the
   // shared refresh afterward. Connect and Configure use the same action.
   // `changed` refreshes, `cancelled` does not, and `navigating` keeps the pending
@@ -97,7 +99,7 @@
     },
   };
 
-  // ── Registries ────────────────────────────────────────────────────────
+  // ── cardSpecs ─────────────────────────────────────────────────────────
 
   // Kind factories build complete cardSpecs. Optional kind+slug factories add
   // provider overrides for cases such as Google and Slack.
@@ -122,15 +124,16 @@
 
     resolve(integration) {
       if (!integration || !integration.kind) return null;
-      const overrideFactory = integration.slug
-        ? _cardSpecFactories.get(cardSpecSelectorKey({ kind: integration.kind, slug: integration.slug }))
-        : null;
+      
       const baseFactory = _cardSpecFactories.get(cardSpecSelectorKey({ kind: integration.kind }));
       if (!baseFactory) return null;
 
       const cardSpec = baseFactory(integration);
       if (!cardSpec) return null;
+
+      const overrideFactory = _cardSpecFactories.get(cardSpecSelectorKey({ kind: integration.kind, slug: integration.slug }));
       const overrides = overrideFactory ? overrideFactory(integration) : null;
+      
       const metadata = integration.metadata || {};
       let provisionLabel = null;
       // Platform is the lowest-priority shared credential source, so if it
@@ -139,7 +142,7 @@
       else if (metadata.org_shared) provisionLabel = 'Provided by your organization';
 
       return {
-        key: integrationKey(integration),
+        key: integration.kind + ':' + integration.slug,
         label: integration.label || integration.slug,
         logoUrl: integration.logo_url || null,
         status: integration.status,
@@ -153,22 +156,7 @@
     },
   };
 
-  const _oauthErrorMessages = new Map();
-
-  function registerOauthErrors(map) {
-    for (const code in map) {
-      if (_oauthErrorMessages.has(code)) console.warn('[humr-integrations] Replacing OAuth error message for ' + code + '.');
-      _oauthErrorMessages.set(code, map[code]);
-    }
-  }
-
-  function oauthErrorMessage(code) {
-    return _oauthErrorMessages.get(code);
-  }
-
-  function integrationKey(integration) {
-    return String(integration.kind || 'unknown') + ':' + String(integration.slug || 'unknown');
-  }
+  // ── util ──────────────────────────────────────────────────────────────
 
   function elem(tag, props, children) {
     const el = document.createElement(tag);
@@ -195,6 +183,38 @@
     try { return new Date(iso).toLocaleString(); } catch (_) { return iso; }
   }
 
+  function statusLabelFor(status) {
+    switch (status) {
+      case 'connected': return 'Connected';
+      case 'not_connected': return 'Not connected';
+      case 'token_expired': return 'Token expired';
+      case 'transient_error': return 'Checking…';
+      case 'starting': return 'Starting…';
+      default: return '—';
+    }
+  }
+
+  // Order within a status group: model providers first, then connectors, then
+  // alphabetical by label. (Cards are split into connected / not-connected
+  // grids upstream of this, so status isn't a key here.)
+  function byCategoryThenLabel(a, b) {
+    const aRank = a.category === 'model_provider' ? 0 : 1;
+    const bRank = b.category === 'model_provider' ? 0 : 1;
+    if (aRank !== bRank) return aRank - bRank;
+    const aLabel = (a.label || a.slug || '').toLowerCase();
+    const bLabel = (b.label || b.slug || '').toLowerCase();
+    return aLabel.localeCompare(bLabel);
+  }
+
+  async function throwForErrorResponse(response, fallbackMessage) {
+    if (response.ok) return;
+    let message = fallbackMessage;
+    try { message = (await response.json()).error || message; } catch (_) { /* ignore */ }
+    throw new Error(message);
+  }
+
+  // ── broker ────────────────────────────────────────────────────────────
+
   async function fetchIntegrations() {
     try {
       const response = await fetch(INTEGRATIONS_URL, { cache: 'no-store' });
@@ -205,18 +225,19 @@
     }
   }
 
-  async function throwForErrorResponse(response, fallbackMessage) {
-    if (response.ok) return;
-    let message = fallbackMessage;
-    try { message = (await response.json()).error || message; } catch (_) { /* ignore */ }
-    throw new Error(message);
-  }
-
   async function refreshAll() {
     return await fetch('/__humr_broker/integrations/refresh_all', {
       method: 'POST',
       cache: 'no-store',
     });
+  }
+
+  function tlsInterceptPath(slug, action) {
+    return '/__humr_broker/integrations/tls_intercept/' + encodeURIComponent(slug) + '/' + action;
+  }
+
+  function mcpPath(slug, action) {
+    return '/__humr_broker/integrations/mcp/' + encodeURIComponent(slug) + '/' + action;
   }
 
   // TLS-intercept providers expose /integrations/user/<slug>/start/ for Connect
@@ -231,30 +252,37 @@
     return catalog.humr_control_plane_url.replace(/\/$/, '') + '/integrations/user/' + slug + '/start/?rd=' + rd + '&app_slug=' + encodeURIComponent(catalog.app_slug || '');
   }
 
-  function tlsInterceptPath(slug, action) {
-    return '/__humr_broker/integrations/tls_intercept/' + encodeURIComponent(slug) + '/' + action;
-  }
-
-  function mcpPath(slug, action) {
-    return '/__humr_broker/integrations/mcp/' + encodeURIComponent(slug) + '/' + action;
-  }
-
   function buildMcpConnectUrl(slug) {
     const returnTo = encodeURIComponent(window.location.origin + window.location.pathname);
     const origin = encodeURIComponent(window.location.origin);
     return mcpPath(slug, 'oauth/start') + '?return_to=' + returnTo + '&origin=' + origin;
   }
 
-  function statusLabelFor(status) {
-    switch (status) {
-      case 'connected': return 'Connected';
-      case 'not_connected': return 'Not connected';
-      case 'token_expired': return 'Token expired';
-      case 'transient_error': return 'Checking…';
-      case 'starting': return 'Starting…';
-      default: return '—';
-    }
+  // Tell the broker to drop one provider's cached TLS-intercept token after a
+  // known connect/disconnect/config change (vault save, oauth-sentinel return).
+  // The explicit-Refresh-all path goes through /__humr_broker/integrations/refresh_all
+  // instead, which fans out catalog reload + all-providers TLS invalidate.
+  // Per-provider: POST .../tls_intercept/{slug}/invalidate.
+  //
+  // For env-backed providers the broker also rewrites the managed profile env
+  // block and restarts whichever process-compose entries the provider declares.
+  // Both failure modes (network error reaching the broker, or 5xx from the
+  // broker) propagate to the caller. Cache-hint callers (oauth-sentinel return)
+  // catch and ignore: the proxy's 401-evict path recovers stale tokens on the
+  // first real call.
+  async function invalidateTlsCache(providerSlug) {
+    const url = tlsInterceptPath(providerSlug, 'invalidate');
+    const response = await fetch(url, { method: 'POST' });
+    if (response.ok) return;
+    let payload = {};
+    try { payload = await response.json(); } catch (_) { /* ignore */ }
+    throw new Error(
+      payload.error ||
+        'Saved, but applying the credentials failed. Redeploy this Hermes app to apply them.',
+    );
   }
+
+  // ── webui ─────────────────────────────────────────────────────────────
 
   // Provider logos are served from the HumR extension bundle.
   // Connecting/disconnecting a provider whose env the broker manages (e.g.
@@ -326,18 +354,6 @@
       };
       attempt();
     });
-  }
-
-  // Order within a status group: model providers first, then connectors, then
-  // alphabetical by label. (Cards are split into connected / not-connected
-  // grids upstream of this, so status isn't a key here.)
-  function byCategoryThenLabel(a, b) {
-    const aRank = a.category === 'model_provider' ? 0 : 1;
-    const bRank = b.category === 'model_provider' ? 0 : 1;
-    if (aRank !== bRank) return aRank - bRank;
-    const aLabel = (a.label || a.slug || '').toLowerCase();
-    const bLabel = (b.label || b.slug || '').toLowerCase();
-    return aLabel.localeCompare(bLabel);
   }
 
   function modelProviderForOption(option) {
@@ -458,6 +474,8 @@
     } catch (_) { /* best-effort */ }
   }
 
+  // ── modals ────────────────────────────────────────────────────────────
+
   // Floating "in progress" dialog shown after an oauth-sentinel return, while
   // the broker primes its cache (and any managed-env WebUI restart settles).
   // status_items() reads cache-only, so the first render after a connect would
@@ -492,34 +510,43 @@
     return backdrop;
   }
 
-  // Tell the broker to drop one provider's cached TLS-intercept token after a
-  // known connect/disconnect/config change (vault save, oauth-sentinel return).
-  // The explicit-Refresh-all path goes through /__humr_broker/integrations/refresh_all
-  // instead, which fans out catalog reload + all-providers TLS invalidate.
-  // Per-provider: POST .../tls_intercept/{slug}/invalidate.
-  //
-  // For env-backed providers the broker also rewrites the managed profile env
-  // block and restarts whichever process-compose entries the provider declares.
-  // Both failure modes (network error reaching the broker, or 5xx from the
-  // broker) propagate to the caller. Cache-hint callers (oauth-sentinel return)
-  // catch and ignore: the proxy's 401-evict path recovers stale tokens on the
-  // first real call.
-  async function invalidateTlsCache(providerSlug) {
-    const url = tlsInterceptPath(providerSlug, 'invalidate');
-    const response = await fetch(url, { method: 'POST' });
-    if (response.ok) return;
-    let payload = {};
-    try { payload = await response.json(); } catch (_) { /* ignore */ }
-    throw new Error(
-      payload.error ||
-        'Saved, but applying the credentials failed. Redeploy this Hermes app to apply them.',
-    );
+  function showOauthErrorModal(message) {
+    const backdrop = elem('div', { class: 'humr-modal-backdrop' });
+    const modal = elem('div', { class: 'humr-modal' }, [
+      elem('div', { class: 'humr-modal-title' }, ['Connection not completed']),
+      elem('div', { class: 'humr-modal-body' }, [message]),
+      elem('div', { class: 'humr-modal-actions' }, [
+        elem('button', {
+          class: 'humr-integration-btn humr-integration-btn-primary',
+          type: 'button',
+          onclick: () => backdrop.remove(),
+        }, ['OK']),
+      ]),
+    ]);
+    backdrop.appendChild(modal);
+    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
+    document.body.appendChild(backdrop);
   }
+
+  // ── oauthSentinel ─────────────────────────────────────────────────────
 
   // Error oauth-sentinel codes the CP appends to `rd` when an OAuth flow dies
   // after the consent redirect (cancelled at Google, exchange failure, missing
   // refresh token). Only codes registered by providers are consumed — an
   // unknown ?error= belongs to someone else and is left alone.
+
+  const _oauthErrorMessages = new Map();
+
+  function registerOauthErrors(map) {
+    for (const code in map) {
+      if (_oauthErrorMessages.has(code)) console.warn('[humr-integrations] Replacing OAuth error message for ' + code + '.');
+      _oauthErrorMessages.set(code, map[code]);
+    }
+  }
+
+  function oauthErrorMessage(code) {
+    return _oauthErrorMessages.get(code);
+  }
 
   // Drop any ?connected=/?disconnected=/?error= oauth sentinel once we've
   // acted on it, so a reload doesn't replay the refresh (or re-show the
@@ -549,30 +576,13 @@
     };
   }
 
-  function showOauthErrorModal(message) {
-    const backdrop = elem('div', { class: 'humr-modal-backdrop' });
-    const modal = elem('div', { class: 'humr-modal' }, [
-      elem('div', { class: 'humr-modal-title' }, ['Connection not completed']),
-      elem('div', { class: 'humr-modal-body' }, [message]),
-      elem('div', { class: 'humr-modal-actions' }, [
-        elem('button', {
-          class: 'humr-integration-btn humr-integration-btn-primary',
-          type: 'button',
-          onclick: () => backdrop.remove(),
-        }, ['OK']),
-      ]),
-    ]);
-    backdrop.appendChild(modal);
-    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
-    document.body.appendChild(backdrop);
-  }
-
   window.HumrIntegrations = {
     loadedExtensionScripts: new Set(),
     state,
     page,
+    cardActions,
+    cardSpecs,
     util: {
-      integrationKey,
       elem,
       formatDate,
       statusLabelFor,
@@ -596,8 +606,6 @@
     },
     modals: { showTransitionModal, showOauthErrorModal },
     oauthSentinel: { consumeOAuthSentinel, registerOauthErrors, oauthErrorMessage },
-    cardActions,
-    cardSpecs,
   };
   window.HumrIntegrations.loadedExtensionScripts.add('runtime');
 })();
