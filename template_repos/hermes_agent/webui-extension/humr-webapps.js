@@ -121,7 +121,7 @@
     return card;
   }
 
-  function renderPane(payload) {
+  function renderMainViewAndLeftPane(payload) {
     renderSummary(payload);
 
     const note = document.getElementById('humrWebappsExamplesNote');
@@ -148,7 +148,7 @@
 
   async function refreshAndRender() {
     _current = await fetchWebapps();
-    renderPane(_current);
+    renderMainViewAndLeftPane(_current);
   }
 
   function isPanelActive() {
@@ -182,7 +182,7 @@
   // "web app at a public URL." humr-panel.js sizes it per slot (rail/nav).
   const GLOBE_ICON = '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>';
 
-  function populateView(view) {
+  function populateMainView(view) {
     view.appendChild(
       elem('div', { class: 'humr-webapp-page-inner' }, [
         elem('div', { class: 'humr-webapp-page-head' }, [
@@ -195,7 +195,7 @@
             elem('p', null, [
               'To build your first one, just ask in chat: “Make me a pomodoro timer that logs my focus sessions.” The agent writes the code, starts the app, and the link appears here. From there, describe the change you want and the agent updates the app.',
             ]),
-            // Only true while apps are listed; renderPane toggles it.
+            // Only true while apps are listed; renderMainViewAndLeftPane toggles it.
             elem('p', { id: 'humrWebappsExamplesNote', hidden: '' }, [
               'The apps below shipped with your agent as examples. Try them out, or ask the agent to change or remove them.',
             ]),
@@ -207,7 +207,7 @@
   }
 
   // Running-count summary for the sidebar pane, updated on every refresh.
-  function populatePane(pane) {
+  function populateLeftPane(pane) {
     pane.appendChild(elem('div', { class: 'humr-webapp-summary', id: 'humrWebappsSummary' }, [
       'Loading…',
     ]));
@@ -218,8 +218,8 @@
     title: 'Web Apps',
     icon: GLOBE_ICON,
     viewClass: 'humr-webapp-page',
-    populateView,
-    populatePane,
+    populateMainView,
+    populateLeftPane,
     async onShow() {
       await refreshAndRender();
       // The user may have already left during the fetch; don't restart the

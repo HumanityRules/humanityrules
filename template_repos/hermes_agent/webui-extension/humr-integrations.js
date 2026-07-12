@@ -230,10 +230,11 @@
     return card;
   }
 
-  function renderSummary(payload) {
+  function renderSummary() {
     const summary = document.getElementById('humrIntegrationSummary');
     if (!summary) return;
     summary.innerHTML = '';
+    const payload = state.current;
     if (!payload) {
       summary.appendChild(document.createTextNode('Status unavailable.'));
       return;
@@ -299,13 +300,14 @@
     container.appendChild(section);
   }
 
-  function renderPane(payload) {
-    renderSummary(payload);
+  function renderMainViewAndLeftPane() {
+    renderSummary();
 
+    const payload = state.current;
     const ctx = {
       payload,
       returnTo: window.location.origin + window.location.pathname,
-      rerender: () => renderPane(state.current),
+      rerender: renderMainViewAndLeftPane,
       refreshAndRender,
     };
 
@@ -334,7 +336,7 @@
       .filter((it) => it.status === 'connected')
       .slice()
       .sort(byCategoryThenLabel);
-    
+
     const notConnected = items.filter((it) => it.status !== 'connected');
 
     appendSection(list, ctx, 'Connected', 'Nothing connected yet.', connected);
@@ -349,10 +351,10 @@
 
   async function refreshAndRender() {
     state.current = await fetchIntegrations();
-    renderPane(state.current);
+    renderMainViewAndLeftPane();
   }
 
-  function populateView(view) {
+  function populateMainView(view) {
     const refreshButton = elem('button', {
       class: 'humr-integration-btn humr-integration-page-refresh-btn',
       id: 'humrIntegrationRefreshBtn',
@@ -364,6 +366,7 @@
       id: 'humrIntegrationRefreshNote',
       style: { display: 'none' },
     });
+    
     view.appendChild(elem('div', { class: 'humr-integration-page-inner' }, [
       elem('div', { class: 'humr-integration-page-head' }, [
         elem('div', { class: 'humr-integration-page-head-row' }, [
@@ -381,7 +384,7 @@
 
   // Connected-count summary for the sidebar pane, updated on every broker
   // refresh (see renderSummary).
-  function populatePane(pane) {
+  function populateLeftPane(pane) {
     pane.appendChild(elem('div', { class: 'humr-integration-summary', id: 'humrIntegrationSummary' }, [
       'Loading…',
     ]));
@@ -415,8 +418,8 @@
       title: 'Integrations',
       icon: PLUG_ICON,
       viewClass: 'humr-integration-page',
-      populateView,
-      populatePane,
+      populateMainView,
+      populateLeftPane,
       onShow: refreshAndRender, // opening the tab re-syncs from the broker
       onMount: handleOauthReturnAndRender,
     });

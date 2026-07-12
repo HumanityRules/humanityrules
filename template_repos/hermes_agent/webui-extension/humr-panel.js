@@ -15,8 +15,8 @@
 //     title,        // nav label, tooltip, aria-label, and sidebar pane heading
 //     icon,         // inner markup of a 24x24 stroke icon (path/circle elements)
 //     viewClass,    // optional extra class(es) for the <section> main view
-//     populateView(view),  // fill the <section id="main<Id>"> once at mount
-//     populatePane(pane),  // optional: fill the sidebar pane below its heading
+//     populateMainView(view),  // fill the <section id="main<Id>"> once at mount
+//     populateLeftPane(pane),  // optional: fill the sidebar pane below its heading
 //     onMount(),    // optional: once, right after the shell DOM is injected
 //     onShow(),     // optional: entering the panel; NOT awaited (see wrapper)
 //     onHide(),     // optional: any switch to another panel; must be idempotent
@@ -164,14 +164,14 @@
       class: 'main-view' + (spec.viewClass ? ' ' + spec.viewClass : ''),
       id: 'main' + capitalizedId,
     });
-    if (spec.populateView) spec.populateView(view);
+    if (spec.populateMainView) spec.populateMainView(view);
 
     // Upstream's switchPanel activates #panel<Id> in the sidebar; without one
     // the sidebar would look empty while our panel is active.
     const pane = elem('div', { class: 'panel-view', id: 'panel' + capitalizedId }, [
       elem('div', { class: 'panel-head' }, [elem('span', null, [spec.title])]),
     ]);
-    if (spec.populatePane) spec.populatePane(pane);
+    if (spec.populateLeftPane) spec.populateLeftPane(pane);
 
     // Hermes 0.51+ shows a desktop `<nav class="rail">` and hides the legacy
     // `.sidebar-nav` at >=641px; register the entry in BOTH so it is visible
