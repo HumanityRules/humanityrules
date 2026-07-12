@@ -356,121 +356,33 @@
     });
   }
 
-  function modelProviderForOption(option) {
-    if (!option) return '';
-    if (option.dataset && option.dataset.provider) return option.dataset.provider;
-    const group = option.parentElement;
-    if (group && group.dataset && group.dataset.provider) return group.dataset.provider;
-    return '';
-  }
-
-  function applyModelsToSelect(select, modelsData) {
-    if (!select || !modelsData || !Array.isArray(modelsData.groups)) return false;
-    const previousOption = select.options[select.selectedIndex] || null;
-    const previousValue = select.value || '';
-    const previousProvider = modelProviderForOption(previousOption);
-    const fragment = document.createDocumentFragment();
-    for (const group of modelsData.groups) {
-      const groupModels = Array.isArray(group.models) ? group.models : [];
-      if (!groupModels.length) continue;
-      const optgroup = document.createElement('optgroup');
-      optgroup.label = group.provider || group.provider_id || 'Models';
-      if (group.provider_id) optgroup.dataset.provider = group.provider_id;
-      for (const model of groupModels) {
-        if (!model || !model.id) continue;
-        const option = document.createElement('option');
-        option.value = model.id;
-        option.textContent = model.label || model.id;
-        if (group.provider_id) option.dataset.provider = group.provider_id;
-        optgroup.appendChild(option);
-      }
-      if (optgroup.children.length) fragment.appendChild(optgroup);
+  async function waitForModels(timeoutMs) {
+    const start = Date.now();
+    while (true) {
+      try {
+        const response = await fetch('/api/models', {
+          cache: 'no-store',
+          credentials: 'include',
+        });
+        const models = response.ok ? await response.json() : null;
+        if (models && Array.isArray(models.groups)) return true;
+      } catch (_) { /* retry while processes restart */ }
+      if (Date.now() - start >= timeoutMs) return false;
+      await new Promise((resolve) => setTimeout(resolve, 400));
     }
-    if (!fragment.childNodes.length) return false;
-    select.innerHTML = '';
-    select.appendChild(fragment);
-
-    let selectedOption = null;
-    for (const option of Array.from(select.options)) {
-      if (previousValue && option.value === previousValue && (!previousProvider || modelProviderForOption(option) === previousProvider)) {
-        selectedOption = option;
-        break;
-      }
-      if (!selectedOption && previousValue && option.value === previousValue) selectedOption = option;
-    }
-    if (!selectedOption && modelsData.default_model) {
-      selectedOption = Array.from(select.options).find((option) => option.value === modelsData.default_model) || null;
-    }
-    if (!selectedOption) selectedOption = select.options[0] || null;
-    if (selectedOption) selectedOption.selected = true;
-    return true;
-  }
-
-  function applyModelsToKnownDropdowns(modelsData) {
-    if (!modelsData) return false;
-    if ('active_provider' in modelsData) window._activeProvider = modelsData.active_provider || null;
-    if ('default_model' in modelsData) window._defaultModel = modelsData.default_model || null;
-    if ('configured_model_badges' in modelsData) window._configuredModelBadges = modelsData.configured_model_badges || {};
-    const refreshedComposer = applyModelsToSelect(document.getElementById('modelSelect'), modelsData);
-    const refreshedSettings = applyModelsToSelect(document.getElementById('settingsModel'), modelsData);
-    try {
-      if (typeof syncModelChip === 'function') syncModelChip();
-      const dropdown = document.getElementById('composerModelDropdown');
-      if (dropdown && dropdown.classList.contains('open') && typeof renderModelDropdown === 'function') {
-        renderModelDropdown();
-        if (typeof _positionModelDropdown === 'function') _positionModelDropdown();
-      }
-    } catch (_) { /* best-effort */ }
-    return refreshedComposer || refreshedSettings;
   }
 
   async function refreshModelDropdowns() {
-    const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-    const fetchModelsData = async () => {
-      const response = await fetch('/api/models', {
-        cache: 'no-store',
-        credentials: 'include',
-      });
-      if (!response.ok) throw new Error('models unavailable');
-      return response.json();
-    };
-    const waitForModelsData = async (timeoutMs) => {
-      const start = Date.now();
-      while (Date.now() - start < timeoutMs) {
-        try {
-          return await fetchModelsData();
-        } catch (_) { /* retry until timeout */ }
-        await wait(400);
-      }
-      try {
-        return await fetchModelsData();
-      } catch (_) {
-        return null;
-      }
-    };
-    const runBestEffort = async (fn) => {
-      if (typeof fn !== 'function') return false;
-      try {
-        const result = fn();
-        if (result && typeof result.then === 'function') await result;
-        return true;
-      } catch (_) {
-        return false;
-      }
-    };
     try {
       await waitForWebui(15000);
-      const modelsData = await waitForModelsData(15000);
-      if (typeof window._invalidateSlashModelCache === 'function') {
-        window._invalidateSlashModelCache();
-      }
-      if (typeof window._refreshModelDropdownsAfterProviderChange === 'function') {
-        await runBestEffort(window._refreshModelDropdownsAfterProviderChange);
-      }
-      window._modelDropdownReady = null;
-      await runBestEffort(window._ensureModelDropdownReady);
-      if (typeof populateModelDropdown === 'function') await runBestEffort(populateModelDropdown);
-      applyModelsToKnownDropdowns(modelsData);
+      if (typeof window._refreshModelDropdownsAfterProviderChange !== 'function') return;
+      // Static assets can be available before the restarted model backend is.
+      if (!await waitForModels(15000)) return;
+      // Hermes refreshes the composer, Settings, slash-command cache, and model
+      // badges. Its hook starts asynchronously, so wait for the promise it owns.
+      window._refreshModelDropdownsAfterProviderChange();
+      const ready = window._modelDropdownReady;
+      if (ready && typeof ready.then === 'function') await ready;
     } catch (_) { /* best-effort */ }
   }
 

@@ -13,8 +13,13 @@ function loadScript(context, fileName) {
   vm.runInContext(source, context, { filename: fileName });
 }
 
-function createBrowserContext() {
+function createBrowserContext({ modelsReadyAfter = 3 } = {}) {
   const events = [];
+  let modelAttempts = 0;
+  let now = 0;
+  class TestDate extends Date {
+    static now() { return now; }
+  }
   const window = {
     location: {
       origin: 'https://agent.example.test',
@@ -23,6 +28,10 @@ function createBrowserContext() {
       hash: '',
     },
     history: { replaceState() {} },
+  };
+  window._refreshModelDropdownsAfterProviderChange = () => {
+    events.push('models');
+    window._modelDropdownReady = Promise.resolve().then(() => events.push('models-ready'));
   };
   const document = {
     getElementById() { return null; },
@@ -38,13 +47,19 @@ function createBrowserContext() {
         return { ok: true };
       }
       if (url === '/api/models') {
-        events.push('models');
+        events.push('models-probe');
+        modelAttempts += 1;
+        if (modelAttempts < modelsReadyAfter) {
+          if (modelAttempts === 1) throw new Error('model backend restarting');
+          return { ok: false };
+        }
         return { ok: true, json: async () => ({ groups: [] }) };
       }
       throw new Error('Unexpected fetch: ' + url);
     },
     requestAnimationFrame(callback) { callback(); },
-    setTimeout,
+    setTimeout(callback, delay = 0) { now += delay; callback(); },
+    Date: TestDate,
     window,
   });
   return { context, events, window };
@@ -109,6 +124,16 @@ test('connect outcomes settle once', async () => {
   assert.equal((await connectOutcome.promise).outcome, 'changed');
 });
 
+test('model readiness timeout does not invoke the Hermes refresh hook', async () => {
+  const { context, events, window } = createBrowserContext({ modelsReadyAfter: Infinity });
+  loadScript(context, 'humr-integrations-runtime.js');
+
+  await window.HumrIntegrations.webui.refreshModelDropdowns();
+
+  assert.equal(events.includes('models'), false);
+  assert.equal(events.filter((event) => event === 'models-probe').length > 1, true);
+});
+
 test('card actions reconcile only changed outcomes', async () => {
   const { context, events, window } = createBrowserContext();
   loadScript(context, 'humr-integrations-runtime.js');
@@ -127,7 +152,17 @@ test('card actions reconcile only changed outcomes', async () => {
     },
   };
   await cardActions.connect(changedCard);
-  assert.deepEqual(events, ['render', 'provider', 'catalog', 'models', 'render']);
+  assert.deepEqual(events, [
+    'render',
+    'provider',
+    'catalog',
+    'models-probe',
+    'models-probe',
+    'models-probe',
+    'models',
+    'models-ready',
+    'render',
+  ]);
   assert.equal(cardActions.isConnecting(changedCard), false);
 
   events.length = 0;
