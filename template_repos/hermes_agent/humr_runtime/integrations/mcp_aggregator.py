@@ -279,10 +279,10 @@ class MCPAggregator:
     async def status_items(self) -> list[dict]:
         """Return ready-to-render integration cards for the broker's unified status fan-out.
 
-        One entry per DCR provider plus one per Merge-managed connector. The broker
-        prepends its own TLS-intercept entries (Google) and returns the combined list
-        to the WebUI, which renders cards by `kind`. Keeping the assembly here means
-        the broker never has to know Merge or PostHog or Notion exist.
+        One entry per DCR provider plus one per Merge-managed connector. The control
+        API prepends the TLS-intercept entries and returns the combined list to the
+        WebUI, which renders cards from `kind`-selected specifications. Keeping the
+        assembly here means the broker never has to know individual connectors.
         """
         items: list[dict] = []
         merge_connectors: list[dict] = []

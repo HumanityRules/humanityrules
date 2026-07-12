@@ -216,7 +216,7 @@ control, host a remote MCP server whose OAuth metadata advertises an
 RFC 7591 `registration_endpoint` — i.e. a third-party MCP client
 (including Hermes's `mcp_aggregator.py`) can register itself dynamically
 and walk a PKCE OAuth flow without any human pre-registering an OAuth app.
-This is the same pattern Hermes already runs against Notion today.
+This is the same pattern implemented by Hermes's direct-MCP connector layer.
 
 A vendor being in this list is **not** a statement about how Merge
 integrates them — that's Part 1. It's purely about whether we *could*

@@ -1,10 +1,10 @@
 # MCP Aggregator Design
 
-How a Hermes Personal Assistant talks to MCP servers (Notion today; others tomorrow) on behalf of one user, without credentials entering the sandbox.
+How a Hermes Personal Assistant talks to direct MCP servers (PostHog is enabled today; Notion's implementation is currently disabled) on behalf of one user, without credentials entering the sandbox.
 
 ## Problem
 
-MCP servers like Notion's (`mcp.notion.com/mcp`) require OAuth 2.1 authentication. Hermes Agent has built-in MCP support (`auth: oauth` in config) that can drive the OAuth flow directly — but that puts refresh tokens inside the sandbox at `/workspace/.hermes/auth.json`, breaking the custody invariant established by the integrations broker design.
+Direct MCP servers such as PostHog and Notion require OAuth 2.1 authentication. Hermes Agent has built-in MCP support (`auth: oauth` in config) that can drive the OAuth flow directly — but that puts refresh tokens inside the sandbox at `/workspace/.hermes/auth.json`, breaking the custody invariant established by the integrations broker design.
 
 ## Solution
 
@@ -121,7 +121,7 @@ The aggregator owns the OAuth handlers (DCR, callback, status, disconnect) but t
 - `GET /__humr_broker/integrations/mcp/<provider>/oauth/callback?code=...&state=...` — exchange code, store tokens.
 - `POST /__humr_broker/integrations/mcp/<provider>/disconnect` — drop tokens, revoke, notify Hermes.
 
-`GET /__humr_broker/integrations` returns a unified flat list of all integrations (TLS-intercept providers like Google + MCP-aggregator providers like Notion + Merge per-connector cards), each tagged with a `kind` discriminator the WebUI uses to dispatch the right click handlers.
+`GET /__humr_broker/integrations` returns a unified flat list of all integrations: TLS-intercept entries, direct-MCP entries such as PostHog, and per-connector Merge entries. Each item carries a mechanism `kind` and product `category`; the WebUI resolves `kind` to a normalized card specification and uses `category` only for page grouping.
 
 The aggregator also exposes a second kind of upstream — `auth_kind="humr_relay"` — used for Merge.dev: instead of holding OAuth tokens directly, the ProxyProvider's `client_factory` builds a `StreamableHttpTransport` pointed at a HUMR relay endpoint with `HUMR_ENV_BEARER` + identity headers attached. See `merge_integration_design.md`.
 
@@ -157,9 +157,9 @@ EBS-backed, survives container restarts. If `token.json` is missing on boot, pro
 
 Adding a second DCR-capable MCP provider (e.g., Linear, Slack) requires:
 
-1. A new entry in the aggregator's provider registry (URL, scopes, display label).
+1. A new entry in the aggregator's DCR connector registry (URL, scopes, display label).
 2. A new `<provider>/` directory under the storage layout.
-3. A "Connect <Provider>" tile in the WebUI extension.
+3. No connector-specific WebUI card code unless the integration needs UI behavior beyond the default `mcp_aggregator` card specification.
 
 No new processes, no new ports, no new supervisor entries.
 

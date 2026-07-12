@@ -1,5 +1,5 @@
 // HUMR integrations page controller: mounts the Integrations tab (via
-// humr-panel.js), renders per-provider cards from the broker's unified control
+// humr-panel.js), renders integration cards from the broker's unified control
 // API, orchestrates oauth-sentinel returns, and bootstraps.
 (() => {
   'use strict';
@@ -13,20 +13,16 @@
     modals = {},
     oauthSentinel: oauthSentinelApi = {},
     flows = {},
-    providers = {},
-    connectors = {},
+    cardSpecs = {},
   } = namespace;
-  const { elem, formatDate, statusLabelFor, byCategoryThenLabel } = util;
-  const { fetchIntegrations, refreshAll, buildTlsConnectUrl, invalidateTlsCache } = broker;
+  const { elem, statusLabelFor, integrationKey, byCategoryThenLabel } = util;
+  const { fetchIntegrations, refreshAll, invalidateTlsCache } = broker;
   const { logoImg, waitForLogos, waitForWebui, refreshModelDropdownsIfProviderAffectsPicker } = webui;
   const { showTransitionModal, showOauthErrorModal } = modals;
   const { consumeOAuthSentinel, oauthErrorMessage } = oauthSentinelApi;
   const {
     markConnecting,
     runDisconnect,
-    startVaultConfig,
-    startDeviceConnect,
-    disconnectTlsProvider,
   } = flows;
 
   let _refreshInflight = false;
@@ -112,9 +108,8 @@
   // ── Shared card + disconnect helpers ──────────────────────────────
 
   // A Disconnect button with the shared in-flight treatment: disabled and
-  // labelled "Disconnecting…" while `key` is in the pending set. `key` is the
-  // value tracked in state.disconnecting — the provider slug for TLS-intercept
-  // cards, or the "merge:"/"mcp:"-prefixed provider id for connector cards.
+  // labelled "Disconnecting…" while the integration's canonical key is in the
+  // pending set.
   function disconnectButton(key, onclick) {
     const pending = state.disconnecting.has(key);
     const props = { class: 'humr-integration-btn humr-integration-btn-secondary', onclick };
@@ -144,14 +139,11 @@
     return elem('div', { class: 'humr-integration-org-shared' }, [label]);
   }
 
-  function configureButton(item, ctx, connectBtnForRevert) {
-    const canConfigure = item.connect_mode === 'vault';
+  function configureButton(spec) {
+    const canConfigure = typeof spec.configure === 'function';
     const props = { class: 'humr-integration-btn' };
     if (canConfigure) {
-      props.onclick = () => {
-        const revert = connectBtnForRevert ? markConnecting(connectBtnForRevert) : undefined;
-        startVaultConfig(item, ctx, revert);
-      };
+      props.onclick = spec.configure;
     } else {
       props.disabled = true;
     }
@@ -159,12 +151,10 @@
   }
 
   // Build the shared card shell for the grid: a vertical card with a title row
-  // (optional logo + title) and a status pill in the head. `providerKey`
-  // becomes the card's data-provider attribute (slug for TLS, prefixed id for
-  // connectors). Each renderer fills in its own connected/not-connected body.
-  function buildCardScaffold(item, providerKey) {
+  // (optional logo + title) and a status pill in the head.
+  function buildCardScaffold(item) {
     const isConnected = item.status === 'connected';
-    const card = elem('div', { class: 'humr-integration-card', dataset: { provider: providerKey } });
+    const card = elem('div', { class: 'humr-integration-card' });
     const titleRow = elem('div', { class: 'humr-integration-card-title-row' });
     if (item.logo_url) titleRow.appendChild(logoImg(item.logo_url));
     titleRow.appendChild(elem('div', { class: 'humr-integration-card-title' }, [item.label || item.slug]));
@@ -202,98 +192,41 @@
     card.appendChild(body);
   }
 
-  function renderConnectorCard(item, ctx) {
-    const adapter = connectors.get(item.kind);
-    if (!adapter) return null;
-    const provider = adapter.cardKey(item);
-    const { card, titleRow, statusPill, isConnected } = buildCardScaffold(item, provider);
-
-    if (isConnected) {
-      card.appendChild(elem('div', { class: 'humr-integration-card-head' }, [titleRow, statusPill]));
-      const body = elem('div', { class: 'humr-integration-card-body' });
-      const connectorSharedLabel = sharedProvisionLabel(item);
-      if (connectorSharedLabel) {
-        // No connector is org/platform-shareable today (only key/login providers
-        // are), but honoring the flag here keeps the read-only treatment
-        // consistent if connector adapters ever gain sharing.
-        body.appendChild(sharedProvisionNote(connectorSharedLabel));
-        card.appendChild(body);
-        return card;
-      }
-      const disconnectBtn = disconnectButton(provider, () => runDisconnect(
-        provider,
-        ctx,
-        () => adapter.disconnect(item, ctx),
-      ));
-      const actions = elem('div', { class: 'humr-integration-actions' });
-      actions.appendChild(configureButton(item, ctx));
-      actions.appendChild(disconnectBtn);
-      body.appendChild(actions);
-      card.appendChild(body);
-      return card;
+  function appendCardDetails(body, details, isShared) {
+    for (const detail of details || []) {
+      if (isShared && detail.hideWhenShared) continue;
+      const props = { class: detail.className || 'humr-integration-meta' };
+      if (detail.title) props.title = detail.title;
+      body.appendChild(elem('div', props, [detail.text]));
     }
-
-    appendConnectFooter(card, titleRow, statusPill, item, (revert) => {
-      adapter.connect(item, ctx, revert);
-    });
-    return card;
   }
 
-  function renderTlsInterceptCard(item, ctx) {
-    const usesVault = item.connect_mode === 'vault';
-    const usesDevice = item.connect_mode === 'device';
-    const adapter = providers.get(item.slug);
-    const { card, titleRow, statusPill, isConnected } = buildCardScaffold(item, item.slug);
+  function renderIntegrationCard(item, ctx, spec) {
+    const key = integrationKey(item);
+    const { card, titleRow, statusPill, isConnected } = buildCardScaffold(item);
 
-    if (isConnected) {
-      card.appendChild(elem('div', { class: 'humr-integration-card-head' }, [titleRow, statusPill]));
-      const body = elem('div', { class: 'humr-integration-card-body' });
-      // Slack personal mode resolves an owner; only that provider sets it.
-      const ownerName = item.metadata && item.metadata.owner_name;
-      if (ownerName) {
-        body.appendChild(elem('div', { class: 'humr-integration-meta' }, ['Replies only to ' + ownerName]));
-      }
-      const sharedLabel = sharedProvisionLabel(item);
-      if (sharedLabel) {
-        // Org- or platform-provided credentials are not user-managed: no
-        // Configure/Disconnect, and we drop "Last refreshed" to keep the
-        // read-only card clean.
-        body.appendChild(sharedProvisionNote(sharedLabel));
-        card.appendChild(body);
-        return card;
-      }
-      if (item.last_refreshed_at) {
-        body.appendChild(elem('div', {
-          class: 'humr-integration-meta humr-integration-meta-refresh',
-          title: 'Last refreshed: ' + formatDate(item.last_refreshed_at),
-        }, [
-          'Last refreshed: ' + formatDate(item.last_refreshed_at),
-        ]));
-      }
-      // Configure is always shown; provider adapters can override the action,
-      // vault providers open the credential modal, and everyone else renders
-      // it disabled.
-      const actions = elem('div', { class: 'humr-integration-actions' });
-      if (adapter && adapter.configure) {
-        actions.appendChild(elem('button', {
-          class: 'humr-integration-btn',
-          onclick: () => adapter.configure(item, ctx),
-        }, ['Configure']));
-      } else {
-        actions.appendChild(configureButton(item, ctx));
-      }
-      actions.appendChild(disconnectButton(item.slug, () => { disconnectTlsProvider(item, ctx); }));
-      body.appendChild(actions);
+    if (!isConnected) {
+      appendConnectFooter(card, titleRow, statusPill, item, spec.connect);
+      return card;
+    }
+
+    card.appendChild(elem('div', { class: 'humr-integration-card-head' }, [titleRow, statusPill]));
+    const body = elem('div', { class: 'humr-integration-card-body' });
+    const sharedLabel = sharedProvisionLabel(item);
+    appendCardDetails(body, spec.details, !!sharedLabel);
+    if (sharedLabel) {
+      body.appendChild(sharedProvisionNote(sharedLabel));
       card.appendChild(body);
       return card;
     }
 
-    appendConnectFooter(card, titleRow, statusPill, item, (revert) => {
-      if (adapter && adapter.connect) adapter.connect(item, ctx, revert);
-      else if (usesVault) startVaultConfig(item, ctx, revert);
-      else if (usesDevice) startDeviceConnect(item, ctx, revert);
-      else window.location.href = buildTlsConnectUrl(ctx.payload, item.slug, ctx.returnTo);
-    });
+    const actions = elem('div', { class: 'humr-integration-actions' });
+    actions.appendChild(configureButton(spec));
+    if (typeof spec.disconnect === 'function') {
+      actions.appendChild(disconnectButton(key, () => runDisconnect(key, ctx, spec.disconnect)));
+    }
+    body.appendChild(actions);
+    card.appendChild(body);
     return card;
   }
 
@@ -315,12 +248,11 @@
     ));
   }
 
-  // Render one item's card by kind. TLS-intercept cards need the page context for
-  // their Connect URL; connector cards (MCP + Merge) are self-contained.
+  // Resolve one normalized card specification. Exact kind+slug specializations
+  // win over kind defaults; the renderer itself is mechanism-agnostic.
   function renderCard(item, ctx) {
-    if (item.kind === 'tls_intercept') return renderTlsInterceptCard(item, ctx);
-    if (connectors.get(item.kind)) return renderConnectorCard(item, ctx);
-    return null;
+    const spec = cardSpecs.resolve(item, ctx);
+    return spec ? renderIntegrationCard(item, ctx, spec) : null;
   }
 
   // Build a responsive card grid for `items`, or null if none render.
@@ -394,6 +326,7 @@
     // and "Connectors" sub-groups so that ordering is labeled, not just implied.
     const items = payload.items || [];
     const isModelProvider = (it) => it.category === 'model_provider';
+    const isConnector = (it) => it.category === 'connector';
     const byLabel = (a, b) =>
       (a.label || a.slug || '').toLowerCase().localeCompare((b.label || b.slug || '').toLowerCase());
 
@@ -401,6 +334,7 @@
       .filter((it) => it.status === 'connected')
       .slice()
       .sort(byCategoryThenLabel);
+    
     const notConnected = items.filter((it) => it.status !== 'connected');
 
     appendSection(list, ctx, 'Connected', 'Nothing connected yet.', connected);
@@ -408,7 +342,7 @@
       list, ctx, 'Not connected', 'Everything is connected.',
       [
         { title: 'Model Providers', items: notConnected.filter(isModelProvider).slice().sort(byLabel) },
-        { title: 'Connectors', items: notConnected.filter((it) => !isModelProvider(it)).slice().sort(byLabel) },
+        { title: 'Connectors', items: notConnected.filter(isConnector).slice().sort(byLabel) },
       ],
     );
   }

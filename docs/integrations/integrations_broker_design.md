@@ -58,13 +58,13 @@ Sandbox TLS clients verify the leaf cert against the CA bundle (because the CA's
 
 ### 2. Integrations control API (127.0.0.1:9951)
 
-Starlette/uvicorn server. One unified URL space for **all** browser-facing integration management — Google's TLS-intercept world, Notion's MCP OAuth, and Merge's HUMR-relay passthroughs:
+Starlette/uvicorn server. One unified URL space for **all** browser-facing integration management — TLS-intercept integrations, direct MCP OAuth, and Merge's HUMR-relay passthroughs:
 
 - **`GET /healthz`** — liveness.
-- **`GET /integrations`** — flat unified status, one entry per card: `[{kind, slug, label, status, …}, …]`. `kind` is `tls_intercept` (Google), `mcp_aggregator` (Notion), or `merge_connector` (per-Merge-connector entries with `logo_url`).
+- **`GET /integrations`** — flat unified status, one entry per card: `[{kind, category, slug, label, status, …}, …]`. `kind` selects the connection mechanism (`tls_intercept`, `mcp_aggregator`, or `merge_connector`); `category` selects the product grouping (`model_provider` or `connector`).
 - **`POST /integrations/refresh_all`** — explicit user refresh: reload the MCP catalog and invalidate all TLS-intercept provider caches (cooldown-gated by the broker's credentials service; 429 if called too soon). The WebUI re-fetches `GET /integrations` after a successful refresh.
 - **`POST /integrations/tls_intercept/<provider>/disconnect`**, **`POST /integrations/tls_intercept/<provider>/setup-session`**, **`POST /integrations/tls_intercept/<provider>/invalidate`**, **`POST /integrations/tls_intercept/<provider>/device/start|status|cancel`** — TLS-intercept providers (Google, GitHub, Telegram, Slack, device-flow LLMs). Registered directly on the broker router.
-- **`GET /integrations/mcp/<provider>/oauth/start`**, **`GET /integrations/mcp/<provider>/oauth/callback`**, **`POST /integrations/mcp/<provider>/disconnect`** — MCP-aggregator OAuth flow (Notion). The aggregator owns the handlers; the broker mounts them via `MCPAggregator.routes(prefix="/integrations")`.
+- **`GET /integrations/mcp/<provider>/oauth/start`**, **`GET /integrations/mcp/<provider>/oauth/callback`**, **`POST /integrations/mcp/<provider>/disconnect`** — direct-MCP OAuth flow (PostHog today). The aggregator owns the handlers; the broker mounts them via `MCPAggregator.routes(prefix="/integrations")`.
 - **`GET /integrations/merge/connector-status`**, **`POST /integrations/merge/link-token`**, **`POST /integrations/merge/disconnect`** — Merge passthroughs that forward to HUMR with the env bearer attached. See `merge_integration_design.md`.
 
 Reached from the browser same-origin via a WebUI reverse-proxy patch (`patches-webui/07-humr-broker-proxy.patch`) that forwards `/__humr_broker/*` to `127.0.0.1:9951`. Deliberately bypasses the WebUI's CSRF gate — the broker is loopback-only and the endpoints are stateless.

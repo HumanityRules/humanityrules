@@ -185,17 +185,17 @@ parts fork in five places, everything else is shared:
 - **Validation** (`provider_slack.py`) — `xoxb-` via `auth.test`, `xapp-` via
   `apps.connections.open`; personal-mode owner email via `users.lookupByEmail`.
   `refresh_outcome` returns both secrets.
-- **UI** — a custom modal registered via `registerVaultRenderer('slack', showSlackConfigModal)`
-  in `humr-integrations-slack.js`: editable app-name field
+- **UI** — a `tls_intercept` + `slack` card specialization supplies
+  `showSlackConfigModal` as its vault renderer in `humr-integrations-slack.js`: editable app-name field
   (defaults to the template name, re-bakes both manifest names on edit), mode
   selector, manifest prefill link, two token fields, and an owner-email field
   shown only when Personal is selected.
 
 The shared pieces carry both secrets via the `secrets: dict[str,str]` map on
 `RefreshResult`/`_TokenCacheEntry`, and Slack registers as one `provider_slack`
-module behind the `provider_registry` (`ProviderKind.VAULT`), with its WebUI renderer
-registered via `registerVaultRenderer('slack', showSlackConfigModal)` in
-`humr-integrations-slack.js`. The Merge `slack` connector is excluded
+module behind the `provider_registry` (`ProviderKind.VAULT`), with its WebUI behavior
+registered through the unified card-specification registry in `humr-integrations-slack.js`.
+The Merge `slack` connector is excluded
 so it never appears beside the native one.
 
 Both modes are enabled. Personal mode resolves the owner's email to a Slack

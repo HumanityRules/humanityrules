@@ -1,11 +1,12 @@
-// HUMR Google integration: scope picker, provider adapter, and OAuth error registrations.
+// HUMR Google integration: scope picker, card specialization, and OAuth error registrations.
 (() => {
   'use strict';
 
-  const { util, broker, oauthSentinel, providers } = window.HumrIntegrations;
+  const { util, broker, oauthSentinel, flows, cardSpecs } = window.HumrIntegrations;
   const { elem } = util;
   const { buildTlsConnectUrl } = broker;
   const { registerOauthErrors } = oauthSentinel;
+  const { createTlsCardSpec } = flows;
 
   // ── Google Workspace scope picker ─────────────────────────────────
   // The CP owns all scope semantics. The card renders the capability
@@ -136,13 +137,15 @@
     document.body.appendChild(backdrop);
   }
 
-  providers.register('google', {
-    connect(item, ctx, revert) {
-      showGoogleScopeModal(item, ctx.payload, ctx.returnTo, revert);
-    },
-    configure(item, ctx) {
-      showGoogleScopeModal(item, ctx.payload, ctx.returnTo);
-    },
+  cardSpecs.register({ kind: 'tls_intercept', slug: 'google' }, (item, ctx) => {
+    return createTlsCardSpec(item, ctx, {
+      connect(revert) {
+        showGoogleScopeModal(item, ctx.payload, ctx.returnTo, revert);
+      },
+      configure() {
+        showGoogleScopeModal(item, ctx.payload, ctx.returnTo);
+      },
+    });
   });
 
   registerOauthErrors({

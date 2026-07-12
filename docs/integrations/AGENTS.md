@@ -2,9 +2,9 @@
 
 Hermes agent third-party integrations: OAuth broker, MCP aggregators, Merge connectors, gateway platforms (Slack, Telegram), and device-flow LLM providers. **When creating a new document in `docs/integrations/`, always add a reference to it here.**
 
-- **`docs/integrations/integrations_broker_design.md`** — Architecture for third-party OAuth integrations in Hermes (Google today; Slack/Notion/Linear next). Open when reasoning about the HUMR/customer trust boundary, adding a provider, or debugging the broker.
+- **`docs/integrations/integrations_broker_design.md`** — Architecture for the unified integrations broker: TLS-intercept, direct MCP, Merge, vault, OAuth, and device-flow connections. Open when reasoning about the HUMR/customer trust boundary, adding an integration, or debugging the broker.
 
-- **`docs/integrations/mcp_aggregator_design.md`** — Architecture for MCP server integration in Hermes (Notion today). Open when adding MCP providers, working on the aggregator (in `integrations_broker.py`), or reasoning about the sandbox ↔ MCP trust boundary.
+- **`docs/integrations/mcp_aggregator_design.md`** — Architecture for direct MCP server integration in Hermes (PostHog is enabled today; Notion's implementation is currently disabled). Open when adding MCP connectors, working on the aggregator, or reasoning about the sandbox ↔ MCP trust boundary.
 
 - **`docs/integrations/device_flow_integration_design.md`** — Broker-run OAuth device flows for LLM providers whose refresh tokens stay outside the sandbox, including Codex/ChatGPT-subscription and Nous Portal: TLS-intercept token injection, HUMR-side refresh-token storage, placeholder auth.json seeding, and model-picker visibility. Open when revisiting device-flow LLM provider integrations.
 

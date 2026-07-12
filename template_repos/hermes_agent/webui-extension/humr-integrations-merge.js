@@ -1,9 +1,10 @@
-// HUMR Merge integration: connector authentication flow and adapter registration.
+// HUMR Merge integration: connector authentication flow and card specification.
 (() => {
   'use strict';
 
-  const { util, connectors } = window.HumrIntegrations;
+  const { util, flows, cardSpecs } = window.HumrIntegrations;
   const { elem } = util;
+  const { throwForErrorResponse } = flows;
 
   // ── Merge connector flow ──────────────────────────────────────────
 
@@ -87,21 +88,23 @@
     setTimeout(tick, intervalMs);
   }
 
-  connectors.register('merge_connector', {
-    cardKey(item) {
-      return 'merge:' + item.slug;
-    },
-    connect(item, ctx, revert) {
-      startMergeConnect(item, ctx, revert);
-    },
-    async disconnect(item, ctx) {
-      await fetch('/__humr_broker/integrations/merge/disconnect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ connector_slug: item.slug }),
-      });
-      await ctx.refreshAndRender();
-    },
+  cardSpecs.register({ kind: 'merge_connector' }, (item, ctx) => {
+    return {
+      details: [],
+      connect(revert) {
+        startMergeConnect(item, ctx, revert);
+      },
+      configure: null,
+      async disconnect() {
+        const response = await fetch('/__humr_broker/integrations/merge/disconnect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ connector_slug: item.slug }),
+        });
+        await throwForErrorResponse(response, 'Disconnect failed. Please try again.');
+        await ctx.refreshAndRender();
+      },
+    };
   });
   window.HumrIntegrations.loadedExtensionScripts.add('merge');
 })();
