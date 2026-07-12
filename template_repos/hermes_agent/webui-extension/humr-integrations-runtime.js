@@ -33,7 +33,8 @@
   };
 
   // Cross-cutting lifecycle for invoking actions exposed by resolved cardSpecs.
-  // Provider-specific network and refresh behavior remains on the cardSpec.
+  // Provider-specific network behavior remains on the cardSpec; disconnect
+  // catalog/model reconciliation lives here as shared action aftermath.
   // Connect resolves with outcome `navigating`, `cancelled`, or `changed`; only
   // `navigating` keeps the pending state because the page is about to unload.
   const _connecting = new Set();
@@ -81,6 +82,8 @@
       page.rerender();
       try {
         await cardSpec.disconnect();
+        await page.refreshAndRender();
+        if (cardSpec.affectsModelPicker) await refreshModelDropdowns();
       } catch (err) {
         alert(err.message || 'Disconnect failed. Please try again.');
       } finally {
@@ -147,6 +150,7 @@
         logoUrl: integration.logo_url || null,
         status: integration.status,
         isConnected: integration.status === 'connected',
+        affectsModelPicker: !!integration.affects_model_picker,
         provisionLabel,
         ...cardSpec,
       };
@@ -401,8 +405,7 @@
     return refreshedComposer || refreshedSettings;
   }
 
-  async function refreshModelDropdownsIfProviderAffectsPicker(integration) {
-    if (!integration || !integration.affects_model_picker) return;
+  async function refreshModelDropdowns() {
     const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     const fetchModelsData = async () => {
       const response = await fetch('/api/models', {
@@ -450,6 +453,11 @@
       if (typeof populateModelDropdown === 'function') await runBestEffort(populateModelDropdown);
       applyModelsToKnownDropdowns(modelsData);
     } catch (_) { /* best-effort */ }
+  }
+
+  async function refreshModelDropdownsIfProviderAffectsPicker(integration) {
+    if (!integration || !integration.affects_model_picker) return;
+    await refreshModelDropdowns();
   }
 
   // Floating "in progress" dialog shown after an oauth-sentinel return, while
