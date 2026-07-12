@@ -7,7 +7,7 @@
 (() => {
   'use strict';
 
-  const { state, page, util, broker, webui, flows, cardSpecs } = window.HumrIntegrations;
+  const { page, util, broker, webui, flows, cardSpecs } = window.HumrIntegrations;
   const { elem, formatDate } = util;
   const { tlsInterceptPath, mcpPath, buildTlsConnectUrl, buildMcpConnectUrl, invalidateTlsCache } = broker;
   const { refreshModelDropdownsIfProviderAffectsPicker } = webui;
@@ -30,24 +30,6 @@
       btn.disabled = false;
       btn.textContent = original;
     };
-  }
-
-  // Run a disconnect with the shared guard/spinner/cleanup dance: no-op if one
-  // is already in flight for `key`; otherwise mark pending and re-render (so the
-  // button shows "Disconnecting…"), run `perform`, then always clear and
-  // re-render. `perform` owns the fetch and any post-disconnect refresh.
-  async function runDisconnect(key, perform) {
-    if (state.disconnecting.has(key)) return;
-    state.disconnecting.add(key);
-    page.rerender();
-    try {
-      await perform();
-    } catch (err) {
-      alert(err.message || 'Disconnect failed. Please try again.');
-    } finally {
-      state.disconnecting.delete(key);
-      page.rerender();
-    }
   }
 
   async function throwForErrorResponse(response, fallbackMessage) {
@@ -510,7 +492,6 @@
 
   Object.assign(flows, {
     markConnecting,
-    runDisconnect,
     throwForErrorResponse,
     createTlsCardSpec,
     fieldInputFor,

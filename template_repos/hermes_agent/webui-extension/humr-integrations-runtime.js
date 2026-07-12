@@ -8,7 +8,7 @@
   'use strict';
 
   const INTEGRATIONS_URL = '/__humr_broker/integrations';
-  const state = { current: null, disconnecting: new Set() };
+  const state = { current: null };
 
   // Stable render-lifecycle collaborator shared by the split integration
   // scripts. The page controller supplies its callbacks once it has loaded.
@@ -29,6 +29,28 @@
     refreshAndRender() {
       if (!_refreshAndRender) throw new Error('[humr-integrations] page is not configured.');
       return _refreshAndRender();
+    },
+  };
+
+  // Cross-cutting lifecycle for invoking actions exposed by resolved cardSpecs.
+  // Provider-specific network and refresh behavior remains on the cardSpec.
+  const _disconnecting = new Set();
+  const cardActions = {
+    isDisconnecting(cardSpec) {
+      return _disconnecting.has(cardSpec.key);
+    },
+    async disconnect(cardSpec) {
+      if (cardActions.isDisconnecting(cardSpec)) return;
+      _disconnecting.add(cardSpec.key);
+      page.rerender();
+      try {
+        await cardSpec.disconnect();
+      } catch (err) {
+        alert(err.message || 'Disconnect failed. Please try again.');
+      } finally {
+        _disconnecting.delete(cardSpec.key);
+        page.rerender();
+      }
     },
   };
 
@@ -526,6 +548,7 @@
     modals: { showTransitionModal, showOauthErrorModal },
     oauthSentinel: { consumeOAuthSentinel, registerOauthErrors, oauthErrorMessage },
     flows: {},
+    cardActions,
     cardSpecs,
   };
   window.HumrIntegrations.loadedExtensionScripts.add('runtime');
