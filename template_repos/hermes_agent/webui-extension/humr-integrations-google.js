@@ -141,12 +141,12 @@
 
   cardSpecs.register({ kind: 'tls_intercept', slug: 'google' }, (integration) => {
     const connectUrl = buildTlsConnectUrl(integration.slug);
-    return cardSpecs.createTls(integration, {
+    return {
       canConfigure: true,
       connect() {
         return showGoogleScopeModal(integration, connectUrl);
       },
-    });
+    };
   });
 
   registerOauthErrors({
