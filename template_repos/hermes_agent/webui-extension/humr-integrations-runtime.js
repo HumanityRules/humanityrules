@@ -23,6 +23,9 @@
     return selector.kind + '\u0000' + (selector.slug || '');
   }
 
+  // Registry of cardSpec factories. Each factory contributes provider- or
+  // mechanism-specific details and actions; resolve() binds those to the
+  // integration's shared presentation data and returns one complete cardSpec.
   const cardSpecs = {
     register(selector, factory) {
       if (!selector || !selector.kind || typeof factory !== 'function') {
@@ -36,14 +39,36 @@
       _cardSpecFactories.set(key, factory);
     },
   
-    resolve(item, ctx) {
-      if (!item || !item.kind) return null;
-      const exact = item.slug
-        ? _cardSpecFactories.get(cardSpecSelectorKey({ kind: item.kind, slug: item.slug }))
+    resolve(integration, page) {
+      if (!integration || !integration.kind) return null;
+      const exact = integration.slug
+        ? _cardSpecFactories.get(cardSpecSelectorKey({ kind: integration.kind, slug: integration.slug }))
         : null;
-      const fallback = _cardSpecFactories.get(cardSpecSelectorKey({ kind: item.kind }));
+      const fallback = _cardSpecFactories.get(cardSpecSelectorKey({ kind: integration.kind }));
       const factory = exact || fallback;
-      return factory ? factory(item, ctx) : null;
+      if (!factory) return null;
+
+      const cardSpec = factory(integration, page);
+      if (!cardSpec) return null;
+      const metadata = integration.metadata || {};
+      let provisionLabel = null;
+      // Platform is the lowest-priority shared credential source, so if it
+      // stamped the outcome no organization or personal credential applied.
+      if (metadata.platform_shared) provisionLabel = 'Provided by Humanity Rules';
+      else if (metadata.org_shared) provisionLabel = 'Provided by your organization';
+
+      // Factories supply mechanism/provider-specific details and actions. The
+      // registry binds those to the common presentation data so consumers deal
+      // with one resolved cardSpec rather than integration + page + behavior.
+      return {
+        key: integrationKey(integration),
+        label: integration.label || integration.slug,
+        logoUrl: integration.logo_url || null,
+        status: integration.status,
+        isConnected: integration.status === 'connected',
+        provisionLabel,
+        ...cardSpec,
+      };
     },
   };
 
@@ -60,8 +85,8 @@
     return _oauthErrorMessages.get(code);
   }
 
-  function integrationKey(item) {
-    return String(item.kind || 'unknown') + ':' + String(item.slug || 'unknown');
+  function integrationKey(integration) {
+    return String(integration.kind || 'unknown') + ':' + String(integration.slug || 'unknown');
   }
 
   function elem(tag, props, children) {
@@ -108,9 +133,9 @@
 
   // TLS-intercept providers expose /integrations/user/<slug>/start/ for Connect
   // (top-level navigation to HUMR). Disconnect goes through the broker.
-  function buildTlsConnectUrl(payload, slug, returnTo) {
+  function buildTlsConnectUrl(catalog, slug, returnTo) {
     const rd = encodeURIComponent(returnTo);
-    return payload.humr_control_plane_url.replace(/\/$/, '') + '/integrations/user/' + slug + '/start/?rd=' + rd + '&app_slug=' + encodeURIComponent(payload.app_slug || '');
+    return catalog.humr_control_plane_url.replace(/\/$/, '') + '/integrations/user/' + slug + '/start/?rd=' + rd + '&app_slug=' + encodeURIComponent(catalog.app_slug || '');
   }
 
   function tlsInterceptPath(slug, action) {
@@ -290,8 +315,8 @@
     return refreshedComposer || refreshedSettings;
   }
 
-  async function refreshModelDropdownsIfProviderAffectsPicker(item) {
-    if (!item || !item.affects_model_picker) return;
+  async function refreshModelDropdownsIfProviderAffectsPicker(integration) {
+    if (!integration || !integration.affects_model_picker) return;
     const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     const fetchModelsData = async () => {
       const response = await fetch('/api/models', {

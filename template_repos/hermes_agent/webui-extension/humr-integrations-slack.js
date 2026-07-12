@@ -37,7 +37,7 @@
       encodeURIComponent(JSON.stringify(manifest));
   }
 
-  function showSlackConfigModal(item, session, ctx, onClose) {
+  function showSlackConfigModal(integration, session, page, onClose) {
     const schema = session.schema;
     const backdrop = elem('div', { class: 'humr-modal-backdrop humr-vault-backdrop' });
     const close = () => { backdrop.remove(); if (onClose) onClose(); };
@@ -190,10 +190,10 @@
       saveBtn,
     ]);
     form.appendChild(actions);
-    wireVaultSubmit({ form, session, item, saveBtn, actions, errorBox, successBox, close }, ctx);
+    wireVaultSubmit({ form, session, integration, saveBtn, actions, errorBox, successBox, close }, page);
 
     const modal = elem('div', { class: 'humr-modal humr-vault-modal' }, [
-      elem('div', { class: 'humr-modal-title' }, [(schema.status === 'connected' ? 'Configure ' : 'Connect ') + (schema.label || item.label)]),
+      elem('div', { class: 'humr-modal-title' }, [(schema.status === 'connected' ? 'Configure ' : 'Connect ') + (schema.label || integration.label)]),
       elem('div', { class: 'humr-modal-body' }, [schema.message || 'Tokens are sent directly to the Humanity Rules vault.']),
       errorBox,
       successBox,
@@ -204,8 +204,8 @@
     document.body.appendChild(backdrop);
   }
 
-  cardSpecs.register({ kind: 'tls_intercept', slug: 'slack' }, (item, ctx) => {
-    return createTlsCardSpec(item, ctx, { vaultRenderer: showSlackConfigModal });
+  cardSpecs.register({ kind: 'tls_intercept', slug: 'slack' }, (integration, page) => {
+    return createTlsCardSpec(integration, page, { vaultRenderer: showSlackConfigModal });
   });
   window.HumrIntegrations.loadedExtensionScripts.add('slack');
 })();

@@ -36,17 +36,17 @@
   // is already in flight for `key`; otherwise mark pending and re-render (so the
   // button shows "Disconnecting…"), run `perform`, then always clear and
   // re-render. `perform` owns the fetch and any post-disconnect refresh.
-  async function runDisconnect(key, ctx, perform) {
+  async function runDisconnect(key, page, perform) {
     if (state.disconnecting.has(key)) return;
     state.disconnecting.add(key);
-    ctx.rerender();
+    page.rerender();
     try {
       await perform();
     } catch (err) {
       alert(err.message || 'Disconnect failed. Please try again.');
     } finally {
       state.disconnecting.delete(key);
-      ctx.rerender();
+      page.rerender();
     }
   }
 
@@ -88,8 +88,8 @@
     return wrapper;
   }
 
-  async function requestVaultSetupSession(item) {
-    const url = tlsInterceptPath(item.slug, 'setup-session') +
+  async function requestVaultSetupSession(integration) {
+    const url = tlsInterceptPath(integration.slug, 'setup-session') +
       '?origin=' + encodeURIComponent(window.location.origin);
     let response;
     try {
@@ -142,21 +142,21 @@
   // the broker cache (which rewrites the gateway env and restarts the
   // gateway), swap the action row to a Close button, and refresh the cards.
   // `verb` is 'Saved' or 'Connected' depending on how the credential landed.
-  async function applyVaultCredentials({ item, statusEl, actions, close, verb }, ctx) {
+  async function applyVaultCredentials({ integration, statusEl, actions, close, verb }, page) {
     statusEl.textContent = verb + '. Applying credentials…';
     statusEl.style.display = '';
     let restarted = true;
     try {
-      await invalidateTlsCache(item.slug);
+      await invalidateTlsCache(integration.slug);
     } catch (err) {
       restarted = false;
       statusEl.textContent =
         err.message ||
         verb + ', but applying the credentials failed. Redeploy this Hermes app to apply them.';
     }
-    if (item.affects_model_picker) {
+    if (integration.affects_model_picker) {
       statusEl.textContent = verb + '. Updating the model list…';
-      await refreshModelDropdownsIfProviderAffectsPicker(item);
+      await refreshModelDropdownsIfProviderAffectsPicker(integration);
     }
     actions.replaceChildren(elem('button', {
       class: 'humr-integration-btn humr-integration-btn-primary',
@@ -164,7 +164,7 @@
       onclick: close,
     }, ['Close']));
     try {
-      await ctx.refreshAndRender();
+      await page.refreshAndRender();
     } catch (_) { /* sidebar refresh can recover on next open */ }
     if (restarted) {
       statusEl.textContent = verb + '. The new credentials are active.';
@@ -174,8 +174,8 @@
   // Wire a vault form's submit: POST to HUMR, then run the shared apply
   // sequence. Shared by the generic and Slack renderers so the
   // save/restart/refresh flow is single-sourced.
-  function wireVaultSubmit(opts, ctx) {
-    const { form, session, item, saveBtn, actions, errorBox, successBox, close } = opts;
+  function wireVaultSubmit(opts, page) {
+    const { form, session, integration, saveBtn, actions, errorBox, successBox, close } = opts;
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
       let saved = false;
@@ -186,7 +186,7 @@
       try {
         await submitVaultForm(session, form);
         saved = true;
-        await applyVaultCredentials({ item, statusEl: successBox, actions, close, verb: 'Saved' }, ctx);
+        await applyVaultCredentials({ integration, statusEl: successBox, actions, close, verb: 'Saved' }, page);
       } catch (err) {
         errorBox.textContent = err.message || 'Save failed.';
         errorBox.style.display = '';
@@ -199,9 +199,9 @@
     });
   }
 
-  function showGenericVaultConfigModal(item, session, ctx, onClose) {
+  function showGenericVaultConfigModal(integration, session, page, onClose) {
     if (session.schema && session.schema.mode === 'link_poll') {
-      showLinkPollConnectModal(item, session, ctx, onClose);
+      showLinkPollConnectModal(integration, session, page, onClose);
       return;
     }
     const schema = session.schema;
@@ -226,9 +226,9 @@
       saveBtn,
     ]);
     form.appendChild(actions);
-    wireVaultSubmit({ form, session, item, saveBtn, actions, errorBox, successBox, close }, ctx);
+    wireVaultSubmit({ form, session, integration, saveBtn, actions, errorBox, successBox, close }, page);
     const modal = elem('div', { class: 'humr-modal humr-vault-modal' }, [
-      elem('div', { class: 'humr-modal-title' }, [(schema.status === 'connected' ? 'Configure ' : 'Connect ') + (schema.label || item.label)]),
+      elem('div', { class: 'humr-modal-title' }, [(schema.status === 'connected' ? 'Configure ' : 'Connect ') + (schema.label || integration.label)]),
       elem('div', { class: 'humr-modal-body' }, [schema.message || 'Credentials are sent directly to the Humanity Rules vault.']),
       errorBox,
       successBox,
@@ -251,7 +251,7 @@
   // each poll is one getUpdates on the HUMR side, and sessions cap at 30 min.
   const LINK_POLL_MS = 1000;
 
-  function showLinkPollConnectModal(item, session, ctx, onClose) {
+  function showLinkPollConnectModal(integration, session, page, onClose) {
     const schema = session.schema;
     const backdrop = elem('div', { class: 'humr-modal-backdrop humr-vault-backdrop' });
     let stopped = false;
@@ -263,7 +263,7 @@
     const actions = elem('div', { class: 'humr-modal-actions' }, [cancelBtn]);
 
     const children = [
-      elem('div', { class: 'humr-modal-title' }, ['Connect ' + (schema.label || item.label)]),
+      elem('div', { class: 'humr-modal-title' }, ['Connect ' + (schema.label || integration.label)]),
       elem('div', { class: 'humr-modal-body' }, [schema.message || '']),
     ];
     if (schema.qr_data_uri) {
@@ -312,7 +312,7 @@
       if (stopped) return;
       if (response.ok && payload.status === 'connected') {
         stopped = true;
-        await applyVaultCredentials({ item, statusEl: statusBox, actions, close, verb: 'Connected' }, ctx);
+        await applyVaultCredentials({ integration, statusEl: statusBox, actions, close, verb: 'Connected' }, page);
         return;
       }
       if (response.ok) {
@@ -332,11 +332,11 @@
 
   const DEVICE_POLL_MS = 3000;
 
-  async function startDeviceConnect(item, ctx, revert) {
+  async function startDeviceConnect(integration, page, revert) {
     const revertOnce = () => { if (revert) { revert(); revert = null; } };
     let session;
     try {
-      const base = tlsInterceptPath(item.slug, 'device');
+      const base = tlsInterceptPath(integration.slug, 'device');
       const resp = await fetch(base + '/start', { method: 'POST', cache: 'no-store' });
       session = await resp.json();
       if (!resp.ok || !session.ok) throw new Error(session.error || 'Could not start the login.');
@@ -345,13 +345,13 @@
       revertOnce();
       return;
     }
-    showDeviceModal(item, session, ctx, revertOnce);
+    showDeviceModal(integration, session, page, revertOnce);
   }
 
-  function showDeviceModal(item, session, ctx, onClose) {
+  function showDeviceModal(integration, session, page, onClose) {
     const backdrop = elem('div', { class: 'humr-modal-backdrop' });
     let cancelled = false;
-    const base = tlsInterceptPath(item.slug, 'device');
+    const base = tlsInterceptPath(integration.slug, 'device');
     const close = () => {
       cancelled = true;
       backdrop.remove();
@@ -372,7 +372,7 @@
     const cancelBtn = elem('button', { class: 'humr-integration-btn', type: 'button', onclick: close }, ['Cancel']);
 
     const modal = elem('div', { class: 'humr-modal' }, [
-      elem('div', { class: 'humr-modal-title' }, ['Connect ' + item.label]),
+      elem('div', { class: 'humr-modal-title' }, ['Connect ' + integration.label]),
       elem('div', { class: 'humr-modal-body humr-device-step-label' }, [
         'Open the link below and sign in:',
       ]),
@@ -402,8 +402,8 @@
       if (cancelled) return;
       if (st.phase === 'completed') {
         backdrop.remove();
-        await ctx.refreshAndRender();
-        await refreshModelDropdownsIfProviderAffectsPicker(item);
+        await page.refreshAndRender();
+        await refreshModelDropdownsIfProviderAffectsPicker(integration);
         if (onClose) onClose();
         return;
       }
@@ -421,7 +421,7 @@
 
   // Open the shared vault setup plumbing with either the generic schema-driven
   // modal or a card specification's custom modal renderer.
-  async function startVaultConfig(item, ctx, revert, modalRenderer) {
+  async function startVaultConfig(integration, page, revert, modalRenderer) {
     // `revert` (from markConnecting) restores the Connect button. Fire it if we
     // never open the modal (error), or when the user dismisses it without
     // connecting; a successful save re-renders the card from scratch so the
@@ -429,31 +429,31 @@
     // button on an already-connected provider reuses this path).
     const revertOnce = () => { if (revert) { revert(); revert = null; } };
     try {
-      const session = await requestVaultSetupSession(item);
+      const session = await requestVaultSetupSession(integration);
       const renderer = modalRenderer || showGenericVaultConfigModal;
-      renderer(item, session, ctx, revertOnce);
+      renderer(integration, session, page, revertOnce);
     } catch (err) {
       alert(err.message || 'Could not open the vault dialog.');
       revertOnce();
     }
   }
 
-  async function disconnectTlsProvider(item, ctx) {
-    const response = await fetch(tlsInterceptPath(item.slug, 'disconnect'), {
+  async function disconnectTlsProvider(integration, page) {
+    const response = await fetch(tlsInterceptPath(integration.slug, 'disconnect'), {
       method: 'POST',
       cache: 'no-store',
     });
     await throwForErrorResponse(response, 'Disconnect failed. Please try again.');
-    await ctx.refreshAndRender();
-    await refreshModelDropdownsIfProviderAffectsPicker(item);
+    await page.refreshAndRender();
+    await refreshModelDropdownsIfProviderAffectsPicker(integration);
   }
 
-  function tlsCardDetails(item) {
+  function tlsCardDetails(integration) {
     const details = [];
-    const ownerName = item.metadata && item.metadata.owner_name;
+    const ownerName = integration.metadata && integration.metadata.owner_name;
     if (ownerName) details.push({ text: 'Replies only to ' + ownerName });
-    if (item.last_refreshed_at) {
-      const refreshed = 'Last refreshed: ' + formatDate(item.last_refreshed_at);
+    if (integration.last_refreshed_at) {
+      const refreshed = 'Last refreshed: ' + formatDate(integration.last_refreshed_at);
       details.push({
         className: 'humr-integration-meta humr-integration-meta-refresh',
         text: refreshed,
@@ -464,40 +464,41 @@
     return details;
   }
 
-  function createTlsCardSpec(item, ctx, customization) {
+  function createTlsCardSpec(integration, page, customization) {
     const custom = customization || {};
-    const usesVault = item.connect_mode === 'vault';
-    const usesDevice = item.connect_mode === 'device';
-    const openVault = (revert) => startVaultConfig(item, ctx, revert, custom.vaultRenderer);
+    const catalog = page.catalog;
+    const usesVault = integration.connect_mode === 'vault';
+    const usesDevice = integration.connect_mode === 'device';
+    const openVault = (revert) => startVaultConfig(integration, page, revert, custom.vaultRenderer);
     const defaultConnect = (revert) => {
       if (usesVault) openVault(revert);
-      else if (usesDevice) startDeviceConnect(item, ctx, revert);
-      else window.location.href = buildTlsConnectUrl(ctx.payload, item.slug, ctx.returnTo);
+      else if (usesDevice) startDeviceConnect(integration, page, revert);
+      else window.location.href = buildTlsConnectUrl(catalog, integration.slug, page.returnTo);
     };
     const configure = Object.prototype.hasOwnProperty.call(custom, 'configure')
       ? custom.configure
       : (usesVault ? () => openVault() : null);
     return {
-      details: tlsCardDetails(item),
+      details: tlsCardDetails(integration),
       connect: custom.connect || defaultConnect,
       configure,
       async disconnect() {
-        await disconnectTlsProvider(item, ctx);
+        await disconnectTlsProvider(integration, page);
       },
     };
   }
 
-  function createMcpCardSpec(item, ctx) {
+  function createMcpCardSpec(integration, page) {
     return {
       details: [],
       connect() {
-        window.location.href = buildMcpConnectUrl(item.slug);
+        window.location.href = buildMcpConnectUrl(integration.slug);
       },
       configure: null,
       async disconnect() {
-        const response = await fetch(mcpPath(item.slug, 'disconnect'), { method: 'POST' });
+        const response = await fetch(mcpPath(integration.slug, 'disconnect'), { method: 'POST' });
         await throwForErrorResponse(response, 'Disconnect failed. Please try again.');
-        await ctx.refreshAndRender();
+        await page.refreshAndRender();
       },
     };
   }
