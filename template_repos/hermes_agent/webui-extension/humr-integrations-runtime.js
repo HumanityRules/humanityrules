@@ -33,12 +33,18 @@
   };
 
   // Cross-cutting lifecycle for invoking actions exposed by resolved cardSpecs.
-  // Provider-specific network behavior remains on the cardSpec; disconnect
-  // catalog/model reconciliation lives here as shared action aftermath.
+  // Provider-specific network behavior remains on the cardSpec; catalog/model
+  // reconciliation lives here as shared action aftermath.
   // Connect resolves with outcome `navigating`, `cancelled`, or `changed`; only
   // `navigating` keeps the pending state because the page is about to unload.
   const _connecting = new Set();
   const _disconnecting = new Set();
+
+  async function refreshAfterChange(cardSpec) {
+    await page.refreshAndRender();
+    if (cardSpec.affectsModelPicker) await refreshModelDropdowns();
+  }
+
   const cardActions = {
     createConnectOutcome() {
       let resolveOutcome;
@@ -63,6 +69,7 @@
       let result = null;
       try {
         result = await cardSpec.connect();
+        if (result && result.outcome === 'changed') await refreshAfterChange(cardSpec);
       } catch (err) {
         alert(err.message || 'Connect failed. Please try again.');
       } finally {
@@ -82,8 +89,7 @@
       page.rerender();
       try {
         await cardSpec.disconnect();
-        await page.refreshAndRender();
-        if (cardSpec.affectsModelPicker) await refreshModelDropdowns();
+        await refreshAfterChange(cardSpec);
       } catch (err) {
         alert(err.message || 'Disconnect failed. Please try again.');
       } finally {

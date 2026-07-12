@@ -7,10 +7,9 @@
 (() => {
   'use strict';
 
-  const { page, util, broker, webui, flows, cardActions, cardSpecs } = window.HumrIntegrations;
+  const { util, broker, flows, cardActions, cardSpecs } = window.HumrIntegrations;
   const { elem, formatDate } = util;
   const { tlsInterceptPath, mcpPath, buildTlsConnectUrl, buildMcpConnectUrl, invalidateTlsCache } = broker;
-  const { refreshModelDropdownsIfProviderAffectsPicker } = webui;
 
   const VAULT_NETWORK_ERROR = (
     'Could not reach the Humanity Rules vault. Try again. ' +
@@ -107,7 +106,7 @@
   // Post-save/connect sequence shared by the vault form modals and the
   // link+poll modal: the credential is already stored on HUMR, so invalidate
   // the broker cache (which rewrites the gateway env and restarts the
-  // gateway), swap the action row to a Close button, and refresh the cards.
+  // gateway), and swap the action row to a Close button.
   // `verb` is 'Saved' or 'Connected' depending on how the credential landed.
   async function applyVaultCredentials({ integration, statusEl, actions, close, verb }) {
     statusEl.textContent = verb + '. Applying credentials…';
@@ -121,18 +120,11 @@
         err.message ||
         verb + ', but applying the credentials failed. Redeploy this Hermes app to apply them.';
     }
-    if (integration.affects_model_picker) {
-      statusEl.textContent = verb + '. Updating the model list…';
-      await refreshModelDropdownsIfProviderAffectsPicker(integration);
-    }
     actions.replaceChildren(elem('button', {
       class: 'humr-integration-btn humr-integration-btn-primary',
       type: 'button',
       onclick: close,
     }, ['Close']));
-    try {
-      await page.refreshAndRender();
-    } catch (_) { /* sidebar refresh can recover on next open */ }
     if (restarted) {
       statusEl.textContent = verb + '. The new credentials are active.';
     }
@@ -140,7 +132,7 @@
 
   // Wire a vault form's submit: POST to HUMR, then run the shared apply
   // sequence. Shared by the generic and Slack renderers so the
-  // save/restart/refresh flow is single-sourced.
+  // save/restart flow is single-sourced.
   function wireVaultSubmit(opts) {
     const { form, session, integration, saveBtn, actions, errorBox, successBox, close } = opts;
     let resolveChanged;
@@ -377,12 +369,7 @@
       if (cancelled) return;
       if (st.phase === 'completed') {
         backdrop.remove();
-        try {
-          await page.refreshAndRender();
-          await refreshModelDropdownsIfProviderAffectsPicker(integration);
-        } finally {
-          connectOutcome.finish('changed');
-        }
+        connectOutcome.finish('changed');
         return;
       }
       if (st.phase === 'failed' || st.phase === null) {
