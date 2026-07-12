@@ -1,15 +1,14 @@
 // HUMR integration connection flows: provider-neutral vault, device, and
-// disconnect machinery plus connector adapters.
+// disconnect machinery plus the default TLS and direct-MCP card specifications.
 //
 // TLS-intercept Connect (Google, GitHub, …) is a top-level navigation to HUMR's
 // control plane; Disconnect goes through the broker so the Integrations pane
-// stays open. MCP-aggregator providers (Notion) flow entirely through the
-// broker.
+// stays open. Direct MCP connectors flow entirely through the broker.
 (() => {
   'use strict';
 
-  const { state, util, broker, webui, flows, connectors } = window.HumrIntegrations;
-  const { elem } = util;
+  const { state, util, broker, webui, flows, cardSpecs } = window.HumrIntegrations;
+  const { elem, formatDate } = util;
   const { tlsInterceptPath, mcpPath, buildMcpConnectUrl, invalidateTlsCache } = broker;
   const { refreshModelDropdownsIfProviderAffectsPicker } = webui;
 
@@ -43,10 +42,19 @@
     ctx.rerender();
     try {
       await perform();
+    } catch (err) {
+      alert(err.message || 'Disconnect failed. Please try again.');
     } finally {
       state.disconnecting.delete(key);
       ctx.rerender();
     }
+  }
+
+  async function throwForErrorResponse(response, fallbackMessage) {
+    if (response.ok) return;
+    let message = fallbackMessage;
+    try { message = (await response.json()).error || message; } catch (_) { /* ignore */ }
+    throw new Error(message);
   }
 
   function fieldInputFor(field) {
@@ -411,27 +419,9 @@
     setTimeout(poll, DEVICE_POLL_MS);
   }
 
-  // Per-provider config-modal renderers. The generic `showGenericVaultConfigModal`
-  // renders any flat `schema.fields` form, and dispatches `mode: 'link_poll'`
-  // schemas (Telegram managed bots) to the link+poll modal. Providers
-  // whose setup needs more than a flat form (e.g. Slack's mode selector +
-  // manifest prefill link + two tokens) register a custom renderer with
-  // registerVaultRenderer(), keyed by slug; everything else falls back to the
-  // generic one. All renderers share the same setup-session/submit/restart
-  // plumbing.
-
-  const _vaultRenderers = new Map();
-
-  function registerVaultRenderer(slug, renderer) {
-    if (_vaultRenderers.has(slug)) console.warn('[humr-integrations] Replacing vault renderer for ' + slug + '.');
-    _vaultRenderers.set(slug, renderer);
-  }
-
-  function vaultRendererFor(slug) {
-    return _vaultRenderers.get(slug);
-  }
-
-  async function startVaultConfig(item, ctx, revert) {
+  // Open the shared vault setup plumbing with either the generic schema-driven
+  // modal or a card specification's custom modal renderer.
+  async function startVaultConfig(item, ctx, revert, modalRenderer) {
     // `revert` (from markConnecting) restores the Connect button. Fire it if we
     // never open the modal (error), or when the user dismisses it without
     // connecting; a successful save re-renders the card from scratch so the
@@ -440,7 +430,7 @@
     const revertOnce = () => { if (revert) { revert(); revert = null; } };
     try {
       const session = await requestVaultSetupSession(item);
-      const renderer = vaultRendererFor(item.slug) || showGenericVaultConfigModal;
+      const renderer = modalRenderer || showGenericVaultConfigModal;
       renderer(item, session, ctx, revertOnce);
     } catch (err) {
       alert(err.message || 'Could not open the vault dialog.');
@@ -448,46 +438,78 @@
     }
   }
 
-  // One disconnect path for every TLS-intercept provider (vault + OAuth).
-  // The broker resolves the provider kind server-side, so both kinds POST
-  // here identically.
-  function disconnectTlsProvider(item, ctx) {
-    return runDisconnect(item.slug, ctx, async () => {
-      const response = await fetch(tlsInterceptPath(item.slug, 'disconnect'), {
-        method: 'POST',
-        cache: 'no-store',
-      });
-      if (!response.ok) {
-        let message = 'Disconnect failed. Please try again.';
-        try { message = (await response.json()).error || message; } catch (_) { /* ignore */ }
-        alert(message);
-        return;
-      }
-      await ctx.refreshAndRender();
-      await refreshModelDropdownsIfProviderAffectsPicker(item);
+  async function disconnectTlsProvider(item, ctx) {
+    const response = await fetch(tlsInterceptPath(item.slug, 'disconnect'), {
+      method: 'POST',
+      cache: 'no-store',
     });
+    await throwForErrorResponse(response, 'Disconnect failed. Please try again.');
+    await ctx.refreshAndRender();
+    await refreshModelDropdownsIfProviderAffectsPicker(item);
   }
 
-  connectors.register('mcp_aggregator', {
-    cardKey(item) {
-      return 'mcp:' + item.slug;
-    },
-    connect(item, ctx, revert) {
-      window.location.href = buildMcpConnectUrl(item.slug);
-    },
-    async disconnect(item, ctx) {
-      await fetch(mcpPath(item.slug, 'disconnect'), { method: 'POST' });
-      await ctx.refreshAndRender();
-    },
-  });
+  function tlsCardDetails(item) {
+    const details = [];
+    const ownerName = item.metadata && item.metadata.owner_name;
+    if (ownerName) details.push({ text: 'Replies only to ' + ownerName });
+    if (item.last_refreshed_at) {
+      const refreshed = 'Last refreshed: ' + formatDate(item.last_refreshed_at);
+      details.push({
+        className: 'humr-integration-meta humr-integration-meta-refresh',
+        text: refreshed,
+        title: refreshed,
+        hideWhenShared: true,
+      });
+    }
+    return details;
+  }
+
+  function createTlsCardSpec(item, ctx, customization) {
+    const custom = customization || {};
+    const usesVault = item.connect_mode === 'vault';
+    const usesDevice = item.connect_mode === 'device';
+    const openVault = (revert) => startVaultConfig(item, ctx, revert, custom.vaultRenderer);
+    const defaultConnect = (revert) => {
+      if (usesVault) openVault(revert);
+      else if (usesDevice) startDeviceConnect(item, ctx, revert);
+      else window.location.href = buildTlsConnectUrl(ctx.payload, item.slug, ctx.returnTo);
+    };
+    const configure = Object.prototype.hasOwnProperty.call(custom, 'configure')
+      ? custom.configure
+      : (usesVault ? () => openVault() : null);
+    return {
+      details: tlsCardDetails(item),
+      connect: custom.connect || defaultConnect,
+      configure,
+      async disconnect() {
+        await disconnectTlsProvider(item, ctx);
+      },
+    };
+  }
+
+  function createMcpCardSpec(item, ctx) {
+    return {
+      details: [],
+      connect() {
+        window.location.href = buildMcpConnectUrl(item.slug);
+      },
+      configure: null,
+      async disconnect() {
+        const response = await fetch(mcpPath(item.slug, 'disconnect'), { method: 'POST' });
+        await throwForErrorResponse(response, 'Disconnect failed. Please try again.');
+        await ctx.refreshAndRender();
+      },
+    };
+  }
+
+  cardSpecs.register({ kind: 'tls_intercept' }, createTlsCardSpec);
+  cardSpecs.register({ kind: 'mcp_aggregator' }, createMcpCardSpec);
 
   Object.assign(flows, {
     markConnecting,
     runDisconnect,
-    startVaultConfig,
-    registerVaultRenderer,
-    startDeviceConnect,
-    disconnectTlsProvider,
+    throwForErrorResponse,
+    createTlsCardSpec,
     fieldInputFor,
     wireVaultSubmit,
   });

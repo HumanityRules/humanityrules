@@ -12,25 +12,38 @@
 
   // ── Registries ────────────────────────────────────────────────────────
 
-  const _providers = new Map();
-  const providers = {
-    register(slug, adapter) {
-      if (_providers.has(slug)) console.warn('[humr-integrations] Replacing provider adapter for ' + slug + '.');
-      _providers.set(slug, adapter);
-    },
-    get(slug) {
-      return _providers.get(slug);
-    },
-  };
+  // Card behavior is registered once per broker kind, with optional
+  // kind+slug specializations for integrations whose UI differs from the kind
+  // default (Google's scope picker, Slack's custom vault form). Resolution
+  // prefers the exact specialization and otherwise falls back to the kind
+  // factory.
+  const _cardSpecFactories = new Map();
 
-  const _connectors = new Map();
-  const connectors = {
-    register(kind, adapter) {
-      if (_connectors.has(kind)) console.warn('[humr-integrations] Replacing connector adapter for ' + kind + '.');
-      _connectors.set(kind, adapter);
+  function cardSpecSelectorKey(selector) {
+    return selector.kind + '\u0000' + (selector.slug || '');
+  }
+
+  const cardSpecs = {
+    register(selector, factory) {
+      if (!selector || !selector.kind || typeof factory !== 'function') {
+        throw new Error('[humr-integrations] cardSpecs.register() needs a kind and factory.');
+      }
+      const key = cardSpecSelectorKey(selector);
+      if (_cardSpecFactories.has(key)) {
+        const suffix = selector.slug ? ':' + selector.slug : '';
+        console.warn('[humr-integrations] Replacing card specification for ' + selector.kind + suffix + '.');
+      }
+      _cardSpecFactories.set(key, factory);
     },
-    get(kind) {
-      return _connectors.get(kind);
+  
+    resolve(item, ctx) {
+      if (!item || !item.kind) return null;
+      const exact = item.slug
+        ? _cardSpecFactories.get(cardSpecSelectorKey({ kind: item.kind, slug: item.slug }))
+        : null;
+      const fallback = _cardSpecFactories.get(cardSpecSelectorKey({ kind: item.kind }));
+      const factory = exact || fallback;
+      return factory ? factory(item, ctx) : null;
     },
   };
 
@@ -45,6 +58,10 @@
 
   function oauthErrorMessage(code) {
     return _oauthErrorMessages.get(code);
+  }
+
+  function integrationKey(item) {
+    return String(item.kind || 'unknown') + ':' + String(item.slug || 'unknown');
   }
 
   function elem(tag, props, children) {
@@ -436,7 +453,7 @@
   window.HumrIntegrations = {
     loadedExtensionScripts: new Set(),
     state,
-    util: { elem, formatDate, statusLabelFor, byCategoryThenLabel },
+    util: { integrationKey, elem, formatDate, statusLabelFor, byCategoryThenLabel },
     broker: {
       fetchIntegrations,
       refreshAll,
@@ -455,8 +472,7 @@
     modals: { showTransitionModal, showOauthErrorModal },
     oauthSentinel: { consumeOAuthSentinel, registerOauthErrors, oauthErrorMessage },
     flows: {},
-    providers,
-    connectors,
+    cardSpecs,
   };
   window.HumrIntegrations.loadedExtensionScripts.add('runtime');
 })();
