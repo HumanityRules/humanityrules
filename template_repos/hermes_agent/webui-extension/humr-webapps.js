@@ -1,11 +1,17 @@
 // HUMR WebUI extension — Web Apps panel.
 //
 // Reads from the platform-owned `__admin` webapp (FastAPI, served same-origin
-// at /webapps/__admin/api/). Mirrors humr-integrations.js: rail icon + sidebar
+// at /webapps/__admin/api/). Mounted through humr-panel.js: rail icon + sidebar
 // summary panel + main view, polling every 3s while the panel is active.
 // Read-only in v1; mutations stay on the CLI.
 (() => {
   'use strict';
+
+  if (!window.HumrPanel) {
+    console.error('[humr-webapps] humr-panel.js failed to load; not mounting.');
+    return;
+  }
+  const elem = window.HumrPanel.elem;
 
   const API_URL = '/webapps/__admin/api/webapps';
   const POLL_MS = 3000;
@@ -17,25 +23,6 @@
   let _current = null;
   let _pollTimer = null;
   let _showInternal = false;
-
-  function elem(tag, props, children) {
-    const el = document.createElement(tag);
-    if (props) {
-      for (const k in props) {
-        if (k === 'style' && typeof props[k] === 'object') Object.assign(el.style, props[k]);
-        else if (k === 'dataset' && typeof props[k] === 'object') Object.assign(el.dataset, props[k]);
-        else if (k.startsWith('on') && typeof props[k] === 'function') el.addEventListener(k.slice(2), props[k]);
-        else el.setAttribute(k, props[k]);
-      }
-    }
-    if (children) {
-      for (const c of children) {
-        if (c == null) continue;
-        el.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
-      }
-    }
-    return el;
-  }
 
   async function fetchWebapps() {
     try {
@@ -172,11 +159,13 @@
   function startPolling() {
     if (_pollTimer != null) return;
     const tick = async () => {
-      if (!isPanelActive()) {
-        stopPolling();
-        return;
-      }
+      _pollTimer = null; // this timer fired; nothing is scheduled right now
+      if (!isPanelActive()) return;
       await refreshAndRender();
+      // Re-check after the await: the user may have left the panel during the
+      // fetch (stop for good), or left and come back (startPolling already
+      // scheduled a fresh chain; rescheduling here would double the polling).
+      if (!isPanelActive() || _pollTimer != null) return;
       _pollTimer = setTimeout(tick, POLL_MS);
     };
     _pollTimer = setTimeout(tick, POLL_MS);
@@ -189,53 +178,12 @@
     }
   }
 
-  function ensureSidebarTabAndPane() {
-    const sidebar = document.querySelector('.sidebar');
-    const sidebarNav = sidebar && sidebar.querySelector('.sidebar-nav');
-    const mainEl = document.querySelector('main.main');
-    const rail = document.querySelector('nav.rail');
-    if (!sidebar || !sidebarNav || !mainEl) return false;
-    if (document.getElementById('mainWebapps')) return true;
+  // Globe-with-grid icon — distinct from the integrations plug. Conveys
+  // "web app at a public URL." humr-panel.js sizes it per slot (rail/nav).
+  const GLOBE_ICON = '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>';
 
-    const onActivate = () => {
-      if (typeof window.switchPanel === 'function') {
-        window.switchPanel('webapps', { fromRailClick: true });
-      }
-    };
-
-    // Globe-with-grid icon — distinct from the integrations plug. Conveys
-    // "web app at a public URL." 20×20 in the rail, 18×18 in the sidebar-nav.
-    const railIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>';
-    const navIcon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>';
-
-    if (rail && !document.getElementById('humrWebappsRailBtn')) {
-      const railBtn = elem('button', {
-        type: 'button',
-        class: 'rail-btn nav-tab has-tooltip',
-        id: 'humrWebappsRailBtn',
-        'aria-label': 'Web Apps',
-        dataset: { panel: 'webapps', tooltip: 'Web Apps' },
-        onclick: onActivate,
-      });
-      railBtn.innerHTML = railIcon;
-      const spacer = rail.querySelector('.rail-spacer');
-      if (spacer) rail.insertBefore(railBtn, spacer);
-      else rail.appendChild(railBtn);
-    }
-
-    if (!document.getElementById('humrWebappsTab')) {
-      const navBtn = elem('button', {
-        type: 'button',
-        class: 'nav-tab has-tooltip has-tooltip--bottom',
-        id: 'humrWebappsTab',
-        dataset: { panel: 'webapps', label: 'Web Apps', tooltip: 'Web Apps' },
-        onclick: onActivate,
-      });
-      navBtn.innerHTML = navIcon;
-      sidebarNav.appendChild(navBtn);
-    }
-
-    const view = elem('section', { class: 'main-view humr-webapp-page', id: 'mainWebapps' }, [
+  function populateView(view) {
+    view.appendChild(
       elem('div', { class: 'humr-webapp-page-inner' }, [
         elem('div', { class: 'humr-webapp-page-head' }, [
           elem('div', { class: 'humr-webapp-page-title' }, ['Web Apps']),
@@ -255,56 +203,29 @@
         ]),
         elem('div', { class: 'humr-webapp-list', id: 'humrWebappsList' }),
       ]),
-    ]);
-    mainEl.appendChild(view);
-
-    const sidebarPane = elem('div', { class: 'panel-view', id: 'panelWebapps' }, [
-      elem('div', { class: 'panel-head' }, [
-        elem('span', null, ['Web Apps']),
-      ]),
-      elem('div', { class: 'humr-webapp-summary', id: 'humrWebappsSummary' }, [
-        'Loading…',
-      ]),
-    ]);
-    const sidebarBottom = sidebar.querySelector('.sidebar-bottom');
-    if (sidebarBottom) sidebar.insertBefore(sidebarPane, sidebarBottom);
-    else sidebar.appendChild(sidebarPane);
-    return true;
+    );
   }
 
-  // humr-integrations.js already wraps switchPanel for its `showing-integrations`
-  // class. Wrap again here, chaining through the previous wrapper so both
-  // panels coexist regardless of script load order.
-  function wrapSwitchPanel() {
-    if (typeof window.switchPanel !== 'function') return;
-    if (window.__humrWebappsWrapped) return;
-    window.__humrWebappsWrapped = true;
-    const orig = window.switchPanel;
-    window.switchPanel = async function (name) {
-      const result = await orig.apply(this, arguments);
-      const mainEl = document.querySelector('main.main');
-      if (mainEl) mainEl.classList.toggle('showing-webapps', name === 'webapps');
-      if (name === 'webapps') {
-        await refreshAndRender();
-        startPolling();
-      } else {
-        stopPolling();
-      }
-      return result;
-    };
+  // Running-count summary for the sidebar pane, updated on every refresh.
+  function populatePane(pane) {
+    pane.appendChild(elem('div', { class: 'humr-webapp-summary', id: 'humrWebappsSummary' }, [
+      'Loading…',
+    ]));
   }
 
-  function init() {
-    if (!ensureSidebarTabAndPane()) {
-      requestAnimationFrame(init);
-      return;
-    }
-    wrapSwitchPanel();
-  }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
-  }
+  window.HumrPanel.register({
+    id: 'webapps',
+    title: 'Web Apps',
+    icon: GLOBE_ICON,
+    viewClass: 'humr-webapp-page',
+    populateView,
+    populatePane,
+    async onShow() {
+      await refreshAndRender();
+      // The user may have already left during the fetch; don't restart the
+      // polling their onHide just stopped.
+      if (isPanelActive()) startPolling();
+    },
+    onHide: stopPolling, // idempotent — fires on every switch to another panel
+  });
 })();

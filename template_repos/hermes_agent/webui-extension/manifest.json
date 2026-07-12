@@ -1,16 +1,16 @@
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
   "extensions": [
     {
       "id": "humr-integrations",
       "name": "HumR Integrations",
-      "scripts": ["humr-integrations-runtime.js", "humr-integrations-connection-flows.js", "humr-integrations-google.js", "humr-integrations-slack.js", "humr-integrations-merge.js", "humr-integrations.js"],
+      "scripts": ["humr-panel.js", "humr-integrations-runtime.js", "humr-integrations-connection-flows.js", "humr-integrations-google.js", "humr-integrations-slack.js", "humr-integrations-merge.js", "humr-integrations.js"],
       "stylesheets": ["humr-integrations.css", "humr-model-picker.css"]
     },
     {
       "id": "humr-webapps",
       "name": "HumR Web Apps",
-      "scripts": ["humr-webapps.js"],
+      "scripts": ["humr-panel.js", "humr-webapps.js"],
       "stylesheets": ["humr-webapps.css"]
     },
     {

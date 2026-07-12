@@ -106,6 +106,7 @@ class TestHermesSandboxSeed(unittest.TestCase):
         self.assertEqual(
             extensions["humr-integrations"]["scripts"],
             [
+                "humr-panel.js",
                 "humr-integrations-runtime.js",
                 "humr-integrations-connection-flows.js",
                 "humr-integrations-google.js",
@@ -115,7 +116,7 @@ class TestHermesSandboxSeed(unittest.TestCase):
             ],
         )
         self.assertIn("humr-model-picker.css", extensions["humr-integrations"]["stylesheets"])
-        self.assertEqual(extensions["humr-webapps"]["scripts"], ["humr-webapps.js"])
+        self.assertEqual(extensions["humr-webapps"]["scripts"], ["humr-panel.js", "humr-webapps.js"])
         self.assertEqual(extensions["humr-permissions"]["scripts"], ["humr-permissions.js"])
 
     def test_runtime_uses_webui_managed_extension_root(self) -> None:
