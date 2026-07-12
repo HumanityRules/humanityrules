@@ -107,7 +107,6 @@
           body: JSON.stringify({ connector_slug: integration.slug }),
         });
         await throwForErrorResponse(response, 'Disconnect failed. Please try again.');
-        await page.refreshAndRender();
       },
     };
   });

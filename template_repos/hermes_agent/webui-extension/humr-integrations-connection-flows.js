@@ -417,8 +417,6 @@
       cache: 'no-store',
     });
     await throwForErrorResponse(response, 'Disconnect failed. Please try again.');
-    await page.refreshAndRender();
-    await refreshModelDropdownsIfProviderAffectsPicker(integration);
   }
 
   function tlsCardDetails(integration) {
@@ -475,7 +473,6 @@
       async disconnect() {
         const response = await fetch(mcpPath(integration.slug, 'disconnect'), { method: 'POST' });
         await throwForErrorResponse(response, 'Disconnect failed. Please try again.');
-        await page.refreshAndRender();
       },
     };
   }

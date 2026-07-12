@@ -21,8 +21,10 @@
   const { logoImg, waitForLogos, waitForWebui, refreshModelDropdownsIfProviderAffectsPicker } = webui;
   const { showTransitionModal, showOauthErrorModal } = modals;
   const { consumeOAuthSentinel, oauthErrorMessage } = oauthSentinelApi;
-  let _refreshInflight = false;
 
+
+  let _refreshInflight = false;
+  
   async function startRefreshCatalog() {
     if (_refreshInflight) return;
     const btn = document.getElementById('humrIntegrationRefreshBtn');
