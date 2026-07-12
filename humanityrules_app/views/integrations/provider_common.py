@@ -15,8 +15,7 @@ This module holds what both families (or both OAuth providers) would
 otherwise duplicate: the redirect-flow request helpers, the refresh-exchange
 result wrapper, JWT access-token claim helpers, and the broker-outcome
 constructors that single-source the `{outcome, secrets?, expires_in?, config?,
-metadata?}` contract the batched refresh endpoint returns. See
-docs/integrations/integrations_broker_design.md.
+metadata?}` contract the batched refresh endpoint returns.
 """
 
 import base64

@@ -146,7 +146,7 @@ The manifest also carries `channels:read`, `groups:read`, `im:read`, `mpim:read`
 
 ## Sandbox credential isolation
 
-The gateway runs **inside the sandbox** (Telegram-style — not a WhatsApp-style external bridge), with `HTTPS_PROXY` pointed at the integrations broker. Both long-lived tokens stay **outside** the sandbox; the broker phantom-swaps the placeholder Bearer for the real token in flight, exactly as in [integrations_broker_design.md](integrations_broker_design.md).
+The gateway runs **inside the sandbox** (Telegram-style — not a WhatsApp-style external bridge), with `HTTPS_PROXY` pointed at the integrations broker. Both long-lived tokens stay **outside** the sandbox; the broker phantom-swaps the placeholder Bearer for the real token in flight.
 
 This works because every long-lived token appears only in REST `Authorization: Bearer` headers (which the broker can intercept and swap), never on the WebSocket:
 
@@ -185,15 +185,17 @@ parts fork in five places, everything else is shared:
 - **Validation** (`provider_slack.py`) — `xoxb-` via `auth.test`, `xapp-` via
   `apps.connections.open`; personal-mode owner email via `users.lookupByEmail`.
   `refresh_outcome` returns both secrets.
-- **UI** — a custom `_VAULT_RENDERERS["slack"]` modal: editable app-name field
+- **UI** — a custom modal registered via `registerVaultRenderer('slack', showSlackConfigModal)`
+  in `humr-integrations-slack.js`: editable app-name field
   (defaults to the template name, re-bakes both manifest names on edit), mode
   selector, manifest prefill link, two token fields, and an owner-email field
   shown only when Personal is selected.
 
 The shared pieces carry both secrets via the `secrets: dict[str,str]` map on
 `RefreshResult`/`_TokenCacheEntry`, and Slack registers as one `provider_slack`
-module behind the `provider_registry` (`ProviderKind.VAULT`), with a custom
-`_VAULT_RENDERERS["slack"]` WebUI renderer. The Merge `slack` connector is excluded
+module behind the `provider_registry` (`ProviderKind.VAULT`), with its WebUI renderer
+registered via `registerVaultRenderer('slack', showSlackConfigModal)` in
+`humr-integrations-slack.js`. The Merge `slack` connector is excluded
 so it never appears beside the native one.
 
 Both modes are enabled. Personal mode resolves the owner's email to a Slack

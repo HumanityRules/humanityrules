@@ -1,8 +1,7 @@
 """Tests for `?next=` support on /oidc/login/ and /oidc/callback/.
 
-These are the patches the Google Workspace integration design calls for in
-`docs/integrations/integrations_broker_design.md`: the OIDC entry point must honor
-a validated `next` so the post-auth redirect can land on
+The Google Workspace integration needs the OIDC entry point to honor a
+validated `next` so the post-auth redirect can land on
 `/integrations/user/google/start/`. Validation uses
 `django.utils.http.url_has_allowed_host_and_scheme` so `next` cannot be used as
 an open redirector.
