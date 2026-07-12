@@ -2,8 +2,8 @@
 (() => {
   'use strict';
 
-  const { util, broker, oauthSentinel, cardActions, cardSpecs } = window.HumrIntegrations;
-  const { elem } = util;
+  const { util, broker, oauthSentinel, cardSpecs } = window.HumrIntegrations;
+  const { elem, createConnectOutcome } = util;
   const { buildTlsConnectUrl } = broker;
   const { registerOauthErrors } = oauthSentinel;
 
@@ -42,7 +42,7 @@
   }
 
   function showGoogleScopeModal(integration, connectUrl) {
-    const connectOutcome = cardActions.createConnectOutcome();
+    const connectOutcome = createConnectOutcome();
     const grants = googleGrants(integration);
     const isConnected = integration.status === 'connected';
     // Pre-check from what Google actually granted; a never-connected card

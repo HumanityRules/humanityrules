@@ -2,8 +2,8 @@
 (() => {
   'use strict';
 
-  const { util, vaultForm, cardActions, cardSpecs } = window.HumrIntegrations;
-  const { elem } = util;
+  const { util, vaultForm, cardSpecs } = window.HumrIntegrations;
+  const { elem, createConnectOutcome } = util;
   const { fieldInputFor, open: openVaultForm, wireSubmit } = vaultForm;
 
   // Slack manifest name rules (https://docs.slack.dev/reference/app-manifest):
@@ -38,7 +38,7 @@
   }
 
   function showSlackConfigModal(integration, session) {
-    const connectOutcome = cardActions.createConnectOutcome();
+    const connectOutcome = createConnectOutcome();
     const schema = session.schema;
     const backdrop = elem('div', { class: 'humr-modal-backdrop humr-vault-backdrop' });
     const close = () => { backdrop.remove(); connectOutcome.finish('cancelled'); };
