@@ -7,8 +7,8 @@
 (() => {
   'use strict';
 
-  const { util, broker, cardActions, cardSpecs } = window.HumrIntegrations;
-  const { elem, formatDate, throwForErrorResponse } = util;
+  const { util, broker, cardSpecs } = window.HumrIntegrations;
+  const { elem, formatDate, throwForErrorResponse, createConnectOutcome } = util;
   const { tlsInterceptPath, mcpPath, buildTlsConnectUrl, buildMcpConnectUrl, invalidateTlsCache } = broker;
 
   const VAULT_NETWORK_ERROR = (
@@ -159,7 +159,7 @@
     if (session.schema && session.schema.mode === 'link_poll') {
       return showLinkPollConnectModal(integration, session);
     }
-    const connectOutcome = cardActions.createConnectOutcome();
+    const connectOutcome = createConnectOutcome();
     const schema = session.schema;
     const backdrop = elem('div', { class: 'humr-modal-backdrop humr-vault-backdrop' });
     const close = () => { backdrop.remove(); connectOutcome.finish('cancelled'); };
@@ -210,7 +210,7 @@
   const LINK_POLL_MS = 1000;
 
   function showLinkPollConnectModal(integration, session) {
-    const connectOutcome = cardActions.createConnectOutcome();
+    const connectOutcome = createConnectOutcome();
     const schema = session.schema;
     const backdrop = elem('div', { class: 'humr-modal-backdrop humr-vault-backdrop' });
     let stopped = false;
@@ -308,7 +308,7 @@
   }
 
   function showDeviceModal(integration, session) {
-    const connectOutcome = cardActions.createConnectOutcome();
+    const connectOutcome = createConnectOutcome();
     const backdrop = elem('div', { class: 'humr-modal-backdrop' });
     let cancelled = false;
     const base = tlsInterceptPath(integration.slug, 'device');

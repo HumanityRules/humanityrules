@@ -2,8 +2,8 @@
 (() => {
   'use strict';
 
-  const { util, cardActions, cardSpecs } = window.HumrIntegrations;
-  const { elem, throwForErrorResponse } = util;
+  const { util, cardSpecs } = window.HumrIntegrations;
+  const { elem, throwForErrorResponse, createConnectOutcome } = util;
 
   // ── Merge connector flow ──────────────────────────────────────────
 
@@ -50,7 +50,7 @@
     }
     window.open(data.magic_link_url, '_blank');
 
-    const connectOutcome = cardActions.createConnectOutcome();
+    const connectOutcome = createConnectOutcome();
     let stopped = false;
     const waiting = showMergeWaitingModal(integration, () => {
       stopped = true;

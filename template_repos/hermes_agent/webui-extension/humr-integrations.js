@@ -12,15 +12,64 @@
     webui = {},
     modals = {},
     oauthSentinel: oauthSentinelApi = {},
-    cardActions = {},
     cardSpecs = {},
-    page = {},
   } = namespace;
   const { elem, statusLabelFor, byCategoryThenLabel } = util;
   const { fetchIntegrations, refreshAll, invalidateTlsCache } = broker;
   const { logoImg, waitForLogos, waitForWebui, refreshModelDropdowns } = webui;
   const { showTransitionModal, showOauthErrorModal } = modals;
   const { consumeOAuthSentinel, oauthErrorMessage } = oauthSentinelApi;
+
+  // In-flight connect/disconnect keys for UI disablement.
+  const _connecting = new Set();
+  const _disconnecting = new Set();
+
+  async function refreshAfterChange(cardSpec) {
+    await refreshAndRender();
+    if (cardSpec.affectsModelPicker) await refreshModelDropdowns();
+  }
+
+  const cardActions = {
+    isConnecting(cardSpec) {
+      return _connecting.has(cardSpec.key);
+    },
+    async connect(cardSpec) {
+      if (cardActions.isConnecting(cardSpec)) return;
+      _connecting.add(cardSpec.key);
+      renderMainViewAndLeftPane();
+      let result = null;
+      try {
+        result = await cardSpec.connect();
+        if (result && result.outcome === 'changed') await refreshAfterChange(cardSpec);
+      } catch (err) {
+        alert(err.message || 'Connect failed. Please try again.');
+      } finally {
+        // OAuth redirect: keep the key in _connecting until unload so the card stays disabled mid-nav.
+        if (!result || result.outcome !== 'navigating') {
+          _connecting.delete(cardSpec.key);
+          renderMainViewAndLeftPane();
+        }
+      }
+      return result;
+    },
+    isDisconnecting(cardSpec) {
+      return _disconnecting.has(cardSpec.key);
+    },
+    async disconnect(cardSpec) {
+      if (cardActions.isDisconnecting(cardSpec)) return;
+      _disconnecting.add(cardSpec.key);
+      renderMainViewAndLeftPane();
+      try {
+        await cardSpec.disconnect();
+        await refreshAfterChange(cardSpec);
+      } catch (err) {
+        alert(err.message || 'Disconnect failed. Please try again.');
+      } finally {
+        _disconnecting.delete(cardSpec.key);
+        renderMainViewAndLeftPane();
+      }
+    },
+  };
 
   let _refreshInflight = false;
 
@@ -372,8 +421,6 @@
       return;
     }
 
-    page.configure({ rerender: renderMainViewAndLeftPane, refreshAndRender });
-
     // Plug icon: 24×24 stroke paths; humr-panel.js sizes it per slot (rail/nav).
     const PLUG_ICON = '<path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0zM12 18v4"/>';
 
@@ -392,51 +439,46 @@
   // First render, once humr-panel.js has the shell DOM mounted. A HUMR
   // connect/disconnect flow returns to the WebUI via a full page load and
   // leaves an oauth sentinel behind; consume it and pick the matching flow.
-  function handleOauthReturnAndRender() {
+  async function handleOauthReturnAndRender() {
     const oauthSentinel = consumeOAuthSentinel();
     if (oauthSentinel && oauthSentinel.transition === 'error') {
       // The flow died after the consent redirect; nothing changed broker-side,
       // so a plain render + explanation is enough (no cache invalidate).
       window.switchPanel('integrations');
-      refreshAndRender();
+      const refreshing = refreshAndRender();
       showOauthErrorModal(oauthErrorMessage(oauthSentinel.code));
-    } else if (oauthSentinel) {
-      // User just came back from HUMR's start/disconnect via a full page load.
-      // Show the dialog first thing so it covers everything (incl. the panel-
-      // switch animation), then do all the work behind it:
-      //   1. switch to our panel + render (WebUI is up, so logos load) and WAIT
-      //      for the logos to cache — the later re-render reuses them so the
-      //      restart can't blank them.
-      //   2. fire the invalidate, which kicks the system.webui restart.
-      //   3. wait for the WebUI to serve again, re-render, then drop the dialog.
-      const transitionModal = showTransitionModal(oauthSentinel);
-      // Yield a frame so the dialog actually paints before the render work
-      // below blocks the main thread — otherwise it'd appear only after.
-      new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
-        .then(() => window.switchPanel('integrations'))
-        .then(refreshAndRender)
-        .then(() => waitForLogos(10000))
-        // Cache-hint only — if the broker is unreachable or returns 5xx, the
-        // proxy's 401-evict path recovers stale tokens on the first real call.
-        .then(() => invalidateTlsCache(oauthSentinel.provider).catch(() => {}))
-        .then(() => waitForWebui(15000))
-        .then(refreshAndRender)
-        // No OAuth provider affects models today; keep the return path correct
-        // if one does later.
-        .then(() => {
-          const integration = (state.current && Array.isArray(state.current.items))
-            ? state.current.items.find((integration) => integration && integration.slug === oauthSentinel.provider)
-            : null;
-          if (integration && integration.affects_model_picker) return refreshModelDropdowns();
-        })
-        .finally(() => {
-          transitionModal.remove();
-          // A failed narrow rides the disconnected transition with an error
-          // code attached — explain it once the card reflects reality.
-          if (oauthSentinel.errorCode) showOauthErrorModal(oauthErrorMessage(oauthSentinel.errorCode));
-        });
-    } else {
-      refreshAndRender();
+      await refreshing;
+      return;
+    }
+    if (!oauthSentinel) {
+      await refreshAndRender();
+      return;
+    }
+
+    // Keep the transition modal up while the broker applies the returned
+    // credentials and any restarted WebUI becomes ready again.
+    const transitionModal = showTransitionModal(oauthSentinel);
+    try {
+      // Yield two frames so the modal paints before the work begins.
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      window.switchPanel('integrations');
+      await refreshAndRender();
+      await waitForLogos(10000);
+      // Cache hint only: the proxy's 401 path can recover if this fails.
+      try { await invalidateTlsCache(oauthSentinel.provider); } catch (_) { /* best-effort */ }
+      await waitForWebui(15000);
+      await refreshAndRender();
+
+      // No OAuth provider affects models today; keep the return path correct
+      // if one does later.
+      const integration = (state.current && Array.isArray(state.current.items))
+        ? state.current.items.find((integration) => integration && integration.slug === oauthSentinel.provider)
+        : null;
+      if (integration && integration.affects_model_picker) await refreshModelDropdowns();
+    } finally {
+      transitionModal.remove();
+      // A failed narrow changes state and also carries an explanation.
+      if (oauthSentinel.errorCode) showOauthErrorModal(oauthErrorMessage(oauthSentinel.errorCode));
     }
   }
 

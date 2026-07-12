@@ -9,95 +9,19 @@
   const INTEGRATIONS_URL = '/__humr_broker/integrations';
   const state = { current: null };
 
-  // Stable render-lifecycle collaborator shared by the split integration
-  // scripts. The page controller supplies its callbacks once it has loaded.
-  let _rerender = null;
-  let _refreshAndRender = null;
-  const page = {
-    configure({ rerender, refreshAndRender }) {
-      if (typeof rerender !== 'function' || typeof refreshAndRender !== 'function') {
-        throw new Error('[humr-integrations] page.configure() needs render lifecycle functions.');
-      }
-      _rerender = rerender;
-      _refreshAndRender = refreshAndRender;
-    },
-    rerender() {
-      if (!_rerender) throw new Error('[humr-integrations] page is not configured.');
-      return _rerender();
-    },
-    refreshAndRender() {
-      if (!_refreshAndRender) throw new Error('[humr-integrations] page is not configured.');
-      return _refreshAndRender();
-    },
-  };
-
-  // ── cardActions ───────────────────────────────────────────────────────
-
-  // Provider behavior stays on cardSpec; cardActions owns pending state and the
-  // shared refresh afterward. Connect and Configure use the same action.
-  // `changed` refreshes, `cancelled` does not, and `navigating` keeps the pending
-  // state because the page is about to unload.
-  const _connecting = new Set();
-  const _disconnecting = new Set();
-
-  async function refreshAfterChange(cardSpec) {
-    await page.refreshAndRender();
-    if (cardSpec.affectsModelPicker) await refreshModelDropdowns();
+  function createConnectOutcome() {
+    let resolveOutcome;
+    const promise = new Promise((resolve) => { resolveOutcome = resolve; });
+    let settled = false;
+    return {
+      promise,
+      finish(outcome) {
+        if (settled) return;
+        settled = true;
+        resolveOutcome({ outcome });
+      },
+    };
   }
-
-  const cardActions = {
-    createConnectOutcome() {
-      let resolveOutcome;
-      const promise = new Promise((resolve) => { resolveOutcome = resolve; });
-      let settled = false;
-      return {
-        promise,
-        finish(outcome) {
-          if (settled) return;
-          settled = true;
-          resolveOutcome({ outcome });
-        },
-      };
-    },
-    isConnecting(cardSpec) {
-      return _connecting.has(cardSpec.key);
-    },
-    async connect(cardSpec) {
-      if (cardActions.isConnecting(cardSpec)) return;
-      _connecting.add(cardSpec.key);
-      page.rerender();
-      let result = null;
-      try {
-        result = await cardSpec.connect();
-        if (result && result.outcome === 'changed') await refreshAfterChange(cardSpec);
-      } catch (err) {
-        alert(err.message || 'Connect failed. Please try again.');
-      } finally {
-        if (!result || result.outcome !== 'navigating') {
-          _connecting.delete(cardSpec.key);
-          page.rerender();
-        }
-      }
-      return result;
-    },
-    isDisconnecting(cardSpec) {
-      return _disconnecting.has(cardSpec.key);
-    },
-    async disconnect(cardSpec) {
-      if (cardActions.isDisconnecting(cardSpec)) return;
-      _disconnecting.add(cardSpec.key);
-      page.rerender();
-      try {
-        await cardSpec.disconnect();
-        await refreshAfterChange(cardSpec);
-      } catch (err) {
-        alert(err.message || 'Disconnect failed. Please try again.');
-      } finally {
-        _disconnecting.delete(cardSpec.key);
-        page.rerender();
-      }
-    },
-  };
 
   // ── cardSpecs ─────────────────────────────────────────────────────────
 
@@ -491,8 +415,6 @@
   window.HumrIntegrations = {
     loadedExtensionScripts: new Set(),
     state,
-    page,
-    cardActions,
     cardSpecs,
     util: {
       elem,
@@ -500,6 +422,7 @@
       statusLabelFor,
       byCategoryThenLabel,
       throwForErrorResponse,
+      createConnectOutcome,
     },
     broker: {
       fetchIntegrations,
