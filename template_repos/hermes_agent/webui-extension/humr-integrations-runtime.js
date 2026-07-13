@@ -8,20 +8,6 @@
 
   const state = { current: null };
 
-  function createConnectOutcome() {
-    let resolveOutcome;
-    const promise = new Promise((resolve) => { resolveOutcome = resolve; });
-    let settled = false;
-    return {
-      promise,
-      finish(outcome) {
-        if (settled) return;
-        settled = true;
-        resolveOutcome({ outcome });
-      },
-    };
-  }
-
   // ── cardSpecs ─────────────────────────────────────────────────────────
 
   // Kind factories build complete cardSpecs. Optional kind+slug factories add
@@ -80,6 +66,20 @@
   };
 
   // ── util ──────────────────────────────────────────────────────────────
+
+  function createConnectOutcome() {
+    let resolveOutcome;
+    const promise = new Promise((resolve) => { resolveOutcome = resolve; });
+    let settled = false;
+    return {
+      promise,
+      finish(outcome) {
+        if (settled) return;
+        settled = true;
+        resolveOutcome({ outcome });
+      },
+    };
+  }
 
   function elem(tag, props, children) {
     const el = document.createElement(tag);
