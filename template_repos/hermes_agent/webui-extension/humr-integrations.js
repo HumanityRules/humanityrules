@@ -360,9 +360,20 @@
     );
   }
 
-  async function refreshAndRender() {
-    state.current = await fetchIntegrations();
-    renderMainViewAndLeftPane();
+  let _refreshAndRenderPromise = null;
+
+  function refreshAndRender() {
+    if (_refreshAndRenderPromise) return _refreshAndRenderPromise;
+
+    _refreshAndRenderPromise = fetchIntegrations()
+      .then((catalog) => {
+        state.current = catalog;
+        renderMainViewAndLeftPane();
+      })
+      .finally(() => {
+        _refreshAndRenderPromise = null;
+      });
+    return _refreshAndRenderPromise;
   }
 
   function populateMainView(view) {
@@ -450,6 +461,7 @@
       await refreshing;
       return;
     }
+    
     if (!oauthSentinel) {
       await refreshAndRender();
       return;

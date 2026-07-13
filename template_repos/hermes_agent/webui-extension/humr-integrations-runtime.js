@@ -6,7 +6,6 @@
 (() => {
   'use strict';
 
-  const INTEGRATIONS_URL = '/__humr_broker/integrations';
   const state = { current: null };
 
   function createConnectOutcome() {
@@ -141,7 +140,7 @@
 
   async function fetchIntegrations() {
     try {
-      const response = await fetch(INTEGRATIONS_URL, { cache: 'no-store' });
+      const response = await fetch('/__humr_broker/integrations', { cache: 'no-store' });
       if (!response.ok) return null;
       return await response.json();
     } catch (_) {

@@ -164,7 +164,7 @@ test('model readiness timeout does not invoke the Hermes refresh hook', async ()
   assert.equal(events.filter((event) => event === 'models-probe').length > 1, true);
 });
 
-test('OAuth return refreshes around invalidation and removes its modal', async () => {
+test('OAuth return deduplicates the panel refresh around invalidation', async () => {
   const { context, events, window } = createBrowserContext({ search: '?connected=google' });
   let registration = null;
   window.HumrPanel = { register(value) { registration = value; } };
@@ -178,6 +178,10 @@ test('OAuth return refreshes around invalidation and removes its modal', async (
   ]) {
     loadScript(context, fileName);
   }
+  window.switchPanel = (panel) => {
+    events.push('switch:' + panel);
+    registration.onShow();
+  };
 
   await registration.onMount();
 
