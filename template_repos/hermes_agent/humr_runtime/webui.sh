@@ -70,6 +70,11 @@ sandbox_seed() {
         || die "failed to seed sandbox runtime state"
 }
 
+reconcile_platform_skills() {
+    "$HERMES_WEBUI_PYTHON" "${HUMR_RUNTIME_DIR}/reconcile_platform_skills.py" \
+        || die "failed to reconcile platform skills"
+}
+
 start_system_process_compose() {
     echo "[webui] Starting system process-compose on 127.0.0.1:${SYSTEM_PROCESS_COMPOSE_PORT}..."
     process-compose \
@@ -185,6 +190,7 @@ wait_for_webui() {
 }
 
 main() {
+    reconcile_platform_skills
     sandbox_seed
     bootstrap_admin_webapp
     seed_example_webapps
