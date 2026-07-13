@@ -2309,6 +2309,9 @@
     font-size: var(--text-xs);
     line-height: calc(var(--spacing) * 6);
   }
+  .text-\[1\.75rem\] {
+    font-size: 1.75rem;
+  }
   .text-\[9px\] {
     font-size: 9px;
   }
