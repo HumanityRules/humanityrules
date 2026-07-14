@@ -2,8 +2,9 @@
 (() => {
   'use strict';
 
-  const { util, broker, oauthSentinel, cardSpecs } = window.HumrIntegrations;
-  const { elem, createConnectOutcome } = util;
+  const { util, broker, modals, oauthSentinel, cardSpecs } = window.HumrIntegrations;
+  const { elem } = util;
+  const { openConnectModal } = modals;
   const { buildTlsConnectUrl } = broker;
   const { registerOauthErrors } = oauthSentinel;
 
@@ -42,7 +43,6 @@
   }
 
   function showGoogleScopeModal(integration, connectUrl) {
-    const connectOutcome = createConnectOutcome();
     const grants = googleGrants(integration);
     const isConnected = integration.status === 'connected';
     // Pre-check from what Google actually granted; a never-connected card
@@ -53,90 +53,84 @@
       selection[product.key] = (level === 'read' || level === 'write') ? level : (grants ? 'off' : 'read');
     }
 
-    const backdrop = elem('div', { class: 'humr-modal-backdrop' });
-    const cancel = () => { backdrop.remove(); connectOutcome.finish('cancelled'); };
+    return openConnectModal({
+      title: (isConnected ? 'Configure ' : 'Connect ') + (integration.label || integration.slug),
+      variant: 'scope',
+    }, ({ finish, close }) => {
+      const applyBtn = elem('button', {
+        class: 'humr-integration-btn humr-integration-btn-primary',
+        type: 'button',
+      }, [isConnected ? 'Update access' : 'Connect']);
+      const syncApply = () => {
+        applyBtn.disabled = GOOGLE_SCOPE_PRODUCTS.every((p) => selection[p.key] === 'off');
+      };
 
-    const applyBtn = elem('button', {
-      class: 'humr-integration-btn humr-integration-btn-primary',
-      type: 'button',
-    }, [isConnected ? 'Update access' : 'Connect']);
-    const syncApply = () => {
-      applyBtn.disabled = GOOGLE_SCOPE_PRODUCTS.every((p) => selection[p.key] === 'off');
-    };
-
-    // Mirror the CP's implied closure: bump docs/sheets up to drive's level
-    // and disable their sub-drive buttons ("included with Drive access").
-    const segByProduct = {};
-    const syncSegs = () => {
-      const driveRank = GOOGLE_LEVEL_RANK[selection.drive];
-      for (const floored of GOOGLE_FLOORED_BY_DRIVE) {
-        if (GOOGLE_LEVEL_RANK[selection[floored]] < driveRank) selection[floored] = selection.drive;
-      }
-      for (const product of GOOGLE_SCOPE_PRODUCTS) {
-        const floor = GOOGLE_FLOORED_BY_DRIVE.includes(product.key) ? driveRank : 0;
-        for (const btn of segByProduct[product.key].children) {
-          btn.setAttribute('aria-pressed', String(btn.dataset.level === selection[product.key]));
-          const belowFloor = GOOGLE_LEVEL_RANK[btn.dataset.level] < floor;
-          btn.disabled = belowFloor;
-          btn.title = belowFloor ? 'Included with Drive access' : '';
+      // Mirror the CP's implied closure: bump docs/sheets up to drive's level
+      // and disable their sub-drive buttons ("included with Drive access").
+      const segByProduct = {};
+      const syncSegs = () => {
+        const driveRank = GOOGLE_LEVEL_RANK[selection.drive];
+        for (const floored of GOOGLE_FLOORED_BY_DRIVE) {
+          if (GOOGLE_LEVEL_RANK[selection[floored]] < driveRank) selection[floored] = selection.drive;
         }
-      }
-      syncApply();
-    };
+        for (const product of GOOGLE_SCOPE_PRODUCTS) {
+          const floor = GOOGLE_FLOORED_BY_DRIVE.includes(product.key) ? driveRank : 0;
+          for (const btn of segByProduct[product.key].children) {
+            btn.setAttribute('aria-pressed', String(btn.dataset.level === selection[product.key]));
+            const belowFloor = GOOGLE_LEVEL_RANK[btn.dataset.level] < floor;
+            btn.disabled = belowFloor;
+            btn.title = belowFloor ? 'Included with Drive access' : '';
+          }
+        }
+        syncApply();
+      };
 
-    const rows = [];
-    for (const product of GOOGLE_SCOPE_PRODUCTS) {
-      const seg = elem('div', { class: 'humr-scope-seg', role: 'radiogroup', 'aria-label': product.label });
-      segByProduct[product.key] = seg;
-      for (const level of GOOGLE_SCOPE_LEVELS) {
-        seg.appendChild(elem('button', {
-          type: 'button',
-          class: 'humr-scope-seg-btn',
-          dataset: { level: level.key },
-          onclick: () => {
-            selection[product.key] = level.key;
-            syncSegs();
-          },
-        }, [level.label]));
+      const rows = [];
+      for (const product of GOOGLE_SCOPE_PRODUCTS) {
+        const seg = elem('div', { class: 'humr-scope-seg', role: 'radiogroup', 'aria-label': product.label });
+        segByProduct[product.key] = seg;
+        for (const level of GOOGLE_SCOPE_LEVELS) {
+          seg.appendChild(elem('button', {
+            type: 'button',
+            class: 'humr-scope-seg-btn',
+            dataset: { level: level.key },
+            onclick: () => {
+              selection[product.key] = level.key;
+              syncSegs();
+            },
+          }, [level.label]));
+        }
+        rows.push(elem('div', { class: 'humr-scope-row' }, [
+          elem('div', { class: 'humr-scope-row-label' }, [product.label]),
+          seg,
+        ]));
       }
-      rows.push(elem('div', { class: 'humr-scope-row' }, [
-        elem('div', { class: 'humr-scope-row-label' }, [product.label]),
-        seg,
-      ]));
-    }
-    syncSegs();
+      syncSegs();
 
-    applyBtn.addEventListener('click', () => {
-      const productsParam = GOOGLE_SCOPE_PRODUCTS
-        .filter((p) => selection[p.key] !== 'off')
-        .map((p) => p.key + ':' + selection[p.key])
-        .join(',');
-      connectOutcome.finish('navigating');
-      window.location.href = connectUrl +
-        '&products=' + encodeURIComponent(productsParam);
+      applyBtn.addEventListener('click', () => {
+        const productsParam = GOOGLE_SCOPE_PRODUCTS
+          .filter((p) => selection[p.key] !== 'off')
+          .map((p) => p.key + ':' + selection[p.key])
+          .join(',');
+        finish('navigating');
+        window.location.href = connectUrl +
+          '&products=' + encodeURIComponent(productsParam);
+      });
+
+      return [
+        elem('div', { class: 'humr-modal-body' }, [
+          'Pick what this agent may access. Google will show a consent screen for your selection.',
+          (grants && grants.google_email)
+            ? elem('div', { class: 'humr-scope-account' }, ['Connected as ' + grants.google_email])
+            : null,
+        ]),
+        elem('div', { class: 'humr-scope-rows' }, rows),
+        elem('div', { class: 'humr-modal-actions' }, [
+          elem('button', { class: 'humr-integration-btn', type: 'button', onclick: close }, ['Cancel']),
+          applyBtn,
+        ]),
+      ];
     });
-
-    const bodyLines = [
-      'Pick what this agent may access. Google will show a consent screen for your selection.',
-    ];
-    const modal = elem('div', { class: 'humr-modal humr-scope-modal' }, [
-      elem('div', { class: 'humr-modal-title' }, [(isConnected ? 'Configure ' : 'Connect ') + (integration.label || integration.slug)]),
-      elem('div', { class: 'humr-modal-body' }, [
-        bodyLines.join(' '),
-        (grants && grants.google_email)
-          ? elem('div', { class: 'humr-scope-account' }, ['Connected as ' + grants.google_email])
-          : null,
-      ]),
-      elem('div', { class: 'humr-scope-rows' }, rows),
-      elem('div', { class: 'humr-modal-actions' }, [
-        elem('button', { class: 'humr-integration-btn', type: 'button', onclick: cancel }, ['Cancel']),
-        applyBtn,
-      ]),
-    ]);
-    backdrop.appendChild(modal);
-    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) cancel(); });
-    document.body.appendChild(backdrop);
-    return connectOutcome.promise;
   }
 
   cardSpecs.register({ kind: 'tls_intercept', slug: 'google' }, (integration) => {

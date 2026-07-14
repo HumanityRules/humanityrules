@@ -7,8 +7,9 @@
 (() => {
   'use strict';
 
-  const { util, broker, cardSpecs } = window.HumrIntegrations;
-  const { elem, formatDate, throwForErrorResponse, createConnectOutcome } = util;
+  const { util, broker, modals, cardSpecs } = window.HumrIntegrations;
+  const { elem, formatDate, throwForErrorResponse } = util;
+  const { openConnectModal } = modals;
   const { tlsInterceptPath, mcpPath, buildTlsConnectUrl, buildMcpConnectUrl, invalidateTlsCache } = broker;
 
   const VAULT_NETWORK_ERROR = (
@@ -159,42 +160,39 @@
     if (session.schema && session.schema.mode === 'link_poll') {
       return showLinkPollConnectModal(integration, session);
     }
-    const connectOutcome = createConnectOutcome();
     const schema = session.schema;
-    const backdrop = elem('div', { class: 'humr-modal-backdrop humr-vault-backdrop' });
-    const close = () => { backdrop.remove(); connectOutcome.finish('cancelled'); };
-    const errorBox = elem('div', { class: 'humr-vault-error', style: { display: 'none' } });
-    const successBox = elem('div', { class: 'humr-vault-success', style: { display: 'none' } });
-    const form = elem('form', { class: 'humr-vault-form' });
-    for (const field of schema.fields || []) {
-      form.appendChild(fieldInputFor(field));
-    }
-    const saveBtn = elem('button', {
-      class: 'humr-integration-btn humr-integration-btn-primary',
-      type: 'submit',
-    }, ['Save']);
-    const actions = elem('div', { class: 'humr-modal-actions' }, [
-      elem('button', {
-        class: 'humr-integration-btn',
-        type: 'button',
-        onclick: close,
-      }, ['Cancel']),
-      saveBtn,
-    ]);
-    form.appendChild(actions);
-    wireVaultSubmit({ form, session, integration, saveBtn, actions, errorBox, successBox, close })
-      .then(() => connectOutcome.finish('changed'));
-    const modal = elem('div', { class: 'humr-modal humr-vault-modal' }, [
-      elem('div', { class: 'humr-modal-title' }, [(schema.status === 'connected' ? 'Configure ' : 'Connect ') + (schema.label || integration.label)]),
-      elem('div', { class: 'humr-modal-body' }, [schema.message || 'Credentials are sent directly to the Humanity Rules vault.']),
-      errorBox,
-      successBox,
-      form,
-    ]);
-    backdrop.appendChild(modal);
-    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
-    document.body.appendChild(backdrop);
-    return connectOutcome.promise;
+    return openConnectModal({
+      title: (schema.status === 'connected' ? 'Configure ' : 'Connect ') + (schema.label || integration.label),
+      variant: 'vault',
+    }, ({ finish, close }) => {
+      const errorBox = elem('div', { class: 'humr-vault-error', style: { display: 'none' } });
+      const successBox = elem('div', { class: 'humr-vault-success', style: { display: 'none' } });
+      const form = elem('form', { class: 'humr-vault-form' });
+      for (const field of schema.fields || []) {
+        form.appendChild(fieldInputFor(field));
+      }
+      const saveBtn = elem('button', {
+        class: 'humr-integration-btn humr-integration-btn-primary',
+        type: 'submit',
+      }, ['Save']);
+      const actions = elem('div', { class: 'humr-modal-actions' }, [
+        elem('button', {
+          class: 'humr-integration-btn',
+          type: 'button',
+          onclick: close,
+        }, ['Cancel']),
+        saveBtn,
+      ]);
+      form.appendChild(actions);
+      wireVaultSubmit({ form, session, integration, saveBtn, actions, errorBox, successBox, close })
+        .then(() => finish('changed'));
+      return [
+        elem('div', { class: 'humr-modal-body' }, [schema.message || 'Credentials are sent directly to the Humanity Rules vault.']),
+        errorBox,
+        successBox,
+        form,
+      ];
+    });
   }
 
   // ── Link+poll vault flow ──────────────────────────────────────────
@@ -210,80 +208,78 @@
   const LINK_POLL_MS = 1000;
 
   function showLinkPollConnectModal(integration, session) {
-    const connectOutcome = createConnectOutcome();
     const schema = session.schema;
-    const backdrop = elem('div', { class: 'humr-modal-backdrop humr-vault-backdrop' });
     let stopped = false;
-    const close = () => { stopped = true; backdrop.remove(); connectOutcome.finish('cancelled'); };
+    return openConnectModal({
+      title: 'Connect ' + (schema.label || integration.label),
+      variant: 'vault',
+      onCancelled: () => { stopped = true; },
+    }, ({ finish, close }) => {
+      const errorBox = elem('div', { class: 'humr-vault-error', style: { display: 'none' } });
+      const statusBox = elem('div', { class: 'humr-vault-success' }, [schema.pending_message || 'Waiting for confirmation…']);
+      const cancelBtn = elem('button', { class: 'humr-integration-btn', type: 'button', onclick: close }, ['Cancel']);
+      const actions = elem('div', { class: 'humr-modal-actions' }, [cancelBtn]);
 
-    const errorBox = elem('div', { class: 'humr-vault-error', style: { display: 'none' } });
-    const statusBox = elem('div', { class: 'humr-vault-success' }, [schema.pending_message || 'Waiting for confirmation…']);
-    const cancelBtn = elem('button', { class: 'humr-integration-btn', type: 'button', onclick: close }, ['Cancel']);
-    const actions = elem('div', { class: 'humr-modal-actions' }, [cancelBtn]);
-
-    const children = [
-      elem('div', { class: 'humr-modal-title' }, ['Connect ' + (schema.label || integration.label)]),
-      elem('div', { class: 'humr-modal-body' }, [schema.message || '']),
-    ];
-    if (schema.qr_data_uri) {
-      children.push(elem('div', { class: 'humr-vault-qr-wrap' }, [
-        elem('img', { class: 'humr-vault-qr', src: schema.qr_data_uri, alt: 'QR code', decoding: 'async' }),
-        elem('div', { class: 'humr-vault-qr-caption' }, [schema.qr_caption || 'Scan with your phone']),
-      ]));
-      if (schema.link_note) {
-        children.push(elem('div', { class: 'humr-vault-link-note' }, [schema.link_note]));
-      }
-      children.push(statusBox);
-    } else {
-      // The control plane reported the flow as unavailable (schema.message
-      // says why); there is nothing to open or poll.
-      stopped = true;
-      cancelBtn.textContent = 'Close';
-    }
-    children.push(errorBox, actions);
-    backdrop.appendChild(elem('div', { class: 'humr-modal humr-vault-modal' }, children));
-    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
-    document.body.appendChild(backdrop);
-
-    const fail = (message) => {
-      statusBox.style.display = 'none';
-      errorBox.textContent = message || 'Connect failed. Please try again.';
-      errorBox.style.display = '';
-      cancelBtn.textContent = 'Close';
-    };
-
-    const poll = async () => {
-      if (stopped) return;
-      let response;
-      let payload = {};
-      try {
-        response = await fetch(session.poll_url, {
-          method: 'POST',
-          credentials: 'omit',
-          headers: { 'Content-Type': 'text/plain' },
-          body: JSON.stringify({ submit_token: session.submit_token }),
-        });
-        try { payload = await response.json(); } catch (_) { /* ignore */ }
-      } catch (_) {
-        setTimeout(poll, LINK_POLL_MS); // network blip: keep polling
-        return;
-      }
-      if (stopped) return;
-      if (response.ok && payload.status === 'connected') {
+      const children = [
+        elem('div', { class: 'humr-modal-body' }, [schema.message || '']),
+      ];
+      if (schema.qr_data_uri) {
+        children.push(elem('div', { class: 'humr-vault-qr-wrap' }, [
+          elem('img', { class: 'humr-vault-qr', src: schema.qr_data_uri, alt: 'QR code', decoding: 'async' }),
+          elem('div', { class: 'humr-vault-qr-caption' }, [schema.qr_caption || 'Scan with your phone']),
+        ]));
+        if (schema.link_note) {
+          children.push(elem('div', { class: 'humr-vault-link-note' }, [schema.link_note]));
+        }
+        children.push(statusBox);
+      } else {
+        // The control plane reported the flow as unavailable (schema.message
+        // says why); there is nothing to open or poll.
         stopped = true;
-        await applyVaultCredentials({ integration, statusEl: statusBox, actions, close, verb: 'Connected' });
-        connectOutcome.finish('changed');
-        return;
+        cancelBtn.textContent = 'Close';
       }
-      if (response.ok) {
-        setTimeout(poll, LINK_POLL_MS);
-        return;
-      }
-      stopped = true;
-      fail(payload.error); // expired session or provider error: terminal
-    };
-    if (!stopped) setTimeout(poll, LINK_POLL_MS);
-    return connectOutcome.promise;
+      children.push(errorBox, actions);
+
+      const fail = (message) => {
+        statusBox.style.display = 'none';
+        errorBox.textContent = message || 'Connect failed. Please try again.';
+        errorBox.style.display = '';
+        cancelBtn.textContent = 'Close';
+      };
+
+      const poll = async () => {
+        if (stopped) return;
+        let response;
+        let payload = {};
+        try {
+          response = await fetch(session.poll_url, {
+            method: 'POST',
+            credentials: 'omit',
+            headers: { 'Content-Type': 'text/plain' },
+            body: JSON.stringify({ submit_token: session.submit_token }),
+          });
+          try { payload = await response.json(); } catch (_) { /* ignore */ }
+        } catch (_) {
+          setTimeout(poll, LINK_POLL_MS); // network blip: keep polling
+          return;
+        }
+        if (stopped) return;
+        if (response.ok && payload.status === 'connected') {
+          stopped = true;
+          await applyVaultCredentials({ integration, statusEl: statusBox, actions, close, verb: 'Connected' });
+          finish('changed');
+          return;
+        }
+        if (response.ok) {
+          setTimeout(poll, LINK_POLL_MS);
+          return;
+        }
+        stopped = true;
+        fail(payload.error); // expired session or provider error: terminal
+      };
+      if (!stopped) setTimeout(poll, LINK_POLL_MS);
+      return children;
+    });
   }
 
   // ── OAuth device-login flow ───────────────────────────────────────
@@ -308,74 +304,70 @@
   }
 
   function showDeviceModal(integration, session) {
-    const connectOutcome = createConnectOutcome();
-    const backdrop = elem('div', { class: 'humr-modal-backdrop' });
-    let cancelled = false;
     const base = tlsInterceptPath(integration.slug, 'device');
-    const close = () => {
-      cancelled = true;
-      backdrop.remove();
-      // Best-effort: tell the broker to drop the in-flight session.
-      fetch(base + '/cancel', { method: 'POST' }).catch(() => {});
-      connectOutcome.finish('cancelled');
-    };
+    let cancelled = false;
+    return openConnectModal({
+      title: 'Connect ' + integration.label,
+      // No backdrop-click dismissal: a stray click would void the session.
+      dismissable: false,
+      onCancelled: () => {
+        cancelled = true;
+        // Best-effort: tell the broker to drop the in-flight session.
+        fetch(base + '/cancel', { method: 'POST' }).catch(() => {});
+      },
+    }, ({ close }) => {
+      const codeEl = elem('div', { class: 'humr-device-code' }, [session.user_code || '—']);
+      const link = elem('a', {
+        class: 'humr-device-oauth-link',
+        href: session.verification_url,
+        target: '_blank',
+        rel: 'noopener',
+      }, [session.verification_url]);
+      const statusBox = elem('div', { class: 'humr-vault-success' }, ['Waiting for you to approve in your browser…']);
+      const errorBox = elem('div', { class: 'humr-vault-error', style: { display: 'none' } });
+      const cancelBtn = elem('button', { class: 'humr-integration-btn', type: 'button', onclick: close }, ['Cancel']);
 
-    const codeEl = elem('div', { class: 'humr-device-code' }, [session.user_code || '—']);
-    const link = elem('a', {
-      class: 'humr-device-oauth-link',
-      href: session.verification_url,
-      target: '_blank',
-      rel: 'noopener',
-    }, [session.verification_url]);
-    const statusBox = elem('div', { class: 'humr-vault-success' }, ['Waiting for you to approve in your browser…']);
-    const errorBox = elem('div', { class: 'humr-vault-error', style: { display: 'none' } });
-    const cancelBtn = elem('button', { class: 'humr-integration-btn', type: 'button', onclick: close }, ['Cancel']);
-
-    const modal = elem('div', { class: 'humr-modal' }, [
-      elem('div', { class: 'humr-modal-title' }, ['Connect ' + integration.label]),
-      elem('div', { class: 'humr-modal-body humr-device-step-label' }, [
-        'Open the link below and sign in:',
-      ]),
-      elem('div', { class: 'humr-modal-body humr-device-step-content' }, [link]),
-      elem('div', { class: 'humr-modal-body humr-device-step-label' }, [
-        'After opening the link and signing in, enter this code:',
-      ]),
-      codeEl,
-      statusBox,
-      errorBox,
-      elem('div', { class: 'humr-modal-actions' }, [cancelBtn]),
-    ]);
-    backdrop.appendChild(modal);
-    document.body.appendChild(backdrop);
-
-    // Poll the broker for terminal state.
-    const poll = async () => {
-      if (cancelled) return;
-      let st;
-      try {
-        const resp = await fetch(base + '/status', { cache: 'no-store' });
-        st = await resp.json();
-      } catch (_) {
+      // Poll the broker for terminal state.
+      const poll = async () => {
+        if (cancelled) return;
+        let st;
+        try {
+          const resp = await fetch(base + '/status', { cache: 'no-store' });
+          st = await resp.json();
+        } catch (_) {
+          setTimeout(poll, DEVICE_POLL_MS);
+          return;
+        }
+        if (cancelled) return;
+        if (st.phase === 'completed') {
+          close('changed');
+          return;
+        }
+        if (st.phase === 'failed' || st.phase === null) {
+          statusBox.style.display = 'none';
+          errorBox.textContent = st.error || 'Login failed. Please try again.';
+          errorBox.style.display = '';
+          cancelBtn.textContent = 'Close';
+          return;
+        }
         setTimeout(poll, DEVICE_POLL_MS);
-        return;
-      }
-      if (cancelled) return;
-      if (st.phase === 'completed') {
-        backdrop.remove();
-        connectOutcome.finish('changed');
-        return;
-      }
-      if (st.phase === 'failed' || st.phase === null) {
-        statusBox.style.display = 'none';
-        errorBox.textContent = st.error || 'Login failed. Please try again.';
-        errorBox.style.display = '';
-        cancelBtn.textContent = 'Close';
-        return;
-      }
+      };
       setTimeout(poll, DEVICE_POLL_MS);
-    };
-    setTimeout(poll, DEVICE_POLL_MS);
-    return connectOutcome.promise;
+
+      return [
+        elem('div', { class: 'humr-modal-body humr-device-step-label' }, [
+          'Open the link below and sign in:',
+        ]),
+        elem('div', { class: 'humr-modal-body humr-device-step-content' }, [link]),
+        elem('div', { class: 'humr-modal-body humr-device-step-label' }, [
+          'After opening the link and signing in, enter this code:',
+        ]),
+        codeEl,
+        statusBox,
+        errorBox,
+        elem('div', { class: 'humr-modal-actions' }, [cancelBtn]),
+      ];
+    });
   }
 
   // Open the shared vault setup plumbing with either the generic schema-driven

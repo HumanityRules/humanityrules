@@ -29,6 +29,7 @@ function createBrowserContext({ modelsReadyAfter = 3, search = '' } = {}) {
     },
     history: { replaceState() { events.push('sentinel-consumed'); } },
     switchPanel(panel) { events.push('switch:' + panel); },
+    addEventListener() {},
   };
   window._refreshModelDropdownsAfterProviderChange = () => {
     events.push('models');
@@ -48,6 +49,8 @@ function createBrowserContext({ modelsReadyAfter = 3, search = '' } = {}) {
   }
   const document = {
     body: new TestElement('body'),
+    hidden: false,
+    addEventListener() {},
     getElementById() { return null; },
     createElement(tag) { return new TestElement(tag); },
     createTextNode(text) { return { textContent: text }; },
@@ -143,15 +146,68 @@ test('configurable cards reuse the connection action', () => {
   assert.equal(window.HumrIntegrations.cardSpecs.createTls, undefined);
 });
 
-test('connect outcomes settle once', async () => {
+test('connect modal keeps the first outcome', async () => {
   const { context, window } = createBrowserContext();
   loadScript(context, 'humr-integrations-runtime.js');
 
-  const connectOutcome = window.HumrIntegrations.util.createConnectOutcome();
-  connectOutcome.finish('changed');
-  connectOutcome.finish('cancelled');
+  let modalCtx = null;
+  const promise = window.HumrIntegrations.modals.openConnectModal(
+    { title: 'Test' },
+    (ctx) => { modalCtx = ctx; return []; },
+  );
+  modalCtx.finish('changed');
+  modalCtx.close(); // a Close click after a successful save must not override
 
-  assert.equal((await connectOutcome.promise).outcome, 'changed');
+  assert.equal((await promise).outcome, 'changed');
+});
+
+test('closing a connect modal cancels and runs the abandon hook', async () => {
+  const { context, window } = createBrowserContext();
+  loadScript(context, 'humr-integrations-runtime.js');
+
+  let cancels = 0;
+  let modalCtx = null;
+  const promise = window.HumrIntegrations.modals.openConnectModal(
+    { title: 'Test', onCancelled: () => { cancels += 1; } },
+    (ctx) => { modalCtx = ctx; return []; },
+  );
+  modalCtx.close({ type: 'click' }); // a click event as the argument coerces to cancelled
+
+  assert.equal((await promise).outcome, 'cancelled');
+  assert.equal(cancels, 1);
+});
+
+test('closing a stay-open success dialog does not run the abandon hook', async () => {
+  const { context, window } = createBrowserContext();
+  loadScript(context, 'humr-integrations-runtime.js');
+
+  let cancels = 0;
+  let modalCtx = null;
+  const promise = window.HumrIntegrations.modals.openConnectModal(
+    { title: 'Test', onCancelled: () => { cancels += 1; } },
+    (ctx) => { modalCtx = ctx; return []; },
+  );
+  modalCtx.finish('changed'); // e.g. vault save succeeded, dialog shows "Saved"
+  modalCtx.close(); // the user clicks Close afterwards
+
+  assert.equal((await promise).outcome, 'changed');
+  assert.equal(cancels, 0);
+});
+
+test('a changed close skips the abandon hook', async () => {
+  const { context, window } = createBrowserContext();
+  loadScript(context, 'humr-integrations-runtime.js');
+
+  let cancels = 0;
+  let modalCtx = null;
+  const promise = window.HumrIntegrations.modals.openConnectModal(
+    { title: 'Test', onCancelled: () => { cancels += 1; } },
+    (ctx) => { modalCtx = ctx; return []; },
+  );
+  modalCtx.close('changed');
+
+  assert.equal((await promise).outcome, 'changed');
+  assert.equal(cancels, 0);
 });
 
 test('model readiness timeout does not invoke the Hermes refresh hook', async () => {

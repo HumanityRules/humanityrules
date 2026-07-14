@@ -2,30 +2,11 @@
 (() => {
   'use strict';
 
-  const { util, cardSpecs } = window.HumrIntegrations;
-  const { elem, throwForErrorResponse, createConnectOutcome } = util;
+  const { util, modals, cardSpecs } = window.HumrIntegrations;
+  const { elem, throwForErrorResponse } = util;
+  const { openConnectModal } = modals;
 
   // ── Merge connector flow ──────────────────────────────────────────
-
-  function showMergeWaitingModal(integration, onCancel) {
-    const backdrop = elem('div', { class: 'humr-modal-backdrop' });
-    const modal = elem('div', { class: 'humr-modal' }, [
-      elem('div', { class: 'humr-modal-title' }, ['Waiting for ' + integration.label + '…']),
-      elem('div', { class: 'humr-modal-body' }, [
-        'Complete authentication in the tab that just opened. When Merge confirms, ' +
-        'this dialog closes automatically.',
-      ]),
-      elem('div', { class: 'humr-modal-actions' }, [
-        elem('button', {
-          class: 'humr-integration-btn',
-          onclick: () => { backdrop.remove(); onCancel(); },
-        }, ['Cancel']),
-      ]),
-    ]);
-    backdrop.appendChild(modal);
-    document.body.appendChild(backdrop);
-    return backdrop;
-  }
 
   async function startMergeConnect(integration) {
     let resp;
@@ -50,42 +31,48 @@
     }
     window.open(data.magic_link_url, '_blank');
 
-    const connectOutcome = createConnectOutcome();
     let stopped = false;
-    const waiting = showMergeWaitingModal(integration, () => {
-      stopped = true;
-      connectOutcome.finish('cancelled');
-    });
-    const start = Date.now();
-    const intervalMs = 3000;
-    const timeoutMs = 30 * 60 * 1000;
-    const tick = async () => {
-      if (stopped) return;
-      if (Date.now() - start > timeoutMs) {
-        stopped = true;
-        waiting.remove();
-        connectOutcome.finish('cancelled');
-        return;
-      }
-      try {
-        const r = await fetch(
-          '/__humr_broker/integrations/merge/connector-status?connector_slug=' + encodeURIComponent(integration.slug),
-          { cache: 'no-store' },
-        );
-        if (r.ok) {
-          const s = await r.json();
-          if (s.status === 'connected') {
-            stopped = true;
-            waiting.remove();
-            connectOutcome.finish('changed');
-            return;
-          }
+    return openConnectModal({
+      title: 'Waiting for ' + integration.label + '…',
+      onCancelled: () => { stopped = true; },
+    }, ({ close }) => {
+      const start = Date.now();
+      const intervalMs = 3000;
+      const timeoutMs = 30 * 60 * 1000;
+      const tick = async () => {
+        if (stopped) return;
+        if (Date.now() - start > timeoutMs) {
+          close();
+          return;
         }
-      } catch (_) { /* keep polling */ }
+        try {
+          const r = await fetch(
+            '/__humr_broker/integrations/merge/connector-status?connector_slug=' + encodeURIComponent(integration.slug),
+            { cache: 'no-store' },
+          );
+          if (r.ok) {
+            const s = await r.json();
+            if (s.status === 'connected') {
+              stopped = true;
+              close('changed');
+              return;
+            }
+          }
+        } catch (_) { /* keep polling */ }
+        setTimeout(tick, intervalMs);
+      };
       setTimeout(tick, intervalMs);
-    };
-    setTimeout(tick, intervalMs);
-    return connectOutcome.promise;
+
+      return [
+        elem('div', { class: 'humr-modal-body' }, [
+          'Complete authentication in the tab that just opened. When Merge confirms, ' +
+          'this dialog closes automatically.',
+        ]),
+        elem('div', { class: 'humr-modal-actions' }, [
+          elem('button', { class: 'humr-integration-btn', onclick: close }, ['Cancel']),
+        ]),
+      ];
+    });
   }
 
   cardSpecs.register({ kind: 'merge_connector' }, (integration) => {

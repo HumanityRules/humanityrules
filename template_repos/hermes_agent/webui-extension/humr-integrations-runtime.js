@@ -67,20 +67,6 @@
 
   // ── util ──────────────────────────────────────────────────────────────
 
-  function createConnectOutcome() {
-    let resolveOutcome;
-    const promise = new Promise((resolve) => { resolveOutcome = resolve; });
-    let settled = false;
-    return {
-      promise,
-      finish(outcome) {
-        if (settled) return;
-        settled = true;
-        resolveOutcome({ outcome });
-      },
-    };
-  }
-
   function elem(tag, props, children) {
     const el = document.createElement(tag);
     if (props) {
@@ -311,6 +297,54 @@
 
   // ── modals ────────────────────────────────────────────────────────────
 
+  // Shared shell for every connect-flow dialog: builds the backdrop, dialog
+  // frame, and title around `build`'s children and returns a promise of the
+  // flow outcome ({ outcome: 'changed' | 'cancelled' | 'navigating' }).
+  //
+  // `build({ finish, close })` returns the dialog's children below the title.
+  //  - finish(outcome) settles the promise but keeps the dialog open — for
+  //    flows that stay up as confirmation ("Saved") or during a redirect.
+  //    Only the first settle wins (a promise cannot re-resolve), so a Close
+  //    click after a successful save still reports 'changed'.
+  //  - close(outcome) settles and removes the dialog. Anything other than
+  //    'changed'/'navigating' — including the click event when passed
+  //    directly as a handler — counts as 'cancelled', which first runs
+  //    opts.onCancelled: the abandon hook (stop a poll, void a device
+  //    session). The hook is skipped once the outcome is settled, so
+  //    closing a "Saved" confirmation doesn't abandon anything.
+  //
+  // opts.variant picks the dialog CSS: 'vault' (credential forms) or 'scope'
+  // (Google picker). opts.dismissable=false disables backdrop-click close
+  // (device login, where a stray click would void the session).
+  function openConnectModal(opts, build) {
+    const { title, variant, dismissable = true, onCancelled } = opts;
+    let resolveOutcome;
+    const promise = new Promise((resolve) => { resolveOutcome = resolve; });
+    const backdrop = elem('div', {
+      class: 'humr-modal-backdrop' + (variant === 'vault' ? ' humr-vault-backdrop' : ''),
+    });
+    // The promise itself is settle-once; `settled` only gates the abandon
+    // hook, so dismissing a stay-open success dialog doesn't count as abandon.
+    let settled = false;
+    const finish = (outcome) => { settled = true; resolveOutcome({ outcome }); };
+    const close = (outcome) => {
+      if (outcome !== 'changed' && outcome !== 'navigating') {
+        outcome = 'cancelled';
+        if (!settled && onCancelled) onCancelled();
+      }
+      finish(outcome);
+      backdrop.remove();
+    };
+    const modalClass = 'humr-modal' +
+      (variant === 'vault' ? ' humr-vault-modal' : variant === 'scope' ? ' humr-scope-modal' : '');
+    const children = [elem('div', { class: 'humr-modal-title' }, [title])]
+      .concat(build({ finish, close }) || []);
+    backdrop.appendChild(elem('div', { class: modalClass }, children));
+    if (dismissable) backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+    document.body.appendChild(backdrop);
+    return promise;
+  }
+
   // Floating "in progress" dialog shown after an oauth-sentinel return, while
   // the broker primes its cache (and any managed-env WebUI restart settles).
   // status_items() reads cache-only, so the first render after a connect would
@@ -346,21 +380,16 @@
   }
 
   function showOauthErrorModal(message) {
-    const backdrop = elem('div', { class: 'humr-modal-backdrop' });
-    const modal = elem('div', { class: 'humr-modal' }, [
-      elem('div', { class: 'humr-modal-title' }, ['Connection not completed']),
+    openConnectModal({ title: 'Connection not completed' }, ({ close }) => [
       elem('div', { class: 'humr-modal-body' }, [message]),
       elem('div', { class: 'humr-modal-actions' }, [
         elem('button', {
           class: 'humr-integration-btn humr-integration-btn-primary',
           type: 'button',
-          onclick: () => backdrop.remove(),
+          onclick: close,
         }, ['OK']),
       ]),
     ]);
-    backdrop.appendChild(modal);
-    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.remove(); });
-    document.body.appendChild(backdrop);
   }
 
   // ── oauthSentinel ─────────────────────────────────────────────────────
@@ -421,7 +450,6 @@
       statusLabelFor,
       byCategoryThenLabel,
       throwForErrorResponse,
-      createConnectOutcome,
     },
     broker: {
       fetchIntegrations,
@@ -438,7 +466,7 @@
       waitForWebui,
       refreshModelDropdowns,
     },
-    modals: { showTransitionModal, showOauthErrorModal },
+    modals: { openConnectModal, showTransitionModal, showOauthErrorModal },
     oauthSentinel: { consumeOAuthSentinel, registerOauthErrors, oauthErrorMessage },
   };
   window.HumrIntegrations.loadedExtensionScripts.add('runtime');
