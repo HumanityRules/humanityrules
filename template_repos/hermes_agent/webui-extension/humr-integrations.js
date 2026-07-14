@@ -373,9 +373,17 @@
 
   let _refreshAndRenderPromise = null;
 
+  // Toggle the head "Syncing…" indicator. Lives in the page head (populateMainView),
+  // which renderMainViewAndLeftPane never rebuilds, so it survives a re-render.
+  function setSyncingIndicator(active) {
+    const indicator = document.getElementById('humrIntegrationSyncIndicator');
+    if (indicator) indicator.style.display = active ? '' : 'none';
+  }
+
   function refreshAndRender() {
     if (_refreshAndRenderPromise) return _refreshAndRenderPromise;
 
+    setSyncingIndicator(true);
     _refreshAndRenderPromise = fetchIntegrations()
       .then((catalog) => {
         state.current = catalog;
@@ -383,6 +391,7 @@
       })
       .finally(() => {
         _refreshAndRenderPromise = null;
+        setSyncingIndicator(false);
       });
     return _refreshAndRenderPromise;
   }
@@ -399,11 +408,24 @@
       id: 'humrIntegrationRefreshNote',
       style: { display: 'none' },
     });
-    
+    // Background broker syncs (tab open, window focus, post connect/disconnect)
+    // run without touching the Refresh button. This spinner surfaces them.
+    const syncIndicator = elem('div', {
+      class: 'humr-integration-page-sync',
+      id: 'humrIntegrationSyncIndicator',
+      style: { display: 'none' },
+    }, [
+      elem('span', { class: 'humr-integration-page-sync-spinner' }),
+      elem('span', {}, ['Syncing…']),
+    ]);
+
     view.appendChild(elem('div', { class: 'humr-integration-page-inner' }, [
       elem('div', { class: 'humr-integration-page-head' }, [
         elem('div', { class: 'humr-integration-page-head-row' }, [
-          elem('div', { class: 'humr-integration-page-title' }, ['Integrations']),
+          elem('div', { class: 'humr-integration-page-title-group' }, [
+            elem('div', { class: 'humr-integration-page-title' }, ['Integrations']),
+            syncIndicator,
+          ]),
           refreshButton,
         ]),
         elem('div', { class: 'humr-integration-page-meta' }, [
@@ -455,17 +477,6 @@
       populateLeftPane,
       onShow: refreshAndRender, // opening the tab re-syncs from the broker
       onMount: handleOauthReturnAndRender,
-    });
-
-    // onShow only covers panel switches inside this window. A second window
-    // showing this page keeps its pre-change render alive indefinitely (e.g.
-    // a disconnect in one window, stale "Connected" in the other), so also
-    // re-sync whenever this window becomes the one the user is looking at.
-    // refreshAndRender dedups, so focus+visibilitychange firing together
-    // cost one broker fetch.
-    window.addEventListener('focus', () => { refreshAndRender(); });
-    document.addEventListener('visibilitychange', () => {
-      if (!document.hidden) refreshAndRender();
     });
   }
 
