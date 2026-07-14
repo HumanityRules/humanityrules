@@ -24,6 +24,16 @@
   const _connecting = new Set();
   const _disconnecting = new Set();
 
+  // Transient bottom-center confirmation for actions whose only other visible
+  // effect is a card quietly moving between sections (disconnect). Single-slot:
+  // a new toast replaces any live one. Lifetime matches the CSS animation.
+  function showToast(message) {
+    for (const live of document.querySelectorAll('.humr-toast')) live.remove();
+    const toast = elem('div', { class: 'humr-toast' }, [message]);
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 4100);
+  }
+
   async function refreshAfterChange(cardSpec) {
     await refreshAndRender();
     if (cardSpec.affectsModelPicker) await refreshModelDropdowns();
@@ -62,6 +72,7 @@
       try {
         await cardSpec.disconnect();
         await refreshAfterChange(cardSpec);
+        showToast(cardSpec.label + ' disconnected.');
       } catch (err) {
         alert(err.message || 'Disconnect failed. Please try again.');
       } finally {
@@ -444,6 +455,17 @@
       populateLeftPane,
       onShow: refreshAndRender, // opening the tab re-syncs from the broker
       onMount: handleOauthReturnAndRender,
+    });
+
+    // onShow only covers panel switches inside this window. A second window
+    // showing this page keeps its pre-change render alive indefinitely (e.g.
+    // a disconnect in one window, stale "Connected" in the other), so also
+    // re-sync whenever this window becomes the one the user is looking at.
+    // refreshAndRender dedups, so focus+visibilitychange firing together
+    // cost one broker fetch.
+    window.addEventListener('focus', () => { refreshAndRender(); });
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) refreshAndRender();
     });
   }
 
