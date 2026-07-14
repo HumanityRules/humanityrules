@@ -902,46 +902,76 @@ def _header_value(headers: list[tuple[bytes, bytes]], name: bytes) -> bytes | No
     return None
 
 
+def _header_values(headers: list[tuple[bytes, bytes]], name: bytes) -> list[bytes]:
+    """Return every value for one header name, preserving field order."""
+    normalized_name = name.lower()
+    return [value.lower() for field_name, value in headers if field_name.lower() == normalized_name]
+
+
 async def _read_body(reader: asyncio.StreamReader, headers: list[tuple[bytes, bytes]]) -> bytes:
     """Read a request body per Content-Length / Transfer-Encoding.
 
     Transfer-Encoding takes precedence over Content-Length, mirroring the
     response-side rule — reading by CL when TE is present would leave chunk
-    framing bytes on the socket to be parsed as the next request. A TE whose
-    final coding isn't chunked is unreadable in a request (there's no EOF to
-    delimit it), and a malformed CL is undelimitable — both are rejected as
-    ValueError, which the request loop answers with a 400.
+    framing bytes on the socket to be parsed as the next request. Chunked is
+    the only transfer coding the broker can decode; other or repeated codings
+    and malformed CL values are rejected as ValueError, which the request loop
+    answers with a 400.
     """
-    te = _header_value(headers=headers, name=b"transfer-encoding")
-    if te is not None:
-        encodings = [token.strip() for token in te.split(b",")]
-        if encodings and encodings[-1] == b"chunked":
-            return await _read_chunked(reader=reader)
-        raise ValueError(f"unsupported request Transfer-Encoding: {te!r}")
-    cl = _header_value(headers=headers, name=b"content-length")
-    if cl is None:
+    transfer_encoding_values = _header_values(headers=headers, name=b"transfer-encoding")
+    if transfer_encoding_values:
+        encodings = [token.strip() for value in transfer_encoding_values for token in value.split(b",")]
+        # Dechunking is the only request transfer coding the broker implements.
+        # Accepting a preceding coding (for example gzip, chunked) and then
+        # stripping Transfer-Encoding upstream would silently change semantics.
+        if encodings != [b"chunked"]:
+            raise ValueError(f"unsupported request Transfer-Encoding: {b', '.join(encodings)!r}")
+        return await _read_chunked(reader=reader)
+
+    content_length_values = [token.strip() for value in _header_values(headers=headers, name=b"content-length") for token in value.split(b",")]
+    if not content_length_values:
         return b""
-    if not _CONTENT_LENGTH_RE.fullmatch(cl):
-        raise ValueError(f"invalid request Content-Length: {cl!r}")
-    remaining = int(cl)
+    if any(not _CONTENT_LENGTH_RE.fullmatch(value) for value in content_length_values):
+        raise ValueError(f"invalid request Content-Length: {b', '.join(content_length_values)!r}")
+    if len(set(content_length_values)) != 1:
+        raise ValueError(f"conflicting request Content-Length values: {content_length_values!r}")
+    remaining = int(content_length_values[0])
     if remaining == 0:
         return b""
-    return await reader.readexactly(remaining)
+    try:
+        return await reader.readexactly(remaining)
+    except asyncio.IncompleteReadError as exc:
+        raise ValueError(f"request body ended after {len(exc.partial)} of {remaining} bytes") from exc
 
 
 async def _read_chunked(reader: asyncio.StreamReader) -> bytes:
     chunks: list[bytes] = []
     while True:
         size_line = await reader.readline()
-        size = int(size_line.strip().split(b";")[0], 16)
+        if not size_line:
+            raise ValueError("request chunked body ended before a chunk size")
+        if not size_line.endswith(b"\r\n"):
+            raise ValueError("request chunk size line did not end with CRLF")
+        size_token = size_line[:-2].split(b";", 1)[0].strip()
+        if not _CHUNK_SIZE_RE.fullmatch(size_token):
+            raise ValueError(f"invalid request chunk size: {size_token!r}")
+        size = int(size_token, 16)
         if size == 0:
             while True:
                 trailer_line = await reader.readline()
-                if trailer_line in (b"\r\n", b"\n", b""):
-                    break
-            return b"".join(chunks)
-        chunks.append(await reader.readexactly(size))
-        await reader.readline()
+                if not trailer_line:
+                    raise ValueError("request chunked body ended inside trailers")
+                if trailer_line == b"\r\n":
+                    return b"".join(chunks)
+                if not trailer_line.endswith(b"\r\n"):
+                    raise ValueError("request trailer line did not end with CRLF")
+        try:
+            chunks.append(await reader.readexactly(size))
+            delimiter = await reader.readexactly(2)
+        except asyncio.IncompleteReadError as exc:
+            raise ValueError("request chunk payload ended before its declared boundary") from exc
+        if delimiter != b"\r\n":
+            raise ValueError("request chunk payload was not followed by CRLF")
 
 
 def _build_authorization_value(token: str, auth_format: str) -> bytes:
