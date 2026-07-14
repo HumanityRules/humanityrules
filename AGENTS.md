@@ -1,20 +1,16 @@
 # Project synopsis
 
-**Humanity Rules** is an enterprise platform for deploying governed AI assistants inside a company’s own cloud (AWS VPC). Every employee gets a real AI agent with tool execution, persistent memory, and multi-channel access (Slack, web, a personal URL), running isolated and always-on in the company’s own account.
+**Humanity Rules (HumR) is the enterprise home for personal AI agents.** It gives employees an always-on agent that remembers context, works across channels, and continues after the laptop closes—without requiring them to install privileged software or operate agent infrastructure.
 
-- **The Problem:** AI agents today run client-side, on employees’ laptops, creating a security and governance nightmare. The company can’t see or control what employees do with them, credentials and data leak through unvetted plugins/MCP servers, and the setup locks the company into a single lab’s model and harness. Agents running on third-party accounts instead of the company’s own cloud are not acceptable for regulation and audit.
-- **The Solution:** Deploy each employee’s assistant into the company’s VPC with governance built in from the start: curated, security-audited skills; model-provider control (e.g., Bedrock, so nothing leaves the VPC); sandboxed execution; tight ABAC permissions; Okta/SSO auth; approval workflows; and full audit trails.
-- **The moat:** Not the model, not the harness — the enterprise delivery platform. We sell trust: a curated, centrally controlled, audited ecosystem of agentic tools with sensible security defaults that are easy to configure.
-- **Cloud:** AWS-first (ECS/Fargate, CloudFormation/CDK). Additional cloud providers will follow.
-- **Stage:** Pre-beta. The platform architecture (ABAC, approval workflows, Fargate deployment, secrets management) maps directly onto governed AI assistants.
+HumR lets employees build directly with agents, turn successful workflows into apps, and share those apps with their teams in a governed, auditable way.
 
-**"Humanity Rules" (abbreviated "HumR") is the product identity, used everywhere.** The code, infrastructure, and environment variables use the `humanityrules` / `humr` / `HUMR_` identifiers throughout (AWS resource names use the short `humr`; Python packages use the full `humanityrules`).
+HumR’s product POV is that agents should be easy enough for non-technical employees to put to work while being owned and operated as company infrastructure—not left unsupervised on employee laptops or rented as a strategic runtime from a model lab. HumR runs agents as isolated workloads in the customer’s cloud, with brokered credentials, scoped permissions, approved tools and models, SSO, ABAC policies, human approvals, and audit trails.
 
-HumR chooses the open-source Hermes agent (abbreviated HA) as its agent harness, and the Hermes WebUI as the UI for users. 
+**What makes HumR different is that the customer owns the agent platform:** its runtime, identity, permissions, integrations, operational history, and choice of models.
 
-The HA that HumR deploys is located at template_repos/hermes_agent/. HumR deploys Hermes using the AppTemplate mechanism.
+**Stage:** Pre-beta and pre-product-market fit, with no customers yet.
 
-HumR's control plane is called CP.
+**Implementation facts:** “Humanity Rules” and “HumR” are the product identity. Code and infrastructure use `humanityrules`, `humr`, and `HUMR_`; AWS resources use `humr`, and Python packages use `humanityrules`. HumR uses the open-source Hermes Agent (HA) as its harness and Hermes WebUI as its primary UI. The deployed Hermes template is under `template_repos/hermes_agent/` and is deployed through the AppTemplate mechanism. HumR’s control plane is called CP.
 
 
 # Running Python Commands
