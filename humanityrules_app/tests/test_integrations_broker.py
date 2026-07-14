@@ -516,6 +516,86 @@ class TestForwardHeaderNormalization(unittest.TestCase):
 
 class TestHttpParsing(unittest.IsolatedAsyncioTestCase):
 
+    async def test_read_body_reads_content_length(self) -> None:
+        reader = _feed_upstream(b"helloNEXT")
+
+        body = await broker.tls_intercept._read_body(
+            reader=reader,
+            headers=[(b"Content-Length", b"5")],
+        )
+
+        self.assertEqual(body, b"hello")
+        self.assertEqual(await reader.readexactly(4), b"NEXT")
+
+    async def test_read_body_prefers_chunked_over_content_length(self) -> None:
+        reader = _feed_upstream(b"5\r\nhello\r\n0\r\n\r\nNEXT")
+
+        body = await broker.tls_intercept._read_body(
+            reader=reader,
+            headers=[
+                (b"Transfer-Encoding", b"chunked"),
+                (b"Content-Length", b"999"),
+            ],
+        )
+
+        self.assertEqual(body, b"hello")
+        self.assertEqual(await reader.readexactly(4), b"NEXT")
+
+    async def test_read_body_accepts_repeated_identical_content_length(self) -> None:
+        reader = _feed_upstream(b"test")
+
+        body = await broker.tls_intercept._read_body(
+            reader=reader,
+            headers=[
+                (b"Content-Length", b"4"),
+                (b"Content-Length", b"4"),
+            ],
+        )
+
+        self.assertEqual(body, b"test")
+
+    async def test_read_body_rejects_conflicting_content_length(self) -> None:
+        reader = _feed_upstream(b"hello")
+
+        with self.assertRaisesRegex(ValueError, "conflicting request Content-Length"):
+            await broker.tls_intercept._read_body(
+                reader=reader,
+                headers=[
+                    (b"Content-Length", b"4"),
+                    (b"Content-Length", b"5"),
+                ],
+            )
+
+    async def test_read_body_rejects_malformed_content_length(self) -> None:
+        reader = _feed_upstream(b"")
+
+        with self.assertRaisesRegex(ValueError, "invalid request Content-Length"):
+            await broker.tls_intercept._read_body(
+                reader=reader,
+                headers=[(b"Content-Length", b"-1")],
+            )
+
+    async def test_read_body_rejects_repeated_transfer_encoding_chain(self) -> None:
+        reader = _feed_upstream(b"0\r\n\r\n")
+
+        with self.assertRaisesRegex(ValueError, "unsupported request Transfer-Encoding"):
+            await broker.tls_intercept._read_body(
+                reader=reader,
+                headers=[
+                    (b"Transfer-Encoding", b"chunked"),
+                    (b"Transfer-Encoding", b"gzip"),
+                ],
+            )
+
+    async def test_read_body_rejects_truncated_content_length(self) -> None:
+        reader = _feed_upstream(b"short")
+
+        with self.assertRaisesRegex(ValueError, "ended after 5 of 10 bytes"):
+            await broker.tls_intercept._read_body(
+                reader=reader,
+                headers=[(b"Content-Length", b"10")],
+            )
+
     async def test_read_chunked_consumes_trailers(self) -> None:
         reader = asyncio.StreamReader()
         reader.feed_data(b"4\r\ntest\r\n0\r\nX-Trailer: one\r\nAnother: two\r\n\r\nNEXT")
@@ -524,6 +604,30 @@ class TestHttpParsing(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(body, b"test")
         self.assertEqual(await reader.readexactly(4), b"NEXT")
+
+    async def test_read_chunked_rejects_truncated_payload(self) -> None:
+        reader = _feed_upstream(b"a\r\nshort")
+
+        with self.assertRaisesRegex(ValueError, "payload ended before"):
+            await broker.tls_intercept._read_chunked(reader=reader)
+
+    async def test_read_chunked_rejects_malformed_size(self) -> None:
+        reader = _feed_upstream(b"-1\r\n")
+
+        with self.assertRaisesRegex(ValueError, "invalid request chunk size"):
+            await broker.tls_intercept._read_chunked(reader=reader)
+
+    async def test_read_chunked_rejects_malformed_payload_delimiter(self) -> None:
+        reader = _feed_upstream(b"4\r\ntestXX0\r\n\r\n")
+
+        with self.assertRaisesRegex(ValueError, "not followed by CRLF"):
+            await broker.tls_intercept._read_chunked(reader=reader)
+
+    async def test_read_chunked_rejects_eof_inside_trailers(self) -> None:
+        reader = _feed_upstream(b"0\r\nX-Trailer: incomplete\r\n")
+
+        with self.assertRaisesRegex(ValueError, "ended inside trailers"):
+            await broker.tls_intercept._read_chunked(reader=reader)
 
 
 class _RecordingWriter:
@@ -551,6 +655,26 @@ class _RecordingWriter:
         return b"".join(self.chunks)
 
 
+class _NotifyingWriter(_RecordingWriter):
+    """Recording writer whose drain boundaries can be awaited by staged tests."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._drained = asyncio.Condition()
+
+    async def drain(self) -> None:
+        await super().drain()
+        async with self._drained:
+            self._drained.notify_all()
+
+    async def wait_for_bytes(self, expected: bytes, timeout_seconds: float) -> None:
+        async with self._drained:
+            await asyncio.wait_for(
+                self._drained.wait_for(lambda: expected in self.all_bytes()),
+                timeout=timeout_seconds,
+            )
+
+
 def _feed_upstream(raw: bytes) -> asyncio.StreamReader:
     reader = asyncio.StreamReader()
     reader.feed_data(raw)
@@ -566,17 +690,85 @@ def _chunk(payload: bytes) -> bytes:
 class _StubUpstreamWriter:
     """Minimal writer for the upstream side of _forward_to_upstream."""
 
+    def __init__(self) -> None:
+        self.chunks: list[bytes] = []
+        self.closed = False
+
     def write(self, data: bytes) -> None:
-        return None
+        self.chunks.append(bytes(data))
 
     async def drain(self) -> None:
         return None
 
     def close(self) -> None:
-        return None
+        self.closed = True
 
     async def wait_closed(self) -> None:
         return None
+
+    def all_bytes(self) -> bytes:
+        return b"".join(self.chunks)
+
+
+class _StubTransport:
+
+    def __init__(self) -> None:
+        self.protocol = object()
+
+    def get_protocol(self) -> object:
+        return self.protocol
+
+
+class _TlsRecordingWriter(_RecordingWriter):
+    """Writer stand-in that supports the transport and close API used by TLS interception."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.transport = _StubTransport()
+        self.closed = False
+
+    def get_extra_info(self, name: str) -> tuple[str, int] | None:
+        if name == "peername":
+            return ("test-client", 12345)
+        return None
+
+    def close(self) -> None:
+        self.closed = True
+
+    async def wait_closed(self) -> None:
+        return None
+
+
+class _StubCertMinter:
+
+    def __init__(self) -> None:
+        self.hostnames: list[str] = []
+        self.context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+
+    def context_for(self, hostname: str) -> ssl.SSLContext:
+        self.hostnames.append(hostname)
+        return self.context
+
+
+class _StubProxyTokenStore:
+
+    def __init__(self, provider: tls_providers.TlsProviderSpec, secrets: dict[str, str] | None) -> None:
+        self.provider = provider
+        self.secrets = secrets
+        self.invalidated_slugs: list[str] = []
+        self.secret_hosts: list[str] = []
+
+    def provider_for_host(self, host: str) -> tls_providers.TlsProviderSpec | None:
+        if host in self.provider.hosts:
+            return self.provider
+        return None
+
+    async def secrets_for_host(self, host: str) -> dict[str, str] | None:
+        self.secret_hosts.append(host)
+        return self.secrets
+
+    async def invalidate(self, slug: str) -> None:
+        self.invalidated_slugs.append(slug)
 
 
 class TestStreamingRelay(unittest.IsolatedAsyncioTestCase):
@@ -600,6 +792,120 @@ class TestStreamingRelay(unittest.IsolatedAsyncioTestCase):
                 client_writer=client_writer,
             )
         return status, keep_alive, client_writer
+
+    async def _forward_from_reader(
+        self,
+        upstream_reader: asyncio.StreamReader,
+        client_writer: _RecordingWriter,
+        host: str,
+    ) -> tuple[int, bool]:
+        upstream_writer = _StubUpstreamWriter()
+
+        async def _fake_open_connection(**kwargs: object) -> tuple[asyncio.StreamReader, _StubUpstreamWriter]:
+            return upstream_reader, upstream_writer
+
+        with patch.object(broker.tls_intercept.asyncio, "open_connection", _fake_open_connection):
+            return await broker.tls_intercept._forward_to_upstream(
+                host=host,
+                port=443,
+                method="POST",
+                path_with_query="/v1/chat/completions",
+                headers=[(b"host", host.encode())],
+                body=b"{}",
+                client_writer=client_writer,
+            )
+
+    async def test_chunked_sse_reaches_client_before_upstream_finishes(self) -> None:
+        first_event = b'data: {"d":"first"}\n\n'
+        second_event = b'data: {"d":"second"}\n\n'
+        upstream_reader = asyncio.StreamReader()
+        client_writer = _NotifyingWriter()
+        upstream_reader.feed_data(
+            b"HTTP/1.1 200 OK\r\n"
+            b"Content-Type: text/event-stream\r\n"
+            b"Transfer-Encoding: chunked\r\n"
+            b"\r\n"
+            + _chunk(first_event)
+        )
+
+        forward_task = asyncio.create_task(
+            self._forward_from_reader(
+                upstream_reader=upstream_reader,
+                client_writer=client_writer,
+                host="api.openai.com",
+            )
+        )
+        await client_writer.wait_for_bytes(expected=first_event, timeout_seconds=1.0)
+
+        self.assertFalse(forward_task.done())
+        self.assertNotIn(second_event, client_writer.all_bytes())
+
+        upstream_reader.feed_data(_chunk(second_event) + b"0\r\n\r\n")
+        upstream_reader.feed_eof()
+        status, keep_alive = await asyncio.wait_for(forward_task, timeout=1.0)
+
+        self.assertEqual(status, 200)
+        self.assertTrue(keep_alive)
+        self.assertIn(second_event, client_writer.all_bytes())
+
+    async def test_content_length_body_reaches_client_before_upstream_finishes(self) -> None:
+        body = b"first-second"
+        upstream_reader = asyncio.StreamReader()
+        client_writer = _NotifyingWriter()
+        upstream_reader.feed_data(
+            b"HTTP/1.1 200 OK\r\n"
+            b"Content-Length: " + str(len(body)).encode() + b"\r\n"
+            b"\r\n"
+            b"first-"
+        )
+
+        forward_task = asyncio.create_task(
+            self._forward_from_reader(
+                upstream_reader=upstream_reader,
+                client_writer=client_writer,
+                host="api.anthropic.com",
+            )
+        )
+        await client_writer.wait_for_bytes(expected=b"first-", timeout_seconds=1.0)
+
+        self.assertFalse(forward_task.done())
+        self.assertNotIn(b"second", client_writer.all_bytes())
+
+        upstream_reader.feed_data(b"second")
+        status, keep_alive = await asyncio.wait_for(forward_task, timeout=1.0)
+
+        self.assertEqual(status, 200)
+        self.assertTrue(keep_alive)
+        self.assertTrue(client_writer.all_bytes().endswith(body))
+
+    async def test_eof_body_reaches_client_before_upstream_finishes(self) -> None:
+        upstream_reader = asyncio.StreamReader()
+        client_writer = _NotifyingWriter()
+        upstream_reader.feed_data(
+            b"HTTP/1.1 200 OK\r\n"
+            b"Content-Type: application/octet-stream\r\n"
+            b"\r\n"
+            b"first-"
+        )
+
+        forward_task = asyncio.create_task(
+            self._forward_from_reader(
+                upstream_reader=upstream_reader,
+                client_writer=client_writer,
+                host="github.com",
+            )
+        )
+        await client_writer.wait_for_bytes(expected=b"first-", timeout_seconds=1.0)
+
+        self.assertFalse(forward_task.done())
+
+        upstream_reader.feed_data(b"second")
+        upstream_reader.feed_eof()
+        status, keep_alive = await asyncio.wait_for(forward_task, timeout=1.0)
+
+        self.assertEqual(status, 200)
+        self.assertFalse(keep_alive)
+        self.assertTrue(client_writer.all_bytes().endswith(b"first-second"))
 
     async def test_chunked_sse_is_relayed_frame_by_frame(self) -> None:
         upstream = (
@@ -854,6 +1160,7 @@ class TestStreamingRelay(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(keep_alive)
         # Bytes that did arrive are still forwarded.
         self.assertIn(b'data: {"d":"x"}', writer.all_bytes())
+        self.assertNotIn(b"HTTP/1.1 502", writer.all_bytes())
 
     async def test_chunked_sse_without_terminator_marks_connection_not_reusable(self) -> None:
         # A well-formed chunk arrives, then upstream EOFs before the
@@ -938,6 +1245,215 @@ class TestStreamingRelay(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status, 204)
         self.assertTrue(keep_alive)
         self.assertIn(b"204 No Content", writer.all_bytes())
+
+
+class TestProxyConnectionStateMachine(unittest.IsolatedAsyncioTestCase):
+    """Exercise CONNECT routing and the persistent intercepted-request loop."""
+
+    async def _run_intercept(
+        self,
+        client_bytes: bytes,
+        upstream_responses: list[bytes],
+        secrets: dict[str, str] | None,
+        feed_client_eof: bool,
+    ) -> tuple[_TlsRecordingWriter, list[_StubUpstreamWriter], _StubProxyTokenStore]:
+        provider = tls_providers.TLS_INTERCEPT_PROVIDERS["openrouter"]
+        token_store = _StubProxyTokenStore(provider=provider, secrets=secrets)
+        minter = _StubCertMinter()
+        client_reader = asyncio.StreamReader()
+        client_reader.feed_data(client_bytes)
+        if feed_client_eof:
+            client_reader.feed_eof()
+        client_writer = _TlsRecordingWriter()
+        upstream_readers = [_feed_upstream(response) for response in upstream_responses]
+        upstream_writers = [_StubUpstreamWriter() for _response in upstream_responses]
+
+        async def _fake_open_connection(**kwargs: object) -> tuple[asyncio.StreamReader, _StubUpstreamWriter]:
+            if not upstream_readers:
+                raise AssertionError("intercept loop opened more upstream connections than expected")
+            return upstream_readers.pop(0), upstream_writers[len(upstream_writers) - len(upstream_readers) - 1]
+
+        loop = asyncio.get_running_loop()
+        start_tls = AsyncMock(return_value=client_writer.transport)
+        with (
+            patch.object(loop, "start_tls", start_tls),
+            patch.object(broker.tls_intercept.asyncio, "StreamWriter", return_value=client_writer),
+            patch.object(broker.tls_intercept.asyncio, "open_connection", _fake_open_connection),
+        ):
+            await asyncio.wait_for(
+                broker.tls_intercept._intercept_and_forward(
+                    client_reader=client_reader,
+                    client_writer=client_writer,
+                    host="openrouter.ai",
+                    port=443,
+                    provider=provider,
+                    minter=minter,
+                    token_store=token_store,
+                ),
+                timeout=1.0,
+            )
+
+        start_tls.assert_awaited_once()
+        self.assertEqual(minter.hostnames, ["openrouter.ai"])
+        return client_writer, upstream_writers, token_store
+
+    async def test_connect_routes_known_host_to_tls_interceptor(self) -> None:
+        provider = tls_providers.TLS_INTERCEPT_PROVIDERS["openrouter"]
+        token_store = _StubProxyTokenStore(provider=provider, secrets={"api_key": "real-key"})
+        minter = _StubCertMinter()
+        client_reader = _feed_upstream(
+            b"CONNECT OpenRouter.ai.:8443 HTTP/1.1\r\n"
+            b"Host: OpenRouter.ai.:8443\r\n"
+            b"\r\n"
+        )
+        client_writer = _TlsRecordingWriter()
+        intercept = AsyncMock()
+
+        with patch.object(broker.tls_intercept, "_intercept_and_forward", intercept):
+            await broker.tls_intercept._handle_proxy_conn(
+                reader=client_reader,
+                writer=client_writer,
+                minter=minter,
+                token_store=token_store,
+            )
+
+        intercept.assert_awaited_once_with(
+            client_reader=client_reader,
+            client_writer=client_writer,
+            host="openrouter.ai",
+            port=8443,
+            provider=provider,
+            minter=minter,
+            token_store=token_store,
+        )
+        self.assertTrue(client_writer.closed)
+
+    async def test_persistent_client_relays_chunked_sse_then_content_length_response(self) -> None:
+        first_event = b'data: {"d":"first"}\n\n'
+        client_bytes = (
+            b"POST /api/v1/chat/completions HTTP/1.1\r\n"
+            b"Host: openrouter.ai\r\n"
+            b"Authorization: Bearer HUMR_PLACEHOLDER\r\n"
+            b"Transfer-Encoding: chunked\r\n"
+            b"\r\n"
+            b"2\r\n{}\r\n0\r\n\r\n"
+            b"GET /api/v1/models HTTP/1.1\r\n"
+            b"Host: openrouter.ai\r\n"
+            b"Connection: close\r\n"
+            b"\r\n"
+        )
+        upstream_responses = [
+            (
+                b"HTTP/1.1 200 OK\r\n"
+                b"Content-Type: text/event-stream\r\n"
+                b"Transfer-Encoding: chunked\r\n"
+                b"\r\n"
+                + _chunk(first_event)
+                + b"0\r\n\r\n"
+            ),
+            b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}",
+        ]
+
+        client_writer, upstream_writers, token_store = await self._run_intercept(
+            client_bytes=client_bytes,
+            upstream_responses=upstream_responses,
+            secrets={"api_key": "real-openrouter-key"},
+            feed_client_eof=False,
+        )
+
+        downstream = client_writer.all_bytes()
+        self.assertIn(first_event, downstream)
+        self.assertTrue(downstream.endswith(b"{}"))
+        self.assertEqual(downstream.count(b"HTTP/1.1 200 OK"), 2)
+        first_request = upstream_writers[0].all_bytes()
+        self.assertIn(b"POST /api/v1/chat/completions HTTP/1.1", first_request)
+        self.assertIn(b"Authorization: Bearer real-openrouter-key", first_request)
+        self.assertIn(b"Content-Length: 2", first_request)
+        self.assertNotIn(b"Transfer-Encoding", first_request)
+        second_request = upstream_writers[1].all_bytes()
+        self.assertIn(b"GET /api/v1/models HTTP/1.1", second_request)
+        self.assertNotIn(b"Authorization", second_request)
+        self.assertEqual(token_store.secret_hosts, ["openrouter.ai"])
+        self.assertTrue(client_writer.closed)
+
+    async def test_upstream_eof_framing_ends_client_loop_without_waiting_for_another_request(self) -> None:
+        client_writer, upstream_writers, token_store = await self._run_intercept(
+            client_bytes=b"GET /api/v1/models HTTP/1.1\r\nHost: openrouter.ai\r\n\r\n",
+            upstream_responses=[b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{}"],
+            secrets={"api_key": "unused"},
+            feed_client_eof=False,
+        )
+
+        self.assertTrue(client_writer.all_bytes().endswith(b"{}"))
+        self.assertEqual(len(upstream_writers), 1)
+        self.assertEqual(token_store.secret_hosts, [])
+
+    async def test_upstream_connection_close_ends_client_loop_after_framed_body(self) -> None:
+        client_writer, _upstream_writers, _token_store = await self._run_intercept(
+            client_bytes=b"GET /api/v1/models HTTP/1.1\r\nHost: openrouter.ai\r\n\r\n",
+            upstream_responses=[b"HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 2\r\n\r\n{}"],
+            secrets={"api_key": "unused"},
+            feed_client_eof=False,
+        )
+
+        self.assertTrue(client_writer.all_bytes().endswith(b"{}"))
+
+    async def test_upstream_failure_before_head_returns_clean_502(self) -> None:
+        with patch.object(broker.tls_intercept.logger, "exception") as log_exception:
+            client_writer, _upstream_writers, _token_store = await self._run_intercept(
+                client_bytes=b"GET /api/v1/models HTTP/1.1\r\nHost: openrouter.ai\r\n\r\n",
+                upstream_responses=[b"HTTP/1.1 200 OK\r\nContent-Length: garbage\r\n\r\n"],
+                secrets={"api_key": "unused"},
+                feed_client_eof=False,
+            )
+
+        response = client_writer.all_bytes()
+        self.assertIn(b"HTTP/1.1 502 Bad Gateway", response)
+        self.assertNotIn(b"HTTP/1.1 200 OK", response)
+        log_exception.assert_called_once()
+
+    async def test_only_credentialed_401_invalidates_provider_cache(self) -> None:
+        client_bytes = (
+            b"GET /api/v1/authenticated HTTP/1.1\r\n"
+            b"Host: openrouter.ai\r\n"
+            b"Authorization: Bearer HUMR_PLACEHOLDER\r\n"
+            b"\r\n"
+            b"GET /api/v1/anonymous HTTP/1.1\r\n"
+            b"Host: openrouter.ai\r\n"
+            b"Connection: close\r\n"
+            b"\r\n"
+        )
+        unauthorized = b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n"
+
+        _client_writer, _upstream_writers, token_store = await self._run_intercept(
+            client_bytes=client_bytes,
+            upstream_responses=[unauthorized, unauthorized],
+            secrets={"api_key": "real-openrouter-key"},
+            feed_client_eof=False,
+        )
+
+        self.assertEqual(token_store.secret_hosts, ["openrouter.ai"])
+        self.assertEqual(token_store.invalidated_slugs, ["openrouter"])
+
+    async def test_bad_request_framing_returns_400_without_opening_upstream(self) -> None:
+        client_writer, upstream_writers, token_store = await self._run_intercept(
+            client_bytes=(
+                b"POST /api/v1/chat/completions HTTP/1.1\r\n"
+                b"Host: openrouter.ai\r\n"
+                b"Content-Length: 4\r\n"
+                b"Content-Length: 5\r\n"
+                b"\r\n"
+            ),
+            upstream_responses=[],
+            secrets={"api_key": "unused"},
+            feed_client_eof=False,
+        )
+
+        response = client_writer.all_bytes()
+        self.assertIn(b"HTTP/1.1 400 Bad Request", response)
+        self.assertIn(b"conflicting request Content-Length", response)
+        self.assertEqual(upstream_writers, [])
+        self.assertEqual(token_store.secret_hosts, [])
 
 
 class TestCertMinter(unittest.TestCase):
