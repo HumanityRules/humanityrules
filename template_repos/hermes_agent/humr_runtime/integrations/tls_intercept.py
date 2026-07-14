@@ -16,6 +16,7 @@ import logging
 import os
 import random
 import ssl
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -756,7 +757,14 @@ async def _intercept_and_forward(
                     break
             headers = _parse_headers(lines=headers_raw)
             path_with_query = request_line.decode("iso-8859-1").split(" ", 2)[1]
-            body = await _read_body(reader=tls_reader, headers=headers)
+            try:
+                body = await _read_body(reader=tls_reader, headers=headers)
+            except ValueError as exc:
+                # Unparseable framing: whatever follows on the socket can't
+                # be delimited, so answer 400 and close rather than read
+                # body bytes as the next request line.
+                await _send_json_error(writer=tls_writer, status=400, message=f"bad request framing: {exc}")
+                return
             try:
                 addresses_humr_credential = _request_addresses_humr_credential(
                     headers=headers,
@@ -820,6 +828,10 @@ async def _intercept_and_forward(
                 await token_store.invalidate(slug=provider.slug)
                 logger.info("evicted %s token cache after upstream 401 from %s", provider.slug, host)
             if not keep_alive:
+                return
+            # The client asked to close after this exchange; don't sit in
+            # readline() waiting for a request that will never come.
+            if _connection_close_requested(headers=headers):
                 return
     finally:
         with contextlib.suppress(Exception):
@@ -891,13 +903,26 @@ def _header_value(headers: list[tuple[bytes, bytes]], name: bytes) -> bytes | No
 
 
 async def _read_body(reader: asyncio.StreamReader, headers: list[tuple[bytes, bytes]]) -> bytes:
-    """Read a request body per Content-Length / Transfer-Encoding."""
+    """Read a request body per Content-Length / Transfer-Encoding.
+
+    Transfer-Encoding takes precedence over Content-Length, mirroring the
+    response-side rule — reading by CL when TE is present would leave chunk
+    framing bytes on the socket to be parsed as the next request. A TE whose
+    final coding isn't chunked is unreadable in a request (there's no EOF to
+    delimit it), and a malformed CL is undelimitable — both are rejected as
+    ValueError, which the request loop answers with a 400.
+    """
     te = _header_value(headers=headers, name=b"transfer-encoding")
-    if te == b"chunked":
-        return await _read_chunked(reader=reader)
+    if te is not None:
+        encodings = [token.strip() for token in te.split(b",")]
+        if encodings and encodings[-1] == b"chunked":
+            return await _read_chunked(reader=reader)
+        raise ValueError(f"unsupported request Transfer-Encoding: {te!r}")
     cl = _header_value(headers=headers, name=b"content-length")
     if cl is None:
         return b""
+    if not _CONTENT_LENGTH_RE.fullmatch(cl):
+        raise ValueError(f"invalid request Content-Length: {cl!r}")
     remaining = int(cl)
     if remaining == 0:
         return b""
@@ -1164,6 +1189,22 @@ def _rewrite_request_for_provider(
     raise ValueError(f"unknown credential_method: {method!r}")
 
 
+_upstream_ssl_context: ssl.SSLContext | None = None
+
+
+def _get_upstream_ssl_context() -> ssl.SSLContext:
+    """Return the shared upstream client SSLContext, creating it on first use.
+
+    A context is safe to share across connections, and creating one per
+    request re-parses the entire system CA store — measurable allocator churn
+    under concurrent proxy traffic.
+    """
+    global _upstream_ssl_context
+    if _upstream_ssl_context is None:
+        _upstream_ssl_context = ssl.create_default_context()
+    return _upstream_ssl_context
+
+
 async def _forward_to_upstream(
     host: str,
     port: int,
@@ -1175,14 +1216,16 @@ async def _forward_to_upstream(
 ) -> tuple[int, bool]:
     """Replay the request to the real upstream and relay the response to the client.
 
-    Server-sent-event responses are relayed frame-by-frame so tokens reach the
-    sandbox client live (the agent's per-delta stream callbacks then fire as
-    they arrive instead of all at once); every other response is buffered and
-    re-rendered with a computed Content-Length, preserving the per-object X cost
-    audit. Returns ``(status, keep_alive)``; ``keep_alive`` is False when the
-    client connection must be torn down after this exchange.
+    The response head is forwarded verbatim and the body is relayed chunk by
+    chunk in its upstream framing — never buffered whole. Streaming keeps SSE
+    deltas live for the sandbox client AND caps broker memory at one relay
+    chunk per in-flight response; buffering entire bodies made broker RSS
+    track the largest response ever proxied (git clone packs through
+    github.com reached multi-GB peaks). Returns ``(status, keep_alive)``;
+    ``keep_alive`` is False when the client connection must be torn down
+    after this exchange.
     """
-    ctx = ssl.create_default_context()
+    ctx = _get_upstream_ssl_context()
     upstream_reader, upstream_writer = await asyncio.open_connection(host=host, port=port, ssl=ctx, server_hostname=host)
     try:
         normalized_headers = _normalize_forward_headers(headers=headers, body_length=len(body))
@@ -1194,122 +1237,168 @@ async def _forward_to_upstream(
         if body:
             upstream_writer.write(body)
         await upstream_writer.drain()
-        status_line = await upstream_reader.readline()
-        try:
-            status = int(status_line.split(b" ", 2)[1])
-        except (IndexError, ValueError):
-            raise RuntimeError(f"bad upstream status line: {status_line!r}")
-        response_headers: list[tuple[bytes, bytes]] = []
+        # Interim (1xx) responses precede the final one on the same
+        # connection: relay each interim head verbatim and keep reading, so
+        # an interim 100/103 doesn't desync the stream and the final status
+        # (which drives keep-alive and the 401 evict) is the one acted on.
+        # (The proxy reads the full request body before forwarding, so a
+        # client waiting on 100-continue waits out its expect timeout first —
+        # pre-existing behavior.) 101 is the exception: it has no following
+        # response — the connection switches protocols. Upgrades aren't
+        # supported (the request normalizer strips `Upgrade`/`Connection`),
+        # so a stray 101 is final and force-closes.
         while True:
-            line = await upstream_reader.readline()
-            if line in (b"\r\n", b"\n", b""):
+            status, response_headers = await _read_response_head(reader=upstream_reader)
+            if not (100 <= status < 200) or status == 101:
                 break
-            if b":" not in line:
-                continue
-            name, _, value = line.partition(b":")
-            response_headers.append((name.strip(), value.strip().rstrip(b"\r\n")))
-        connection_keep_alive = _header_value(headers=response_headers, name=b"connection") != b"close"
+            client_writer.write(_render_response_head(status=status, headers=response_headers))
+            await client_writer.drain()
+        connection_keep_alive = status != 101 and not _connection_close_requested(headers=response_headers)
 
-        # Statuses that cannot carry a body (HEAD, 1xx, 204, 304) fall through
-        # to the buffered no-body path even when mislabeled text/event-stream —
-        # the streaming relay would otherwise wait on EOF as the body delimiter
-        # and hang a perfectly valid response.
-        _can_have_body = not (method.upper() == "HEAD" or 100 <= status < 200 or status in (204, 304))
-        if _can_have_body and _response_is_event_stream(headers=response_headers):
-            framed = await _relay_streaming_response(
+        # Statuses that cannot carry a body (HEAD, 1xx, 204, 304) stop at
+        # the head even when framing headers are present (a 304 echoes
+        # the would-be body's Content-Length) — the relay would otherwise
+        # wait on body bytes that never come and hang a valid response.
+        response_can_have_body = not (method.upper() == "HEAD" or 100 <= status < 200 or status in (204, 304))
+        if response_can_have_body:
+            # Parsing (and validating) the framing BEFORE the head is written
+            # keeps invalid-framing failures on the clean-502 path below.
+            framing, forward_headers = _parse_response_framing(headers=response_headers)
+        else:
+            framing, forward_headers = None, response_headers
+
+        client_writer.write(_render_response_head(status=status, headers=forward_headers))
+        await client_writer.drain()
+
+        # Past this point the head is committed to the client: an error can
+        # no longer be reported as an HTTP response without corrupting the
+        # byte stream (the client would read it as body data). On failure,
+        # tear the connection down instead — truncation is detectable from
+        # the framing; an injected 502 mid-body is silent corruption.
+        try:
+            if not response_can_have_body:
+                return status, connection_keep_alive
+            framed = await _relay_response_body(
                 upstream_reader=upstream_reader,
                 client_writer=client_writer,
-                status=status,
-                headers=response_headers,
+                framing=framing,
             )
             return status, connection_keep_alive and framed
-
-        resp_body = await _read_response_body(reader=upstream_reader, headers=response_headers, status=status, method=method)
-        # Cost audit for X: X meters per object returned (not per request), and
-        # posts and users are *separately* billed meters (~$0.005 vs ~$0.01),
-        # deduped per object per 24h. Count each by sniffing object shape (a user
-        # object has `username`; a post has `text`/`edit_history_tweet_ids`)
-        # across data[] + includes[] so each audit line maps onto the console's
-        # two meters. Lists/media/DM-events fall into neither and aren't billed.
-        if host == "api.x.com":
-            posts_n = users_n = -1
-            try:
-                parsed = json.loads(resp_body)
-                posts_n = users_n = 0
-                for bucket in (parsed.get("data"), (parsed.get("includes") or {}).get("tweets"), (parsed.get("includes") or {}).get("users")):
-                    items = bucket if isinstance(bucket, list) else ([bucket] if isinstance(bucket, dict) else [])
-                    for item in items:
-                        if "username" in item:
-                            users_n += 1
-                        elif "text" in item or "edit_history_tweet_ids" in item:
-                            posts_n += 1
-            except (ValueError, AttributeError, TypeError):
-                pass
-            logger.info(
-                "X-COST-AUDIT method=%s path=%s status=%s posts=%s users=%s body_bytes=%s",
-                method, path_with_query, status, posts_n, users_n, len(resp_body),
-            )
-        client_writer.write(_render_response(status=status, headers=response_headers, body=resp_body))
-        await client_writer.drain()
-        return status, connection_keep_alive
+        except Exception:
+            logger.exception("relay from %s failed after response head was sent", host)
+            return status, False
     finally:
         with contextlib.suppress(Exception):
             upstream_writer.close()
             await upstream_writer.wait_closed()
 
 
-def _response_is_event_stream(headers: list[tuple[bytes, bytes]]) -> bool:
-    """True when the upstream response should be relayed frame-by-frame.
+async def _read_response_head(reader: asyncio.StreamReader) -> tuple[int, list[tuple[bytes, bytes]]]:
+    """Read one response status line + header block from the upstream."""
+    status_line = await reader.readline()
+    try:
+        status = int(status_line.split(b" ", 2)[1])
+    except (IndexError, ValueError):
+        raise RuntimeError(f"bad upstream status line: {status_line!r}")
+    headers: list[tuple[bytes, bytes]] = []
+    while True:
+        line = await reader.readline()
+        if line in (b"\r\n", b"\n", b""):
+            break
+        if b":" not in line:
+            continue
+        name, _, value = line.partition(b":")
+        headers.append((name.strip(), value.strip().rstrip(b"\r\n")))
+    return status, headers
 
-    An explicit ``text/event-stream`` Content-Type is authoritative. The
-    ChatGPT Codex backend (chatgpt.com/backend-api/codex/responses) omits
-    Content-Type on its SSE responses entirely, so a chunked body with no
-    declared content type is also relayed live. Over-matching is safe: the
-    streaming relay forwards any body transparently, at the sole cost of
-    skipping the buffered X cost audit — and api.x.com always labels its
-    JSON responses.
+
+def _connection_close_requested(headers: list[tuple[bytes, bytes]]) -> bool:
+    """True when any Connection field carries a `close` token.
+
+    Connection is a comma-separated token list AND may legally appear as
+    multiple field lines — every occurrence is scanned, not just the first.
     """
-    content_type = _header_value(headers=headers, name=b"content-type")
-    if content_type is not None:
-        return b"text/event-stream" in content_type
-    return _header_value(headers=headers, name=b"transfer-encoding") == b"chunked"
-
-
-async def _relay_streaming_response(
-    upstream_reader: asyncio.StreamReader,
-    client_writer: asyncio.StreamWriter,
-    status: int,
-    headers: list[tuple[bytes, bytes]],
-) -> bool:
-    """Relay an SSE response head + body to the client, flushing per frame.
-
-    Headers are forwarded verbatim (unlike the buffered path, the upstream
-    framing — ``Transfer-Encoding``/``Content-Length`` — is preserved so the
-    client can delimit the body). Returns whether the client connection may be
-    reused: False whenever the body didn't terminate cleanly (connection-close
-    framing, a short ``Content-Length``, or a chunked body without its
-    terminating 0-chunk), since the client's parser can't find a clean boundary
-    and would misframe or hang on the next response sent over the same socket.
-    """
-    head = b"HTTP/1.1 " + str(status).encode() + b" " + _http_reason(status=status).encode() + b"\r\n"
     for name, value in headers:
-        head += name + b": " + value + b"\r\n"
-    head += b"\r\n"
-    client_writer.write(head)
-    await client_writer.drain()
+        if name.lower() != b"connection":
+            continue
+        if b"close" in {token.strip() for token in value.lower().split(b",")}:
+            return True
+    return False
 
+
+@dataclass(frozen=True)
+class _BodyFraming:
+    """How one upstream response body is delimited on the wire."""
+
+    kind: Literal["chunked", "content_length", "eof"]
+    content_length: int | None
+
+
+_CONTENT_LENGTH_RE = re.compile(rb"^\d+$")
+_CHUNK_SIZE_RE = re.compile(rb"^[0-9A-Fa-f]+$")
+
+
+def _parse_response_framing(headers: list[tuple[bytes, bytes]]) -> tuple[_BodyFraming, list[tuple[bytes, bytes]]]:
+    """Decide the response body framing and the headers to forward with it.
+
+    Transfer-Encoding takes precedence over Content-Length (RFC 9112 §6.3):
+    following CL when TE is present would let the next response's bytes be
+    read as body data, and an intermediary must not forward both — CL is
+    stripped from the forwarded head so the downstream parser can't pick the
+    other one. TE is a comma-separated coding list; the body is chunked-framed
+    only when chunked is the FINAL coding, otherwise it is close-delimited.
+    Raises RuntimeError on a malformed Content-Length (a response the client
+    must never see as-is — callers turn it into a clean 502).
+    """
     transfer_encoding = None
-    content_length = None
+    content_length_value = None
     for name, value in headers:
         lowered = name.lower()
         if lowered == b"transfer-encoding":
             transfer_encoding = value.lower()
         elif lowered == b"content-length":
-            content_length = value
-    if transfer_encoding == b"chunked":
+            content_length_value = value
+    if transfer_encoding is not None:
+        forward_headers = [(name, value) for name, value in headers if name.lower() != b"content-length"]
+        encodings = [token.strip() for token in transfer_encoding.split(b",")]
+        kind = "chunked" if encodings and encodings[-1] == b"chunked" else "eof"
+        return _BodyFraming(kind=kind, content_length=None), forward_headers
+    if content_length_value is not None:
+        if not _CONTENT_LENGTH_RE.fullmatch(content_length_value):
+            raise RuntimeError(f"invalid upstream Content-Length: {content_length_value!r}")
+        return _BodyFraming(kind="content_length", content_length=int(content_length_value)), headers
+    return _BodyFraming(kind="eof", content_length=None), headers
+
+
+def _render_response_head(status: int, headers: list[tuple[bytes, bytes]]) -> bytes:
+    """Render the response status line + headers verbatim for the client."""
+    head = b"HTTP/1.1 " + str(status).encode() + b" " + _http_reason(status=status).encode() + b"\r\n"
+    for name, value in headers:
+        head += name + b": " + value + b"\r\n"
+    return head + b"\r\n"
+
+
+async def _relay_response_body(
+    upstream_reader: asyncio.StreamReader,
+    client_writer: asyncio.StreamWriter,
+    framing: _BodyFraming,
+) -> bool:
+    """Relay a response body to the client chunk by chunk, flushing per chunk.
+
+    The head already told the client how the body is delimited (framing was
+    parsed and validated by `_parse_response_framing` before the head was
+    committed). Per-chunk flushing keeps SSE deltas live and holds at most
+    one relay chunk in memory regardless of body size. Returns whether the
+    client connection may be reused: False whenever the body didn't terminate
+    cleanly (connection-close framing, a short ``Content-Length``, or a
+    chunked body without its terminating 0-chunk), since the client's parser
+    can't find a clean boundary and would misframe or hang on the next
+    response sent over the same socket.
+    """
+    if framing.kind == "chunked":
         return await _relay_chunked_stream(upstream_reader=upstream_reader, client_writer=client_writer)
-    if content_length is not None:
-        remaining = int(content_length)
+    if framing.kind == "content_length":
+        remaining = framing.content_length
         while remaining > 0:
             chunk = await upstream_reader.read(min(65536, remaining))
             if not chunk:
@@ -1346,86 +1435,59 @@ async def _relay_chunked_stream(upstream_reader: asyncio.StreamReader, client_wr
         size_line = await upstream_reader.readline()
         if not size_line:
             return False
-        try:
-            size = int(size_line.strip().split(b";")[0], 16)
-        except ValueError:
+        # Validate the size token as strict hex (RFC 9112 §7.1) before
+        # converting: int(x, 16) also accepts forms like `-1`/`+1` that a
+        # client parser would reject or, worse, interpret differently.
+        size_token = size_line.strip().split(b";")[0].strip()
+        if not _CHUNK_SIZE_RE.fullmatch(size_token):
             return False
+        size = int(size_token, 16)
         client_writer.write(size_line)
         if size == 0:
-            # Forward the trailer section up to its terminating blank line. A
-            # bare EOF (b"") before that blank line means the chunked
-            # terminator (0-chunk + trailers + CRLF) never completed, so the
-            # client can't reframe — relay the partial bytes but report
-            # non-reuse.
+            # Forward the trailer section up to its terminating blank line,
+            # flushing per line — trailer size is sender-controlled, and an
+            # undrained loop would buffer it without backpressure. A bare EOF
+            # (b"") before the blank line means the chunked terminator
+            # (0-chunk + trailers + CRLF) never completed, so the client
+            # can't reframe — relay the partial bytes but report non-reuse.
             while True:
                 trailer_line = await upstream_reader.readline()
                 if trailer_line == b"":
                     await client_writer.drain()
                     return False
                 client_writer.write(trailer_line)
+                await client_writer.drain()
                 if trailer_line in (b"\r\n", b"\n"):
                     break
-            await client_writer.drain()
             return True
-        try:
-            chunk = await upstream_reader.readexactly(size)
-        except asyncio.IncompleteReadError as exc:
-            # Forward whatever bytes did arrive so an in-flight frame isn't
-            # silently dropped, but the chunk is short of its declared size —
-            # the client's decoder can't trust the framing from here on.
-            client_writer.write(exc.partial)
+        # Relay the payload in bounded sub-reads: the chunk size is
+        # sender-controlled, and reading a whole chunk at once would let one
+        # huge chunk re-create the buffered-body memory blowup. A short read
+        # (EOF mid-payload) has already forwarded the partial bytes, but the
+        # chunk is short of its declared size — the client's decoder can't
+        # trust the framing from here on.
+        remaining = size
+        while remaining > 0:
+            payload = await upstream_reader.read(min(65536, remaining))
+            if not payload:
+                return False
+            remaining -= len(payload)
+            client_writer.write(payload)
             await client_writer.drain()
-            return False
         crlf = await upstream_reader.readline()
-        client_writer.write(chunk + crlf)
+        client_writer.write(crlf)
         await client_writer.drain()
-
-
-async def _read_response_body(reader: asyncio.StreamReader, headers: list[tuple[bytes, bytes]], status: int, method: str) -> bytes:
-    if method.upper() == "HEAD" or 100 <= status < 200 or status in (204, 304):
-        return b""
-    te_value = None
-    for n, v in headers:
-        if n.lower() == b"transfer-encoding":
-            te_value = v.lower()
-            break
-    if te_value == b"chunked":
-        return await _read_chunked(reader=reader)
-    cl_value = None
-    for n, v in headers:
-        if n.lower() == b"content-length":
-            cl_value = v
-            break
-    if cl_value is not None:
-        remaining = int(cl_value)
-        if remaining == 0:
-            return b""
-        return await reader.readexactly(remaining)
-    chunks: list[bytes] = []
-    while True:
-        chunk = await reader.read(65536)
-        if not chunk:
-            break
-        chunks.append(chunk)
-    return b"".join(chunks)
-
-
-def _render_response(status: int, headers: list[tuple[bytes, bytes]], body: bytes) -> bytes:
-    reason = _http_reason(status=status)
-    lines = [b"HTTP/1.1 " + str(status).encode() + b" " + reason.encode() + b"\r\n"]
-    skip = {b"transfer-encoding", b"connection", b"content-length"}
-    for name, value in headers:
-        if name.lower() in skip:
-            continue
-        lines.append(name + b": " + value + b"\r\n")
-    lines.append(b"Content-Length: " + str(len(body)).encode() + b"\r\n")
-    lines.append(b"Connection: close\r\n")
-    lines.append(b"\r\n")
-    return b"".join(lines) + body
+        if crlf != b"\r\n":
+            # The chunk delimiter is missing or malformed (strict CRLF per
+            # RFC 9112): whatever follows can't be framed as a size line, so
+            # stop relaying and report the connection unusable rather than
+            # emit garbage framing a stricter client parser would reject.
+            return False
 
 
 def _http_reason(status: int) -> str:
     return {
+        100: "Continue", 101: "Switching Protocols", 103: "Early Hints",
         200: "OK", 201: "Created", 204: "No Content", 301: "Moved Permanently",
         302: "Found", 304: "Not Modified", 400: "Bad Request", 401: "Unauthorized",
         403: "Forbidden", 404: "Not Found", 409: "Conflict", 410: "Gone",
