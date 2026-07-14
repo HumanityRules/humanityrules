@@ -580,7 +580,7 @@ class _StubUpstreamWriter:
 
 
 class TestStreamingRelay(unittest.IsolatedAsyncioTestCase):
-    """_forward_to_upstream relays SSE live and buffers everything else."""
+    """_forward_to_upstream streams every response body live in its upstream framing."""
 
     async def _forward(self, upstream_response: bytes, *, host: str) -> tuple[int, bool, _RecordingWriter]:
         client_writer = _RecordingWriter()
@@ -653,7 +653,7 @@ class TestStreamingRelay(unittest.IsolatedAsyncioTestCase):
         non_empty_flushes = [f for f in writer.flushes if f]
         self.assertGreaterEqual(len(non_empty_flushes), 4)
 
-    async def test_content_length_without_content_type_is_buffered(self) -> None:
+    async def test_content_length_body_streams_after_head(self) -> None:
         body = b"{\"ok\":true}"
         upstream = (
             b"HTTP/1.1 200 OK\r\n"
@@ -665,7 +665,9 @@ class TestStreamingRelay(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status, 200)
         self.assertTrue(keep_alive)
         self.assertTrue(writer.all_bytes().endswith(body))
-        self.assertEqual(len([f for f in writer.flushes if f]), 1)
+        # Streaming path: the head is committed first, then the body relays
+        # in its own flush(es) — never held until the body completes.
+        self.assertEqual(len([f for f in writer.flushes if f]), 2)
 
     async def test_content_length_sse_is_relayed(self) -> None:
         payload = b"data: {\"d\":\"hi\"}\n\ndata: [DONE]\n\n"
@@ -681,7 +683,7 @@ class TestStreamingRelay(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(keep_alive)
         self.assertIn(payload, writer.all_bytes())
 
-    async def test_json_response_is_buffered_with_content_length(self) -> None:
+    async def test_json_content_length_response_streams_with_framing_preserved(self) -> None:
         body = b"{\"ok\":true}"
         upstream = (
             b"HTTP/1.1 200 OK\r\n"
@@ -696,8 +698,129 @@ class TestStreamingRelay(unittest.IsolatedAsyncioTestCase):
         full = writer.all_bytes()
         self.assertIn(b"Content-Length: 11", full)
         self.assertTrue(full.endswith(body))
-        # Buffered path: the whole response lands in a single flush.
-        self.assertEqual(len([f for f in writer.flushes if f]), 1)
+        # Streaming path: head flush + body flush.
+        self.assertEqual(len([f for f in writer.flushes if f]), 2)
+
+    async def test_interim_1xx_head_is_relayed_before_final_response(self) -> None:
+        body = b"ok"
+        upstream = (
+            b"HTTP/1.1 100 Continue\r\n"
+            b"\r\n"
+            b"HTTP/1.1 200 OK\r\n"
+            b"Content-Length: " + str(len(body)).encode() + b"\r\n"
+            b"\r\n" + body
+        )
+        status, keep_alive, writer = await self._forward(upstream, host="api.anthropic.com")
+
+        # The final status — not the interim one — drives the return value.
+        self.assertEqual(status, 200)
+        self.assertTrue(keep_alive)
+        full = writer.all_bytes()
+        self.assertIn(b"HTTP/1.1 100 Continue", full)
+        self.assertIn(b"HTTP/1.1 200 OK", full)
+        self.assertTrue(full.endswith(body))
+
+    async def test_transfer_encoding_wins_over_content_length_and_cl_is_stripped(self) -> None:
+        upstream = (
+            b"HTTP/1.1 200 OK\r\n"
+            b"Transfer-Encoding: chunked\r\n"
+            b"Content-Length: 999\r\n"
+            b"\r\n"
+            + _chunk(b"payload")
+            + b"0\r\n\r\n"
+        )
+        status, keep_alive, writer = await self._forward(upstream, host="api.anthropic.com")
+
+        self.assertEqual(status, 200)
+        # Chunked framing terminated cleanly, so the connection is reusable —
+        # which is only sound because the body was read by TE, not CL.
+        self.assertTrue(keep_alive)
+        full = writer.all_bytes()
+        self.assertIn(b"Transfer-Encoding: chunked", full)
+        # Forwarding both TE and CL would leave the client parser free to
+        # pick the wrong delimiter — CL must not survive into the head.
+        self.assertNotIn(b"Content-Length", full)
+        self.assertIn(b"payload", full)
+
+    async def test_invalid_content_length_fails_before_head_is_committed(self) -> None:
+        upstream = (
+            b"HTTP/1.1 200 OK\r\n"
+            b"Content-Length: garbage\r\n"
+            b"\r\n"
+        )
+        client_writer = _RecordingWriter()
+        upstream_reader = _feed_upstream(upstream)
+
+        async def _fake_open_connection(**kwargs) -> tuple[asyncio.StreamReader, _StubUpstreamWriter]:
+            return upstream_reader, _StubUpstreamWriter()
+
+        with patch.object(broker.tls_intercept.asyncio, "open_connection", _fake_open_connection):
+            with self.assertRaises(RuntimeError):
+                await broker.tls_intercept._forward_to_upstream(
+                    host="api.anthropic.com",
+                    port=443,
+                    method="GET",
+                    path_with_query="/v1/models",
+                    headers=[(b"host", b"api.anthropic.com")],
+                    body=b"",
+                    client_writer=client_writer,
+                )
+        # Nothing was written: the caller can still answer with a clean 502.
+        self.assertEqual(client_writer.all_bytes(), b"")
+
+    async def test_malformed_chunk_size_marks_connection_not_reusable(self) -> None:
+        upstream = (
+            b"HTTP/1.1 200 OK\r\n"
+            b"Transfer-Encoding: chunked\r\n"
+            b"\r\n"
+            b"-1\r\n"
+            b"\r\n"
+            b"0\r\n\r\n"
+        )
+        status, keep_alive, writer = await self._forward(upstream, host="api.anthropic.com")
+
+        self.assertEqual(status, 200)
+        self.assertFalse(keep_alive)
+        # The bogus size line is not forwarded — int(x, 16) would have
+        # accepted "-1" but a client chunk parser must reject it.
+        self.assertNotIn(b"-1\r\n", writer.all_bytes())
+
+    async def test_huge_single_chunk_relays_in_bounded_subreads(self) -> None:
+        payload = b"x" * 200_000
+        upstream = (
+            b"HTTP/1.1 200 OK\r\n"
+            b"Transfer-Encoding: chunked\r\n"
+            b"\r\n"
+            + _chunk(payload)
+            + b"0\r\n\r\n"
+        )
+        status, keep_alive, writer = await self._forward(upstream, host="api.anthropic.com")
+
+        self.assertEqual(status, 200)
+        self.assertTrue(keep_alive)
+        self.assertIn(payload, writer.all_bytes())
+        # One sender-controlled 200KB chunk must NOT arrive as one flush —
+        # the relay reads it in <=64KB sub-reads (4 payload flushes here),
+        # which is what bounds broker memory per in-flight response.
+        payload_flushes = [f for f in writer.flushes if f and b"x" * 1024 in f]
+        self.assertGreaterEqual(len(payload_flushes), 4)
+
+    async def test_repeated_connection_close_field_disables_reuse(self) -> None:
+        body = b"ok"
+        upstream = (
+            b"HTTP/1.1 200 OK\r\n"
+            b"Connection: keep-alive\r\n"
+            b"Connection: close\r\n"
+            b"Content-Length: " + str(len(body)).encode() + b"\r\n"
+            b"\r\n" + body
+        )
+        status, keep_alive, writer = await self._forward(upstream, host="api.anthropic.com")
+
+        self.assertEqual(status, 200)
+        # Connection may appear as multiple field lines; the `close` token in
+        # ANY of them wins over an earlier keep-alive.
+        self.assertFalse(keep_alive)
+        self.assertTrue(writer.all_bytes().endswith(body))
 
     async def test_eof_framed_sse_marks_connection_not_reusable(self) -> None:
         upstream = (
