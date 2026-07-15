@@ -10,6 +10,7 @@ and bounces the browser to the original ``rd`` URL.
 """
 
 import logging
+import re
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -45,28 +46,82 @@ WS_CLOSE_AUTH_REQUIRED = 4401
 WS_CLOSE_FORBIDDEN = 4403
 WS_CLOSE_SERVICE_UNAVAILABLE = 1011
 
+# Anonymous public-webapp requests only. Authenticated traffic is uncapped.
+PUBLIC_MAX_BODY_BYTES = 10 * 1024 * 1024
+PUBLIC_CACHE_MAX_ENTRIES = 512
+
+# User webapp slugs as routed by the agent's Caddy (webapps_lib.SLUG_PATTERN
+# minus the `__` internal prefix — internal webapps are path-routed on the
+# bare host, never a subdomain).
+_WEBAPP_SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,30}[a-z0-9]$")
+
+
+def _webapp_slug_for_host(host: str, public_hostname: str | None) -> str | None:
+    """Parse '<slug>.<public_hostname>' into the webapp slug, else None.
+
+    Host is attacker-chosen: normalize port/case/trailing-dot before matching
+    so variants of one hostname can't become distinct cache keys, and require
+    the remainder to be a single valid slug label.
+    """
+    if not public_hostname or not host:
+        return None
+    hostname = host.split(":", 1)[0].rstrip(".").lower()
+    suffix = "." + public_hostname.lower().rstrip(".")
+    if not hostname.endswith(suffix):
+        return None
+    label = hostname[: -len(suffix)]
+    if not _WEBAPP_SLUG_RE.match(label):
+        return None
+    return label
+
 
 @dataclass(frozen=True)
 class _AuthDecision:
-    """Result of running cookie -> JWT -> PDP for one request.
+    """Result of authorizing one request, same logic for HTTP and WS paths.
 
-    Exactly one of `identity` or `reject` is set. `reject` is a string tag the
-    HTTP and WS paths translate into their own protocol-appropriate response
-    (302/401/403/503 vs ws close codes).
+    Three shapes: `identity` set (authenticated allow), `public` True with no
+    identity (anonymous allow for a publicly-granted webapp subdomain), or
+    `reject` set — a string tag the HTTP and WS paths translate into their own
+    protocol-appropriate response (302/401/403/503 vs ws close codes).
     """
     identity: jwt_verify.SessionIdentity | None
     reject: str | None  # one of: "auth", "deny", "pdp-down"
+    public: bool
 
 
 async def _authorize_session(
     *,
     cookie_value: str | None,
     path: str,
+    host: str,
     state: Any,
 ) -> _AuthDecision:
-    """Verify the session cookie and run PDP. Same logic for HTTP and WS paths."""
+    """Public-webapp check on the Host, then cookie -> JWT -> PDP.
+
+    A webapp subdomain with a live public grant is allowed anonymously — the
+    session flow never runs, so org members and visitors see the same thing.
+    A webapp subdomain without one falls through to the session flow.
+    """
+    webapp_slug = _webapp_slug_for_host(host=host, public_hostname=state.config.public_hostname)
+    if webapp_slug is not None:
+        decision = state.public_cache.get(slug=webapp_slug)
+        if decision is None:
+            decision = await pdp_mod.evaluate_public(
+                http_client=state.http_client,
+                pdp_url=state.config.pdp_url,
+                env_bearer_token=state.config.env_bearer_token,
+                app_id=state.config.app_id,
+                webapp_slug=webapp_slug,
+                path=path,
+            )
+            if decision is None:
+                return _AuthDecision(identity=None, reject="pdp-down", public=False)
+            state.public_cache.put(slug=webapp_slug, decision=decision)
+        if decision.decision == "allow":
+            return _AuthDecision(identity=None, reject=None, public=True)
+
     if not cookie_value:
-        return _AuthDecision(identity=None, reject="auth")
+        return _AuthDecision(identity=None, reject="auth", public=False)
 
     identity = jwt_verify.verify_session_jwt(
         jwt_value=cookie_value,
@@ -74,7 +129,7 @@ async def _authorize_session(
         env_domain=state.config.env_domain,
     )
     if identity is None:
-        return _AuthDecision(identity=None, reject="auth")
+        return _AuthDecision(identity=None, reject="auth", public=False)
 
     decision = state.pdp_cache.get(provider=identity.provider, sub=identity.sub)
     if decision is None:
@@ -89,7 +144,7 @@ async def _authorize_session(
             path=path,
         )
         if decision is None:
-            return _AuthDecision(identity=identity, reject="pdp-down")
+            return _AuthDecision(identity=identity, reject="pdp-down", public=False)
         state.pdp_cache.put(provider=identity.provider, sub=identity.sub, decision=decision)
 
     if decision.decision != "allow":
@@ -98,9 +153,9 @@ async def _authorize_session(
             decision.reason, state.config.env_slug, state.config.app_id,
             identity.username, path,
         )
-        return _AuthDecision(identity=identity, reject="deny")
+        return _AuthDecision(identity=identity, reject="deny", public=False)
 
-    return _AuthDecision(identity=identity, reject=None)
+    return _AuthDecision(identity=identity, reject=None, public=False)
 
 
 async def _close_ws_after_accept(websocket: WebSocket, code: int) -> None:
@@ -191,6 +246,10 @@ def create_app(cfg: config_mod.PolicyProxyConfig) -> FastAPI:
     app.state.pdp_cache = pdp_cache_mod.PdpDecisionCache(
         ttl_seconds=cfg.pdp_cache_ttl_seconds,
     )
+    app.state.public_cache = pdp_cache_mod.PublicWebappDecisionCache(
+        ttl_seconds=cfg.public_cache_ttl_seconds,
+        max_entries=PUBLIC_CACHE_MAX_ENTRIES,
+    )
     app.state.activity_reporter = activity_reporter_mod.PolicyProxyActivityReporter(
         http_client_provider=lambda: app.state.http_client,
         endpoint_url=f"{cfg.control_plane_url}/api/runtime/policy-proxy-activity",
@@ -259,6 +318,7 @@ def create_app(cfg: config_mod.PolicyProxyConfig) -> FastAPI:
         result = await _authorize_session(
             cookie_value=request.cookies.get(jwt_verify.SESSION_COOKIE_NAME),
             path=request.url.path,
+            host=request.headers.get("host", ""),
             state=state,
         )
 
@@ -273,13 +333,13 @@ def create_app(cfg: config_mod.PolicyProxyConfig) -> FastAPI:
                 content="you do not have access to this application", status_code=403,
             )
 
-        assert result.identity is not None
         state.activity_reporter.observe()
         return await proxy_mod.proxy_to_upstream(
             request=request,
             identity=result.identity,
             upstream_base=state.upstream_base,
             http_client=state.http_client,
+            max_body_bytes=PUBLIC_MAX_BODY_BYTES if result.public else None,
         )
 
     @app.websocket("/{path:path}")
@@ -293,6 +353,7 @@ def create_app(cfg: config_mod.PolicyProxyConfig) -> FastAPI:
         result = await _authorize_session(
             cookie_value=websocket.cookies.get(jwt_verify.SESSION_COOKIE_NAME),
             path=websocket.url.path,
+            host=websocket.headers.get("host", ""),
             state=state,
         )
 
@@ -306,7 +367,6 @@ def create_app(cfg: config_mod.PolicyProxyConfig) -> FastAPI:
             await _close_ws_after_accept(websocket=websocket, code=WS_CLOSE_FORBIDDEN)
             return
 
-        assert result.identity is not None
         state.activity_reporter.observe()
         try:
             await proxy_mod.proxy_to_upstream_ws(

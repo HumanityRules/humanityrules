@@ -1,0 +1,54 @@
+{% comment %}
+Public Access panel on the app detail page. Lists live WebappPublicGrant rows;
+revoke swaps this whole section (outerHTML on #public-access-section).
+Context: app, public_access_enabled, public_grants [{grant, url}], can_publish.
+{% endcomment %}
+{% if public_access_enabled %}
+<div class="mb-6" id="public-access-section">
+    <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Public Access</h2>
+        {% if can_publish %}
+        <a href="/apps/{{ app.slug }}/public-access/new"
+           hx-get="/apps/{{ app.slug }}/public-access/new"
+           hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true"
+           class="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700">Publish a webapp…</a>
+        {% endif %}
+    </div>
+    {% if public_grants %}
+    <div class="overflow-x-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
+        <table class="min-w-full">
+            <tbody class="[&_tr:not(:last-child)>td]:border-b [&_tr:not(:last-child)>td]:border-gray-200 dark:[&_tr:not(:last-child)>td]:border-gray-700">
+                {% for row in public_grants %}
+                <tr>
+                    <td class="px-4 py-3 text-sm">
+                        {% if row.url %}
+                        <a href="{{ row.url }}" target="_blank" rel="noopener" class="font-mono text-indigo-600 dark:text-indigo-400 hover:underline">{{ row.url }}</a>
+                        {% else %}
+                        <span class="font-mono text-gray-500 dark:text-gray-400">{{ row.grant.slug }} (no deployment hostname)</span>
+                        {% endif %}
+                    </td>
+                    <td class="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">{{ row.grant.environment.slug }}</td>
+                    <td class="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                        {% if row.grant.expires_at %}expires {{ row.grant.expires_at|timeuntil }} from now{% else %}until revoked{% endif %}
+                    </td>
+                    <td class="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">by {{ row.grant.granted_by.username|default:"—" }}</td>
+                    {% if can_publish %}
+                    <td class="px-4 py-3 text-right whitespace-nowrap">
+                        <button type="button"
+                                hx-get="/apps/{{ app.slug }}/public-access/{{ row.grant.id }}/revoke-confirm/"
+                                hx-target="#modal-container" hx-swap="innerHTML"
+                                class="rounded-md bg-red-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-500 dark:bg-red-500 dark:hover:bg-red-400">Revoke</button>
+                    </td>
+                    {% endif %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 border-dashed rounded-lg p-4 text-center">
+        <p class="text-sm text-gray-500 dark:text-gray-400">No webapps are publicly accessible.</p>
+    </div>
+    {% endif %}
+</div>
+{% endif %}

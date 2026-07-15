@@ -14,11 +14,55 @@ from django.http import HttpRequest, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
-from ..models import App, DeploymentBlueprint, User
+from ..models import App, DeploymentBlueprint, User, WebappPublicGrant
 from ..services import abac_service
 from . import env_bearer_auth
 
 logger = logging.getLogger(__name__)
+
+
+@csrf_exempt
+@require_POST
+def pdp_evaluate_public(request: HttpRequest) -> JsonResponse:
+    """Anonymous decision for one webapp subdomain: allow iff a live WebappPublicGrant exists.
+
+    Called by the policy proxy when a request's Host parses as
+    <webapp_slug>.<agent-host>, before (and instead of) any session identity
+    check. The env bearer identifies the Environment; a deny here sends the
+    proxy down its normal cookie/ABAC path.
+    """
+    raw_token = env_bearer_auth.extract_bearer_token(request=request)
+    if raw_token is None:
+        return JsonResponse({"error": "missing bearer token"}, status=401)
+
+    environment = env_bearer_auth.resolve_env_from_token(raw_token=raw_token)
+    if environment is None:
+        return JsonResponse({"error": "invalid bearer token"}, status=401)
+
+    try:
+        payload = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "invalid JSON body"}, status=400)
+
+    app_id = payload.get("app_id")
+    webapp_slug = payload.get("webapp_slug")
+    if not (isinstance(app_id, str) and isinstance(webapp_slug, str)):
+        return JsonResponse({"error": "app_id and webapp_slug are required strings"}, status=400)
+
+    organization = environment.aws_account.organization
+
+    app = App.objects.filter(organization=organization, slug=app_id).first()
+    if app is None:
+        logger.info("pdp-public deny reason=app-not-in-org env=%s app_id=%s webapp=%s", environment.slug, app_id, webapp_slug)
+        return JsonResponse({"decision": "deny", "reason": "app-not-in-org"})
+
+    grant_is_live = WebappPublicGrant.live().filter(app=app, environment=environment, slug=webapp_slug).exists()
+    if grant_is_live:
+        logger.info("pdp-public allow env=%s app=%s webapp=%s", environment.slug, app.slug, webapp_slug)
+        return JsonResponse({"decision": "allow", "reason": "public-webapp"})
+
+    logger.info("pdp-public deny reason=not-public env=%s app=%s webapp=%s", environment.slug, app.slug, webapp_slug)
+    return JsonResponse({"decision": "deny", "reason": "not-public"})
 
 
 @csrf_exempt

@@ -1,5 +1,8 @@
 {# Reusable confirmation modal — loaded via HTMX GET into #modal-container #}
-{# Template variables: modal_title, modal_message, confirm_url, confirm_label #}
+{% comment %}
+Template variables: modal_title, modal_message, confirm_url, confirm_label.
+Optional: confirm_target, confirm_swap, confirm_push_url.
+{% endcomment %}
 <div class="relative z-50" role="dialog" aria-modal="true">
     {# Backdrop #}
     <div class="fixed inset-0 bg-gray-500/75 dark:bg-gray-900/80 transition-opacity"></div>
@@ -42,9 +45,9 @@
                     </button>
                     <button type="button"
                             hx-post="{{ confirm_url }}"
-                            hx-target="#main-content"
-                            hx-swap="innerHTML"
-                            hx-push-url="true"
+                            hx-target="{{ confirm_target|default:'#main-content' }}"
+                            hx-swap="{{ confirm_swap|default:'innerHTML' }}"
+                            hx-push-url="{{ confirm_push_url|default:'true' }}"
                             hx-on::after-request="document.getElementById('modal-container').innerHTML = ''"
                             class="rounded-md bg-red-600 px-3 py-2 text-sm font-semibold text-white shadow-xs hover:bg-red-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 dark:bg-red-500 dark:hover:bg-red-400">
                         {{ confirm_label }}

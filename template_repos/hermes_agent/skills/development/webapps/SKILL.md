@@ -51,6 +51,7 @@ webapps reload
 webapps set-env <slug> KEY=VALUE [KEY2=VALUE2 ...]
 webapps unregister <slug>
 webapps delete <slug> --yes
+webapps expose <slug>
 ```
 
 - **`<slug>`**: lowercase, 2–32 chars, letters/digits/hyphens. Must start with a letter, end alphanumeric. Becomes the leftmost DNS label, so all DNS-safe constraints apply.
@@ -58,6 +59,10 @@ webapps delete <slug> --yes
 - **`--cwd`**: absolute path to the project working directory (typically `/workspace/webapps/projects/<slug>`).
 - **`--env`**: repeatable `KEY=VALUE` pair stored before the first start.
 - **`--timeout`**: seconds for `webapps start` to poll for readiness (default 75). This is not the process-compose probe grace period, which gives apps roughly a minute to bind.
+
+## Public access (`webapps expose`)
+
+Webapps require HUMR sign-in by default. `webapps expose <slug>` does NOT make the app public — it prints a control-plane link where a human org admin confirms the exposure (with an expiry, 24h by default). When the user asks to make a webapp public, run it and give them the link; the page shows the exact URL that becomes internet-reachable. You cannot grant, extend, or revoke public access yourself.
 
 ## Dependencies
 

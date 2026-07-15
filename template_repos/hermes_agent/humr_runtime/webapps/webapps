@@ -23,6 +23,7 @@ from webapps_lib import (
     WEBAPPS_PROJECT,
     ProcessComposeLock,
     die,
+    is_internal_slug,
     is_routed,
     load_process_compose_yaml,
     make_process_entry,
@@ -234,6 +235,38 @@ def cmd_delete(args: argparse.Namespace) -> None:
     print(f"webapps: {args.slug!r} deleted.")
 
 
+def cmd_expose(args: argparse.Namespace) -> None:
+    """Print the control-plane link where a human can make this webapp public.
+
+    Publishing is a control-plane action, not an agent capability: this
+    command only builds the deep link. The app owner opens it, sees the exact
+    hostname that would become public, and confirms there.
+    """
+    validate_slug(args.slug)
+    if is_internal_slug(args.slug):
+        die(f"{args.slug!r} is a platform-internal webapp; it cannot be made public")
+
+    doc = load_process_compose_yaml(project=WEBAPPS_PROJECT)
+    if args.slug not in doc["processes"]:
+        die(f"unknown app {args.slug!r}; create it first (see `webapps list`)")
+
+    control_plane_url = os.environ.get("HUMR_CONTROL_PLANE_URL", "").rstrip("/")
+    app_slug = os.environ.get("HUMR_APP_SLUG", "")
+    env_slug = os.environ.get("HUMR_ENV_SLUG", "")
+    if not (control_plane_url and app_slug and env_slug):
+        die(
+            "HUMR_CONTROL_PLANE_URL / HUMR_APP_SLUG / HUMR_ENV_SLUG not set; "
+            "public exposure needs the control-plane deep link and this "
+            "environment doesn't provide it"
+        )
+
+    deep_link = f"{control_plane_url}/apps/{app_slug}/public-access/new?slug={args.slug}&env={env_slug}"
+    print(f"Public access to {url_for(args.slug)} is granted on the control plane, by a human.")
+    print("Ask the app owner to open this link and confirm:")
+    print("")
+    print(f"  {deep_link}")
+
+
 def main() -> None:
     p = argparse.ArgumentParser(
         prog="webapps",
@@ -294,6 +327,10 @@ def main() -> None:
     pc_delete.add_argument("slug")
     pc_delete.add_argument("--yes", action="store_true")
     pc_delete.set_defaults(func=cmd_delete)
+
+    pc_expose = sub.add_parser("expose", help="Print the control-plane link to make a webapp public (a human confirms there).")
+    pc_expose.add_argument("slug")
+    pc_expose.set_defaults(func=cmd_expose)
 
     args = p.parse_args()
     args.func(args)

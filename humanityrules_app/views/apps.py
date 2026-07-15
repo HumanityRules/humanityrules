@@ -20,6 +20,7 @@ from humanityrules_app.services.jobs import environment_operation_gate
 
 from . import abac_view_checks
 from . import base
+from . import webapp_public_access
 
 OPEN_BLUEPRINT_STATUSES = (
     DeploymentBlueprint.Status.DRAFT,
@@ -248,6 +249,7 @@ def build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
     context["can_remove"] = can_edit and not is_pending_removal and not app_is_live(app)
     context["url_base"] = f"/apps/{app.slug}/tags/"
     context["suggested_keys"], context["suggested_values"] = abac_service.get_resource_tag_suggestions(org, "app")
+    context.update(webapp_public_access.build_public_access_context(request=request, app=app))
 
     return context
 

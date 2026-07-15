@@ -1,0 +1,23 @@
+{% comment %}
+Post-confirm landing for one grant: shows the public URL and self-checks it
+server-side until it answers (see _app_public_access_check.html).
+Context: app, grant, public_url.
+{% endcomment %}
+<div class="max-w-2xl">
+    <div class="mb-6">
+        <a href="/apps/{{ app.slug }}/"
+           hx-get="/apps/{{ app.slug }}/" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true"
+           class="text-sm text-indigo-600 dark:text-indigo-400 hover:underline">&larr; {{ app.name }}</a>
+        <h1 class="mt-2 text-2xl font-bold text-gray-900 dark:text-white">Webapp published</h1>
+        <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">
+            <span class="font-mono">{{ grant.slug }}</span> on {{ grant.environment.name }} is public
+            {% if grant.expires_at %}until {{ grant.expires_at }}{% else %}until revoked{% endif %}.
+        </p>
+    </div>
+
+    <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-6"
+         hx-get="/apps/{{ app.slug }}/public-access/{{ grant.id }}/check/?n=0"
+         hx-trigger="load" hx-swap="innerHTML">
+        <p class="text-sm text-gray-500 dark:text-gray-400">Checking the public URL…</p>
+    </div>
+</div>
