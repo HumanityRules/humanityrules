@@ -28,6 +28,10 @@ _HOP_BY_HOP_HEADERS = {
 _FORBIDDEN_INBOUND_HEADERS = {"host"}
 _ORIGIN_LIKE_HEADERS = frozenset({"origin", "referer"})
 
+# Mirrors policy_proxy: on localhost, cookies are shared across ports, so a
+# humr_session JWT set by another local service must not reach the upstream app.
+SESSION_COOKIE_NAME = "humr_session"
+
 
 def _host_for_caddy(host: str) -> str:
     """Strip the port from Host so Caddy matches HUMR_PUBLIC_HOSTNAME (e.g. localhost)."""
@@ -69,13 +73,33 @@ _WS_HANDSHAKE_HEADERS = {
 }
 
 
+def _strip_session_cookie(cookie_header: str) -> str:
+    """Remove the humr_session pair from a Cookie header, keeping app-owned cookies."""
+    kept: list[str] = []
+    for pair in cookie_header.split(";"):
+        pair = pair.strip()
+        if not pair or pair.split("=", 1)[0].strip() == SESSION_COOKIE_NAME:
+            continue
+        kept.append(pair)
+    return "; ".join(kept)
+
+
 def _filter_request_headers(headers) -> dict[str, str]:
     out: dict[str, str] = {}
+    # HTTP/2 clients may split cookies across multiple Cookie fields (RFC 7540
+    # section 8.1.2.5); collect them all so the dict doesn't keep only the last.
+    cookie_parts: list[str] = []
     for name, value in headers.items():
         lower = name.lower()
         if lower in _HOP_BY_HOP_HEADERS or lower in _FORBIDDEN_INBOUND_HEADERS:
             continue
+        if lower == "cookie":
+            if (stripped := _strip_session_cookie(cookie_header=value)):
+                cookie_parts.append(stripped)
+            continue
         out[name] = _normalize_origin_like_header(name=name, value=value)
+    if cookie_parts:
+        out["Cookie"] = "; ".join(cookie_parts)
     return out
 
 
@@ -141,6 +165,10 @@ def _filter_ws_handshake_headers(headers) -> list[tuple[str, str]]:
     for name, value in headers.items():
         lower = name.lower()
         if lower in _WS_HANDSHAKE_HEADERS or lower in _FORBIDDEN_INBOUND_HEADERS:
+            continue
+        if lower == "cookie":
+            if (stripped := _strip_session_cookie(cookie_header=value)):
+                out.append((name, stripped))
             continue
         out.append((name, _normalize_origin_like_header(name=name, value=value)))
     return out
