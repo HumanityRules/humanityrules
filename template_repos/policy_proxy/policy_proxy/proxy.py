@@ -99,13 +99,35 @@ _WS_HANDSHAKE_HEADERS = {
 }
 
 
+def _strip_session_cookie(cookie_header: str) -> str:
+    """Remove the humr_session pair from a Cookie header, keeping app-owned cookies."""
+    kept: list[str] = []
+    for pair in cookie_header.split(";"):
+        pair = pair.strip()
+        if not pair or pair.split("=", 1)[0].strip() == jwt_verify.SESSION_COOKIE_NAME:
+            continue
+        kept.append(pair)
+    return "; ".join(kept)
+
+
 def _filter_request_headers(headers) -> dict[str, str]:
     out: dict[str, str] = {}
+    # HTTP/2 clients may split cookies across multiple Cookie fields (RFC 7540
+    # section 8.1.2.5); collect them all so the dict doesn't keep only the last.
+    cookie_parts: list[str] = []
     for name, value in headers.items():
         lower = name.lower()
         if lower in _HOP_BY_HOP_HEADERS or lower in _FORBIDDEN_INBOUND_HEADERS:
             continue
+        # The session JWT is for the policy proxy, not the upstream app — apps
+        # that need user identity read X-Auth-* instead.
+        if lower == "cookie":
+            if (stripped := _strip_session_cookie(cookie_header=value)):
+                cookie_parts.append(stripped)
+            continue
         out[name] = value
+    if cookie_parts:
+        out["Cookie"] = "; ".join(cookie_parts)
     return out
 
 
