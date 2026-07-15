@@ -38,6 +38,7 @@ from humanityrules_app.models import (
     ResourceTag,
     User,
     WaitlistSignup,
+    WebappPublicGrant,
     Workspace,
 )
 
@@ -583,3 +584,11 @@ class PlatformSharedCredentialAdmin(admin.ModelAdmin):
         if obj.created_by_id is None:
             obj.created_by = request.user
         super().save_model(request, obj, form, change)
+
+
+@admin.register(WebappPublicGrant)
+class WebappPublicGrantAdmin(admin.ModelAdmin):
+    list_display = ["slug", "app", "environment", "granted_by", "created_at", "expires_at", "revoked_at", "revoked_by"]
+    list_filter = ["environment"]
+    readonly_fields = ["id", "created_at"]
+    autocomplete_fields = ["app", "granted_by", "revoked_by"]

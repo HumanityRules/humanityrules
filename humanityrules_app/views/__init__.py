@@ -12,6 +12,14 @@ from .fleet import (
 )
 from .workspaces import workspaces, workspace_detail, workspace_create, workspace_remove_confirm, workspace_remove, workspace_tag_add, workspace_tag_remove, workspace_tags_save
 from .apps import app_detail, app_deployment_teardown, app_deployment_redeploy, app_deployment_status, app_deployment_log, app_card_status, app_teardown_confirm, app_tag_add, app_tag_remove, app_tags_save, blueprint_row_status, app_remove_confirm, app_remove, app_cost_panel
+from .webapp_public_access import (
+    webapp_public_access_new,
+    webapp_public_access_create,
+    webapp_public_access_status,
+    webapp_public_access_check,
+    webapp_public_access_revoke_confirm,
+    webapp_public_access_revoke,
+)
 from .environments import environments, environment_detail, environment_setup_form, environment_provisioning_log, environment_status, environment_retry, environment_teardown_confirm, environment_teardown, environment_tag_add, environment_tag_remove, environment_tags_save
 from .environment_editor import (
     environment_editor,
@@ -109,7 +117,7 @@ from .auth_env_sso import env_start, env_callback, env_jwks
 from .onboarding import onboarding, onboarding_agent
 from .invites import accept_invite, create_invite, revoke_invite
 from .health import health_check
-from .pdp import pdp_evaluate
+from .pdp import pdp_evaluate, pdp_evaluate_public
 from .policy_proxy_activity import policy_proxy_activity
 from .chat import (
     chat_app_deploy,
@@ -183,6 +191,12 @@ __all__ = [
     "workspace_tags_save",
     "app_detail",
     "app_cost_panel",
+    "webapp_public_access_new",
+    "webapp_public_access_create",
+    "webapp_public_access_status",
+    "webapp_public_access_check",
+    "webapp_public_access_revoke_confirm",
+    "webapp_public_access_revoke",
     "app_deployment_log",
     "app_deployment_teardown",
     "app_deployment_redeploy",
@@ -281,6 +295,7 @@ __all__ = [
     "aws_install_account_callback",
     "health_check",
     "pdp_evaluate",
+    "pdp_evaluate_public",
     "policy_proxy_activity",
     "integrations_org_github_connect",
     "integrations_org_github_callback",

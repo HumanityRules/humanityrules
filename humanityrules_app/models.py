@@ -3,6 +3,7 @@ import uuid
 
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+from django.utils import timezone
 
 
 class User(AbstractUser):
@@ -2222,6 +2223,67 @@ class CostRefreshJob(models.Model):
 
     def __str__(self) -> str:
         return f"CostRefreshJob {self.id} app={self.app_id} {self.status}"
+
+
+class WebappPublicGrant(models.Model):
+    """Anonymous-internet access to one agent webapp on one environment.
+
+    A live row makes ``https://<slug>.<agent-host>/`` reachable without a
+    session: the PDP answers allow for that host and the policy proxy forwards
+    the request with no ``X-Auth-*`` identity headers. Org scoping is
+    transitive via ``app``.
+
+    Rows are never deleted — revoking stamps ``revoked_at``/``revoked_by`` so
+    exposure history stays queryable (same pattern as ``OrganizationInvite``).
+    Each row is one continuous exposure window: extending a live grant updates
+    ``expires_at``; re-publishing after expiry revokes the old row and inserts
+    a fresh one. At most one non-revoked row exists per (app, environment,
+    slug). Expiry is evaluated lazily at PDP query time; no background job.
+    """
+
+    # User webapp slugs as accepted by the agent's `webapps` CLI, minus the
+    # `__` platform-internal prefix: internal webapps are path-routed on the
+    # bare agent host, which is never grantable.
+    SLUG_PATTERN_TEXT = r"^[a-z][a-z0-9-]{0,30}[a-z0-9]$"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
+    app = models.ForeignKey(App, on_delete=models.CASCADE, related_name="webapp_public_grants")
+    environment = models.ForeignKey(Environment, on_delete=models.CASCADE, related_name="webapp_public_grants")
+    slug = models.CharField(max_length=32, help_text="Webapp subdomain label, e.g. 'dashboard' in dashboard.<agent-host>.")
+    granted_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="webapp_grants_created")
+    expires_at = models.DateTimeField(null=True, blank=True, help_text="Null = public until revoked.")
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    revoked_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="webapp_grants_revoked")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Webapp Public Grant"
+        verbose_name_plural = "Webapp Public Grants"
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["app", "environment", "slug"],
+                condition=models.Q(revoked_at__isnull=True),
+                name="unique_unrevoked_webapp_grant",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["app", "environment", "slug"]),
+        ]
+
+    @classmethod
+    def live(cls) -> "models.QuerySet[WebappPublicGrant]":
+        """Grants currently granting access: not revoked and not expired."""
+        return cls.objects.filter(revoked_at__isnull=True).filter(
+            models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=timezone.now()),
+        )
+
+    @property
+    def is_live(self) -> bool:
+        return self.revoked_at is None and (self.expires_at is None or self.expires_at > timezone.now())
+
+    def __str__(self) -> str:
+        return f"WebappPublicGrant {self.slug} app={self.app_id} env={self.environment_id}"
 
 
 # =============================================================================

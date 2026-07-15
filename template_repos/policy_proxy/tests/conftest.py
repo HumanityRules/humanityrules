@@ -65,7 +65,9 @@ def policy_proxy_config() -> config_mod.PolicyProxyConfig:
         upstream_host="127.0.0.1",
         upstream_port=8787,
         listen_port=8443,
+        public_hostname="vmendi-hermes.humr-sandbox.humrsandbox.com",
         pdp_cache_ttl_seconds=0,  # disabled by default; tests opt in explicitly
+        public_cache_ttl_seconds=0,  # disabled by default; tests opt in explicitly
         activity_report_interval_seconds=300,
     )
 

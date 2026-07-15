@@ -25,8 +25,16 @@ class PolicyProxyConfig:
     upstream_host: str
     upstream_port: int
     listen_port: int
-    # Cache ttl for PDP allow/deny decisions, seconds. 0 disables caching.
+    # The agent's public hostname (<subdomain>.<env-domain>). Hosts of the
+    # form <webapp-slug>.<public_hostname> are webapp subdomains and get the
+    # anonymous public-grant check before the session flow. None when the app
+    # is path-routed (no subhosting) — then no host is a webapp subdomain.
+    public_hostname: str | None
+    # Cache ttl for identity-keyed PDP allow/deny decisions, seconds. 0 disables caching.
     pdp_cache_ttl_seconds: int
+    # Cache ttl for anonymous public-webapp decisions, seconds. Bounds both
+    # grant latency (stale deny) and revocation latency (stale allow).
+    public_cache_ttl_seconds: int
     # Authorized traffic reports are coalesced into one request per interval.
     activity_report_interval_seconds: int
 
@@ -59,7 +67,9 @@ def load_proxy_config_from_env() -> PolicyProxyConfig:
         upstream_host=_required("HUMR_UPSTREAM_HOST"),
         upstream_port=int(_required("HUMR_UPSTREAM_PORT")),
         listen_port=int(_required("HUMR_LISTEN_PORT")),
-        pdp_cache_ttl_seconds=_int_env(name="HUMR_PDP_CACHE_TTL_SECONDS", default=600),
+        public_hostname=os.environ.get("HUMR_PUBLIC_HOSTNAME") or None,
+        pdp_cache_ttl_seconds=_int_env(name="HUMR_PDP_CACHE_TTL_SECONDS", default=60),
+        public_cache_ttl_seconds=_int_env(name="HUMR_PUBLIC_CACHE_TTL_SECONDS", default=10),
         activity_report_interval_seconds=_int_env(
             name="HUMR_POLICY_PROXY_ACTIVITY_INTERVAL_SECONDS",
             default=300,

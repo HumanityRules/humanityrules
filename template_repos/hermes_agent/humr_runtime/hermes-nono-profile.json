@@ -11,8 +11,10 @@
     "allow_vars": [
       "AWS_DEFAULT_REGION",
       "AWS_EC2_METADATA_DISABLED",
+      "HUMR_APP_SLUG",
       "HUMR_BIN_DIR",
       "HUMR_CONTROL_PLANE_URL",
+      "HUMR_ENV_SLUG",
       "HUMR_LOGIN_PATH",
       "HUMR_PUBLIC_HOSTNAME",
       "HUMR_ROOT",

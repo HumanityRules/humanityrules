@@ -1,0 +1,84 @@
+{% comment %}
+Confirm page for making one webapp public — the deep-link target printed by
+the agent's `webapps expose`. Plain (non-HTMX) form: the POST redirects to the
+grant's status page, which polls the public URL until it answers.
+Context: app, environments [{environment, agent_hostname, selected}], prefill_slug.
+{% endcomment %}
+<div class="max-w-2xl"
+     x-data="{
+        slug: '{{ prefill_slug|escapejs }}',
+        host: document.querySelector('input[name=environment]:checked')?.dataset.hostname || '',
+        url() { return this.slug && this.host ? 'https://' + this.slug + '.' + this.host + '/' : ''; },
+     }">
+    <div class="mb-6">
+        <a href="/apps/{{ app.slug }}/"
+           hx-get="/apps/{{ app.slug }}/" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true"
+           class="text-sm text-indigo-600 dark:text-indigo-400 hover:underline">&larr; {{ app.name }}</a>
+        <h1 class="mt-2 text-2xl font-bold text-gray-900 dark:text-white">Publish a webapp</h1>
+        <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">
+            Public access means anyone on the internet can open this webapp — no sign-in, no organization membership.
+        </p>
+    </div>
+
+    <form method="post" action="/apps/{{ app.slug }}/public-access/">
+        {% csrf_token %}
+        <div class="space-y-6 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-6">
+            <div>
+                <label for="webapp-slug" class="block text-sm font-medium text-gray-900 dark:text-white">Webapp name</label>
+                <input type="text" name="slug" id="webapp-slug" required
+                       x-model="slug"
+                       pattern="[a-z][a-z0-9-]{0,30}[a-z0-9]"
+                       placeholder="dashboard"
+                       class="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-2 text-sm font-mono text-gray-900 dark:text-white"
+                       value="{{ prefill_slug }}">
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">The subdomain label the agent created the webapp under.</p>
+            </div>
+
+            <fieldset>
+                <legend class="block text-sm font-medium text-gray-900 dark:text-white">Environment</legend>
+                <div class="mt-2 space-y-2">
+                    {% for row in environments %}
+                    <label class="flex items-center gap-2 text-sm text-gray-900 dark:text-white">
+                        <input type="radio" name="environment" value="{{ row.environment.slug }}"
+                               data-hostname="{{ row.agent_hostname|default:'' }}"
+                               @change="host = $el.dataset.hostname"
+                               {% if row.selected %}checked{% endif %} required>
+                        <span>{{ row.environment.name }}</span>
+                        {% if row.agent_hostname %}<span class="font-mono text-xs text-gray-500 dark:text-gray-400">{{ row.agent_hostname }}</span>{% endif %}
+                    </label>
+                    {% endfor %}
+                </div>
+            </fieldset>
+
+            <fieldset>
+                <legend class="block text-sm font-medium text-gray-900 dark:text-white">Public for</legend>
+                <div class="mt-2 flex gap-6">
+                    <label class="flex items-center gap-2 text-sm text-gray-900 dark:text-white">
+                        <input type="radio" name="expiry" value="1h"> 1 hour
+                    </label>
+                    <label class="flex items-center gap-2 text-sm text-gray-900 dark:text-white">
+                        <input type="radio" name="expiry" value="24h" checked> 24 hours
+                    </label>
+                    <label class="flex items-center gap-2 text-sm text-gray-900 dark:text-white">
+                        <input type="radio" name="expiry" value="never"> Until revoked
+                    </label>
+                </div>
+            </fieldset>
+
+            <div class="rounded-md border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/10 p-4">
+                <p class="text-sm text-amber-800 dark:text-amber-300">
+                    This will be reachable by <strong>anyone on the internet</strong>:
+                </p>
+                <p class="mt-1 font-mono text-sm text-amber-900 dark:text-amber-200" x-text="url() || '(pick a webapp name and environment)'"></p>
+            </div>
+
+            <div class="flex justify-end gap-3">
+                <a href="/apps/{{ app.slug }}/"
+                   hx-get="/apps/{{ app.slug }}/" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true"
+                   class="rounded-md px-3 py-2 text-sm font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">Cancel</a>
+                <button type="submit"
+                        class="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700">Make public</button>
+            </div>
+        </div>
+    </form>
+</div>

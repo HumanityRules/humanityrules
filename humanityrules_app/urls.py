@@ -46,6 +46,16 @@ urlpatterns = [
     path("apps/<slug:app_slug>/deployments/<uuid:deployment_id>/teardown-confirm/", views.app_teardown_confirm, name="app_teardown_confirm"),
     path("apps/<slug:app_slug>/remove-confirm/", views.app_remove_confirm, name="app_remove_confirm"),
     path("apps/<slug:app_slug>/remove/", views.app_remove, name="app_remove"),
+    path("apps/<slug:app_slug>/public-access/new", views.webapp_public_access_new, name="webapp_public_access_new"),
+    path("apps/<slug:app_slug>/public-access/", views.webapp_public_access_create, name="webapp_public_access_create"),
+    path("apps/<slug:app_slug>/public-access/<uuid:grant_id>/", views.webapp_public_access_status, name="webapp_public_access_status"),
+    path("apps/<slug:app_slug>/public-access/<uuid:grant_id>/check/", views.webapp_public_access_check, name="webapp_public_access_check"),
+    path(
+        "apps/<slug:app_slug>/public-access/<uuid:grant_id>/revoke-confirm/",
+        views.webapp_public_access_revoke_confirm,
+        name="webapp_public_access_revoke_confirm",
+    ),
+    path("apps/<slug:app_slug>/public-access/<uuid:grant_id>/revoke/", views.webapp_public_access_revoke, name="webapp_public_access_revoke"),
 
     # Environments
     path("environments/", views.environments, name="environments"),
@@ -205,6 +215,7 @@ urlpatterns = [
     path("api/github/webhook", views.github_webhook, name="github_webhook"),
     #  - pdp_evaluate: called by policy proxies to authorize each request against ABAC
     path("api/pdp/evaluate", views.pdp_evaluate, name="pdp_evaluate"),
+    path("api/pdp/evaluate-public", views.pdp_evaluate_public, name="pdp_evaluate_public"),
     #  - policy_proxy_activity: debounced last-authorized-traffic signal from each policy proxy
     path("api/runtime/policy-proxy-activity", views.policy_proxy_activity, name="policy_proxy_activity"),
 

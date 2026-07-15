@@ -1,7 +1,7 @@
 """Tests for the PDP decision cache."""
 
 from policy_proxy.pdp import PdpDecision
-from policy_proxy.pdp_cache import PdpDecisionCache
+from policy_proxy.pdp_cache import PdpDecisionCache, PublicWebappDecisionCache
 
 
 def _fake_clock(start: float = 100.0):
@@ -91,3 +91,36 @@ def test_clear_drops_everything() -> None:
     assert cache.size() == 2
     cache.clear()
     assert cache.size() == 0
+
+
+def test_public_cache_expires_entries() -> None:
+    now, advance = _fake_clock()
+    cache = PublicWebappDecisionCache(ttl_seconds=10, max_entries=8, now_fn=now)
+    cache.put(slug="dash", decision=DENY)
+    assert cache.get(slug="dash") == DENY
+    advance(11)
+    assert cache.get(slug="dash") is None
+
+
+def test_public_cache_caps_attacker_chosen_keys() -> None:
+    now, _ = _fake_clock()
+    cache = PublicWebappDecisionCache(ttl_seconds=60, max_entries=3, now_fn=now)
+    for i in range(10):
+        cache.put(slug=f"scan-{i}", decision=DENY)
+    assert cache.size() == 3
+    # Re-putting an existing key never evicts.
+    cache.put(slug="scan-9", decision=ALLOW)
+    assert cache.size() == 3
+    assert cache.get(slug="scan-9") == ALLOW
+
+
+def test_public_cache_evicts_soonest_expiring_entry() -> None:
+    now, advance = _fake_clock()
+    cache = PublicWebappDecisionCache(ttl_seconds=60, max_entries=2, now_fn=now)
+    cache.put(slug="old", decision=DENY)
+    advance(30)
+    cache.put(slug="new", decision=ALLOW)
+    cache.put(slug="newest", decision=ALLOW)
+    assert cache.get(slug="old") is None
+    assert cache.get(slug="new") == ALLOW
+    assert cache.get(slug="newest") == ALLOW

@@ -163,20 +163,39 @@ def _upstream_starting_response(request: Request) -> Response:
 
 async def proxy_to_upstream(
     request: Request,
-    identity: jwt_verify.SessionIdentity,
+    identity: jwt_verify.SessionIdentity | None,
     upstream_base: str,
     http_client: httpx.AsyncClient,
+    max_body_bytes: int | None,
 ):
-    """Forward the request to *upstream_base* and stream the reply back."""
+    """Forward the request to *upstream_base* and stream the reply back.
+
+    identity=None is an anonymous public-webapp request: no X-Auth-* headers
+    are added, and _filter_request_headers has already stripped any inbound
+    ones — the upstream app detects visitors by their absence.
+
+    max_body_bytes caps the request body (public traffic only). Bodies without
+    a Content-Length are rejected outright: uvicorn enforces the declared
+    length, so the header check is airtight, while chunked uploads would need
+    mid-stream abortion to cap.
+    """
+    if max_body_bytes is not None:
+        if "transfer-encoding" in request.headers:
+            return PlainTextResponse(content="content-length required", status_code=411)
+        content_length = int(request.headers.get("content-length", "0") or "0")
+        if content_length > max_body_bytes:
+            return PlainTextResponse(content="request body too large", status_code=413)
+
     url = f"{upstream_base}{request.url.path}"
     if request.url.query:
         url = f"{url}?{request.url.query}"
 
     headers = _filter_request_headers(request.headers)
-    headers["X-Auth-User"] = identity.username
-    headers["X-Auth-Sub"] = identity.sub
-    headers["X-Auth-Provider"] = identity.provider
-    headers["X-Auth-Email"] = identity.email
+    if identity is not None:
+        headers["X-Auth-User"] = identity.username
+        headers["X-Auth-Sub"] = identity.sub
+        headers["X-Auth-Provider"] = identity.provider
+        headers["X-Auth-Email"] = identity.email
     original_host = request.headers.get("host", "")
     if original_host:
         headers["X-Forwarded-Host"] = original_host
@@ -277,14 +296,16 @@ async def _pump_upstream_to_client(
 
 async def proxy_to_upstream_ws(
     websocket: WebSocket,
-    identity: jwt_verify.SessionIdentity,
+    identity: jwt_verify.SessionIdentity | None,
     upstream_host: str,
     upstream_port: int,
 ) -> None:
     """Proxy a WebSocket between the browser and the local upstream app.
 
     Opens the upstream connection first, then accepts the inbound handshake
-    with the selected subprotocol and pumps frames until either side disconnects.
+    with the selected subprotocol and pumps frames until either side
+    disconnects. identity=None is an anonymous public-webapp connection: no
+    X-Auth-* headers are added (inbound ones are already stripped).
     """
     path = websocket.url.path
     query = websocket.url.query
@@ -293,10 +314,11 @@ async def proxy_to_upstream_ws(
         uri = f"{uri}?{query}"
 
     extra_headers = _filter_ws_handshake_headers(websocket.headers)
-    extra_headers.append(("X-Auth-User", identity.username))
-    extra_headers.append(("X-Auth-Sub", identity.sub))
-    extra_headers.append(("X-Auth-Provider", identity.provider))
-    extra_headers.append(("X-Auth-Email", identity.email))
+    if identity is not None:
+        extra_headers.append(("X-Auth-User", identity.username))
+        extra_headers.append(("X-Auth-Sub", identity.sub))
+        extra_headers.append(("X-Auth-Provider", identity.provider))
+        extra_headers.append(("X-Auth-Email", identity.email))
     if (original_host := websocket.headers.get("host")):
         extra_headers.append(("X-Forwarded-Host", original_host))
 
