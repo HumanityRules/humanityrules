@@ -384,6 +384,115 @@ def test_upstream_non_connect_error_still_returns_502(
 
 
 # -----------------------------------------------------------------------------
+# Cookie forwarding — the session JWT must never reach the upstream app
+# -----------------------------------------------------------------------------
+
+
+def _cookie_names(request: httpx.Request) -> list[str]:
+    """Return the cookie names in the request's Cookie header."""
+    raw = request.headers.get("cookie", "")
+    return [pair.split("=", 1)[0].strip() for pair in raw.split(";") if pair.strip()]
+
+
+def test_session_only_request_forwards_no_cookie_header(
+    policy_proxy_config, fake_jwks_client, jwt_minter,
+) -> None:
+    async def pdp(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"decision": "allow", "reason": "ok"})
+
+    async def upstream(request: httpx.Request) -> httpx.Response:
+        assert "cookie" not in request.headers
+        return httpx.Response(200, content=_streamed_body(b"ok"))
+
+    client = _mk_client(policy_proxy_config, fake_jwks_client, pdp, upstream)
+    response = client.get(
+        "/chat/new",
+        cookies={jwt_verify.SESSION_COOKIE_NAME: jwt_minter()},
+    )
+    assert response.status_code == 200
+
+
+def test_app_cookies_forwarded_without_session_cookie(
+    policy_proxy_config, fake_jwks_client, jwt_minter,
+) -> None:
+    async def pdp(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"decision": "allow", "reason": "ok"})
+
+    async def upstream(request: httpx.Request) -> httpx.Response:
+        assert jwt_verify.SESSION_COOKIE_NAME not in _cookie_names(request)
+        assert "theme" in _cookie_names(request)
+        assert "csrftoken" in _cookie_names(request)
+        assert "theme=dark" in request.headers["cookie"]
+        assert "csrftoken=abc123" in request.headers["cookie"]
+        return httpx.Response(200, content=_streamed_body(b"ok"))
+
+    client = _mk_client(policy_proxy_config, fake_jwks_client, pdp, upstream)
+    response = client.get(
+        "/chat/new",
+        cookies={
+            jwt_verify.SESSION_COOKIE_NAME: jwt_minter(),
+            "theme": "dark",
+            "csrftoken": "abc123",
+        },
+    )
+    assert response.status_code == 200
+
+
+def test_duplicate_cookie_headers_merge_without_session_cookie(
+    policy_proxy_config, fake_jwks_client, jwt_minter,
+) -> None:
+    """HTTP/2 clients may split cookies across Cookie fields; all must survive merged."""
+    async def pdp(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"decision": "allow", "reason": "ok"})
+
+    async def upstream(request: httpx.Request) -> httpx.Response:
+        names = _cookie_names(request)
+        assert jwt_verify.SESSION_COOKIE_NAME not in names
+        assert "theme" in names
+        assert "csrftoken" in names
+        cookie_header = request.headers["cookie"]
+        assert "theme=dark" in cookie_header
+        assert "csrftoken=abc123" in cookie_header
+        return httpx.Response(200, content=_streamed_body(b"ok"))
+
+    client = _mk_client(policy_proxy_config, fake_jwks_client, pdp, upstream)
+    response = client.get(
+        "/chat/new",
+        headers=[
+            ("cookie", f"{jwt_verify.SESSION_COOKIE_NAME}={jwt_minter()}; theme=dark"),
+            ("cookie", "csrftoken=abc123"),
+        ],
+    )
+    assert response.status_code == 200
+
+
+def test_similarly_named_cookies_are_preserved(
+    policy_proxy_config, fake_jwks_client, jwt_minter,
+) -> None:
+    """Only the exact session cookie name is stripped, not superstrings of it."""
+    async def pdp(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"decision": "allow", "reason": "ok"})
+
+    async def upstream(request: httpx.Request) -> httpx.Response:
+        names = _cookie_names(request)
+        assert jwt_verify.SESSION_COOKIE_NAME not in names
+        assert f"{jwt_verify.SESSION_COOKIE_NAME}2" in names
+        assert f"my_{jwt_verify.SESSION_COOKIE_NAME}" in names
+        return httpx.Response(200, content=_streamed_body(b"ok"))
+
+    client = _mk_client(policy_proxy_config, fake_jwks_client, pdp, upstream)
+    response = client.get(
+        "/chat/new",
+        cookies={
+            jwt_verify.SESSION_COOKIE_NAME: jwt_minter(),
+            f"{jwt_verify.SESSION_COOKIE_NAME}2": "keep-me",
+            f"my_{jwt_verify.SESSION_COOKIE_NAME}": "keep-me-too",
+        },
+    )
+    assert response.status_code == 200
+
+
+# -----------------------------------------------------------------------------
 # PDP decision cache
 # -----------------------------------------------------------------------------
 
