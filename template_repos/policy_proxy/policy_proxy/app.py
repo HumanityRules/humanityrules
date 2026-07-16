@@ -100,7 +100,7 @@ async def _authorize_session(
 
     A webapp subdomain with a live public grant is allowed anonymously — the
     session flow never runs, so org members and visitors see the same thing.
-    A webapp subdomain without one falls through to the session flow.
+    A webapp subdomain without a live public grant falls through to the session flow.
     """
     webapp_slug = _webapp_slug_for_host(host=host, public_hostname=state.config.public_hostname)
     if webapp_slug is not None:
