@@ -247,6 +247,84 @@ def test_ws_allow_proxies_bidirectional(
     assert "cookie" not in seen_headers
 
 
+def test_ws_public_request_cannot_forge_underscore_identity_alias(
+    policy_proxy_config, fake_jwks_client,
+) -> None:
+    """The handshake must strip X_Auth_User too: a WSGI upstream folds it to the
+    same HTTP_X_AUTH_USER as the hyphenated identity header the proxy authors."""
+    port = _free_port()
+    cfg = type(policy_proxy_config)(
+        **{**policy_proxy_config.__dict__, "upstream_port": port},
+    )
+    public_host = f"dashboard.{cfg.public_hostname}"
+    seen: dict[str, list[str]] = {"names": []}
+
+    async def upstream_handler(connection):
+        for k, _ in connection.request.headers.raw_items():
+            seen["names"].append(k.lower())
+        first = await connection.recv()
+        await connection.send(f"echo:{first}")
+        try:
+            await connection.recv()
+        except websockets.ConnectionClosed:
+            pass
+
+    async def pdp(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"decision": "allow", "reason": "public-webapp"})
+
+    client = _mk_client(cfg, fake_jwks_client, pdp)
+
+    with _upstream_ws_server(upstream_handler, port=port):
+        with client.websocket_connect(
+            "/ws",
+            headers={"host": public_host, "X_Auth_User": "victor"},
+        ) as ws:
+            ws.send_text("hello")
+            assert ws.receive_text() == "echo:hello"
+
+    assert "x_auth_user" not in seen["names"]
+    assert "x-auth-user" not in seen["names"]
+
+
+def test_ws_public_request_cannot_forge_forwarded_host(
+    policy_proxy_config, fake_jwks_client,
+) -> None:
+    """The handshake carries headers as a list, where the proxy's own value can only
+    be appended, never substituted for a forged one. It has to be stripped inbound."""
+    port = _free_port()
+    cfg = type(policy_proxy_config)(
+        **{**policy_proxy_config.__dict__, "upstream_port": port},
+    )
+    public_host = f"dashboard.{cfg.public_hostname}"
+    seen: dict[str, list[str]] = {"xfh": []}
+
+    async def upstream_handler(connection):
+        for k, v in connection.request.headers.raw_items():
+            if k.lower() == "x-forwarded-host":
+                seen["xfh"].append(v)
+        first = await connection.recv()
+        await connection.send(f"echo:{first}")
+        try:
+            await connection.recv()
+        except websockets.ConnectionClosed:
+            pass
+
+    async def pdp(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"decision": "allow", "reason": "public-webapp"})
+
+    client = _mk_client(cfg, fake_jwks_client, pdp)
+
+    with _upstream_ws_server(upstream_handler, port=port):
+        with client.websocket_connect(
+            "/ws",
+            headers={"host": public_host, "X-Forwarded-Host": cfg.public_hostname},
+        ) as ws:
+            ws.send_text("hello")
+            assert ws.receive_text() == "echo:hello"
+
+    assert seen["xfh"] == [public_host]
+
+
 async def test_ws_upstream_unreachable_closes_with_1011(
     policy_proxy_config: config_mod.PolicyProxyConfig,
     fake_jwks_client: object,

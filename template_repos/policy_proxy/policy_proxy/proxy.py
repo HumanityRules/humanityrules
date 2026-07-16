@@ -80,9 +80,19 @@ _HOP_BY_HOP_HEADERS = {
     "te", "trailers", "transfer-encoding", "upgrade",
 }
 
+# Headers this proxy authors. The upstream app reads X-Auth-* as identity and
+# Caddy routes on X-Forwarded-Host, so a client-supplied copy must never reach
+# either. Stripping here is the only thing that enforces that: assigning the
+# header later cannot displace an inbound one, because the outbound dict is
+# case-sensitive while inbound names arrive lowercased, and the WS handshake
+# appends to a list.
+# x-forwarded-for and x-forwarded-proto stay out deliberately — the ALB in
+# front authors those, and the WebUI reads them for client IP and https
+# detection.
 _FORBIDDEN_INBOUND_HEADERS = {
     "host",
     "x-auth-user", "x-auth-sub", "x-auth-email", "x-auth-provider",
+    "x-forwarded-host",
 }
 
 # Headers the websockets library generates itself (or that belong only to the
@@ -116,12 +126,15 @@ def _filter_request_headers(headers) -> dict[str, str]:
     # section 8.1.2.5); collect them all so the dict doesn't keep only the last.
     cookie_parts: list[str] = []
     for name, value in headers.items():
-        lower = name.lower()
-        if lower in _HOP_BY_HOP_HEADERS or lower in _FORBIDDEN_INBOUND_HEADERS:
+        # Match on hyphens AND underscores: a WSGI upstream folds X_Auth_User and
+        # X-Auth-User to the same HTTP_X_AUTH_USER, so an underscore alias that
+        # slipped past this set would be read as the identity header it spoofs.
+        norm = name.lower().replace("_", "-")
+        if norm in _HOP_BY_HOP_HEADERS or norm in _FORBIDDEN_INBOUND_HEADERS:
             continue
         # The session JWT is for the policy proxy, not the upstream app — apps
         # that need user identity read X-Auth-* instead.
-        if lower == "cookie":
+        if norm == "cookie":
             if (stripped := _strip_session_cookie(cookie_header=value)):
                 cookie_parts.append(stripped)
             continue
@@ -235,8 +248,10 @@ async def proxy_to_upstream(
 def _filter_ws_handshake_headers(headers) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
     for name, value in headers.items():
-        lower = name.lower()
-        if lower in _WS_HANDSHAKE_HEADERS or lower in _FORBIDDEN_INBOUND_HEADERS:
+        # See _filter_request_headers: normalize underscores so an X_Auth_User
+        # alias can't slip a spoofed identity header past the forbidden set.
+        norm = name.lower().replace("_", "-")
+        if norm in _WS_HANDSHAKE_HEADERS or norm in _FORBIDDEN_INBOUND_HEADERS:
             continue
         out.append((name, value))
     return out
