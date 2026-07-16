@@ -39,7 +39,7 @@ Context: app, environments [{environment, agent_hostname, selected}], prefill_sl
                 <div class="mt-2 space-y-2">
                     {% for row in environments %}
                     <label class="flex items-center gap-2 text-sm text-gray-900 dark:text-white">
-                        <input type="radio" name="environment" value="{{ row.environment.slug }}"
+                        <input type="radio" name="environment" value="{{ row.environment.id }}"
                                data-hostname="{{ row.agent_hostname|default:'' }}"
                                @change="host = $el.dataset.hostname"
                                {% if row.selected %}checked{% endif %} required>

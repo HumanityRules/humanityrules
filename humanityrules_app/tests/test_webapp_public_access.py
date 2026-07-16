@@ -3,8 +3,10 @@
 import hashlib
 import json
 from datetime import timedelta
+from unittest import mock
 
 from django.db import IntegrityError, transaction
+from django.http import HttpResponse
 from django.test import Client, TestCase
 from django.utils import timezone
 
@@ -24,6 +26,7 @@ from humanityrules_app.models import (
     Workspace,
 )
 from humanityrules_app.services import abac_service
+from humanityrules_app.views import webapp_public_access
 
 
 def _hash(raw: str) -> str:
@@ -171,15 +174,16 @@ class TestGrantLifecycle(PublicAccessTestBase):
 
 class TestPublicAccessViews(PublicAccessTestBase):
 
-    def _create(self, user: User, slug: str, expiry: str = "24h", environment: str = "staging"):
+    def _create(self, user: User, slug: str, expiry: str, environment: str | None) -> HttpResponse:
+        """POST the publish form; environment=None targets self.environment."""
         self.client.force_login(user)
         return self.client.post(
             f"/apps/{self.app.slug}/public-access/",
-            data={"slug": slug, "environment": environment, "expiry": expiry},
+            data={"slug": slug, "environment": environment if environment is not None else str(self.environment.id), "expiry": expiry},
         )
 
     def test_org_admin_creates_grant(self) -> None:
-        response = self._create(user=self.admin, slug="dashboard")
+        response = self._create(user=self.admin, slug="dashboard", expiry="24h", environment=None)
         self.assertEqual(response.status_code, 302)
         grant = WebappPublicGrant.objects.get(app=self.app, slug="dashboard")
         self.assertTrue(grant.is_live)
@@ -188,50 +192,83 @@ class TestPublicAccessViews(PublicAccessTestBase):
         self.assertIn(f"/apps/{self.app.slug}/public-access/{grant.id}/", response["Location"])
 
     def test_never_expiry_creates_open_ended_grant(self) -> None:
-        self._create(user=self.admin, slug="dashboard", expiry="never")
+        self._create(user=self.admin, slug="dashboard", expiry="never", environment=None)
         grant = WebappPublicGrant.objects.get(app=self.app, slug="dashboard")
         self.assertIsNone(grant.expires_at)
 
     def test_member_cannot_create_grant(self) -> None:
-        response = self._create(user=self.member, slug="dashboard")
+        response = self._create(user=self.member, slug="dashboard", expiry="24h", environment=None)
         self.assertEqual(response.status_code, 403)
         self.assertFalse(WebappPublicGrant.objects.filter(slug="dashboard").exists())
 
     def test_invalid_slug_rejected(self) -> None:
         for bad in ("__admin", "a", "has.dot", "-lead"):
-            response = self._create(user=self.admin, slug=bad)
+            response = self._create(user=self.admin, slug=bad, expiry="24h", environment=None)
             self.assertEqual(response.status_code, 422, bad)
         self.assertFalse(WebappPublicGrant.objects.exists())
 
     def test_slug_input_is_lowercased(self) -> None:
-        response = self._create(user=self.admin, slug="Dashboard")
+        response = self._create(user=self.admin, slug="Dashboard", expiry="24h", environment=None)
         self.assertEqual(response.status_code, 302)
         self.assertTrue(WebappPublicGrant.objects.filter(slug="dashboard").exists())
 
     def test_undeployed_environment_rejected(self) -> None:
-        Environment.objects.create(
+        prod = Environment.objects.create(
             aws_account=self.aws_account, name="prod", slug="prod",
             aws_region="us-east-1", shared_alb_hosted_zone="prod.example.com",
         )
-        response = self._create(user=self.admin, slug="dashboard", environment="prod")
+        response = self._create(user=self.admin, slug="dashboard", expiry="24h", environment=str(prod.id))
         self.assertEqual(response.status_code, 422)
+
+    def test_non_uuid_environment_rejected(self) -> None:
+        response = self._create(user=self.admin, slug="dashboard", expiry="24h", environment="staging")
+        self.assertEqual(response.status_code, 422)
+
+    def test_same_slug_environment_in_other_account_is_unambiguous(self) -> None:
+        other_account = AWSAccount.objects.create(organization=self.org, name="Second Account")
+        Environment.objects.create(
+            aws_account=other_account, name="staging", slug="staging",
+            aws_region="us-east-1", shared_alb_hosted_zone="staging2.example.com",
+        )
+        response = self._create(user=self.admin, slug="dashboard", expiry="24h", environment=None)
+        self.assertEqual(response.status_code, 302)
+        grant = WebappPublicGrant.objects.get(app=self.app, slug="dashboard")
+        self.assertEqual(grant.environment, self.environment)
 
     def test_template_without_subhosting_rejected(self) -> None:
         self.template.enable_subhosting = False
         self.template.save(update_fields=["enable_subhosting"])
-        response = self._create(user=self.admin, slug="dashboard")
+        response = self._create(user=self.admin, slug="dashboard", expiry="24h", environment=None)
         self.assertEqual(response.status_code, 422)
 
     def test_recreate_extends_live_grant(self) -> None:
-        self._create(user=self.admin, slug="dashboard", expiry="1h")
-        self._create(user=self.admin, slug="dashboard", expiry="never")
+        self._create(user=self.admin, slug="dashboard", expiry="1h", environment=None)
+        self._create(user=self.admin, slug="dashboard", expiry="never", environment=None)
         grants = WebappPublicGrant.objects.filter(app=self.app, slug="dashboard")
         self.assertEqual(grants.count(), 1)
         self.assertIsNone(grants.get().expires_at)
 
+    def test_first_publish_race_retries_and_extends(self) -> None:
+        real = webapp_public_access._create_or_extend_grant
+        call_count = {"n": 0}
+
+        def lose_race_once(**kwargs) -> WebappPublicGrant:
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                self._grant(slug="dashboard", expires_at=timezone.now() + timedelta(hours=1))
+                raise IntegrityError("unique_unrevoked_webapp_grant")
+            return real(**kwargs)
+
+        with mock.patch.object(webapp_public_access, "_create_or_extend_grant", side_effect=lose_race_once):
+            response = self._create(user=self.admin, slug="dashboard", expiry="never", environment=None)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(call_count["n"], 2)
+        grant = WebappPublicGrant.objects.get(app=self.app, slug="dashboard")
+        self.assertIsNone(grant.expires_at)
+
     def test_recreate_after_expiry_revokes_old_and_inserts_new(self) -> None:
         expired = self._grant(slug="dashboard", expires_at=timezone.now() - timedelta(minutes=1))
-        response = self._create(user=self.admin, slug="dashboard")
+        response = self._create(user=self.admin, slug="dashboard", expiry="24h", environment=None)
         self.assertEqual(response.status_code, 302)
         expired.refresh_from_db()
         self.assertIsNotNone(expired.revoked_at)

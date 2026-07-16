@@ -10,19 +10,19 @@ not a workspace one.
 
 import logging
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta
 from urllib.parse import urlparse
 from uuid import UUID
 
 import httpx
 from django.contrib.auth.decorators import login_required
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 
-from ..models import App, Deployment, DeploymentBlueprint, Environment, WebappPublicGrant
+from ..models import App, Deployment, DeploymentBlueprint, Environment, User, WebappPublicGrant
 from ..services import abac_service
 from . import base
 
@@ -140,6 +140,33 @@ def webapp_public_access_new(request: HttpRequest, app_slug: str) -> HttpRespons
     return render(request, "humanityrules_app/apps/app_public_access_new.html", context=context)
 
 
+def _create_or_extend_grant(app: App, environment: Environment, slug: str, granted_by: User, expires_at: datetime | None) -> WebappPublicGrant:
+    """One exposure window per row: a previous window that has lapsed gets its
+    revoked_at stamped (satisfying the partial unique constraint) and a fresh
+    row records the new window. A still-live grant is just extended.
+    """
+    with transaction.atomic():
+        existing = (
+            WebappPublicGrant.objects.select_for_update()
+            .filter(app=app, environment=environment, slug=slug, revoked_at__isnull=True)
+            .first()
+        )
+        if existing is not None and existing.is_live:
+            existing.expires_at = expires_at
+            existing.save(update_fields=["expires_at"])
+            return existing
+        if existing is not None:
+            existing.revoked_at = timezone.now()
+            existing.save(update_fields=["revoked_at"])
+        return WebappPublicGrant.objects.create(
+            app=app,
+            environment=environment,
+            slug=slug,
+            granted_by=granted_by,
+            expires_at=expires_at,
+        )
+
+
 @login_required
 @require_POST
 def webapp_public_access_create(request: HttpRequest, app_slug: str) -> HttpResponse:
@@ -155,9 +182,15 @@ def webapp_public_access_create(request: HttpRequest, app_slug: str) -> HttpResp
     if not _SLUG_RE.match(slug):
         return HttpResponse("Invalid webapp name.", status=422)
 
+    # Looked up by id, not slug: environment slugs are only unique per AWS
+    # account, so an org with two accounts can hold same-slugged environments.
+    try:
+        environment_id = UUID(request.POST.get("environment", ""))
+    except ValueError:
+        return HttpResponse("Invalid environment.", status=422)
     environment = get_object_or_404(
         Environment.objects.filter(aws_account__organization=request.user.current_organization),
-        slug=request.POST.get("environment", ""),
+        id=environment_id,
     )
     blueprint_exists = (
         DeploymentBlueprint.objects.filter(app=app, environment=environment)
@@ -173,30 +206,13 @@ def webapp_public_access_create(request: HttpRequest, app_slug: str) -> HttpResp
     lifetime = _EXPIRY_CHOICES[expiry_key]
     expires_at = timezone.now() + lifetime if lifetime is not None else None
 
-    # One exposure window per row: a previous window that has lapsed gets its
-    # revoked_at stamped (satisfying the partial unique constraint) and a fresh
-    # row records the new window. A still-live grant is just extended.
-    with transaction.atomic():
-        existing = (
-            WebappPublicGrant.objects.select_for_update()
-            .filter(app=app, environment=environment, slug=slug, revoked_at__isnull=True)
-            .first()
-        )
-        if existing is not None and existing.is_live:
-            existing.expires_at = expires_at
-            existing.save(update_fields=["expires_at"])
-            grant = existing
-        else:
-            if existing is not None:
-                existing.revoked_at = timezone.now()
-                existing.save(update_fields=["revoked_at"])
-            grant = WebappPublicGrant.objects.create(
-                app=app,
-                environment=environment,
-                slug=slug,
-                granted_by=request.user,
-                expires_at=expires_at,
-            )
+    try:
+        grant = _create_or_extend_grant(app=app, environment=environment, slug=slug, granted_by=request.user, expires_at=expires_at)
+    except IntegrityError:
+        # Lost a concurrent first-publish race on unique_unrevoked_webapp_grant:
+        # select_for_update can't lock a row that doesn't exist yet. The winner's
+        # row does exist now, so the retry locks it and takes the extend path.
+        grant = _create_or_extend_grant(app=app, environment=environment, slug=slug, granted_by=request.user, expires_at=expires_at)
 
     logger.info(
         "webapp public grant created app=%s env=%s slug=%s by=%s expires=%s",
