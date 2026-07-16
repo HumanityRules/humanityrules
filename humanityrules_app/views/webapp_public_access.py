@@ -11,6 +11,7 @@ not a workspace one.
 import logging
 import re
 from datetime import timedelta
+from urllib.parse import urlparse
 from uuid import UUID
 
 import httpx
@@ -223,6 +224,26 @@ def webapp_public_access_status(request: HttpRequest, app_slug: str, grant_id: U
     return render(request, "humanityrules_app/apps/app_public_access_status.html", context=context)
 
 
+def _webapp_answered_anonymously(response: httpx.Response) -> bool:
+    """Whether *response* came from the webapp itself, not the layers in front of it.
+
+    The not-yet-public failure modes hide behind sub-500 statuses: the policy
+    proxy answers an anonymous navigation with a 302 off-host to the CP login
+    (never 401/403 — those only reach authenticated callers), and Caddy answers
+    an unrouted slug host with its literal 404 "unknown host" body (see the
+    hermes_agent Caddyfile). Anything the webapp itself produced — its own 4xx,
+    a same-host redirect — counts as reachable.
+    """
+    if response.is_redirect:
+        target_host = urlparse(response.headers.get("location", "")).netloc
+        return target_host in ("", response.request.url.host)
+    if response.status_code in (401, 403):
+        return False
+    if response.status_code == 404 and response.text.strip() == "unknown host":
+        return False
+    return response.status_code < 500
+
+
 @login_required
 @require_GET
 def webapp_public_access_check(request: HttpRequest, app_slug: str, grant_id: UUID) -> HttpResponse:
@@ -244,8 +265,8 @@ def webapp_public_access_check(request: HttpRequest, app_slug: str, grant_id: UU
         status = "error"
     else:
         try:
-            response = httpx.get(public_url, timeout=_LIVE_CHECK_TIMEOUT_SECONDS, follow_redirects=True)
-            if response.status_code < 500 and response.status_code not in (401, 403):
+            response = httpx.get(public_url, timeout=_LIVE_CHECK_TIMEOUT_SECONDS, follow_redirects=False)
+            if _webapp_answered_anonymously(response=response):
                 status = "live"
         except httpx.HTTPError:
             pass
