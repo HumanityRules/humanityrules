@@ -25,7 +25,11 @@ _HOP_BY_HOP_HEADERS = {
     "te", "trailers", "transfer-encoding", "upgrade",
 }
 
-_FORBIDDEN_INBOUND_HEADERS = {"host"}
+# Headers this proxy authors, stripped inbound so a client copy cannot reach
+# Caddy's router alongside ours. Assigning them later cannot displace an
+# inbound one: the outbound dict is case-sensitive while inbound names arrive
+# lowercased, and the WS handshake appends to a list.
+_FORBIDDEN_INBOUND_HEADERS = {"host", "x-forwarded-host"}
 _ORIGIN_LIKE_HEADERS = frozenset({"origin", "referer"})
 
 # Mirrors policy_proxy: on localhost, cookies are shared across ports, so a
@@ -90,10 +94,13 @@ def _filter_request_headers(headers) -> dict[str, str]:
     # section 8.1.2.5); collect them all so the dict doesn't keep only the last.
     cookie_parts: list[str] = []
     for name, value in headers.items():
-        lower = name.lower()
-        if lower in _HOP_BY_HOP_HEADERS or lower in _FORBIDDEN_INBOUND_HEADERS:
+        # Match on hyphens AND underscores: a WSGI upstream folds X_Forwarded_Host
+        # and X-Forwarded-Host to the same HTTP_X_FORWARDED_HOST, so an underscore
+        # alias that slipped past this set would be read as the header it spoofs.
+        norm = name.lower().replace("_", "-")
+        if norm in _HOP_BY_HOP_HEADERS or norm in _FORBIDDEN_INBOUND_HEADERS:
             continue
-        if lower == "cookie":
+        if norm == "cookie":
             if (stripped := _strip_session_cookie(cookie_header=value)):
                 cookie_parts.append(stripped)
             continue
@@ -163,10 +170,12 @@ async def proxy_to_upstream(
 def _filter_ws_handshake_headers(headers) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
     for name, value in headers.items():
-        lower = name.lower()
-        if lower in _WS_HANDSHAKE_HEADERS or lower in _FORBIDDEN_INBOUND_HEADERS:
+        # See _filter_request_headers: normalize underscores so an X_Forwarded_Host
+        # alias can't slip a spoofed header past the forbidden set.
+        norm = name.lower().replace("_", "-")
+        if norm in _WS_HANDSHAKE_HEADERS or norm in _FORBIDDEN_INBOUND_HEADERS:
             continue
-        if lower == "cookie":
+        if norm == "cookie":
             if (stripped := _strip_session_cookie(cookie_header=value)):
                 out.append((name, stripped))
             continue

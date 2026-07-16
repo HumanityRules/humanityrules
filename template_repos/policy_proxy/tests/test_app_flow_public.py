@@ -64,6 +64,60 @@ def test_public_grant_allows_anonymous_and_strips_spoofed_identity(policy_proxy_
     assert payload == {"app_id": "vmendi-hermes", "webapp_slug": "dashboard", "path": "/"}
 
 
+def test_public_request_cannot_forge_underscore_identity_alias(
+    policy_proxy_config, fake_jwks_client,
+) -> None:
+    """X_Auth_User is a WSGI alias of X-Auth-User (both fold to HTTP_X_AUTH_USER),
+    so the underscore form must be stripped just like the hyphenated one."""
+    seen: dict[str, list[str]] = {}
+
+    async def upstream(request: httpx.Request) -> httpx.Response:
+        seen["names"] = [k.decode().lower() for k, _ in request.headers.raw]
+        return httpx.Response(200, content=_streamed_body(b"public content"))
+
+    async def pdp(request: httpx.Request) -> httpx.Response:
+        return _pdp_public_allow_else_fail(request)
+
+    client = _mk_client(policy_proxy_config, fake_jwks_client, pdp, upstream)
+    response = client.get(
+        "/",
+        headers={
+            "host": PUBLIC_HOST,
+            "X_Auth_User": "victor",
+            "X_Auth_Email": "spoof@example.com",
+        },
+    )
+    assert response.status_code == 200
+    assert "x_auth_user" not in seen["names"]
+    assert "x-auth-user" not in seen["names"]
+    assert "x_auth_email" not in seen["names"]
+    assert "x-auth-email" not in seen["names"]
+
+
+def test_public_request_cannot_forge_forwarded_host(policy_proxy_config, fake_jwks_client) -> None:
+    """A forged X-Forwarded-Host must not ride along with ours: Caddy routes on that
+    header and matches on any value, so a second one reaches the bare agent host."""
+    seen: dict[str, list[str]] = {}
+
+    async def upstream(request: httpx.Request) -> httpx.Response:
+        seen["xfh"] = request.headers.get_list("x-forwarded-host")
+        return httpx.Response(200, content=_streamed_body(b"public content"))
+
+    async def pdp(request: httpx.Request) -> httpx.Response:
+        return _pdp_public_allow_else_fail(request)
+
+    client = _mk_client(policy_proxy_config, fake_jwks_client, pdp, upstream)
+    response = client.get(
+        "/",
+        headers={
+            "host": PUBLIC_HOST,
+            "X-Forwarded-Host": policy_proxy_config.public_hostname,
+        },
+    )
+    assert response.status_code == 200
+    assert seen["xfh"] == [PUBLIC_HOST]
+
+
 def test_not_public_webapp_host_falls_through_to_auth(policy_proxy_config, fake_jwks_client) -> None:
     async def pdp(request: httpx.Request) -> httpx.Response:
         assert str(request.url).endswith("-public")
