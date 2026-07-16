@@ -98,14 +98,11 @@ _FORBIDDEN_INBOUND_HEADERS = {
 # Headers the websockets library generates itself (or that belong only to the
 # inbound HTTP→WS handshake). Stripped before forwarding the upstream
 # handshake so we don't end up with two Sec-WebSocket-Key / Host pairs.
-# Cookie is dropped because the session JWT is for the policy proxy, not the
-# upstream app — apps that need user identity read X-Auth-* instead.
 _WS_HANDSHAKE_HEADERS = {
     "host",
     "connection", "upgrade",
     "sec-websocket-key", "sec-websocket-version",
     "sec-websocket-extensions", "sec-websocket-protocol",
-    "cookie",
 }
 
 
@@ -252,6 +249,12 @@ def _filter_ws_handshake_headers(headers) -> list[tuple[str, str]]:
         # alias can't slip a spoofed identity header past the forbidden set.
         norm = name.lower().replace("_", "-")
         if norm in _WS_HANDSHAKE_HEADERS or norm in _FORBIDDEN_INBOUND_HEADERS:
+            continue
+        # The session JWT is for the policy proxy, not the upstream app — apps
+        # that need user identity read X-Auth-* instead.
+        if norm == "cookie":
+            if (stripped := _strip_session_cookie(cookie_header=value)):
+                out.append((name, stripped))
             continue
         out.append((name, value))
     return out
