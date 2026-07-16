@@ -337,6 +337,30 @@ class TestPublicAccessViews(PublicAccessTestBase):
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, "__admin")
 
+    def _member_without_workspace_view(self) -> User:
+        """Membership row only, no org-role attribute — matches no workspace policy."""
+        user = User.objects.create_user(username="pub_no_ws_view", password="x", current_organization=self.org)
+        OrganizationMembership.objects.create(organization=self.org, user=user, role=OrganizationMembership.Role.MEMBER)
+        return user
+
+    def test_status_page_requires_workspace_view(self) -> None:
+        grant = self._grant(slug="dashboard")
+        self.client.force_login(self._member_without_workspace_view())
+        response = self.client.get(f"/apps/{self.app.slug}/public-access/{grant.id}/", HTTP_HX_REQUEST="true")
+        self.assertEqual(response.status_code, 403)
+
+    def test_check_requires_workspace_view(self) -> None:
+        grant = self._grant(slug="dashboard")
+        self.client.force_login(self._member_without_workspace_view())
+        response = self.client.get(f"/apps/{self.app.slug}/public-access/{grant.id}/check/", HTTP_HX_REQUEST="true")
+        self.assertEqual(response.status_code, 403)
+
+    def test_member_with_workspace_view_sees_status_page(self) -> None:
+        grant = self._grant(slug="dashboard")
+        self.client.force_login(self.member)
+        response = self.client.get(f"/apps/{self.app.slug}/public-access/{grant.id}/", HTTP_HX_REQUEST="true")
+        self.assertEqual(response.status_code, 200)
+
     def test_panel_shows_live_grant_url(self) -> None:
         self._grant(slug="dashboard")
         self.client.force_login(self.admin)
