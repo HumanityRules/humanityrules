@@ -230,6 +230,7 @@ def test_ws_allow_proxies_bidirectional(
 
     client = _mk_client(cfg, fake_jwks_client, pdp)
     client.cookies.set(jwt_verify.SESSION_COOKIE_NAME, jwt_minter())
+    client.cookies.set("app_pref", "dark")
 
     with _upstream_ws_server(upstream_handler, port=port, subprotocols=["tty"]):
         with client.websocket_connect(
@@ -243,8 +244,9 @@ def test_ws_allow_proxies_bidirectional(
     assert seen_headers["x-auth-sub"] == "okta|vmendi"
     assert seen_headers["x-auth-email"] == "vmendi@example.com"
     assert seen_headers["__subprotocol__"] == "tty"
-    # The session cookie is for the policy proxy and must not leak to apps.
-    assert "cookie" not in seen_headers
+    # The session cookie is for the policy proxy and must not leak to apps;
+    # app-owned cookies pass through.
+    assert seen_headers["cookie"] == "app_pref=dark"
 
 
 def test_ws_public_request_cannot_forge_underscore_identity_alias(
