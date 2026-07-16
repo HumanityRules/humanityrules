@@ -24,7 +24,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from ..models import App, Deployment, DeploymentBlueprint, Environment, User, WebappPublicGrant
 from ..services import abac_service
-from . import base
+from . import abac_view_checks, base
 
 logger = logging.getLogger(__name__)
 
@@ -231,6 +231,9 @@ def webapp_public_access_status(request: HttpRequest, app_slug: str, grant_id: U
         return render(request, "humanityrules_app/app_shell.html", context=context)
 
     app = _get_app_for_user(request=request, app_slug=app_slug)
+    denied = abac_view_checks.check_abac(request=request, resource=app.workspace, resource_type="workspace", action="workspace:view")
+    if denied:
+        return denied
     grant = get_object_or_404(WebappPublicGrant.objects.select_related("environment"), id=grant_id, app=app)
 
     context = base.get_app_shell_context(request=request, current_page="workspaces")
@@ -271,6 +274,9 @@ def webapp_public_access_check(request: HttpRequest, app_slug: str, grant_id: UU
     the fragment re-polls only while pending and under the attempt budget.
     """
     app = _get_app_for_user(request=request, app_slug=app_slug)
+    denied = abac_view_checks.check_abac(request=request, resource=app.workspace, resource_type="workspace", action="workspace:view")
+    if denied:
+        return denied
     grant = get_object_or_404(WebappPublicGrant.objects.select_related("environment"), id=grant_id, app=app)
 
     public_url = _public_url(grant=grant)
