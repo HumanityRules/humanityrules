@@ -190,6 +190,33 @@ class TestDeploymentBlueprintEffectiveValues(TestCase):
         self.assertEqual(effective_values.subdomain, "myapp")
         self.assertEqual(effective_values.url, "https://myapp.example.com")
 
+    def test_araise_for_new_app_subdomain_conflict_rejects_taken_label(self) -> None:
+        environment = self._create_environment(name="Zone", slug="zone", hosted_zone="apps.example.com")
+        self._create_active_deployment(app=self.app, environment=environment, subdomain="takenlabel")
+
+        with self.assertRaisesMessage(ValueError, "'takenlabel.apps.example.com' is already in use"):
+            async_to_sync(deployment_blueprint_effective_values.araise_for_new_app_subdomain_conflict)(
+                environment=environment,
+                subdomain="takenlabel",
+            )
+
+    def test_araise_for_new_app_subdomain_conflict_allows_free_label(self) -> None:
+        environment = self._create_environment(name="Zone", slug="zone", hosted_zone="apps.example.com")
+        self._create_active_deployment(app=self.app, environment=environment, subdomain="takenlabel")
+
+        async_to_sync(deployment_blueprint_effective_values.araise_for_new_app_subdomain_conflict)(
+            environment=environment,
+            subdomain="freelabel",
+        )
+
+    def test_araise_for_new_app_subdomain_conflict_ignores_environments_without_hosted_zone(self) -> None:
+        self._create_active_deployment(app=self.app, environment=self.environment, subdomain="takenlabel")
+
+        async_to_sync(deployment_blueprint_effective_values.araise_for_new_app_subdomain_conflict)(
+            environment=self.environment,
+            subdomain="takenlabel",
+        )
+
     def test_save_blueprint_returns_effective_values(self) -> None:
         result = async_to_sync(agent_tools.save_blueprint)(
             conversation=self.conversation,
@@ -275,7 +302,7 @@ class TestDeploymentBlueprintEffectiveValues(TestCase):
         )
         self._create_active_deployment(app=other_app, environment=dev_environment, subdomain="takenname")
 
-        with self.assertRaisesMessage(ValueError, "Subdomain 'takenname.example.com' is already in use"):
+        with self.assertRaises(ValueError) as raised:
             async_to_sync(agent_tools.save_blueprint)(
                 conversation=self.conversation,
                 workspace=self.workspace,
@@ -289,6 +316,13 @@ class TestDeploymentBlueprintEffectiveValues(TestCase):
                 datastore_id=None,
                 subdomain="takenname",
             )
+
+        # The conflicting deployment can belong to another org: the message must
+        # name only the label the caller typed, never the other tenant's app.
+        message = str(raised.exception)
+        self.assertIn("Subdomain 'takenname.example.com' is already in use", message)
+        self.assertNotIn("OtherApp", message)
+        self.assertNotIn("Dev", message)
 
         self.conversation.refresh_from_db()
         self.assertIsNone(self.conversation.context_deployment_blueprint_id)

@@ -124,6 +124,114 @@ class AgentSlugTests(SimpleTestCase):
         self.assertIn("--app-name must contain at least one letter or number", stderr.getvalue())
 
 
+class TemplateDeployConflictTests(TestCase):
+    """Verify a hostname-label conflict aborts template deployment before anything is persisted."""
+
+    def setUp(self) -> None:
+        self.organization = models.Organization.objects.create(name="Conflict Org", slug="conflict-org")
+        self.user = models.User.objects.create_user(
+            username="conflict-user",
+            password="x",
+            current_organization=self.organization,
+        )
+        self.workspace = models.Workspace.objects.get(organization=self.organization, slug="default")
+        self.aws_account = models.AWSAccount.objects.create(
+            organization=self.organization,
+            name="Conflict AWS",
+            is_humr_sandbox=True,
+        )
+        self.environment = models.Environment.objects.create(
+            aws_account=self.aws_account,
+            name="Sandbox",
+            slug="sandbox",
+            aws_region="us-east-1",
+            status=models.Environment.Status.READY,
+            shared_alb_hosted_zone="apps.example.com",
+        )
+        self.template = models.AppTemplate.objects.create(
+            name="Conflict Template",
+            slug="conflict-template",
+            description="",
+            icon="",
+            category="ai-assistant",
+            cpu=256,
+            memory=512,
+            default_compute_mode="fargate",
+            is_active=True,
+            containers=[
+                {
+                    "name": "app",
+                    "image_source": "dockerfile",
+                    "source_repo_path": "hermes_agent",
+                    "container_port": 8000,
+                }
+            ],
+        )
+        self.other_repository = models.Repository.objects.create(
+            organization=self.organization,
+            provider=models.Repository.Provider.GITHUB,
+            name="other",
+            full_name="org/other",
+            clone_url="https://github.com/org/other.git",
+            default_branch="main",
+        )
+        self.other_app = models.App.objects.create(
+            organization=self.organization,
+            workspace=self.workspace,
+            repository=self.other_repository,
+            name="Other App",
+            slug="otherapp",
+            app_type=models.App.AppType.WEB,
+            build_strategy=models.App.BuildStrategy.DOCKERFILE,
+            branch="main",
+            container_port=8000,
+            health_check_path="/health",
+        )
+        blueprint = models.DeploymentBlueprint.objects.create(
+            app=self.other_app,
+            environment=self.environment,
+            status=models.DeploymentBlueprint.Status.ACTIVE,
+            branch="",
+            cpu=256,
+            memory=512,
+            subdomain="takenlabel",
+            created_by=self.user,
+        )
+        models.Deployment.objects.create(
+            blueprint=blueprint,
+            app=self.other_app,
+            environment=self.environment,
+            subdomain="takenlabel",
+            git_ref="main",
+            image_tag="otherapp-main-20260717",
+            status=models.Deployment.Status.SUCCEEDED,
+            created_by=self.user,
+        )
+
+    def test_template_deploy_aborts_before_persisting_on_label_conflict(self) -> None:
+        with self.assertRaisesMessage(ValueError, "'takenlabel.apps.example.com' is already in use"):
+            async_to_sync(template_deploy_service.deploy_from_template)(
+                template=self.template,
+                organization=self.organization,
+                workspace=self.workspace,
+                environment=self.environment,
+                app_name="Taken Label",
+                app_slug="takenlabel",
+                created_by=self.user,
+                runtime_variable_overrides=None,
+                owner_username=None,
+                compute_mode="fargate",
+                label="",
+            )
+
+        self.assertFalse(models.App.objects.filter(organization=self.organization, slug="takenlabel").exists())
+        self.assertFalse(models.SandboxSlugClaim.objects.filter(slug="takenlabel").exists())
+        self.assertFalse(
+            models.Repository.objects.filter(organization=self.organization, full_name="template/conflict-template").exists()
+        )
+        self.assertFalse(models.DeploymentBlueprint.objects.exclude(subdomain="takenlabel").exists())
+
+
 class SaveAppSlugTests(TestCase):
     """Verify the agent App creation tool uses dashless derivation."""
 
