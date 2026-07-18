@@ -32,6 +32,11 @@
         Cleanup is in progress.
     </div>
     {% endif %}
+    {% if redeploy_error %}
+    <div class="mb-6 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-500 dark:bg-red-500/10 dark:text-red-200" role="alert">
+        {{ redeploy_error }}
+    </div>
+    {% endif %}
 
     <div x-data="{ tab: '{{ initial_tab }}' }">
         {% comment %} Tabs: Overview + the live deployment log. The log tab is disabled until there's

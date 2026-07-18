@@ -39,7 +39,7 @@ def _bedrock_actions_from_stack(app_config: AppConfig) -> list[str]:
         image_tag="test",
         env_slug="staging",
         resource_prefix="humr-staging-my-hermes",
-        subdomain="my-hermes",
+        subdomain="myhermes",
         database_connection_secret=None,
         shared_alb_hosted_zone=None,
         shared_hosted_zone_id=None,

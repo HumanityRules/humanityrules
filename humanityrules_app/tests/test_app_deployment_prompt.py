@@ -62,3 +62,10 @@ class TestAppDeploymentPrompt(TestCase):
         self.assertIn("Re-deploy to both", prompt)
         self.assertIn("Never offer combined options like `Both`, `All environments`", prompt)
         self.assertIn("handle them as separate deployments with one environment choice at a time", prompt)
+
+    def test_prompt_requires_dashless_explicit_subdomain_on_conflict(self) -> None:
+        prompt = async_to_sync(agent_build_prompt.build_system_prompt)(conversation=self.conversation)
+
+        self.assertIn("App slugs and subdomains contain lowercase letters and digits only", prompt)
+        self.assertIn('specify `subdomain: "myappstaging"`', prompt)
+        self.assertNotIn("automatically suffixed", prompt)

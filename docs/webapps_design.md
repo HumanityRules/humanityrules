@@ -239,7 +239,7 @@ ECS replaces the task. persistent-root-runner restores `/workspace/` from the pe
 
 `webapps list` after cold start shows everything with the same state it had before, modulo a few seconds of "Pending → Running" while processes initialize.
 
-End-to-end verified on `hermes-vmendi-webapps`: created `persist-test`, killed the task with `restart-task`, replacement task came up, `webapps list` showed `persist-test` Running+Ready automatically, HTTP 200 served at the original URL.
+End-to-end verified on `hermesvmendiwebapps`: created `persist-test`, killed the task with `restart-task`, replacement task came up, `webapps list` showed `persist-test` Running+Ready automatically, HTTP 200 served at the original URL.
 
 ## Admin webapp & sidebar UI
 

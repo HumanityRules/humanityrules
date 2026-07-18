@@ -41,7 +41,7 @@ class TestDeploymentLogTab(TestCase):
         )
         self.blueprint = DeploymentBlueprint.objects.create(
             app=self.app, environment=self.env, status=DeploymentBlueprint.Status.ACTIVE,
-            cpu=256, memory=512, subdomain="myapp-staging", created_by=None,
+            cpu=256, memory=512, subdomain="myappstaging", created_by=None,
         )
 
         self.admin_user = User.objects.create_user(username="log_admin", password="x", current_organization=self.org)
@@ -52,7 +52,7 @@ class TestDeploymentLogTab(TestCase):
     def _make_deployment(self, status: str) -> Deployment:
         return Deployment.objects.create(
             blueprint=self.blueprint, app=self.app, environment=self.env,
-            subdomain="myapp-staging", git_ref="main", image_tag="myapp-main-1", status=status,
+            subdomain="myappstaging", git_ref="main", image_tag="myapp-main-1", status=status,
         )
 
     def test_tab_disabled_when_no_logs(self) -> None:

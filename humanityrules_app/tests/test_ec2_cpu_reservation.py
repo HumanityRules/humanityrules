@@ -38,7 +38,7 @@ def _render_ec2(containers: list[ContainerConfig], cpu: int, alb_target_containe
         image_tag="test",
         env_slug="staging",
         resource_prefix="humr-staging-my-app",
-        subdomain="my-app",
+        subdomain="myapp",
         database_connection_secret=None,
         shared_alb_hosted_zone=None,
         shared_hosted_zone_id=None,

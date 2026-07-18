@@ -37,11 +37,38 @@ class OnboardingFirstAgentTests(TestCase):
         self._onboard(email="founder@test.com", org_name="Founder Co")
         response = self.client.get(reverse("onboarding_agent"))
         self.assertEqual(response.status_code, 200)
-        # Dev-login users get first_name "Test"; the prefill is the bare first name.
-        self.assertEqual(response.context["agent_name"], "Test")
+        # Dev-login users get first_name "Test"; the generated prefill is dashless.
+        self.assertEqual(response.context["agent_name"], "test")
         self.assertEqual(response.context["hosted_zone"], "sandbox.humr.io")
         # The sandbox footnote only renders for the HumR-run sandbox account.
         self.assertContains(response, "an account we run")
+
+    def test_get_normalizes_dashed_first_name_for_prefill(self) -> None:
+        user = self._onboard(email="founder@test.com", org_name="Founder Co")
+        user.first_name = "Mary-Jane"
+        user.save(update_fields=["first_name"])
+
+        response = self.client.get(reverse("onboarding_agent"))
+
+        self.assertEqual(response.context["agent_name"], "maryjane")
+
+    def test_get_uses_dashless_fallback_when_first_name_cannot_be_normalized(self) -> None:
+        user = self._onboard(email="founder@test.com", org_name="Founder Co")
+        user.first_name = "李"
+        user.save(update_fields=["first_name"])
+
+        response = self.client.get(reverse("onboarding_agent"))
+
+        self.assertEqual(response.context["agent_name"], "myagent")
+
+    def test_get_preview_derives_a_dashless_agent_slug(self) -> None:
+        self._onboard(email="founder@test.com", org_name="Founder Co")
+
+        response = self.client.get(reverse("onboarding_agent"))
+
+        self.assertContains(response, "function deriveAgentSlug(value)")
+        self.assertContains(response, '.replace(/[^a-z0-9]/g, "")')
+        self.assertNotContains(response, "function slugify(value)")
 
     def test_get_without_flag_redirects_to_dashboard(self) -> None:
         user = self._onboard(email="founder@test.com", org_name="Founder Co")
@@ -67,16 +94,16 @@ class OnboardingFirstAgentTests(TestCase):
     def test_post_deploys_and_redirects_to_app_detail(self) -> None:
         user = self._onboard(email="founder@test.com", org_name="Founder Co")
         fake_deployment = MagicMock()
-        fake_deployment.app.slug = "my-agent"
+        fake_deployment.app.slug = "myagent007"
         deploy_mock = AsyncMock(return_value=fake_deployment)
         with patch("humanityrules_app.views.onboarding.template_deploy_service.deploy_from_template", new=deploy_mock):
-            response = self.client.post(reverse("onboarding_agent"), {"agent_name": "My Agent"})
-        self.assertRedirects(response, "/apps/my-agent/?welcome=1", fetch_redirect_response=False)
+            response = self.client.post(reverse("onboarding_agent"), {"agent_name": "Mý Agent-007"})
+        self.assertRedirects(response, "/apps/myagent007/?welcome=1", fetch_redirect_response=False)
         self.assertNotIn("onboarding_first_agent", self.client.session)
         deploy_mock.assert_awaited_once()
         kwargs = deploy_mock.await_args.kwargs
-        self.assertEqual(kwargs["app_name"], "My Agent")
-        self.assertEqual(kwargs["app_slug"], "my-agent")
+        self.assertEqual(kwargs["app_name"], "Mý Agent-007")
+        self.assertEqual(kwargs["app_slug"], "myagent007")
         self.assertEqual(kwargs["owner_username"], user.username)
         self.assertEqual(kwargs["template"].slug, "hermes-personal")
         self.assertEqual(kwargs["workspace"].organization, user.current_organization)

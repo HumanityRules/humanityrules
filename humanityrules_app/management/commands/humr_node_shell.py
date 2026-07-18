@@ -14,7 +14,7 @@ Usage:
     uv run manage.py humr_node_shell --account "Humanity Rules Sandbox" --env default --list
 
     # Shell into whichever instance is currently hosting an app's RUNNING task.
-    uv run manage.py humr_node_shell --account "Humanity Rules Sandbox" --env default --app hermes-vmendi00
+    uv run manage.py humr_node_shell --account "Humanity Rules Sandbox" --env default --app hermesvmendi00
 
     # Shell into a specific instance (override autodetection).
     uv run manage.py humr_node_shell --account "Humanity Rules Sandbox" --env default --instance-id i-0abc...

@@ -12,8 +12,8 @@ from asgiref.sync import async_to_sync
 from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, render, redirect
-from django.utils.text import slugify
 
+from humanityrules_app import app_slugs
 from humanityrules_app import models
 from humanityrules_app.services import abac_service
 from humanityrules_app.services import llm_preset_service
@@ -114,25 +114,27 @@ def _template_requires_owner(template: models.AppTemplate) -> bool:
 def _username_for_prefill(username: str) -> str:
     """Lowercased, alphanumeric-only local-part — safe to drop into an App slug."""
     local = username.split("@", 1)[0]
-    return "".join(c for c in local if c.isalnum()).lower()
+    return app_slugs.derive_app_slug(value=local)
 
 
 def _compute_default_app_name(*, template: models.AppTemplate, org: models.Organization, owner_username: str | None) -> str:
     """App Name prefill.
 
-    Falls back to template.slug (short, already unique among templates) when
+    Falls back to a dashless form of template.slug when
     there's no prefill_name or no owner — keeps derived resource names short
     enough to clear the 32-char ALB target-group limit.
     """
     pattern = (template.prefill_name or "").strip()
     if not pattern or not owner_username:
-        return template.slug
+        return app_slugs.derive_app_slug(value=template.slug)
     username_token = _username_for_prefill(username=owner_username)
     for index in range(100):
         candidate = pattern.format(username=username_token, index=f"{index:02d}")
-        if not models.App.objects.filter(organization=org, slug=slugify(candidate)).exists():
-            return candidate
-    return pattern.format(username=username_token, index="99")
+        candidate_slug = app_slugs.derive_app_slug(value=candidate)
+        if not models.App.objects.filter(organization=org, slug=candidate_slug).exists():
+            return candidate_slug
+    final_candidate = pattern.format(username=username_token, index="99")
+    return app_slugs.derive_app_slug(value=final_candidate)
 
 
 def _owner_options_for(request: HttpRequest, org: models.Organization) -> list[dict]:
@@ -265,7 +267,7 @@ def _handle_deploy(request: HttpRequest, template: models.AppTemplate, org: mode
     if compute_mode not in models.EcsComputeMode.values:
         errors.append("Compute mode is invalid.")
 
-    app_slug = slugify(app_name)
+    app_slug = app_slugs.derive_app_slug(value=app_name)
     if not app_slug:
         errors.append("App name must contain at least one letter or number.")
 
@@ -314,6 +316,25 @@ def _handle_deploy(request: HttpRequest, template: models.AppTemplate, org: mode
         except models.Environment.DoesNotExist:
             errors.append("Selected environment not found.")
 
+    deployment: models.Deployment | None = None
+    if not errors:
+        try:
+            deployment = async_to_sync(template_deploy_service.deploy_from_template)(
+                template=template,
+                organization=org,
+                workspace=workspace,
+                environment=environment,
+                app_name=app_name,
+                app_slug=app_slug,
+                created_by=request.user,
+                runtime_variable_overrides=variable_overrides,
+                owner_username=owner_username,
+                compute_mode=compute_mode,
+                label="",
+            )
+        except ValueError as exc:
+            errors.append(str(exc))
+
     if errors:
         workspaces = models.Workspace.objects.filter(organization=org)
         workspaces = abac_service.filter_permitted_resources(
@@ -352,18 +373,6 @@ def _handle_deploy(request: HttpRequest, template: models.AppTemplate, org: mode
         context["owner_prefill_map"] = {}
         return render(request, "humanityrules_app/deploy/template_deploy_form.html", context=context)
 
-    deployment = async_to_sync(template_deploy_service.deploy_from_template)(
-        template=template,
-        organization=org,
-        workspace=workspace,
-        environment=environment,
-        app_name=app_name,
-        app_slug=app_slug,
-        created_by=request.user,
-        runtime_variable_overrides=variable_overrides,
-        owner_username=owner_username,
-        compute_mode=compute_mode,
-        label="",
-    )
-
+    if deployment is None:
+        raise RuntimeError("Template deployment completed without a deployment result")
     return redirect("app_detail", app_slug=deployment.app.slug)

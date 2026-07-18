@@ -142,7 +142,7 @@ class TestDeploymentBlueprintEffectiveValues(TestCase):
 
         self.assertEqual(effective_values.cpu_display, "2048 units (2 vCPU)")
 
-    def test_resolve_deployment_blueprint_effective_values_auto_suffixes_on_conflict(self) -> None:
+    def test_resolve_deployment_blueprint_effective_values_errors_on_default_conflict(self) -> None:
         dev_environment = self._create_environment(name="Dev", slug="dev", hosted_zone="example.com")
         self.environment.shared_alb_hosted_zone = "example.com"
         self.environment.save(update_fields=["shared_alb_hosted_zone", "updated_at"])
@@ -158,13 +158,14 @@ class TestDeploymentBlueprintEffectiveValues(TestCase):
             created_by=self.user,
         )
 
-        effective_values = deployment_blueprint_effective_values.resolve_deployment_blueprint_effective_values(
-            app=self.app,
-            blueprint=blueprint,
-        )
-
-        self.assertEqual(effective_values.subdomain, "myapp-staging")
-        self.assertEqual(effective_values.url, "https://myapp-staging.example.com")
+        with self.assertRaisesMessage(
+            ValueError,
+            "Subdomain 'myapp.example.com' is already in use. Please specify an explicit subdomain.",
+        ):
+            deployment_blueprint_effective_values.resolve_deployment_blueprint_effective_values(
+                app=self.app,
+                blueprint=blueprint,
+            )
 
     def test_resolve_deployment_blueprint_effective_values_excludes_same_app_same_environment(self) -> None:
         self.environment.shared_alb_hosted_zone = "example.com"
@@ -207,29 +208,31 @@ class TestDeploymentBlueprintEffectiveValues(TestCase):
         self.assertEqual(result.branch, "master")
         self.assertEqual(result.subdomain, "myapp")
 
-    def test_save_blueprint_auto_suffixes_on_conflict(self) -> None:
+    def test_save_blueprint_errors_on_default_conflict_without_persisting(self) -> None:
         dev_environment = self._create_environment(name="Dev", slug="dev", hosted_zone="example.com")
         self.environment.shared_alb_hosted_zone = "example.com"
         self.environment.save(update_fields=["shared_alb_hosted_zone", "updated_at"])
         self._create_active_deployment(app=self.app, environment=dev_environment, subdomain="myapp")
 
-        result = async_to_sync(agent_tools.save_blueprint)(
-            conversation=self.conversation,
-            workspace=self.workspace,
-            user=self.user,
-            environment_slug=self.environment.slug,
-            branch=None,
-            cpu=256,
-            memory=512,
-            environment_variables=None,
-            app_secrets=None,
-            datastore_id=None,
-            subdomain=None,
-        )
+        with self.assertRaisesMessage(ValueError, "Please specify an explicit subdomain"):
+            async_to_sync(agent_tools.save_blueprint)(
+                conversation=self.conversation,
+                workspace=self.workspace,
+                user=self.user,
+                environment_slug=self.environment.slug,
+                branch=None,
+                cpu=256,
+                memory=512,
+                environment_variables=None,
+                app_secrets=None,
+                datastore_id=None,
+                subdomain=None,
+            )
 
-        self.assertEqual(result.subdomain, "myapp-staging")
+        self.conversation.refresh_from_db()
+        self.assertIsNone(self.conversation.context_deployment_blueprint_id)
 
-    def test_deploy_blueprint_persists_auto_suffixed_subdomain(self) -> None:
+    def test_deploy_blueprint_persists_explicit_subdomain_after_default_conflict(self) -> None:
         dev_environment = self._create_environment(name="Dev", slug="dev", hosted_zone="example.com")
         self.environment.shared_alb_hosted_zone = "example.com"
         self.environment.save(update_fields=["shared_alb_hosted_zone", "updated_at"])
@@ -246,13 +249,13 @@ class TestDeploymentBlueprintEffectiveValues(TestCase):
             environment_variables=None,
             app_secrets=None,
             datastore_id=None,
-            subdomain=None,
+            subdomain="myappstaging",
         )
         deploy_result = async_to_sync(agent_tools.deploy_blueprint)(conversation=self.conversation)
 
         self.assertEqual(deploy_result.git_ref, "master")
         created_deployment = models.Deployment.objects.get(id=deploy_result.deployment_id)
-        self.assertEqual(created_deployment.subdomain, "myapp-staging")
+        self.assertEqual(created_deployment.subdomain, "myappstaging")
 
     def test_save_blueprint_rejects_explicit_conflicting_subdomain_without_persisting(self) -> None:
         dev_environment = self._create_environment(name="Dev", slug="dev", hosted_zone="example.com")
@@ -270,9 +273,9 @@ class TestDeploymentBlueprintEffectiveValues(TestCase):
             container_port=8001,
             health_check_path="/health",
         )
-        self._create_active_deployment(app=other_app, environment=dev_environment, subdomain="taken-name")
+        self._create_active_deployment(app=other_app, environment=dev_environment, subdomain="takenname")
 
-        with self.assertRaisesMessage(ValueError, "Subdomain 'taken-name.example.com' is already in use"):
+        with self.assertRaisesMessage(ValueError, "Subdomain 'takenname.example.com' is already in use"):
             async_to_sync(agent_tools.save_blueprint)(
                 conversation=self.conversation,
                 workspace=self.workspace,
@@ -284,7 +287,29 @@ class TestDeploymentBlueprintEffectiveValues(TestCase):
                 environment_variables=None,
                 app_secrets=None,
                 datastore_id=None,
-                subdomain="taken-name",
+                subdomain="takenname",
+            )
+
+        self.conversation.refresh_from_db()
+        self.assertIsNone(self.conversation.context_deployment_blueprint_id)
+
+    def test_save_blueprint_rejects_invalid_explicit_subdomain_without_persisting(self) -> None:
+        with self.assertRaisesMessage(
+            ValueError,
+            "Agent hostname labels must contain lowercase letters and digits only.",
+        ):
+            async_to_sync(agent_tools.save_blueprint)(
+                conversation=self.conversation,
+                workspace=self.workspace,
+                user=self.user,
+                environment_slug=self.environment.slug,
+                branch=None,
+                cpu=256,
+                memory=512,
+                environment_variables=None,
+                app_secrets=None,
+                datastore_id=None,
+                subdomain="invalid-subdomain",
             )
 
         self.conversation.refresh_from_db()

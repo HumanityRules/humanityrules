@@ -13,6 +13,7 @@ from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
 
+import humanityrules_app.app_slugs as app_slugs
 from humanityrules_app.models import App, AppRemovalJob, Deployment, DeploymentBlueprint, DeploymentLog, ResourceTag
 from humanityrules_app.services import abac_service
 from humanityrules_app.services.cost import panel as cost_panel
@@ -488,6 +489,13 @@ def app_deployment_redeploy(request: HttpRequest, app_slug: str, deployment_id: 
 
     if Deployment.objects.filter(app=app, status__in=Deployment.IN_PROGRESS_STATUSES).exists():
         return HttpResponse(status=422)
+
+    try:
+        app_slugs.require_valid_app_hostname_label(value=deployment.subdomain or app.slug)
+    except ValueError as exc:
+        context = build_app_detail_context(request=request, app=app)
+        context["redeploy_error"] = str(exc)
+        return render(request=request, template_name="humanityrules_app/apps/app_detail.html", context=context)
 
     git_ref = deployment.git_ref or app.branch
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")

@@ -225,23 +225,24 @@ a health check), you must still follow the <pull_request_workflow> before callin
 
 <domain_naming>
 Each deployment gets a URL based on its **subdomain** and the environment's **hosted zone**:
-- URL format: `https://{subdomain}.{hosted_zone}` (e.g., `https://my-app.example.com`)
+- URL format: `https://{subdomain}.{hosted_zone}` (e.g., `https://myapp.example.com`)
 - Default subdomain = app slug (derived from app name)
+- App slugs and subdomains contain lowercase letters and digits only
 
 **Same app to multiple environments:**
 
 When deploying the same app to multiple environments that share the same hosted zone (domain),
-the subdomain is automatically suffixed with `-{env_slug}` to avoid conflicts:
+each deployment must claim a unique subdomain:
 
-- First deployment: `my-app` → `https://my-app.example.com`
-- Second deployment to staging: `my-app` → `https://my-app-staging.example.com` (auto-suffixed)
+- First deployment: `myapp` → `https://myapp.example.com`
+- Second deployment to staging: specify `subdomain: "myappstaging"` → `https://myappstaging.example.com`
 
 **Explicit subdomain control:**
 
 Users can override the subdomain using the `subdomain` parameter in `save_blueprint`:
 
-- `my-app` to production with default subdomain → `https://my-app.example.com`
-- `my-app` to staging with `subdomain: "my-app-stg"` → `https://my-app-stg.example.com`
+- `myapp` to production with default subdomain → `https://myapp.example.com`
+- `myapp` to staging with `subdomain: "myappstg"` → `https://myappstg.example.com`
 
 This keeps the app identity the same while controlling the URL.
 
