@@ -168,6 +168,14 @@ async def deploy_from_template(
     """Create Repository + App + Blueprint + Deployment from a template and queue for deployment."""
     app_slugs.require_valid_app_hostname_label(value=app_slug)
 
+    # The template blueprint carries no explicit subdomain, so the app serves at its slug.
+    # Check the label before any write: a conflict must abort with nothing persisted — no
+    # slug claim, App, or blueprint — so the user can simply retry with a different name.
+    await deployment_blueprint_effective_values.araise_for_new_app_subdomain_conflict(
+        environment=environment,
+        subdomain=app_slug,
+    )
+
     # Reserve the slug before creating any rows: in the shared sandbox app resources are named
     # humr-sandbox-{slug}-* across all orgs, so the slug is global and first-come. Raises a
     # friendly ValueError if another org holds it, and a race loss here leaves no orphan App.

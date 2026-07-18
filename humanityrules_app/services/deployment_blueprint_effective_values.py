@@ -36,38 +36,47 @@ def _format_vcpu(cpu_units: int) -> str:
     return format(Decimal(cpu_units) / Decimal(1024), "g")
 
 
-def _build_conflict_query(
-    app: models.App,
-    blueprint: models.DeploymentBlueprint,
-    effective_subdomain: str,
-) -> QuerySet[models.Deployment]:
-    """Build a queryset for an active deployment that conflicts with the effective subdomain."""
-    return (
-        models.Deployment.objects.filter(
-            subdomain=effective_subdomain,
-            environment__shared_alb_hosted_zone=blueprint.environment.shared_alb_hosted_zone,
-            status__in=ACTIVE_DEPLOYMENT_STATUSES,
-        )
-        .exclude(app_id=app.id, environment_id=blueprint.environment.id)
-        .select_related("app", "environment")
+def _active_label_query(hosted_zone: str, subdomain: str) -> QuerySet[models.Deployment]:
+    """Active deployments serving this hostname label on the hosted zone."""
+    return models.Deployment.objects.filter(
+        subdomain=subdomain,
+        environment__shared_alb_hosted_zone=hosted_zone,
+        status__in=ACTIVE_DEPLOYMENT_STATUSES,
     )
 
 
-def _resolve_effective_subdomain(
-    blueprint: models.DeploymentBlueprint,
-    effective_subdomain: str,
-    conflict: models.Deployment | None,
-) -> str:
-    """Resolve the effective subdomain and reject hostname conflicts."""
+def _build_conflict_query(app: models.App, blueprint: models.DeploymentBlueprint, effective_subdomain: str) -> QuerySet[models.Deployment]:
+    """Build a queryset for an active deployment that conflicts with the effective subdomain."""
+    return _active_label_query(
+        hosted_zone=blueprint.environment.shared_alb_hosted_zone,
+        subdomain=effective_subdomain,
+    ).exclude(app_id=app.id, environment_id=blueprint.environment.id)
+
+
+async def araise_for_new_app_subdomain_conflict(environment: models.Environment, subdomain: str) -> None:
+    """Reject creating an app whose default hostname label an active deployment already serves."""
+    hosted_zone = environment.shared_alb_hosted_zone
+    if not hosted_zone:
+        return
+    label_taken = await _active_label_query(hosted_zone=hosted_zone, subdomain=subdomain).aexists()
+    if label_taken:
+        raise ValueError(f"'{subdomain}.{hosted_zone}' is already in use. Please choose a different name.")
+
+
+def _resolve_effective_subdomain(blueprint: models.DeploymentBlueprint, effective_subdomain: str, label_taken: bool) -> str:
+    """Resolve the effective subdomain and reject hostname conflicts.
+
+    Conflicts can come from any organization (labels are global on the shared hosted
+    zone), so the message never names the conflicting app or environment.
+    """
     app_slugs.require_valid_app_hostname_label(value=effective_subdomain)
     hosted_zone = blueprint.environment.shared_alb_hosted_zone
-    if not hosted_zone or conflict is None:
+    if not hosted_zone or not label_taken:
         return effective_subdomain
 
     if blueprint.subdomain:
         raise ValueError(
-            f"Subdomain '{effective_subdomain}.{hosted_zone}' is already in use by "
-            f"'{conflict.app.name}' in environment '{conflict.environment.name}'. "
+            f"Subdomain '{effective_subdomain}.{hosted_zone}' is already in use. "
             "Please choose a different subdomain."
         )
 
@@ -81,13 +90,13 @@ def _build_effective_values(
     app: models.App,
     blueprint: models.DeploymentBlueprint,
     effective_subdomain: str,
-    conflict: models.Deployment | None,
+    label_taken: bool,
 ) -> DeploymentBlueprintEffectiveValues:
     """Build effective blueprint values from fetched conflict data."""
     resolved_subdomain = _resolve_effective_subdomain(
         blueprint=blueprint,
         effective_subdomain=effective_subdomain,
-        conflict=conflict,
+        label_taken=label_taken,
     )
     hosted_zone = blueprint.environment.shared_alb_hosted_zone
     return DeploymentBlueprintEffectiveValues(
@@ -104,16 +113,16 @@ def resolve_deployment_blueprint_effective_values(
 ) -> DeploymentBlueprintEffectiveValues:
     """Resolve display-ready effective values for a deployment blueprint."""
     effective_subdomain = blueprint.subdomain or app.slug
-    conflict = _build_conflict_query(
+    label_taken = _build_conflict_query(
         app=app,
         blueprint=blueprint,
         effective_subdomain=effective_subdomain,
-    ).first()
+    ).exists()
     return _build_effective_values(
         app=app,
         blueprint=blueprint,
         effective_subdomain=effective_subdomain,
-        conflict=conflict,
+        label_taken=label_taken,
     )
 
 
@@ -123,14 +132,14 @@ async def aresolve_deployment_blueprint_effective_values(
 ) -> DeploymentBlueprintEffectiveValues:
     """Resolve effective blueprint values using async ORM queries."""
     effective_subdomain = blueprint.subdomain or app.slug
-    conflict = await _build_conflict_query(
+    label_taken = await _build_conflict_query(
         app=app,
         blueprint=blueprint,
         effective_subdomain=effective_subdomain,
-    ).afirst()
+    ).aexists()
     return _build_effective_values(
         app=app,
         blueprint=blueprint,
         effective_subdomain=effective_subdomain,
-        conflict=conflict,
+        label_taken=label_taken,
     )
