@@ -55,11 +55,11 @@ class TestAppEndpoints(TestCase):
         )
         self.blueprint = DeploymentBlueprint.objects.create(
             app=self.app, environment=self.env, status=DeploymentBlueprint.Status.ACTIVE,
-            cpu=256, memory=512, subdomain="myapp-staging", created_by=None,
+            cpu=256, memory=512, subdomain="myappstaging", created_by=None,
         )
         self.deployment = Deployment.objects.create(
             blueprint=self.blueprint, app=self.app, environment=self.env,
-            subdomain="myapp-staging", git_ref="main", image_tag="myapp-main-20260227",
+            subdomain="myappstaging", git_ref="main", image_tag="myapp-main-20260227",
             status=Deployment.Status.SUCCEEDED, status_message="Running",
         )
 
@@ -144,14 +144,14 @@ class TestAppEndpoints(TestCase):
             status=DeploymentBlueprint.Status.ACTIVE,
             cpu=256,
             memory=512,
-            subdomain="myapp-legacy",
+            subdomain="myapplegacy",
             created_by=None,
         )
         Deployment.objects.create(
             blueprint=legacy_blueprint,
             app=self.app,
             environment=legacy_env,
-            subdomain="myapp-legacy",
+            subdomain="myapplegacy",
             git_ref="main",
             image_tag="myapp-legacy-20260311",
             status=Deployment.Status.SUCCEEDED,
@@ -162,7 +162,7 @@ class TestAppEndpoints(TestCase):
                 blueprint=self.blueprint,
                 app=self.app,
                 environment=self.env,
-                subdomain="myapp-staging",
+                subdomain="myappstaging",
                 git_ref="main",
                 image_tag=f"myapp-main-{index}",
                 status=Deployment.Status.SUCCEEDED,
@@ -192,7 +192,7 @@ class TestAppEndpoints(TestCase):
             status=DeploymentBlueprint.Status.DRAFT,
             cpu=256,
             memory=512,
-            subdomain="myapp-preview",
+            subdomain="myapppreview",
             created_by=None,
         )
 
@@ -211,14 +211,14 @@ class TestAppEndpoints(TestCase):
             status=DeploymentBlueprint.Status.FAILED,
             cpu=256,
             memory=512,
-            subdomain="myapp-staging-v2",
+            subdomain="myappstagingv2",
             created_by=None,
         )
         Deployment.objects.create(
             blueprint=newer_blueprint,
             app=self.app,
             environment=self.env,
-            subdomain="myapp-staging-v2",
+            subdomain="myappstagingv2",
             git_ref="release",
             image_tag="myapp-release-1",
             status=Deployment.Status.SUCCEEDED,
@@ -228,7 +228,7 @@ class TestAppEndpoints(TestCase):
             blueprint=newer_blueprint,
             app=self.app,
             environment=self.env,
-            subdomain="myapp-staging-v2",
+            subdomain="myappstagingv2",
             git_ref="release",
             image_tag="myapp-release-2",
             status=Deployment.Status.FAILED,
@@ -250,7 +250,7 @@ class TestAppEndpoints(TestCase):
             blueprint=self.blueprint,
             app=self.app,
             environment=self.env,
-            subdomain="myapp-staging",
+            subdomain="myappstaging",
             git_ref="main",
             image_tag="myapp-main-20260311-redeploy",
             status=Deployment.Status.PENDING,
@@ -348,11 +348,63 @@ class TestAppEndpoints(TestCase):
         self.assertNotContains(response, "Inherited from app slug")
 
     @override_settings(AGENT_DEPLOYMENTS_ENABLED=True)
+    def test_ws_editor_deployment_editor_surfaces_default_subdomain_conflict(self) -> None:
+        self.env.shared_alb_hosted_zone = "example.com"
+        self.env.save(update_fields=["shared_alb_hosted_zone", "updated_at"])
+        self.blueprint.subdomain = ""
+        self.blueprint.save(update_fields=["subdomain", "updated_at"])
+        self._set_open_blueprint_status(status=DeploymentBlueprint.Status.DRAFT)
+        other_app = App.objects.create(
+            organization=self.org,
+            workspace=self.workspace,
+            repository=self.repo,
+            name="Other App",
+            slug="otherapp",
+            app_type=App.AppType.WEB,
+            build_strategy=App.BuildStrategy.DOCKERFILE,
+            branch="main",
+            container_port=8001,
+            health_check_path="/health",
+        )
+        other_env = Environment.objects.create(
+            aws_account=self.aws_account,
+            name="Production",
+            slug="production",
+            aws_region="us-east-1",
+            shared_alb_hosted_zone="example.com",
+        )
+        other_blueprint = DeploymentBlueprint.objects.create(
+            app=other_app,
+            environment=other_env,
+            status=DeploymentBlueprint.Status.ACTIVE,
+            cpu=256,
+            memory=512,
+            subdomain="myapp",
+        )
+        Deployment.objects.create(
+            blueprint=other_blueprint,
+            app=other_app,
+            environment=other_env,
+            subdomain="myapp",
+            git_ref="main",
+            image_tag="otherapp-main-conflict",
+            status=Deployment.Status.SUCCEEDED,
+        )
+        self.client.force_login(self.ws_editor)
+
+        response = self.client.get("/deploy/myapp/", **HTMX)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.context["blueprint_effective_values"])
+        self.assertIn("Please specify an explicit subdomain", response.context["blueprint_error"])
+        self.assertContains(response, "Please specify an explicit subdomain")
+
+    @override_settings(AGENT_DEPLOYMENTS_ENABLED=True)
     def test_ws_editor_deployment_editor_shows_explicit_url_value(self) -> None:
         self.env.shared_alb_hosted_zone = "example.com"
         self.env.save(update_fields=["shared_alb_hosted_zone", "updated_at"])
         self.blueprint.branch = "release-2026"
-        self.blueprint.subdomain = "preview-myapp"
+        self.blueprint.subdomain = "previewmyapp"
         self.blueprint.save()
         self._set_open_blueprint_status(status=DeploymentBlueprint.Status.DRAFT)
         self.client.force_login(self.ws_editor)
@@ -360,11 +412,11 @@ class TestAppEndpoints(TestCase):
         self.assertEqual(response.status_code, 200)
         effective_values = response.context["blueprint_effective_values"]
         self.assertEqual(effective_values.branch, "release-2026")
-        self.assertEqual(effective_values.subdomain, "preview-myapp")
-        self.assertEqual(effective_values.url, "https://preview-myapp.example.com")
+        self.assertEqual(effective_values.subdomain, "previewmyapp")
+        self.assertEqual(effective_values.url, "https://previewmyapp.example.com")
         self.assertContains(response, "release-2026")
-        self.assertContains(response, "https://preview-myapp.example.com")
-        self.assertContains(response, "preview-myapp")
+        self.assertContains(response, "https://previewmyapp.example.com")
+        self.assertContains(response, "previewmyapp")
         self.assertNotContains(response, "Inherited from repository default branch")
         self.assertNotContains(response, "Inherited from app slug")
 
@@ -472,6 +524,29 @@ class TestAppEndpoints(TestCase):
         self.client.force_login(self.ws_editor)
         response = self.client.post(f"/apps/myapp/deployments/{self.deployment.id}/redeploy/")
         self.assertEqual(response.status_code, 200)
+
+    def test_ws_editor_redeploy_rejects_invalid_source_subdomain(self) -> None:
+        self.deployment.subdomain = "legacy-subdomain"
+        self.deployment.save(update_fields=["subdomain", "updated_at"])
+        self.client.force_login(self.ws_editor)
+
+        response = self.client.post(f"/apps/myapp/deployments/{self.deployment.id}/redeploy/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Agent hostname labels must contain lowercase letters and digits only.")
+        self.assertEqual(Deployment.objects.filter(app=self.app).count(), 1)
+
+    def test_ws_editor_redeploy_allows_blank_source_subdomain_with_valid_app_slug(self) -> None:
+        self.deployment.subdomain = ""
+        self.deployment.save(update_fields=["subdomain", "updated_at"])
+        self.client.force_login(self.ws_editor)
+
+        response = self.client.post(f"/apps/myapp/deployments/{self.deployment.id}/redeploy/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Agent hostname labels must contain lowercase letters and digits only.")
+        pending = Deployment.objects.get(app=self.app, status=Deployment.Status.PENDING)
+        self.assertEqual(pending.subdomain, "")
 
     def test_ws_viewer_gets_403_on_redeploy(self) -> None:
         self.client.force_login(self.ws_viewer)

@@ -3,11 +3,11 @@ Run a bash script non-interactively in a deployed customer app container and
 return clean stdout/stderr/exit_code. For an interactive shell, use humr_app_shell.
 
 Usage:
-    uv run manage.py humr_app_exec --account "Humanity Rules Sandbox" --app my-app --as hermeswebui <<'EOF'
+    uv run manage.py humr_app_exec --account "Humanity Rules Sandbox" --app myapp --as hermeswebui <<'EOF'
     /app/venv/bin/python -c "from tools.mcp_tool import discover_mcp_tools; print(discover_mcp_tools())"
     EOF
 
-    uv run manage.py humr_app_exec --account "Humanity Rules Sandbox" --app my-app --script-file probe.sh --format json
+    uv run manage.py humr_app_exec --account "Humanity Rules Sandbox" --app myapp --script-file probe.sh --format json
 
 Flags: --as USER, --timeout SECONDS, --cwd PATH, --set KEY=VALUE, --format text|json, --ignore-exit.
 

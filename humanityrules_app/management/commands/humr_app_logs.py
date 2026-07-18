@@ -6,14 +6,14 @@ tasks first, then falls back to stopped tasks. Use --stopped to skip straight
 to stopped tasks (useful when the app is crash-looping).
 
 Usage:
-    uv run manage.py humr_app_logs --account "Humanity Rules Sandbox" --app my-app-slug
-    uv run manage.py humr_app_logs --account "Humanity Rules Sandbox" --app my-app-slug --stopped
-    uv run manage.py humr_app_logs --account "Humanity Rules Sandbox" --app my-app-slug --container docker-dind
-    uv run manage.py humr_app_logs --account "Humanity Rules Sandbox" --env prod --app my-app-slug --limit 200
-    uv run manage.py humr_app_logs --account "Humanity Rules Sandbox" --app my-app-slug --head
-    uv run manage.py humr_app_logs --account "Humanity Rules Sandbox" --app my-app-slug --all
-    uv run manage.py humr_app_logs --account "Humanity Rules Sandbox" --app my-app-slug --org "Humanity Rules"
-    uv run manage.py humr_app_logs --account "Humanity Rules Sandbox" --app my-app-slug --follow
+    uv run manage.py humr_app_logs --account "Humanity Rules Sandbox" --app myappslug
+    uv run manage.py humr_app_logs --account "Humanity Rules Sandbox" --app myappslug --stopped
+    uv run manage.py humr_app_logs --account "Humanity Rules Sandbox" --app myappslug --container docker-dind
+    uv run manage.py humr_app_logs --account "Humanity Rules Sandbox" --env prod --app myappslug --limit 200
+    uv run manage.py humr_app_logs --account "Humanity Rules Sandbox" --app myappslug --head
+    uv run manage.py humr_app_logs --account "Humanity Rules Sandbox" --app myappslug --all
+    uv run manage.py humr_app_logs --account "Humanity Rules Sandbox" --app myappslug --org "Humanity Rules"
+    uv run manage.py humr_app_logs --account "Humanity Rules Sandbox" --app myappslug --follow
 
 Requires HUMR_AWS_ACCESS_KEY and HUMR_AWS_SECRET_KEY in .env
 """

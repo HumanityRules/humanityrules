@@ -23,7 +23,7 @@ class TestFleetRedeployAll(TestCase):
             full_name="fleet/hermes",
             clone_url="https://github.com/fleet/hermes.git",
         )
-        self.app = self._create_app(name="Fleet Agent", slug="fleet-agent", status=models.App.Status.ACTIVE)
+        self.app = self._create_app(name="Fleet Agent", slug="fleetagent", status=models.App.Status.ACTIVE)
         self.environment = self._create_environment(name="Staging", slug="staging", status=models.Environment.Status.READY)
         self.succeeded_source = self._create_deployment(
             app=self.app,
@@ -78,7 +78,7 @@ class TestFleetRedeployAll(TestCase):
             status=models.DeploymentBlueprint.Status.ACTIVE,
             cpu=256,
             memory=512,
-            subdomain=f"{app.slug}-{environment.slug}",
+            subdomain=f"{app.slug}{environment.slug}",
         )
         return models.Deployment.objects.create(
             blueprint=blueprint,
@@ -222,7 +222,7 @@ class TestFleetRedeployAll(TestCase):
             environment=self.environment,
             subdomain=self.succeeded_source.subdomain,
             git_ref="main",
-            image_tag="fleet-agent-main-newer",
+            image_tag="fleetagent-main-newer",
             status=models.Deployment.Status.SUCCEEDED,
         )
 
@@ -241,6 +241,27 @@ class TestFleetRedeployAll(TestCase):
         response = self.client.get("/platform/fleet/")
 
         self.assertNotContains(response, f"/platform/fleet/deployment/{self.succeeded_source.id}/redeploy/")
+
+    def test_per_ha_redeploy_skips_invalid_source_subdomain(self) -> None:
+        self.succeeded_source.subdomain = "legacy-subdomain"
+        self.succeeded_source.save(update_fields=["subdomain", "updated_at"])
+
+        response = self.client.post(f"/platform/fleet/deployment/{self.succeeded_source.id}/redeploy/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(models.Deployment.objects.filter(status=models.Deployment.Status.PENDING).count(), 0)
+        self.assertContains(response, "Agent hostname labels must contain lowercase letters and digits only.")
+
+    def test_per_ha_redeploy_allows_blank_source_subdomain_with_valid_app_slug(self) -> None:
+        self.succeeded_source.subdomain = ""
+        self.succeeded_source.save(update_fields=["subdomain", "updated_at"])
+
+        response = self.client.post(f"/platform/fleet/deployment/{self.succeeded_source.id}/redeploy/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Agent hostname labels must contain lowercase letters and digits only.")
+        pending = models.Deployment.objects.get(status=models.Deployment.Status.PENDING)
+        self.assertEqual(pending.subdomain, "")
 
     def test_confirmation_shows_failed_checkbox_and_current_counts(self) -> None:
         self._add_failed_environment()
@@ -304,7 +325,7 @@ class TestFleetRedeployAll(TestCase):
         )
         pending_removal_app = self._create_app(
             name="Removing Agent",
-            slug="removing-agent",
+            slug="removingagent",
             status=models.App.Status.PENDING_REMOVAL,
         )
         self._create_deployment(

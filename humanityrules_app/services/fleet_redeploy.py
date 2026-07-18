@@ -8,6 +8,7 @@ from django.db import transaction
 from django.db.models import OuterRef, QuerySet, Subquery
 from django.utils import timezone
 
+import humanityrules_app.app_slugs as app_slugs
 from humanityrules_app import models
 
 
@@ -15,6 +16,7 @@ SKIP_APP_BUSY = "Deployment already in progress"
 SKIP_APP_PENDING_REMOVAL = "App pending removal"
 SKIP_ENVIRONMENT_NOT_READY = "Environment not ready"
 SKIP_FAILED_NOT_INCLUDED = "Failed not included"
+SKIP_INVALID_SUBDOMAIN = app_slugs.APP_HOSTNAME_LABEL_ERROR
 SKIP_NEWER_DEPLOYMENT = "Newer deployment exists"
 SKIP_NOT_REDEPLOYABLE = "Not redeployable"
 SKIP_TORN_DOWN = "Torn down"
@@ -97,6 +99,10 @@ def get_redeploy_skip_reason(source: models.Deployment, apps_with_in_progress_de
         return SKIP_NOT_REDEPLOYABLE
     if source.environment.status != models.Environment.Status.READY:
         return SKIP_ENVIRONMENT_NOT_READY
+    try:
+        app_slugs.require_valid_app_hostname_label(value=source.subdomain or source.app.slug)
+    except ValueError:
+        return SKIP_INVALID_SUBDOMAIN
     return None
 
 
@@ -158,6 +164,7 @@ def _build_image_tag(source: models.Deployment) -> str:
 
 def _queue_source(source: models.Deployment, created_by: models.User, status_message: str) -> None:
     """Clone a source deployment into the normal pending deployment queue."""
+    app_slugs.require_valid_app_hostname_label(value=source.subdomain or source.app.slug)
     models.Deployment.objects.create(
         blueprint_id=source.blueprint_id,
         app=source.app,

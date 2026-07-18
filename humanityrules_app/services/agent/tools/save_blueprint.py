@@ -9,6 +9,7 @@ import json
 from dataclasses import asdict, dataclass
 from typing import Any
 
+import humanityrules_app.app_slugs as app_slugs
 from humanityrules_app.models import (
     Conversation,
     Datastore,
@@ -201,6 +202,8 @@ async def save_blueprint(
         raise ValueError(
             "No app context set. Use save_app first to create or identify the app."
         )
+    if subdomain:
+        app_slugs.require_valid_app_hostname_label(value=subdomain)
 
     existing_blueprint_id = conversation.context_deployment_blueprint_id
 

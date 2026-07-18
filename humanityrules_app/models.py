@@ -5,6 +5,8 @@ from django.contrib.auth.models import AbstractUser
 from django.db import models
 from django.utils import timezone
 
+import humanityrules_app.app_slugs as app_slugs
+
 
 class User(AbstractUser):
     """
@@ -762,10 +764,11 @@ class AppTemplate(models.Model):
     # Caddy sidecar then routes by Host header. See docs/webapps_design.md.
     enable_subhosting = models.BooleanField(default=False)
 
-    # Template for the default App Name shown on the deploy form. Tokens:
+    # Template for the dashless default App Name shown on the deploy form. Tokens:
     #   {username} - owner's username; email local-part with non-alnum stripped
     #   {index}    - zero-padded (2-digit) counter that picks the lowest free slug in the org
-    # Empty string = fall back to template.name.
+    # Pattern output is normalized to lowercase letters and digits. Empty string falls back
+    # to the template slug normalized the same way.
     prefill_name = models.CharField(max_length=200, blank=True, default="")
 
     is_active = models.BooleanField()
@@ -825,7 +828,11 @@ class App(models.Model):
         related_name="deployed_apps",
     )
     name = models.CharField(max_length=255)
-    slug = models.SlugField(max_length=255)
+    slug = models.SlugField(
+        max_length=255,
+        validators=[app_slugs.validate_app_hostname_label],
+        help_text="Hostname label containing lowercase letters and digits only.",
+    )
     app_type = models.CharField(
         max_length=20,
         choices=AppType.choices,
@@ -1160,7 +1167,8 @@ class DeploymentBlueprint(models.Model):
     subdomain = models.CharField(
         max_length=63,
         blank=True,
-        help_text="Route53 subdomain. Defaults to app slug, auto-suffixed with -env if conflict.",
+        validators=[app_slugs.validate_app_hostname_label],
+        help_text="Hostname label containing lowercase letters and digits only. Blank defaults to the app slug.",
     )
 
     created_by = models.ForeignKey(
@@ -1283,7 +1291,8 @@ class Deployment(models.Model):
     subdomain = models.CharField(
         max_length=63,
         blank=True,
-        help_text="Route53 subdomain. Defaults to app slug, auto-suffixed with -env if conflict.",
+        validators=[app_slugs.validate_app_hostname_label],
+        help_text="Resolved hostname label containing lowercase letters and digits only. Blank defaults to the app slug.",
     )
 
     # Outputs

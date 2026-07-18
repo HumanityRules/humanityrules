@@ -56,7 +56,7 @@ This doc records **decisions and pointers**, not values. It deliberately omits t
         "cacheWriteInputTokenCount": 18779
     },
     "output": { "outputContentType": "application/json", "outputTokenCount": 12 },
-    "identity": { "arn": "arn:aws:sts::266117665083:assumed-role/humr-default-hermes-vmendi01-task-role/21648c392d544730bcf8b4c42032021d" },
+    "identity": { "arn": "arn:aws:sts::266117665083:assumed-role/humr-default-hermesvmendi01-task-role/21648c392d544730bcf8b4c42032021d" },
     "inferenceRegion": "us-east-2",
     "schemaType": "ModelInvocationLog",
     "schemaVersion": "1.0"

@@ -75,20 +75,20 @@
             const preview = document.getElementById("agent-url-preview");
             const zone = "{{ hosted_zone|escapejs }}";
 
-            // Mirrors django.utils.text.slugify so the preview matches the
-            // subdomain the deploy will actually claim.
-            function slugify(value) {
+            // Derives the dashless hostname label the deploy will claim.
+            function deriveAgentSlug(value) {
                 return value
                     .normalize("NFKD")
                     .replace(/[\u0300-\u036f]/g, "")
                     .toLowerCase()
                     .replace(/[^a-z0-9\s_-]/g, "")
                     .replace(/[-\s]+/g, "-")
-                    .replace(/^[-_]+|[-_]+$/g, "");
+                    .replace(/^[-_]+|[-_]+$/g, "")
+                    .replace(/[^a-z0-9]/g, "");
             }
 
             function refresh() {
-                const slug = slugify(input.value);
+                const slug = deriveAgentSlug(input.value);
                 preview.textContent = slug ? slug + "." + zone : " ";
             }
 

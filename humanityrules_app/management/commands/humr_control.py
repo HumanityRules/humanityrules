@@ -5,15 +5,15 @@ Usage:
     uv run manage.py humr_control create-env --aws-account "Name" --name default --region us-east-1 --hosted-zone example.com
     uv run manage.py humr_control teardown-env --slug default --aws-account "Name"
     uv run manage.py humr_control teardown-env --slug default --aws-account "Name" --force
-    uv run manage.py humr_control teardown-app --app ai-detector-and-humanizer
+    uv run manage.py humr_control teardown-app --app aidetectorandhumanizer
     uv run manage.py humr_control teardown-app --app foo --remove-app --delete-secrets --delete-persistent-data --delete-policies
-    uv run manage.py humr_control deploy-app-template --template hermes-agent --org acme-corp --workspace default --env default --app-name hermes-vmendi
+    uv run manage.py humr_control deploy-app-template --template hermes-agent --org acme-corp --workspace default --env default --app-name "Hermes Vmendi"
     uv run manage.py humr_control redeploy-env --slug default --aws-account "Name"
-    uv run manage.py humr_control redeploy-app --app simple-dashboard
-    uv run manage.py humr_control redeploy-app --app simple-dashboard --env default
-    uv run manage.py humr_control redeploy-app --app simple-dashboard --deployment <uuid>
-    uv run manage.py humr_control restart-task --app hermes-vmendi01
-    uv run manage.py humr_control restart-task --app hermes-vmendi01 --env default
+    uv run manage.py humr_control redeploy-app --app simpledashboard
+    uv run manage.py humr_control redeploy-app --app simpledashboard --env default
+    uv run manage.py humr_control redeploy-app --app simpledashboard --deployment <uuid>
+    uv run manage.py humr_control restart-task --app hermesvmendi01
+    uv run manage.py humr_control restart-task --app hermesvmendi01 --env default
 
 For production, use ./prod_manage.sh humr_control <operation> instead.
 
@@ -21,6 +21,7 @@ For querying data, use humr_query instead.
 """
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from asgiref.sync import async_to_sync
@@ -28,8 +29,8 @@ from botocore.exceptions import ClientError
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandParser
 from django.db import transaction
-from django.utils.text import slugify
 
+from humanityrules_app import app_slugs
 from humanityrules_app import models
 from humanityrules_app.services.app_templates import template_deploy_service
 from humanityrules_app.services.infra_customer import iam_utils
@@ -498,7 +499,7 @@ class Command(BaseCommand):
         ))
         self.stdout.write("")
 
-    def _handle_redeploy_app(self, options):
+    def _handle_redeploy_app(self, options: dict[str, Any]) -> None:
         """Redeploy an app: clone a concluded source Deployment into a new PENDING row.
 
         Mirrors the UI's 'Redeploy' button (`app_deployment_redeploy`): same blueprint,
@@ -547,6 +548,12 @@ class Command(BaseCommand):
                 f"Source deployment status '{source.status}' is not redeployable. "
                 f"Expected one of: {', '.join(allowed_source_statuses)}"
             ))
+            return
+
+        try:
+            app_slugs.require_valid_app_hostname_label(value=source.subdomain or app.slug)
+        except ValueError as exc:
+            self.stderr.write(self.style.ERROR(str(exc)))
             return
 
         created_by = self._resolve_created_by(org=app.organization, username=created_by_username)
@@ -783,7 +790,7 @@ class Command(BaseCommand):
 
         return models.Environment.objects.select_related("aws_account").get(id=env_ids.pop())
 
-    def _handle_deploy_app_template(self, options):
+    def _handle_deploy_app_template(self, options: dict[str, Any]) -> None:
         """Deploy a new app from an AppTemplate.
 
         Mirrors the UI's 'Deploy from template' flow: resolves template, workspace, env,
@@ -805,7 +812,7 @@ class Command(BaseCommand):
         if not app_name:
             self.stderr.write(self.style.ERROR("--app-name must not be empty"))
             return
-        app_slug = slugify(app_name)
+        app_slug = app_slugs.derive_app_slug(value=app_name)
         if not app_slug:
             self.stderr.write(self.style.ERROR("--app-name must contain at least one letter or number"))
             return
@@ -901,19 +908,23 @@ class Command(BaseCommand):
 
         label = options.get("label") or ""
 
-        deployment = async_to_sync(template_deploy_service.deploy_from_template)(
-            template=template,
-            organization=org,
-            workspace=workspace,
-            environment=env,
-            app_name=app_name,
-            app_slug=app_slug,
-            created_by=created_by,
-            runtime_variable_overrides=overrides,
-            owner_username=owner_username,
-            compute_mode=compute_mode,
-            label=label,
-        )
+        try:
+            deployment = async_to_sync(template_deploy_service.deploy_from_template)(
+                template=template,
+                organization=org,
+                workspace=workspace,
+                environment=env,
+                app_name=app_name,
+                app_slug=app_slug,
+                created_by=created_by,
+                runtime_variable_overrides=overrides,
+                owner_username=owner_username,
+                compute_mode=compute_mode,
+                label=label,
+            )
+        except ValueError as exc:
+            self.stderr.write(self.style.ERROR(str(exc)))
+            return
 
         self.stdout.write(self.style.SUCCESS(f"\nDeployment queued from template '{template.slug}'"))
         self.stdout.write(f"  App: {app_name} ({app_slug})")

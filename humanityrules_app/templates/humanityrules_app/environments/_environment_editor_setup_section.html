@@ -22,7 +22,7 @@
             <dd class="font-mono text-gray-900 dark:text-white text-xs">{{ environment.slug }}</dd>
             {% if environment.shared_alb_hosted_zone %}
             <dt class="text-gray-500 dark:text-gray-400">App URL Pattern</dt>
-            <dd class="break-all text-gray-900 dark:text-white">https://app-slug.{{ environment.shared_alb_hosted_zone }}</dd>
+            <dd class="break-all text-gray-900 dark:text-white">https://appslug.{{ environment.shared_alb_hosted_zone }}</dd>
             {% endif %}
             {% if environment.status_message %}
             <dt class="text-gray-500 dark:text-gray-400">Status</dt>

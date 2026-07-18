@@ -271,7 +271,7 @@ HERMES_PERSONAL_TEMPLATE = {
         {**_HERMES_POLICY_PROXY_CONTAINER, "cpu_reservation": 128, "memory_limit_mib": 256},
     ],
     "default_tags": [{"key": "app-type", "value": "personal-assistant"}],
-    "prefill_name": "hermes-{username}{index}",
+    "prefill_name": "hermes{username}{index}",
     "is_active": True,
 }
 

@@ -14,14 +14,16 @@ tunnel.
 Usage:
     uv run manage.py seed_local_app \\
         --aws-account "Humanity Rules Sandbox" \\
-        --app-slug hermes-vmendi00 \\
+        --app-slug hermesvmendi00 \\
         --owner-username vmendi@gmail.com
 """
 
 import hashlib
+from typing import Any
 
-from django.core.management.base import BaseCommand, CommandError
+from django.core.management.base import BaseCommand, CommandError, CommandParser
 
+from humanityrules_app import app_slugs
 from humanityrules_app.models import (
     App,
     AppTemplate,
@@ -44,9 +46,9 @@ DEFAULT_WORKSPACE_SLUG = "default"
 class Command(BaseCommand):
     help = "Seed DB rows for a local Hermes compose app (App stub, Environment, bearer)."
 
-    def add_arguments(self, parser) -> None:
+    def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument("--aws-account", required=True, help="AWS account name the env lives under (e.g. 'Humanity Rules Sandbox').")
-        parser.add_argument("--app-slug", required=True, help="App slug the local container impersonates (e.g. 'hermes-vmendi00').")
+        parser.add_argument("--app-slug", required=True, help="App slug the local container impersonates (e.g. 'hermesvmendi00').")
         parser.add_argument("--owner-username", required=True, help="Username that owns --app-slug (e.g. 'vmendi@gmail.com').")
         parser.add_argument("--env-slug", default=DEFAULT_ENV_SLUG, help=f"Environment slug to create (default '{DEFAULT_ENV_SLUG}').")
         parser.add_argument("--hosted-zone", default=DEFAULT_HOSTED_ZONE, help=f"shared_alb_hosted_zone; must suffix-match the WebUI host (default '{DEFAULT_HOSTED_ZONE}').")
@@ -63,7 +65,13 @@ class Command(BaseCommand):
             help=f"Workspace slug for a new local App stub (default '{DEFAULT_WORKSPACE_SLUG}').",
         )
 
-    def handle(self, *args, **options) -> None:
+    def handle(self, *args: object, **options: Any) -> None:
+        app_slug = options["app_slug"]
+        try:
+            app_slugs.require_valid_app_hostname_label(value=app_slug)
+        except ValueError as exc:
+            raise CommandError(str(exc)) from exc
+
         aws_account = self._resolve_aws_account(name=options["aws_account"])
         env = self._ensure_environment(
             aws_account=aws_account,
@@ -73,14 +81,14 @@ class Command(BaseCommand):
         )
         self._ensure_local_app_stub(
             org=aws_account.organization,
-            app_slug=options["app_slug"],
+            app_slug=app_slug,
             owner_username=options["owner_username"],
             template_slug=options["template"],
             workspace_slug=options["workspace"],
         )
         raw = options["bearer"]
         self._mint_bearer(env=env, raw=raw)
-        self._print_summary(env=env, app_slug=options["app_slug"], owner_username=options["owner_username"], raw=raw)
+        self._print_summary(env=env, app_slug=app_slug, owner_username=options["owner_username"], raw=raw)
 
     def _resolve_aws_account(self, name: str) -> AWSAccount:
         """Return the AWSAccount by name, or fail with the available choices."""

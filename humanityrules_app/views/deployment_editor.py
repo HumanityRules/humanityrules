@@ -48,13 +48,17 @@ def _build_blueprint_section_context(
     context: dict[str, Any] = {
         "app": app,
         "blueprint": blueprint,
+        "blueprint_error": None,
         "blueprint_effective_values": None,
     }
     if app and blueprint:
-        context["blueprint_effective_values"] = deployment_blueprint_effective_values.resolve_deployment_blueprint_effective_values(
-            app=app,
-            blueprint=blueprint,
-        )
+        try:
+            context["blueprint_effective_values"] = deployment_blueprint_effective_values.resolve_deployment_blueprint_effective_values(
+                app=app,
+                blueprint=blueprint,
+            )
+        except ValueError as exc:
+            context["blueprint_error"] = str(exc)
     return context
 
 

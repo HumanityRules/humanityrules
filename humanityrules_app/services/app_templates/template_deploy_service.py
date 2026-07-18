@@ -8,6 +8,7 @@ and queues the deployment for the job worker.
 import logging
 from datetime import datetime
 
+from humanityrules_app import app_slugs
 from humanityrules_app import models
 from humanityrules_app.services import deployment_blueprint_effective_values
 from humanityrules_app.services import llm_preset_service
@@ -165,6 +166,8 @@ async def deploy_from_template(
     label: str,
 ) -> models.Deployment:
     """Create Repository + App + Blueprint + Deployment from a template and queue for deployment."""
+    app_slugs.require_valid_app_hostname_label(value=app_slug)
+
     # Reserve the slug before creating any rows: in the shared sandbox app resources are named
     # humr-sandbox-{slug}-* across all orgs, so the slug is global and first-come. Raises a
     # friendly ValueError if another org holds it, and a race loss here leaves no orphan App.

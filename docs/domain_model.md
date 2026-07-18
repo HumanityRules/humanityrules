@@ -157,7 +157,7 @@ Desired deployable state for one (App, Environment) pair.
 - **environment_variables** — List of {name, value} objects
 - **app_secrets** — Dict mapping secret field names to values (null value = auto-generate a random value)
 - **datastore** — FK to Datastore (optional binding)
-- **subdomain** — Route53 subdomain override (blank = use app slug, auto-suffixed if conflict)
+- **subdomain** — Route53 subdomain override (blank = use app slug; conflicts require an explicit dashless value)
 
 Status lifecycle: draft → deploying → active (on success) / failed. Discarded after teardown.
 
@@ -365,8 +365,8 @@ App slugs are unique per organization (not globally or per workspace) because:
 ### Domain and URL Resolution
 Apps use shared ALB with host-based routing:
 - Environment has `shared_alb_hosted_zone` (e.g., `dev.example.com`)
-- App gets domain `{subdomain}.{shared_alb_hosted_zone}` (e.g., `my-app.dev.example.com`)
-- Subdomain defaults to app slug, auto-suffixed with `-{env_slug}` if another app on the same hosted zone already uses that subdomain
+- App gets domain `{subdomain}.{shared_alb_hosted_zone}` (e.g., `myapp.dev.example.com`)
+- Subdomain defaults to the app slug; conflicts require an explicit dashless subdomain
 
 ### AWS Resource Naming
 - **Base infrastructure** — `humr-{env_slug}-*` (VPC, cluster, execution role)

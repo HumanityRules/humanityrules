@@ -41,7 +41,7 @@ def _render(
         image_tag="test",
         env_slug="staging",
         resource_prefix="humr-staging-my-app",
-        subdomain="my-app",
+        subdomain="myapp",
         database_connection_secret=None,
         shared_alb_hosted_zone=shared_alb_hosted_zone,
         shared_hosted_zone_id=None,
@@ -121,8 +121,8 @@ class TestEnvBearerOverlay(SimpleTestCase):
 
         hermes = _container_defs_by_name(template)["hermes"]
         env = {e["Name"]: e["Value"] for e in hermes.get("Environment", [])}
-        # subdomain="my-app" + zone "example.com" → "my-app.example.com".
-        self.assertEqual(env.get("HUMR_PUBLIC_HOSTNAME"), "my-app.example.com")
+        # subdomain="myapp" + zone "example.com" → "myapp.example.com".
+        self.assertEqual(env.get("HUMR_PUBLIC_HOSTNAME"), "myapp.example.com")
 
     def test_no_owner_username_omits_the_env_var(self) -> None:
         template = _render(

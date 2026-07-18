@@ -8,8 +8,8 @@ If context_app is already set, updates the existing App.
 from dataclasses import asdict, dataclass
 
 from django.db import IntegrityError
-from django.utils.text import slugify
 
+import humanityrules_app.app_slugs as app_slugs
 from humanityrules_app.models import App, Conversation, Repository, User, Workspace
 
 
@@ -76,7 +76,7 @@ async def save_app(
         await app.asave()
         created = False
     else:
-        slug = slugify(name)
+        slug = app_slugs.derive_app_slug(value=name)
         if not slug:
             raise ValueError(f"Invalid app name '{name}': cannot generate slug.")
 

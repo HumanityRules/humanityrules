@@ -5,6 +5,7 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render, redirect
 from django.utils.text import slugify
 
+from .. import app_slugs
 from ..models import App, AppTemplate, Environment, Organization, OrganizationInvite, User, Workspace
 from ..services import abac_service
 from ..services.app_templates import template_deploy_service
@@ -178,16 +179,17 @@ def _first_agent_deploy_targets(org: Organization) -> tuple[AppTemplate, Workspa
 
 
 def _default_agent_name(user: User) -> str:
-    """Prefill for the agent-name input."""
-    first_name = user.first_name.strip()
-    return first_name if first_name else "My Agent"
+    """Build the dashless prefill for the agent-name input."""
+    name_source = user.first_name.strip() or "My Agent"
+    derived_name = app_slugs.derive_app_slug(value=name_source)
+    return derived_name or "myagent"
 
 
 def _validate_agent_name(org: Organization, agent_name: str) -> str | None:
     """Return an error message when the name is unusable, else None."""
     if not agent_name:
         return "Give your agent a name."
-    app_slug = slugify(agent_name)
+    app_slug = app_slugs.derive_app_slug(value=agent_name)
     if not app_slug:
         return "The name must contain at least one letter or number."
     if App.objects.filter(organization=org, slug=app_slug).exists():
@@ -227,7 +229,7 @@ def onboarding_agent(request: HttpRequest) -> HttpResponse:
                     workspace=workspace,
                     environment=environment,
                     app_name=agent_name,
-                    app_slug=slugify(agent_name),
+                    app_slug=app_slugs.derive_app_slug(value=agent_name),
                     created_by=request.user,
                     runtime_variable_overrides={},
                     owner_username=request.user.username,

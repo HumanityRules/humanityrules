@@ -6,10 +6,10 @@ humr_efs_browse). This command connects to an existing ECS task for the app
 service — it does not start a temporary task.
 
 Usage:
-    uv run manage.py humr_app_shell --account "Humanity Rules Sandbox" --app my-app-slug
-    uv run manage.py humr_app_shell --account "Humanity Rules Sandbox" --env prod --app my-app-slug
-    uv run manage.py humr_app_shell --account "Humanity Rules Sandbox" --app my-app-slug --container hermes
-    uv run manage.py humr_app_shell --account "Humanity Rules Sandbox" --org "Humanity Rules" --app my-app-slug
+    uv run manage.py humr_app_shell --account "Humanity Rules Sandbox" --app myappslug
+    uv run manage.py humr_app_shell --account "Humanity Rules Sandbox" --env prod --app myappslug
+    uv run manage.py humr_app_shell --account "Humanity Rules Sandbox" --app myappslug --container hermes
+    uv run manage.py humr_app_shell --account "Humanity Rules Sandbox" --org "Humanity Rules" --app myappslug
 
 Requires:
     - AWS CLI v2
