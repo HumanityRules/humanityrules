@@ -381,16 +381,30 @@ class EcsClusterStack(Stack):
             vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
         )
 
-        # HTTP Listener - always created with default 404 action
+        # When HTTPS is configured, :80 carries no per-host rules. Its default
+        # redirects every host to HTTPS, so each agent needs only one HTTPS
+        # rule instead of a matched :80/:443 pair (halving ALB rule usage).
+        # HTTP-only mode keeps the 404 default and routes per host on :80.
+        https_enabled = bool(shared_hosted_zone_name and shared_hosted_zone_id)
+        if https_enabled:
+            http_default_action = elbv2.ListenerAction.redirect(
+                protocol="HTTPS",
+                port="443",
+                permanent=True,
+            )
+        else:
+            http_default_action = elbv2.ListenerAction.fixed_response(
+                status_code=404,
+                content_type="text/plain",
+                message_body="No app configured for this host",
+            )
+
+        # HTTP Listener - always created
         self.http_listener = self.shared_alb.add_listener(
             "HttpListener",
             port=80,
             protocol=elbv2.ApplicationProtocol.HTTP,
-            default_action=elbv2.ListenerAction.fixed_response(
-                status_code=404,
-                content_type="text/plain",
-                message_body="No app configured for this host",
-            ),
+            default_action=http_default_action,
         )
 
         # HTTPS setup - only if hosted zone is provided
