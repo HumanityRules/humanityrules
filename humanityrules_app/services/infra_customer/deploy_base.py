@@ -23,6 +23,7 @@ from . import acm_utils
 from . import bedrock_logging_utils
 from . import cdk_utils
 from . import cloudformation_utils
+from . import node_packing
 from . import route53_utils
 from . import vpc_utils
 
@@ -233,6 +234,7 @@ class EcsClusterStack(Stack):
         construct_id: str,
         env_slug: str,
         vpc: ec2.IVpc,
+        container_instance_type: ec2.InstanceType,
         shared_hosted_zone_name: str | None,
         shared_hosted_zone_id: str | None,
         existing_certificate_arn: str | None,
@@ -289,14 +291,12 @@ class EcsClusterStack(Stack):
         self.container_instance_launch_template = ec2.LaunchTemplate(
             self, "ContainerInstanceLaunchTemplate",
             launch_template_name=f"{prefix}-ecs-container-instances",
-            # Burstable Graviton: HA nodes idle at ~3% CPU, far under t4g.large's
-            # 30% baseline, so credits never deplete; unlimited mode (the default)
-            # means worst case is surplus billing, not throttling. Packing is
-            # capped at 2 awsvpc tasks per node by the ENI limit (3 ENIs, one
-            # for the host) — denser packing needs ENI trunking, which the
-            # t-family doesn't support and which we won't require of customer
-            # accounts. Task reservations are therefore sized to half a node.
-            instance_type=ec2.InstanceType.of(ec2.InstanceClass.T4G, ec2.InstanceSize.LARGE),
+            # Type comes from the environment's node profile (see
+            # services/infra_customer/node_packing.py for the packing model).
+            # On the burstable t-family default, HA nodes idle at ~3% CPU, far
+            # under the 30% baseline, so credits never deplete; unlimited mode
+            # (the default) means worst case is surplus billing, not throttling.
+            instance_type=container_instance_type,
             machine_image=ecs.EcsOptimizedImage.amazon_linux2023(hardware_type=ecs.AmiHardwareType.ARM),
             role=self.container_instance_role,
             security_group=self.container_instance_security_group,
@@ -715,6 +715,7 @@ def deploy(
     env_slug: str,
     synth_only: bool,
     shared_alb_hosted_zone: str | None,
+    eni_trunking_enabled: bool,
 ) -> bool:
     """
     Deploy shared infrastructure: VPC, ECS cluster, and shared ALB.
@@ -724,6 +725,7 @@ def deploy(
         env_slug: Environment slug for resource naming (e.g., "default", "prod").
         synth_only: If True, only synthesize templates, don't deploy.
         shared_alb_hosted_zone: Hosted zone for wildcard cert (e.g., "dev.example.com"). None = HTTP only.
+        eni_trunking_enabled: Environment.eni_trunking_enabled; picks the container instance type via node_packing.
     Returns:
         True on success, False on failure.
     """
@@ -764,11 +766,13 @@ def deploy(
     builder_stack = BuilderStack(cdk_app, builder_stack_name, env_slug=env_slug, vpc=vpc_stack.vpc)
     builder_stack.add_dependency(vpc_stack)
 
+    node_profile = node_packing.profile_for(eni_trunking_enabled=eni_trunking_enabled)
     ecs_cluster_stack = EcsClusterStack(
         cdk_app,
         cluster_stack_name,
         env_slug=env_slug,
         vpc=vpc_stack.vpc,
+        container_instance_type=ec2.InstanceType(node_profile.instance_type),
         shared_hosted_zone_name=shared_alb_hosted_zone,
         shared_hosted_zone_id=shared_hosted_zone_id,
         existing_certificate_arn=existing_certificate_arn,

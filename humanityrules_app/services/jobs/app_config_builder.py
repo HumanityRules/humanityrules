@@ -242,8 +242,14 @@ def build_app_config_from_blueprint(blueprint: DeploymentBlueprint, repo_path: P
             ],
         )
 
+    # Resolve any fills_node_slot marker into concrete reservations for this
+    # environment's node profile; downstream only ever sees numbers.
+    template_containers = infra_customer.node_packing.resolve_slot_fillers(
+        containers=template.containers, eni_trunking_enabled=environment.eni_trunking_enabled,
+    )
+
     blueprint_by_name = _match_blueprint_containers_to_template(
-        template_containers=template.containers,
+        template_containers=template_containers,
         blueprint_containers=blueprint.containers or [],
     )
 
@@ -254,7 +260,7 @@ def build_app_config_from_blueprint(blueprint: DeploymentBlueprint, repo_path: P
             app_name=app.slug,
             env_slug=environment.slug,
         )
-        for tc in template.containers
+        for tc in template_containers
     ]
 
     app_secrets_union = _union_app_secrets(containers)
