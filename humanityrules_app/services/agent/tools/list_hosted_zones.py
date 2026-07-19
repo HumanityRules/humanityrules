@@ -9,7 +9,7 @@ from dataclasses import dataclass, asdict
 from asgiref.sync import sync_to_async
 from django.conf import settings
 
-from humanityrules_app.models import AWSAccount, Organization
+from humanityrules_app.models import AWSAccount, Environment, Organization
 from humanityrules_app.services import infra_customer
 
 
@@ -20,6 +20,7 @@ class HostedZoneSummary:
     id: str
     name: str
     record_count: int
+    in_use_by_environment: str | None
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -73,11 +74,19 @@ async def list_hosted_zones(aws_account_uuid: str, organization: Organization) -
     # Get hosted zones (boto3 is sync, so wrap it)
     zones = await sync_to_async(_get_hosted_zones_sync)(aws_account)
 
+    # An environment owns its hosted zone exclusively; claimed zones are annotated so
+    # the agent offers only unclaimed ones for a new environment.
+    claimant_names = {
+        environment.shared_alb_hosted_zone: environment.name
+        async for environment in Environment.zone_claimants(aws_account=aws_account)
+    }
+
     return [
         HostedZoneSummary(
             id=zone["id"],
             name=zone["name"],
             record_count=zone["record_count"],
+            in_use_by_environment=claimant_names.get(zone["name"].rstrip(".")),
         )
         for zone in zones
     ]

@@ -1,5 +1,7 @@
 """Tests for environment setup draft, provisioning, and SSE behavior."""
 
+from unittest.mock import patch
+
 from asgiref.sync import async_to_sync
 from django.test import TestCase
 
@@ -71,6 +73,62 @@ class TestEnvironmentSetupFlow(TestCase):
         self.assertEqual(result.status, models.Environment.Status.PENDING)
         self.assertEqual(environment.status, models.Environment.Status.PENDING)
         self.assertEqual(environment.status_message, "Queued for provisioning")
+
+    def test_save_environment_rejects_zone_claimed_by_another_environment(self) -> None:
+        models.Environment.objects.create(
+            aws_account=self.aws_account, name="Claimer", slug="claimer",
+            aws_region="us-east-1", status=models.Environment.Status.READY,
+            shared_alb_hosted_zone="example.com",
+        )
+        with self.assertRaisesMessage(ValueError, "already belongs to environment 'Claimer'"):
+            async_to_sync(agent_tools.save_environment)(
+                conversation=self.conversation,
+                aws_account=self.aws_account,
+                environment_name="Default",
+                aws_region="us-east-1",
+                hosted_zone_name="example.com",
+            )
+        self.assertFalse(models.Environment.objects.filter(aws_account=self.aws_account, slug="default").exists())
+
+    def test_save_environment_update_keeps_its_own_zone(self) -> None:
+        async_to_sync(agent_tools.save_environment)(
+            conversation=self.conversation,
+            aws_account=self.aws_account,
+            environment_name="Default",
+            aws_region="us-east-1",
+            hosted_zone_name="example.com",
+        )
+        result = async_to_sync(agent_tools.save_environment)(
+            conversation=self.conversation,
+            aws_account=self.aws_account,
+            environment_name="Default",
+            aws_region="eu-west-1",
+            hosted_zone_name="example.com",
+        )
+        self.assertFalse(result.created)
+        self.assertEqual(result.shared_alb_hosted_zone, "example.com")
+        self.assertEqual(result.aws_region, "eu-west-1")
+
+    def test_list_hosted_zones_annotates_claimed_zones(self) -> None:
+        models.Environment.objects.create(
+            aws_account=self.aws_account, name="Claimer", slug="claimer",
+            aws_region="us-east-1", status=models.Environment.Status.READY,
+            shared_alb_hosted_zone="example.com",
+        )
+        zones_stub = [
+            {"id": "Z1", "name": "example.com.", "record_count": 4},
+            {"id": "Z2", "name": "free.example.com.", "record_count": 2},
+        ]
+        route53_zones_path = "humanityrules_app.services.infra_customer.route53_utils.list_hosted_zones"
+        assume_role_path = "humanityrules_app.services.infra_customer.iam_utils.get_assumed_role_session"
+        with patch(route53_zones_path, return_value=zones_stub), patch(assume_role_path):
+            summaries = async_to_sync(agent_tools.list_hosted_zones)(
+                aws_account_uuid=str(self.aws_account.id),
+                organization=self.organization,
+            )
+        by_name = {summary.name: summary for summary in summaries}
+        self.assertEqual(by_name["example.com."].in_use_by_environment, "Claimer")
+        self.assertIsNone(by_name["free.example.com."].in_use_by_environment)
 
     def test_provision_environment_requires_saved_draft(self) -> None:
         with self.assertRaisesMessage(ValueError, "Use save_environment first"):

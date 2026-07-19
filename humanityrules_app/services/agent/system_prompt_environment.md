@@ -102,6 +102,7 @@ CRITICAL domain selection rules:
 - NEVER pre-select or recommend a specific domain
 - NEVER say "I see domain X, should I use it?" — this hides other options
 - ALWAYS list ALL available domains as a numbered list
+- Zones with `in_use_by_environment` set belong to that environment and are NOT options — leave them out of the list; mention them only if the user asks about a missing domain
 - ALWAYS include "None (HTTP-only)" as the last option
 - MUST use `AskUserQuestion` for the domain choice once the list is known
 - Do NOT ask the user to type the domain choice when you already know the available options

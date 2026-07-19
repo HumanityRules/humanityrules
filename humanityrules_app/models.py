@@ -534,6 +534,16 @@ class Environment(models.Model):
         """Status may change via background processing (provisioning or teardown)."""
         return self.status in self.TRANSIENT_STATUSES
 
+    @classmethod
+    def zone_claimants(cls, aws_account: AWSAccount) -> "models.QuerySet[Environment]":
+        """All environments in the account that hold a hosted zone (an account can have several, one zone each).
+
+        An environment owns its zone exclusively — its base stack creates the zone-wide
+        `*.<zone>` wildcard record. Every path that offers or accepts a zone checks this
+        queryset to keep a zone with one owner; a discarded draft holds no claim.
+        """
+        return cls.objects.filter(aws_account=aws_account).exclude(shared_alb_hosted_zone="").exclude(status=cls.Status.DISCARDED)
+
 
 class Workspace(models.Model):
     """A workspace for governance and policy. Contains apps and datastores."""

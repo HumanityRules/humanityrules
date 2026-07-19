@@ -5,6 +5,7 @@ If the conversation has no context_environment, creates a new Environment draft 
 If context_environment is already set, updates the existing draft/error environment.
 """
 
+import uuid
 from dataclasses import asdict, dataclass
 
 from django.utils import timezone
@@ -27,6 +28,19 @@ def _build_stack_name(slug: str, stack_kind: str) -> str:
 def _normalize_hosted_zone_name(hosted_zone_name: str) -> str:
     """Normalize hosted zone input for storage."""
     return hosted_zone_name.strip().rstrip(".")
+
+
+async def _ensure_hosted_zone_unclaimed(aws_account: models.AWSAccount, hosted_zone_name: str, exclude_environment_id: uuid.UUID | None) -> None:
+    """Raise if another environment in the account already claims this hosted zone."""
+    claimants = models.Environment.zone_claimants(aws_account=aws_account).filter(shared_alb_hosted_zone=hosted_zone_name)
+    if exclude_environment_id:
+        claimants = claimants.exclude(id=exclude_environment_id)
+    claimant = await claimants.afirst()
+    if claimant:
+        raise ValueError(
+            f"Hosted zone '{hosted_zone_name}' already belongs to environment '{claimant.name}' in AWS account "
+            f"'{aws_account.name}'. An environment owns its hosted zone exclusively; choose a different zone or none (HTTP only)."
+        )
 
 
 @dataclass
@@ -62,6 +76,13 @@ async def save_environment(
 
     normalized_hosted_zone_name = _normalize_hosted_zone_name(hosted_zone_name=hosted_zone_name)
     existing_environment_id = conversation.context_environment_id
+
+    if normalized_hosted_zone_name:
+        await _ensure_hosted_zone_unclaimed(
+            aws_account=aws_account,
+            hosted_zone_name=normalized_hosted_zone_name,
+            exclude_environment_id=existing_environment_id,
+        )
 
     if existing_environment_id:
         try:
