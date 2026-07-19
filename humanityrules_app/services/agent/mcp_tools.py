@@ -298,6 +298,8 @@ def create_humanityrules_mcp_server(conversation: Conversation):
             "List Route53 hosted zones (domains) in a connected AWS account. "
             "Use this to discover available domains for app configuration. "
             "Returns zone ID, domain name, and record count for each public hosted zone. "
+            "Zones with in_use_by_environment set belong to that environment (an environment "
+            "owns its hosted zone exclusively) and are not available for a new environment. "
             "The aws_account_uuid parameter is the internal UUID from list_aws_accounts (the 'id' field), "
             "not the 12-digit AWS account number."
         ),

@@ -195,8 +195,10 @@ def _list_hosted_zone_options(aws_account: models.AWSAccount) -> tuple[list[dict
     """Return (domain options, lookup_failed) for the setup form's domain dropdown.
 
     Options always lead with the "no domain" sentinel, followed by the account's public
-    Route53 hosted zones. On any AWS failure we return (sentinel-only, True) so the form
-    can fall back to a free-text domain input instead of an empty dropdown.
+    Route53 hosted zones. An environment owns its hosted zone exclusively, so zones already
+    claimed by another environment in the account are left out. On any AWS failure we
+    return (sentinel-only, True) so the form can fall back to a free-text domain input
+    instead of an empty dropdown.
     """
     options: list[dict[str, str]] = [{"id": "", "name": NO_DOMAIN_LABEL}]
     try:
@@ -212,9 +214,10 @@ def _list_hosted_zone_options(aws_account: models.AWSAccount) -> tuple[list[dict
         logger.exception("Could not list Route53 hosted zones for AWS account %s", aws_account.id)
         return options, True
 
+    claimed_zones = set(models.Environment.zone_claimants(aws_account=aws_account).values_list("shared_alb_hosted_zone", flat=True))
     for zone in zones:
         name = zone["name"].rstrip(".")
-        if name:
+        if name and name not in claimed_zones:
             options.append({"id": name, "name": name})
     return options, False
 
@@ -281,6 +284,13 @@ def _handle_environment_setup_submit(request: HttpRequest) -> HttpResponse:
         errors["name"] = f"An environment with the name \"{name}\" already exists in this account."
     if not region:
         errors["aws_region"] = "Region is required."
+    if hosted_zone:
+        claimant = models.Environment.zone_claimants(aws_account=aws_account).filter(shared_alb_hosted_zone=hosted_zone).first()
+        if claimant:
+            errors["shared_alb_hosted_zone"] = (
+                f"\"{hosted_zone}\" already belongs to the environment \"{claimant.name}\". "
+                "An environment owns its hosted zone exclusively — choose a different zone."
+            )
 
     if errors:
         return _render_environment_setup_form(request=request, aws_account=aws_account, form_values=form_values, errors=errors)

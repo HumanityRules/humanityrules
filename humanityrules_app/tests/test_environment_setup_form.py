@@ -19,6 +19,10 @@ HTMX = {"HTTP_HX_REQUEST": "true"}
 _HOSTED_ZONES_STUB = ([{"id": "", "name": "None (HTTP only)"}, {"id": "dev.example.com", "name": "dev.example.com"}], False)
 _HOSTED_ZONES_PATH = "humanityrules_app.views.environments._list_hosted_zone_options"
 
+# Deeper stubs for tests that exercise _list_hosted_zone_options itself.
+_ROUTE53_ZONES_PATH = "humanityrules_app.services.infra_customer.route53_utils.list_hosted_zones"
+_ASSUME_ROLE_PATH = "humanityrules_app.services.infra_customer.iam_utils.get_assumed_role_session"
+
 
 class TestEnvironmentSetupForm(TestCase):
     """Form-based environment provisioning + provisioning-log tab with agent deployments disabled."""
@@ -177,6 +181,89 @@ class TestEnvironmentSetupForm(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "already exists")
         self.assertEqual(models.Environment.objects.filter(aws_account=self.aws_account, slug="production").count(), 1)
+
+    @patch(_ROUTE53_ZONES_PATH, return_value=[{"id": "Z1", "name": "claimed.example.com.", "record_count": 3}, {"id": "Z2", "name": "free.example.com.", "record_count": 2}])
+    @patch(_ASSUME_ROLE_PATH)
+    def test_setup_form_domain_dropdown_excludes_claimed_zones(self, mock_session, mock_zones) -> None:
+        models.Environment.objects.create(
+            aws_account=self.aws_account, name="Claimer", slug="claimer",
+            aws_region="us-east-1", status=models.Environment.Status.READY,
+            shared_alb_hosted_zone="claimed.example.com",
+        )
+        self.client.force_login(self.admin_user)
+        response = self.client.get(f"{reverse('environment_setup_form')}?aws_account={self.aws_account.id}", **HTMX)
+        self.assertEqual(response.status_code, 200)
+        option_ids = [option["id"] for option in response.context["domain_options"]]
+        self.assertIn("free.example.com", option_ids)
+        self.assertNotIn("claimed.example.com", option_ids)
+
+    @patch(_HOSTED_ZONES_PATH, return_value=_HOSTED_ZONES_STUB)
+    def test_setup_form_rejects_claimed_zone(self, mock_zones) -> None:
+        models.Environment.objects.create(
+            aws_account=self.aws_account, name="Claimer", slug="claimer",
+            aws_region="us-east-1", status=models.Environment.Status.READY,
+            shared_alb_hosted_zone="dev.example.com",
+        )
+        self.client.force_login(self.admin_user)
+        response = self.client.post(
+            reverse("environment_setup_form"),
+            data={
+                "aws_account": str(self.aws_account.id),
+                "name": "Second",
+                "aws_region": "us-east-1",
+                "shared_alb_hosted_zone": "dev.example.com",
+            },
+            **HTMX,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "already belongs to the environment")
+        self.assertFalse(models.Environment.objects.filter(aws_account=self.aws_account, slug="second").exists())
+
+    def test_setup_form_allows_zone_claimed_by_discarded_environment(self) -> None:
+        models.Environment.objects.create(
+            aws_account=self.aws_account, name="Old", slug="old",
+            aws_region="us-east-1", status=models.Environment.Status.DISCARDED,
+            shared_alb_hosted_zone="dev.example.com",
+        )
+        self.client.force_login(self.admin_user)
+        response = self.client.post(
+            reverse("environment_setup_form"),
+            data={
+                "aws_account": str(self.aws_account.id),
+                "name": "Fresh",
+                "aws_region": "us-east-1",
+                "shared_alb_hosted_zone": "dev.example.com",
+            },
+            **HTMX,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(models.Environment.objects.filter(aws_account=self.aws_account, slug="fresh").exists())
+
+    def test_setup_form_allows_zone_claimed_in_other_account(self) -> None:
+        other_account = models.AWSAccount.objects.create(
+            organization=self.organization,
+            name="Other AWS",
+            aws_account_id="210987654321",
+            status=models.AWSAccount.Status.CONNECTED,
+        )
+        models.Environment.objects.create(
+            aws_account=other_account, name="Other Env", slug="other-env",
+            aws_region="us-east-1", status=models.Environment.Status.READY,
+            shared_alb_hosted_zone="dev.example.com",
+        )
+        self.client.force_login(self.admin_user)
+        response = self.client.post(
+            reverse("environment_setup_form"),
+            data={
+                "aws_account": str(self.aws_account.id),
+                "name": "Mine",
+                "aws_region": "us-east-1",
+                "shared_alb_hosted_zone": "dev.example.com",
+            },
+            **HTMX,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(models.Environment.objects.filter(aws_account=self.aws_account, slug="mine").exists())
 
     def test_setup_form_requires_org_admin(self) -> None:
         self.client.force_login(self.member_user)

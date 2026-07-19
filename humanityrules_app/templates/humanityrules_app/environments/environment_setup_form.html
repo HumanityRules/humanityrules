@@ -91,6 +91,9 @@
             {% include "humanityrules_app/partials/_dropdown_select.html#dropdown_select" with dropdown_id="shared_alb_hosted_zone" dropdown_name="shared_alb_hosted_zone" dropdown_value=selected_domain dropdown_selected_label=selected_domain_label dropdown_options=domain_options %}
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Environment-owned Route53 hosted zone for the shared ALB's wildcard HTTPS certificate and A alias. Choose “None (HTTP only)” for plain HTTP.</p>
             {% endif %}
+            {% if errors.shared_alb_hosted_zone %}
+            <p class="mt-1 text-xs text-red-600 dark:text-red-400">{{ errors.shared_alb_hosted_zone }}</p>
+            {% endif %}
         </div>
 
         <div class="flex justify-end pt-2">
