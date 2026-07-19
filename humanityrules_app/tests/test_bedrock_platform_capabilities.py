@@ -126,7 +126,7 @@ class BedrockPlatformCapabilityTests(SimpleTestCase):
         self.assertEqual(hermes["dockerfile_path"], "Dockerfile")
         self.assertEqual(hermes["efs_mounts"], ["checkpoint"])
         self.assertNotIn("depends_on", hermes)
-        self.assertEqual(hermes["stop_timeout"], 120)
+        self.assertEqual(hermes["stop_timeout"], 600)
         self.assertEqual(hermes["memory_reservation_mib"], 3328)
         self.assertEqual(hermes["memory_limit_mib"], 4096)
         self.assertEqual(hermes["cpu_reservation"], 896)

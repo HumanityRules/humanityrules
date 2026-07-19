@@ -215,11 +215,10 @@ checkpoint_persistent_root() {
     echo "[persistent-root] Writing checkpoint to ${archive}..."
     sync
     # zstd: GNU tar shells out to the `zstd` binary on PATH (apt-installed).
-    # Default level 3, single-threaded — CPU is rarely the bottleneck here
-    # since EFS write throughput (~50 MB/s) caps the tar pipeline well below
-    # zstd's ~400 MB/s/core. If CPU ever becomes the limit, add `-T0` via
-    # ZSTD_NBTHREADS or pipe through `zstd -T0` explicitly.
-    tar --create \
+    # Level 3 (default). ZSTD_NBTHREADS=0 threads across all cores; observed
+    # pipeline throughput is ~12-16 MiB/s compressed with EFS permitting 100
+    # MiB/s — the limit is compression plus small-file reads, not EFS.
+    ZSTD_NBTHREADS=0 tar --create \
         --zstd \
         --file "$tmp_archive" \
         --directory "$HERMES_PERSISTENT_ROOT" \
