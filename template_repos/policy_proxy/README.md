@@ -19,7 +19,7 @@ requests still receive the `302` directly.
 
 | Var | Example | Purpose |
 | --- | --- | --- |
-| `HUMR_APP_ID` | `vmendi-hermes` | App slug, sent in the PDP request. |
+| `HUMR_APP_ID` | `vmendihermes` | App slug, sent in the PDP request. |
 | `HUMR_ENV_SLUG` | `humr-sandbox` | For log lines only. |
 | `HUMR_ENV_DOMAIN` | `humr-sandbox.humrsandbox.com` | Parent domain the session cookie is scoped to. |
 | `HUMR_AUTH_BASE_URL` | `https://humanityrules.io` | Control-plane base URL; the sidecar bounces unauthenticated requests to `<base>/auth/env-start`. |
@@ -30,8 +30,10 @@ requests still receive the `302` directly.
 | `HUMR_UPSTREAM_HOST` | `127.0.0.1` | The app container. |
 | `HUMR_UPSTREAM_PORT` | `8787` | The app container's port. |
 | `HUMR_LISTEN_PORT` | `8443` | Port the policy proxy listens on. ALB routes here. |
-
-`HUMR_POLICY_PROXY_ACTIVITY_INTERVAL_SECONDS` optionally controls the authorized-traffic reporting interval. It defaults to 300 seconds.
+| `HUMR_PUBLIC_HOSTNAME` | `vmendihermes.humr-sandbox.humrsandbox.com` | Agent's public hostname. When set, Hosts of the form `<webapp-slug>-<hostname>` get the anonymous public-grant check. Optional: unset (e.g. local runs) means no Host is a webapp. |
+| `HUMR_PDP_CACHE_TTL_SECONDS` | `60` | PDP decision cache TTL. Optional, default 60. |
+| `HUMR_PUBLIC_CACHE_TTL_SECONDS` | `10` | Public-grant decision cache TTL; bounds both grant and revocation latency. Optional, default 10. |
+| `HUMR_POLICY_PROXY_ACTIVITY_INTERVAL_SECONDS` | `300` | Coalescing interval for activity reports. Optional, default 300. |
 
 ## Local development
 

@@ -19,7 +19,7 @@ The upstream Hermes docs (https://hermes-agent.nousresearch.com/docs/) describe 
 ## The deployment, briefly
 
 - One container per agent. A supervisor runs the WebUI (the chat surface at the agent's URL), a headless gateway (cron ticks, messaging channels, a loopback API for webapps), the user's webapps, and a reverse proxy.
-- Public access passes the platform's proxy first: company login happens before any request reaches this container. There is no anonymous access, and nothing you serve needs its own auth.
+- Public access passes the platform's proxy first: company login happens before any request reaches this container, unless an org admin has made a webapp public — that webapp is served to anyone (see the `webapps` skill). Nothing you serve needs its own auth.
 - Everything you do runs as an unprivileged user inside a sandbox. You cannot open ports to the outside; webapps are the only way to serve HTTP (see the `webapps` skill).
 
 ## What persists, what resets

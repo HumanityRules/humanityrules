@@ -54,7 +54,7 @@ def jwt_minter(rsa_keypair):
 @pytest.fixture
 def policy_proxy_config() -> config_mod.PolicyProxyConfig:
     return config_mod.PolicyProxyConfig(
-        app_id="vmendi-hermes",
+        app_id="vmendihermes",
         env_slug="humr-sandbox",
         env_domain="humr-sandbox.humrsandbox.com",
         auth_base_url="https://auth.humr-sandbox.humrsandbox.com",
@@ -65,7 +65,7 @@ def policy_proxy_config() -> config_mod.PolicyProxyConfig:
         upstream_host="127.0.0.1",
         upstream_port=8787,
         listen_port=8443,
-        public_hostname="vmendi-hermes.humr-sandbox.humrsandbox.com",
+        public_hostname="vmendihermes.humr-sandbox.humrsandbox.com",
         pdp_cache_ttl_seconds=0,  # disabled by default; tests opt in explicitly
         public_cache_ttl_seconds=0,  # disabled by default; tests opt in explicitly
         activity_report_interval_seconds=300,

@@ -22,7 +22,7 @@ async def test_allow_response_parsed() -> None:
             http_client=client,
             pdp_url="https://humanityrules.io/api/pdp/evaluate",
             env_bearer_token="token-abc",
-            app_id="vmendi-hermes",
+            app_id="vmendihermes",
             provider="oidc",
             sub="okta|v",
             username="vmendi",
@@ -34,7 +34,7 @@ async def test_allow_response_parsed() -> None:
     assert captured["auth"] == "Bearer token-abc"
     # httpx encodes JSON with spaces after colons; just check the key/value are in the body.
     body = captured["body"]
-    assert b"vmendi-hermes" in body
+    assert b"vmendihermes" in body
     assert b"app_id" in body
 
 

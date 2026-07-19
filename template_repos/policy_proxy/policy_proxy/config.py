@@ -26,9 +26,10 @@ class PolicyProxyConfig:
     upstream_port: int
     listen_port: int
     # The agent's public hostname (<subdomain>.<env-domain>). Hosts of the
-    # form <webapp-slug>.<public_hostname> are webapp subdomains and get the
-    # anonymous public-grant check before the session flow. None when the app
-    # is path-routed (no subhosting) — then no host is a webapp subdomain.
+    # form <webapp-slug>-<public_hostname> are webapp hostnames and get the
+    # anonymous public-grant check before the session flow. None when the
+    # deployment provides no public hostname (no shared-ALB hosted zone, e.g.
+    # local runs); then no Host is ever treated as a webapp hostname.
     public_hostname: str | None
     # Cache ttl for identity-keyed PDP allow/deny decisions, seconds. 0 disables caching.
     pdp_cache_ttl_seconds: int

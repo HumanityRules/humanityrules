@@ -183,7 +183,7 @@ def seed_one(example: Example) -> None:
 
 def main() -> None:
     if not os.environ.get(PUBLIC_HOSTNAME_ENV):
-        log(f"{PUBLIC_HOSTNAME_ENV} unset; skipping (subdomain routing unavailable).")
+        log(f"{PUBLIC_HOSTNAME_ENV} unset; skipping (hostname routing unavailable).")
         return
     if not EXAMPLES_DIR.is_dir():
         log(f"no catalog at {EXAMPLES_DIR}; nothing to seed.")

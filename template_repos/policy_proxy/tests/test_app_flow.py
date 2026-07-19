@@ -76,7 +76,7 @@ def test_missing_cookie_api_returns_401_with_auth_url(policy_proxy_config, fake_
         raise AssertionError("upstream should not be called")
 
     client = _mk_client(policy_proxy_config, fake_jwks_client, pdp, upstream)
-    referer = "https://vmendi-hermes.humr-sandbox.humrsandbox.com/"
+    referer = "https://vmendihermes.humr-sandbox.humrsandbox.com/"
     response = client.get(
         "/api/sessions",
         headers={
@@ -226,7 +226,7 @@ def test_tampered_cookie_api_returns_401_with_auth_url(policy_proxy_config, fake
     token = jwt_minter()
     h, p, s = token.split(".")
     bad = f"{h}.{p}.{s[:-2]}XY"
-    referer = "https://vmendi-hermes.humr-sandbox.humrsandbox.com/"
+    referer = "https://vmendihermes.humr-sandbox.humrsandbox.com/"
 
     response = client.get(
         "/api/session",

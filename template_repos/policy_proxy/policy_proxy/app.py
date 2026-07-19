@@ -52,21 +52,21 @@ PUBLIC_CACHE_MAX_ENTRIES = 512
 
 # User webapp slugs as routed by the agent's Caddy (webapps_lib.SLUG_PATTERN
 # minus the `__` internal prefix — internal webapps are path-routed on the
-# bare host, never a subdomain).
+# bare agent host, which is never matched as a user webapp hostname).
 _WEBAPP_SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,30}[a-z0-9]$")
 
 
 def _webapp_slug_for_host(host: str, public_hostname: str | None) -> str | None:
-    """Parse '<slug>.<public_hostname>' into the webapp slug, else None.
+    """Parse '<slug>-<public_hostname>' into the webapp slug, else None.
 
     Host is attacker-chosen: normalize port/case/trailing-dot before matching
     so variants of one hostname can't become distinct cache keys, and require
-    the remainder to be a single valid slug label.
+    the remainder to be a valid webapp slug.
     """
     if not public_hostname or not host:
         return None
     hostname = host.split(":", 1)[0].rstrip(".").lower()
-    suffix = "." + public_hostname.lower().rstrip(".")
+    suffix = "-" + public_hostname.lower().rstrip(".")
     if not hostname.endswith(suffix):
         return None
     label = hostname[: -len(suffix)]
@@ -80,7 +80,7 @@ class _AuthDecision:
     """Result of authorizing one request, same logic for HTTP and WS paths.
 
     Three shapes: `identity` set (authenticated allow), `public` True with no
-    identity (anonymous allow for a publicly-granted webapp subdomain), or
+    identity (anonymous allow for a publicly-granted webapp hostname), or
     `reject` set — a string tag the HTTP and WS paths translate into their own
     protocol-appropriate response (302/401/403/503 vs ws close codes).
     """
@@ -98,9 +98,9 @@ async def _authorize_session(
 ) -> _AuthDecision:
     """Public-webapp check on the Host, then cookie -> JWT -> PDP.
 
-    A webapp subdomain with a live public grant is allowed anonymously — the
+    A webapp hostname with a live public grant is allowed anonymously — the
     session flow never runs, so org members and visitors see the same thing.
-    A webapp subdomain without a live public grant falls through to the session flow.
+    A webapp hostname without a live public grant falls through to the session flow.
     """
     webapp_slug = _webapp_slug_for_host(host=host, public_hostname=state.config.public_hostname)
     if webapp_slug is not None:

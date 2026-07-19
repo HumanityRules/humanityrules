@@ -107,6 +107,24 @@ class TestHermesWebappsRuntimeContract(unittest.TestCase):
         self.assertFalse(hasattr(webapps_lib, "load_system_yaml"))
         self.assertFalse(hasattr(webapps_lib, "save_system_yaml"))
 
+    def test_subhost_route_uses_dash_join_for_dashed_slug(self) -> None:
+        route = webapps_lib.route_block_subhost(
+            slug="my-dash-board",
+            port=4001,
+            base_host="wolfie.humr.io",
+        )
+
+        self.assertIn(
+            "@webapp_my_dash_board header X-Forwarded-Host my-dash-board-wolfie.humr.io\n",
+            route,
+        )
+
+    def test_url_for_uses_dash_join_for_dashed_slug(self) -> None:
+        with patch.dict(webapps_lib.os.environ, {"HUMR_PUBLIC_HOSTNAME": "wolfie.humr.io"}, clear=True):
+            url = webapps_lib.url_for(slug="my-dash-board")
+
+        self.assertEqual(url, "https://my-dash-board-wolfie.humr.io/")
+
     def test_webapps_cli_uses_webapps_daemon_for_project_update(self) -> None:
         with patch.object(webapps_lib.subprocess, "run") as run:
             webapps_lib.process_compose_project_update(project=webapps_lib.WEBAPPS_PROJECT)

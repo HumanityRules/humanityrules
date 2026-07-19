@@ -757,11 +757,11 @@ class AppTemplate(models.Model):
     serialize_task_replacement = models.BooleanField(default=False)
 
     # When True, deploy provisions per-agent wildcard infra so the agent can
-    # serve user webapps at sub-subdomains (<slug>.<agent-host>) instead of
-    # path prefixes (<agent-host>/webapps/<slug>/): an ACM cert covering
-    # *.<agent-host>, a wildcard A-alias record, and the ALB listener rule's
-    # host condition widened to include *.<agent-host>. The Hermes agent's
-    # Caddy sidecar then routes by Host header. See docs/webapps_design.md.
+    # serve user webapps at dash-prefixed hostnames (<slug>-<agent-host>): an
+    # ACM cert covering *.<agent-host>, a wildcard A-alias record, and the ALB
+    # listener rule's host condition widened to include *.<agent-host>. The
+    # Hermes agent's Caddy sidecar then routes by Host header. See
+    # docs/webapps_design.md.
     enable_subhosting = models.BooleanField(default=False)
 
     # Template for the dashless default App Name shown on the deploy form. Tokens:
@@ -2237,7 +2237,7 @@ class CostRefreshJob(models.Model):
 class WebappPublicGrant(models.Model):
     """Anonymous-internet access to one agent webapp on one environment.
 
-    A live row makes ``https://<slug>.<agent-host>/`` reachable without a
+    A live row makes ``https://<slug>-<agent-host>/`` reachable without a
     session: the PDP answers allow for that host and the policy proxy forwards
     the request with no ``X-Auth-*`` identity headers. Org scoping is
     transitive via ``app``.
@@ -2258,7 +2258,7 @@ class WebappPublicGrant(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
     app = models.ForeignKey(App, on_delete=models.CASCADE, related_name="webapp_public_grants")
     environment = models.ForeignKey(Environment, on_delete=models.CASCADE, related_name="webapp_public_grants")
-    slug = models.CharField(max_length=32, help_text="Webapp subdomain label, e.g. 'dashboard' in dashboard.<agent-host>.")
+    slug = models.CharField(max_length=32, help_text="Webapp hostname prefix, e.g. 'dashboard' in dashboard-<agent-host>.")
     granted_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="webapp_grants_created")
     expires_at = models.DateTimeField(null=True, blank=True, help_text="Null = public until revoked.")
     revoked_at = models.DateTimeField(null=True, blank=True)

@@ -98,7 +98,7 @@ class TestEnvBearerOverlay(SimpleTestCase):
         self.assertEqual(env.get("HUMR_ENV_SLUG"), "staging")
         self.assertEqual(env.get("HUMR_OWNER_USERNAME"), "vmendi")
         self.assertTrue(env.get("HUMR_CONTROL_PLANE_URL", "").startswith("https://"))
-        # No shared_alb_hosted_zone passed → no HUMR_PUBLIC_HOSTNAME (path-based routing).
+        # No shared_alb_hosted_zone passed → no HUMR_PUBLIC_HOSTNAME.
         self.assertNotIn("HUMR_PUBLIC_HOSTNAME", env)
         secret_names = {s["Name"] for s in hermes.get("Secrets", [])}
         self.assertIn("HUMR_ENV_BEARER", secret_names)

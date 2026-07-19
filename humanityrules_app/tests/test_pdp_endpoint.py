@@ -58,7 +58,7 @@ class PDPTestBase(TestCase):
         )
         self.app = App.objects.create(
             organization=self.org, workspace=self.workspace, repository=self.repo,
-            name="VmendiPA", slug="vmendi-hermes", app_type="web",
+            name="VmendiPA", slug="vmendihermes", app_type="web",
             build_strategy="dockerfile", branch="main", container_port=8000,
             health_check_path="/health",
         )
@@ -138,7 +138,7 @@ class TestPDPEvaluation(PDPTestBase):
     def test_owner_receives_allow(self) -> None:
         status, body = self._post(
             body={
-                "app_id": "vmendi-hermes",
+                "app_id": "vmendihermes",
                 "provider": "oidc",
                 "sub": "okta|vmendi",
                 "username": "vmendi",
@@ -152,7 +152,7 @@ class TestPDPEvaluation(PDPTestBase):
     def test_non_owner_receives_deny(self) -> None:
         status, body = self._post(
             body={
-                "app_id": "vmendi-hermes",
+                "app_id": "vmendihermes",
                 "provider": "oidc",
                 "sub": "okta|alice",
                 "username": "alice",
@@ -191,7 +191,7 @@ class TestPDPEvaluation(PDPTestBase):
         # The app exists in the org but has no blueprint for other_env.
         status, body = self._post(
             body={
-                "app_id": "vmendi-hermes",
+                "app_id": "vmendihermes",
                 "provider": "oidc",
                 "sub": "okta|vmendi",
                 "username": "vmendi",
@@ -206,7 +206,7 @@ class TestPDPEvaluation(PDPTestBase):
     def test_unknown_oidc_sub_returns_deny(self) -> None:
         status, body = self._post(
             body={
-                "app_id": "vmendi-hermes",
+                "app_id": "vmendihermes",
                 "provider": "oidc",
                 "sub": "okta|ghost",
                 "username": "ghost",
@@ -222,7 +222,7 @@ class TestPDPEvaluation(PDPTestBase):
         """A WorkOS sub that doesn't match any User.workos_user_id is user-not-found."""
         status, body = self._post(
             body={
-                "app_id": "vmendi-hermes",
+                "app_id": "vmendihermes",
                 "provider": "workos",
                 "sub": "user_01H_unknown",
                 "username": "ghost@example.com",
@@ -278,7 +278,7 @@ class TestPDPEvaluation(PDPTestBase):
         self.owner.save()
         status, body = self._post(
             body={
-                "app_id": "vmendi-hermes",
+                "app_id": "vmendihermes",
                 "provider": "workos",
                 "sub": "user_01H_vmendi",
                 "username": "vmendi",
@@ -292,7 +292,7 @@ class TestPDPEvaluation(PDPTestBase):
     def test_unknown_provider_returns_400(self) -> None:
         status, body = self._post(
             body={
-                "app_id": "vmendi-hermes",
+                "app_id": "vmendihermes",
                 "provider": "facebook",
                 "sub": "x",
                 "username": "x",
@@ -304,7 +304,7 @@ class TestPDPEvaluation(PDPTestBase):
 
     def test_missing_required_fields_returns_400(self) -> None:
         status, body = self._post(
-            body={"app_id": "vmendi-hermes"},
+            body={"app_id": "vmendihermes"},
             token=self.raw_token,
         )
         self.assertEqual(status, 400)

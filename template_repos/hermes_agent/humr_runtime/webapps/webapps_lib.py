@@ -5,7 +5,7 @@ truth is /workspace/.config/process-compose/webapps/process-compose.yaml;
 routes.caddy is regenerated from it on every mutation. See
 docs/webapps_design.md.
 
-User webapps live at <slug>.<agent-host> (Host-based Caddy routing). The
+User webapps live at <slug>-<agent-host> (Host-based Caddy routing). The
 per-agent ALB wildcard cert + Route 53 wildcard record + listener-rule host
 condition that make those URLs resolve are provisioned at agent-deploy time
 when the AppTemplate sets `enable_subhosting=True`.
@@ -80,7 +80,7 @@ SYSTEM_PROJECT = ProcessComposeProject(
 # Optional `__` prefix marks platform-internal slugs (e.g. __admin). No
 # enforcement: bootstrap wins the cold-start race; agent attempts collide.
 # Internal slugs are routed by path (<host>/webapps/<slug>/); user slugs are
-# routed by host (<slug>.<host>/). See route generation below.
+# routed by host (<slug>-<host>/). See route generation below.
 SLUG_PATTERN = re.compile(r"^(?:__)?[a-z][a-z0-9-]{0,30}[a-z0-9]$")
 INTERNAL_SLUG_PREFIX = "__"
 SYSTEM_SLUG_PREFIX = "system."
@@ -229,7 +229,7 @@ def public_hostname() -> str:
 
 
 def route_block_subhost(slug: str, port: int, base_host: str) -> str:
-    """Caddy site-matcher block for a user webapp at <slug>.<base-host>.
+    """Caddy site-matcher block for a user webapp at <slug>-<base-host>.
 
     Per-app wildcard cert + DNS + ALB host condition (provisioned at
     agent-deploy time when enable_subhosting=True) make these reachable
@@ -247,7 +247,7 @@ def route_block_subhost(slug: str, port: int, base_host: str) -> str:
     """
     name = matcher_name(slug)
     return (
-        f"@{name} header X-Forwarded-Host {slug}.{base_host}\n"
+        f"@{name} header X-Forwarded-Host {slug}-{base_host}\n"
         f"handle @{name} {{\n"
         f"\treverse_proxy 127.0.0.1:{port} {{\n"
         f"\t\theader_up X-Forwarded-Host {{header.X-Forwarded-Host}}\n"
@@ -366,11 +366,11 @@ def wait_for_ready(slug: str, timeout: int) -> dict:
 def url_for(slug: str) -> str:
     """User-facing URL for a webapp.
 
-    User slugs live at <slug>.<agent-host>; platform-internal slugs (`__*`)
+    User slugs live at <slug>-<agent-host>; platform-internal slugs (`__*`)
     stay at <agent-host>/webapps/<slug>/ so the WebUI's same-origin extension
     can reach them without CORS.
     """
     host = os.environ.get(PUBLIC_HOSTNAME_ENV) or "<your-agent-hostname>"
     if is_internal_slug(slug):
         return f"https://{host}/webapps/{slug}/"
-    return f"https://{slug}.{host}/"
+    return f"https://{slug}-{host}/"
