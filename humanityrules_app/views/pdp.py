@@ -98,6 +98,17 @@ def pdp_evaluate(request: HttpRequest) -> JsonResponse:
     if provider not in ("workos", "oidc"):
         return JsonResponse({"error": f"unknown provider {provider!r}"}, status=400)
 
+    # Platform admins bypass ABAC on every HA. Deliberately unscoped user
+    # lookup: the admin is cross-tenant and typically not a member of the
+    # app's organization.
+    sub_column = "workos_user_id" if provider == "workos" else "oidc_sub"
+    if User.objects.filter(**{sub_column: sub}, is_superuser=True).exists():
+        logger.info(
+            "pdp allow reason=platform-admin env=%s app_id=%s username=%s provider=%s sub=%s path=%s",
+            environment.slug, app_id, username, provider, sub, path,
+        )
+        return JsonResponse({"decision": "allow", "reason": "platform-admin"})
+
     organization = environment.aws_account.organization
 
     app = App.objects.filter(organization=organization, slug=app_id).first()
