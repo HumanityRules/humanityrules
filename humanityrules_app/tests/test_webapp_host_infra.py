@@ -61,20 +61,23 @@ def _listener_rule_host_values(template: Template) -> list[list[str]]:
 
 class AppStackWebappHostTests(SimpleTestCase):
 
-    def test_webapp_hosts_widen_both_listener_rules_without_app_dns_or_cert_attachment(self) -> None:
+    def test_webapp_hosts_widen_the_single_https_rule_without_app_dns_or_cert_attachment(self) -> None:
         template = _render_app_stack(enable_webapp_hosts=True)
 
+        # One HTTPS host rule per agent; :80 redirects to HTTPS via listener default.
         self.assertEqual(
             _listener_rule_host_values(template=template),
-            [[f"wolfie.{HOSTED_ZONE}", f"*-wolfie.{HOSTED_ZONE}"]] * 2,
+            [[f"wolfie.{HOSTED_ZONE}", f"*-wolfie.{HOSTED_ZONE}"]],
         )
+        template.resource_count_is("AWS::ElasticLoadBalancingV2::ListenerRule", 1)
         template.resource_count_is("AWS::Route53::RecordSet", 0)
         template.resource_count_is("AWS::ElasticLoadBalancingV2::ListenerCertificate", 0)
 
     def test_disabled_webapp_hosts_match_only_agent_host_without_app_dns(self) -> None:
         template = _render_app_stack(enable_webapp_hosts=False)
 
-        self.assertEqual(_listener_rule_host_values(template=template), [[f"wolfie.{HOSTED_ZONE}"]] * 2)
+        self.assertEqual(_listener_rule_host_values(template=template), [[f"wolfie.{HOSTED_ZONE}"]])
+        template.resource_count_is("AWS::ElasticLoadBalancingV2::ListenerRule", 1)
         template.resource_count_is("AWS::Route53::RecordSet", 0)
 
 
@@ -114,3 +117,35 @@ class ClusterStackWildcardDnsTests(SimpleTestCase):
             {"Fn::Join": ["", ["dualstack.", {"Fn::GetAtt": [alb_logical_id, "DNSName"]}]]},
         )
         self.assertEqual(properties["AliasTarget"]["HostedZoneId"], {"Fn::GetAtt": [alb_logical_id, "CanonicalHostedZoneID"]})
+
+    def test_http_listener_default_redirects_to_https_when_hosted_zone_configured(self) -> None:
+        cdk_app = App()
+        vpc_stack = deploy_base.VpcStack(
+            scope=cdk_app,
+            construct_id="TestVpcStack",
+            env_slug="staging",
+            vpc_cidr="10.90.0.0/16",
+        )
+        cluster_stack = deploy_base.EcsClusterStack(
+            scope=cdk_app,
+            construct_id="TestClusterStack",
+            env_slug="staging",
+            vpc=vpc_stack.vpc,
+            shared_hosted_zone_name=HOSTED_ZONE,
+            shared_hosted_zone_id="Z1234567890",
+            existing_certificate_arn="arn:aws:acm:us-east-1:123456789012:certificate/test",
+        )
+        template = Template.from_stack(cluster_stack)
+
+        template.has_resource_properties(
+            "AWS::ElasticLoadBalancingV2::Listener",
+            {
+                "Port": 80,
+                "DefaultActions": [
+                    {
+                        "Type": "redirect",
+                        "RedirectConfig": {"Protocol": "HTTPS", "Port": "443", "StatusCode": "HTTP_301"},
+                    }
+                ],
+            },
+        )
