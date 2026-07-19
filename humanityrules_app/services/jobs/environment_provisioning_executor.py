@@ -126,6 +126,7 @@ def run_provisioning(environment_id: str) -> bool:
                 env_slug=environment.slug,
                 synth_only=False,
                 shared_alb_hosted_zone=shared_alb_hosted_zone,
+                eni_trunking_enabled=environment.eni_trunking_enabled,
             )
 
             if success:

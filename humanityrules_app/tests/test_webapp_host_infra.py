@@ -1,6 +1,7 @@
 """CDK synth tests for environment wildcard DNS and webapp host routing."""
 
 from aws_cdk import App
+from aws_cdk import aws_ec2 as ec2
 from aws_cdk.assertions import Template
 from django.test import SimpleTestCase
 
@@ -96,6 +97,7 @@ class ClusterStackWildcardDnsTests(SimpleTestCase):
             construct_id="TestClusterStack",
             env_slug="staging",
             vpc=vpc_stack.vpc,
+            container_instance_type=ec2.InstanceType("t4g.large"),
             shared_hosted_zone_name=HOSTED_ZONE,
             shared_hosted_zone_id="Z1234567890",
             existing_certificate_arn="arn:aws:acm:us-east-1:123456789012:certificate/test",
@@ -131,6 +133,7 @@ class ClusterStackWildcardDnsTests(SimpleTestCase):
             construct_id="TestClusterStack",
             env_slug="staging",
             vpc=vpc_stack.vpc,
+            container_instance_type=ec2.InstanceType("t4g.large"),
             shared_hosted_zone_name=HOSTED_ZONE,
             shared_hosted_zone_id="Z1234567890",
             existing_certificate_arn="arn:aws:acm:us-east-1:123456789012:certificate/test",

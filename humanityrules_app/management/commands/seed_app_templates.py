@@ -242,26 +242,12 @@ HERMES_PERSONAL_TEMPLATE = {
             # compressed; a 5 GiB root needs ~2-3 min). The 120s ECS ceiling
             # is Fargate-only; EC2 launch type accepts any value.
             "stop_timeout": 600,
-            # Placement reservation: 896 CPU units. The proxy reserves the
-            # other 128, so a task totals 1024 — half a t4g.large (2048 CPU
-            # units). Two tasks per node is the hard ceiling anyway: awsvpc
-            # gives each task an ENI and a .large has 3 (one for the host),
-            # so reservations are sized to claim half the node. Linux CPU
-            # shares — not a hard cap — let a task burst to the full node
-            # when its neighbor is idle.
-            "cpu_reservation": 896,
-            # Placement reservation: 3.25 GiB so a task totals 3584 MiB with
-            # the proxy's 256 — half a t4g.large's ~7600 MiB usable. Far above
-            # observed usage (hermes RSS runs 500-1000 MiB, worst peak ~1.2
-            # GiB); since the ENI limit fixes packing at two tasks, a generous
-            # memory.low floor costs nothing and maximizes each task's
-            # protection from its neighbor. Hard cap: 4 GiB. Under host
-            # memory pressure the kernel reclaims *reclaimable pages* (page
-            # cache, swappable anonymous pages) from whichever container is
-            # above its floor first. If both tasks' live RSS is unreclaimable
-            # and exceeds the host, an above-floor container is OOM-killed
-            # before the kernel violates memory.low.
-            "memory_reservation_mib": 3328,
+            # Reservations are computed at deploy time: hermes claims the
+            # remainder of one node-packing slot after its siblings' shares
+            # (see services/infra_customer/node_packing.py for the model).
+            "fills_node_slot": True,
+            # The hard cap stays absolute: burst headroom is a per-task
+            # judgment, not node geometry.
             "memory_limit_mib": 4096,
             "configurable_variables": (
                 _HERMES_LLM_PRESET_VAR + _HERMES_AWS_DEFAULT_REGION_VAR
@@ -270,10 +256,10 @@ HERMES_PERSONAL_TEMPLATE = {
             # access tokens by POSTing to HUMR /api/integrations/tokens.
             "requires_env_bearer": True,
         },
-        # Policy proxy is tiny (httpx + starlette); 256 MiB is plenty. Must
+        # Policy proxy is tiny (httpx + starlette); 128 MiB is plenty. Must
         # be set so the task has no container without a memory cap (ECS
         # requires task-level OR per-container memory on EC2).
-        {**_HERMES_POLICY_PROXY_CONTAINER, "cpu_reservation": 128, "memory_limit_mib": 256},
+        {**_HERMES_POLICY_PROXY_CONTAINER, "cpu_reservation": 32, "memory_limit_mib": 128},
     ],
     "default_tags": [{"key": "app-type", "value": "personal-assistant"}],
     "prefill_name": "hermes{username}{index}",

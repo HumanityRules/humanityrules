@@ -17,6 +17,12 @@ SANDBOX_ACCOUNT_NAME = "Humanity Rules Sandbox"
 # use this slug so they resolve to the one shared base infra (humr-sandbox-*).
 HUMR_SANDBOX_ENV_SLUG = "sandbox"
 
+# The node-packing rollout switch for the shared sandbox. True asserts the sandbox
+# account has ECS awsvpcTrunking enabled; ensure_org_sandbox enforces it uniformly on
+# every org's sandbox env row (they all share one cluster, so they must agree), and
+# humr_bootstrap_sandbox passes it to deploy_base for the instance type.
+SANDBOX_ENI_TRUNKING_ENABLED = True
+
 
 def is_sandbox_configured() -> bool:
     """Whether this deployment offers the shared sandbox (both settings present)."""
@@ -39,7 +45,7 @@ def ensure_org_sandbox(organization: Organization) -> AWSAccount | None:
     )
     # A ready-to-use environment pinned to the fixed sandbox slug, so it resolves to the
     # one shared base infra (humr-sandbox-*) provisioned once. No per-org provisioning.
-    Environment.objects.get_or_create(
+    environment, _ = Environment.objects.get_or_create(
         aws_account=aws_account,
         slug=HUMR_SANDBOX_ENV_SLUG,
         defaults={
@@ -48,8 +54,12 @@ def ensure_org_sandbox(organization: Organization) -> AWSAccount | None:
             "shared_alb_hosted_zone": settings.HUMR_SANDBOX_HOSTED_ZONE,
             "status": Environment.Status.READY,
             "status_message": "Shared Humanity Rules sandbox; not provisioned per-org.",
+            "eni_trunking_enabled": SANDBOX_ENI_TRUNKING_ENABLED,
         },
     )
+    if environment.eni_trunking_enabled != SANDBOX_ENI_TRUNKING_ENABLED:
+        environment.eni_trunking_enabled = SANDBOX_ENI_TRUNKING_ENABLED
+        environment.save(update_fields=["eni_trunking_enabled"])
     return aws_account
 
 

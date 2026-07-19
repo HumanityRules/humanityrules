@@ -517,6 +517,13 @@ class Environment(models.Model):
         help_text="Hosted zone for shared ALB wildcard cert (e.g., 'dev.example.com'). Empty = HTTP only.",
     )
 
+    # Set at environment creation, immutable after: flipping it on a live
+    # environment would require cycling container instances to a new type and
+    # redeploying every app. True asserts the account+region has ECS
+    # awsvpcTrunking enabled; instance type and task sizing derive from it in
+    # services/infra_customer/node_packing.py. Not exposed in any UI yet.
+    eni_trunking_enabled = models.BooleanField(default=False)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

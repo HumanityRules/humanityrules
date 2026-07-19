@@ -14,6 +14,7 @@ from . import deploy_base
 from . import ecr_utils
 from . import ecs_utils
 from . import iam_utils
+from . import node_packing
 from . import route53_utils
 from . import secrets_utils
 from . import vpc_utils
@@ -28,6 +29,7 @@ __all__ = [
     "ecr_utils",
     "ecs_utils",
     "iam_utils",
+    "node_packing",
     "route53_utils",
     "secrets_utils",
     "vpc_utils",
