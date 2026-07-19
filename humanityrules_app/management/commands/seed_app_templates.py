@@ -237,7 +237,11 @@ HERMES_PERSONAL_TEMPLATE = {
                 },
             ],
             "linux_capabilities": ["SYS_ADMIN"],
-            "stop_timeout": 120,
+            # SIGTERM→SIGKILL window; must cover the stop-time EFS checkpoint,
+            # whose duration scales with persistent-root size (~12-16 MiB/s
+            # compressed; a 5 GiB root needs ~2-3 min). The 120s ECS ceiling
+            # is Fargate-only; EC2 launch type accepts any value.
+            "stop_timeout": 600,
             # Placement reservation: 896 CPU units. The proxy reserves the
             # other 128, so a task totals 1024 — half a t4g.large (2048 CPU
             # units). Two tasks per node is the hard ceiling anyway: awsvpc
