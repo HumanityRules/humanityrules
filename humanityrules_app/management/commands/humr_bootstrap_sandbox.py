@@ -5,9 +5,9 @@ HUMR_SANDBOX_AWS_ACCOUNT_ID + HUMR_SANDBOX_EXTERNAL_ID are set. When configured 
 1. Backfills a connected sandbox account + ready environment for every existing org.
 2. Verifies the one shared base infra (humr-sandbox-* VPC/cluster/ALB/EFS) exists.
 
-The base infra is heavy and slow to create, so the default run only VERIFIES it (and warns
-if missing) — never blocks a deploy. Pass --provision-base to actually create it; do that once,
-manually (e.g. prod_manage.sh humr_bootstrap_sandbox --provision-base).
+The base infra is heavy and slow to deploy, so the default run only VERIFIES it (and warns
+if missing) — never blocks a deploy. Pass --provision-base to create or update it; run that
+manually whenever the base stacks change (e.g. prod_manage.sh humr_bootstrap_sandbox --provision-base).
 
 The assume-role the CP uses (humr-{external_id}) is created by the CDK SandboxStack, not here.
 """
@@ -28,7 +28,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--provision-base",
             action="store_true",
-            help="Provision the shared base infra if missing (slow; run once manually).",
+            help="Create or update the shared base infra (slow; run manually).",
         )
 
     def handle(self, *args: object, **options: object) -> None:
@@ -52,7 +52,7 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(f"Ensured sandbox rows for {count} organization(s)."))
 
     def _handle_base_infra(self, provision: bool) -> None:
-        """Verify (and optionally provision) the shared base infra under slug 'sandbox'."""
+        """Verify the shared base infra under slug 'sandbox'; with provision=True, create or update it."""
         cluster_stack_name = f"humr-{HUMR_SANDBOX_ENV_SLUG}-cluster"
         try:
             session = infra_customer.iam_utils.get_assumed_role_session(
@@ -62,19 +62,18 @@ class Command(BaseCommand):
                 external_id=settings.HUMR_SANDBOX_EXTERNAL_ID,
                 region=settings.HUMR_SANDBOX_REGION,
             )
-            cf_client = session.client("cloudformation")
-            if cloudformation_utils.stack_exists(cf_client, stack_name=cluster_stack_name):
-                self.stdout.write(f"Shared sandbox base infra present ({cluster_stack_name}).")
-                return
-
             if not provision:
-                self.stderr.write(
-                    f"Shared sandbox base infra is MISSING ({cluster_stack_name}). "
-                    "Run: manage.py humr_bootstrap_sandbox --provision-base"
-                )
+                cf_client = session.client("cloudformation")
+                if cloudformation_utils.stack_exists(cf_client, stack_name=cluster_stack_name):
+                    self.stdout.write(f"Shared sandbox base infra present ({cluster_stack_name}).")
+                else:
+                    self.stderr.write(
+                        f"Shared sandbox base infra is MISSING ({cluster_stack_name}). "
+                        "Run: manage.py humr_bootstrap_sandbox --provision-base"
+                    )
                 return
 
-            self.stdout.write("Provisioning shared sandbox base infra (slow)...")
+            self.stdout.write("Applying shared sandbox base infra (slow)...")
             success = infra_customer.deploy_base.deploy(
                 session=session,
                 env_slug=HUMR_SANDBOX_ENV_SLUG,
@@ -82,9 +81,9 @@ class Command(BaseCommand):
                 shared_alb_hosted_zone=settings.HUMR_SANDBOX_HOSTED_ZONE or None,
             )
             if success:
-                self.stdout.write(self.style.SUCCESS("Shared sandbox base infra provisioned."))
+                self.stdout.write(self.style.SUCCESS("Shared sandbox base infra applied."))
             else:
-                self.stderr.write("Shared sandbox base infra provisioning failed. Check CloudFormation.")
+                self.stderr.write("Shared sandbox base infra apply failed. Check CloudFormation.")
         except Exception as e:
             # Never let sandbox bootstrap break the deploy that runs this command.
             self.stderr.write(f"Sandbox base infra step errored (continuing): {e}")
