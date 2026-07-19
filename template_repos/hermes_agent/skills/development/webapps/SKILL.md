@@ -11,9 +11,9 @@ metadata:
 
 # Webapps
 
-The user will be able to reach the app in a browser at a subdomain of the agent's hostname.
+The user can reach the app in a browser at the agent's hostname prefixed by the webapp slug and a dash.
 
-The `webapps` CLI is on PATH. It registers a process (any language: Python, Node, Elixir, Go, Rust, …) with a supervisor and adds a same-task reverse-proxy route so the user can reach the app at `https://<slug>.<agent-hostname>/`.The agent's wildcard DNS + wildcard TLS cert make any new slug reachable instantly — no DNS work, no per-app infra.
+The `webapps` CLI is on PATH. It registers a process (any language: Python, Node, Elixir, Go, Rust, …) with a supervisor and adds a same-task reverse-proxy route so the user can reach the app at `https://<slug>-<agent-hostname>/`. Any new slug is reachable instantly — no DNS work, no per-app infrastructure.
 
 When the user asks you to create/clone the web app from a Git repository, clone it directly inside /workspace/webapps/projects/
 
@@ -54,7 +54,7 @@ webapps delete <slug> --yes
 webapps expose <slug>
 ```
 
-- **`<slug>`**: lowercase, 2–32 chars, letters/digits/hyphens. Must start with a letter, end alphanumeric. Becomes the leftmost DNS label, so all DNS-safe constraints apply.
+- **`<slug>`**: lowercase, 2–32 chars, letters/digits/hyphens. Must start with a letter, end alphanumeric. Becomes the dash-prefix of the hostname's first DNS label, so only DNS-safe characters are allowed.
 - **`--command`**: full shell command. Use `$WEBAPP_PORT` to read the port — the CLI sets that env var automatically.
 - **`--cwd`**: absolute path to the project working directory (typically `/workspace/webapps/projects/<slug>`).
 - **`--env`**: repeatable `KEY=VALUE` pair stored before the first start.
@@ -73,7 +73,7 @@ Before `webapps create`, install whatever runtime dependencies the project needs
 ```bash
 mkdir -p /workspace/webapps/projects/hello
 cat > /workspace/webapps/projects/hello/index.html <<'EOF'
-<!doctype html><h1>Hello from hello.<agent-host></h1>
+<!doctype html><h1>Hello from hello-<agent-host></h1>
 EOF
 
 webapps create hello \
@@ -82,9 +82,9 @@ webapps create hello \
 webapps start hello
 ```
 
-`webapps start` prints a final line like `webapps: 'hello' is live at https://hello.<agent-host>/`. **Always show that URL to the user as a clickable markdown link**, e.g.:
+`webapps start` prints a final line like `webapps: 'hello' is live at https://hello-<agent-host>/`. **Always show that URL to the user as a clickable markdown link**, e.g.:
 
-> Your app is live at [https://hello.hermes-foo.example.com/](https://hello.hermes-foo.example.com/)
+> Your app is live at [https://hello-hermesfoo.example.com/](https://hello-hermesfoo.example.com/)
 
 Use the *exact host* from the CLI's output, with the trailing slash.
 

@@ -17,7 +17,7 @@ class Migration(migrations.Migration):
             name='WebappPublicGrant',
             fields=[
                 ('id', models.UUIDField(default=uuid.uuid7, editable=False, primary_key=True, serialize=False)),
-                ('slug', models.CharField(help_text="Webapp subdomain label, e.g. 'dashboard' in dashboard.<agent-host>.", max_length=32)),
+                ('slug', models.CharField(help_text="Webapp hostname prefix, e.g. 'dashboard' in dashboard-<agent-host>.", max_length=32)),
                 ('expires_at', models.DateTimeField(blank=True, help_text='Null = public until revoked.', null=True)),
                 ('revoked_at', models.DateTimeField(blank=True, null=True)),
                 ('created_at', models.DateTimeField(auto_now_add=True)),

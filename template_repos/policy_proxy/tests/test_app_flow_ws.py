@@ -131,7 +131,7 @@ def test_ws_missing_cookie_closes_with_4401(policy_proxy_config, fake_jwks_clien
 
     client = _mk_client(policy_proxy_config, fake_jwks_client, pdp)
     with pytest.raises(WebSocketDisconnect) as exc_info:
-        with client.websocket_connect("/webapps/terminal/ws") as ws:
+        with client.websocket_connect("/ws") as ws:
             ws.receive_text()
     assert exc_info.value.code == app_mod.WS_CLOSE_AUTH_REQUIRED
 
@@ -149,7 +149,7 @@ def test_ws_tampered_cookie_closes_with_4401(
 
     client.cookies.set(jwt_verify.SESSION_COOKIE_NAME, bad)
     with pytest.raises(WebSocketDisconnect) as exc_info:
-        with client.websocket_connect("/webapps/terminal/ws") as ws:
+        with client.websocket_connect("/ws") as ws:
             ws.receive_text()
     assert exc_info.value.code == app_mod.WS_CLOSE_AUTH_REQUIRED
 
@@ -163,7 +163,7 @@ def test_ws_pdp_deny_closes_with_4403(
     client = _mk_client(policy_proxy_config, fake_jwks_client, pdp)
     client.cookies.set(jwt_verify.SESSION_COOKIE_NAME, jwt_minter())
     with pytest.raises(WebSocketDisconnect) as exc_info:
-        with client.websocket_connect("/webapps/terminal/ws") as ws:
+        with client.websocket_connect("/ws") as ws:
             ws.receive_text()
     assert exc_info.value.code == app_mod.WS_CLOSE_FORBIDDEN
 
@@ -177,7 +177,7 @@ def test_ws_pdp_unreachable_closes_with_1011(
     client = _mk_client(policy_proxy_config, fake_jwks_client, pdp)
     client.cookies.set(jwt_verify.SESSION_COOKIE_NAME, jwt_minter())
     with pytest.raises(WebSocketDisconnect) as exc_info:
-        with client.websocket_connect("/webapps/terminal/ws") as ws:
+        with client.websocket_connect("/ws") as ws:
             ws.receive_text()
     assert exc_info.value.code == app_mod.WS_CLOSE_SERVICE_UNAVAILABLE
 
@@ -234,7 +234,7 @@ def test_ws_allow_proxies_bidirectional(
 
     with _upstream_ws_server(upstream_handler, port=port, subprotocols=["tty"]):
         with client.websocket_connect(
-            "/webapps/terminal/ws", subprotocols=["tty"],
+            "/ws", subprotocols=["tty"],
         ) as ws:
             ws.send_text("hello")
             assert ws.receive_text() == "echo:hello"
@@ -258,7 +258,7 @@ def test_ws_public_request_cannot_forge_underscore_identity_alias(
     cfg = type(policy_proxy_config)(
         **{**policy_proxy_config.__dict__, "upstream_port": port},
     )
-    public_host = f"dashboard.{cfg.public_hostname}"
+    public_host = f"dashboard-{cfg.public_hostname}"
     seen: dict[str, list[str]] = {"names": []}
 
     async def upstream_handler(connection):
@@ -297,7 +297,7 @@ def test_ws_public_request_cannot_forge_forwarded_host(
     cfg = type(policy_proxy_config)(
         **{**policy_proxy_config.__dict__, "upstream_port": port},
     )
-    public_host = f"dashboard.{cfg.public_hostname}"
+    public_host = f"dashboard-{cfg.public_hostname}"
     seen: dict[str, list[str]] = {"xfh": []}
 
     async def upstream_handler(connection):
@@ -346,7 +346,7 @@ async def test_ws_upstream_unreachable_closes_with_1011(
 
     try:
         async with ws_connect(
-            f"ws://127.0.0.1:{proxy_port}/webapps/terminal/ws",
+            f"ws://127.0.0.1:{proxy_port}/ws",
             additional_headers={
                 "Cookie": f"{jwt_verify.SESSION_COOKIE_NAME}={jwt_minter()}",
             },

@@ -24,10 +24,10 @@ logger = logging.getLogger(__name__)
 @csrf_exempt
 @require_POST
 def pdp_evaluate_public(request: HttpRequest) -> JsonResponse:
-    """Anonymous decision for one webapp subdomain: allow iff a live WebappPublicGrant exists.
+    """Anonymous decision for one webapp hostname: allow iff a live WebappPublicGrant exists.
 
     Called by the policy proxy when a request's Host parses as
-    <webapp_slug>.<agent-host>, before (and instead of) any session identity
+    <webapp_slug>-<agent-host>, before (and instead of) any session identity
     check. The env bearer identifies the Environment; a deny here sends the
     proxy down its normal cookie/ABAC path.
     """

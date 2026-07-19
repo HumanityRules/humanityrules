@@ -9,7 +9,7 @@ from policy_proxy import app as app_mod
 from policy_proxy import jwt_verify
 from tests.test_app_flow import _mk_client, _streamed_body
 
-PUBLIC_HOST = "dashboard.vmendi-hermes.humr-sandbox.humrsandbox.com"
+PUBLIC_HOST = "dashboard-vmendihermes.humr-sandbox.humrsandbox.com"
 
 
 def _pdp_public_allow_else_fail(request: httpx.Request) -> httpx.Response:
@@ -19,16 +19,17 @@ def _pdp_public_allow_else_fail(request: httpx.Request) -> httpx.Response:
 
 def test_webapp_slug_for_host_parses_and_normalizes() -> None:
     public = "agent.example.com"
-    assert app_mod._webapp_slug_for_host(host="dash.agent.example.com", public_hostname=public) == "dash"
-    assert app_mod._webapp_slug_for_host(host="DASH.Agent.Example.Com:443", public_hostname=public) == "dash"
-    assert app_mod._webapp_slug_for_host(host="dash.agent.example.com.", public_hostname=public) == "dash"
-    # Bare host, wrong domain, nested label, internal-style and invalid labels are not webapp slugs.
+    assert app_mod._webapp_slug_for_host(host="my-dash-board-agent.example.com", public_hostname=public) == "my-dash-board"
+    assert app_mod._webapp_slug_for_host(host="MY-DASH-BOARD-Agent.Example.Com:443", public_hostname=public) == "my-dash-board"
+    assert app_mod._webapp_slug_for_host(host="my-dash-board-agent.example.com.", public_hostname=public) == "my-dash-board"
+
     assert app_mod._webapp_slug_for_host(host="agent.example.com", public_hostname=public) is None
-    assert app_mod._webapp_slug_for_host(host="dash.other.example.com", public_hostname=public) is None
-    assert app_mod._webapp_slug_for_host(host="a.b.agent.example.com", public_hostname=public) is None
-    assert app_mod._webapp_slug_for_host(host="__admin.agent.example.com", public_hostname=public) is None
-    assert app_mod._webapp_slug_for_host(host="-x.agent.example.com", public_hostname=public) is None
-    assert app_mod._webapp_slug_for_host(host="dash.agent.example.com", public_hostname=None) is None
+    assert app_mod._webapp_slug_for_host(host="dash-other.example.com", public_hostname=public) is None
+    assert app_mod._webapp_slug_for_host(host="a.b-agent.example.com", public_hostname=public) is None
+    assert app_mod._webapp_slug_for_host(host="__admin-agent.example.com", public_hostname=public) is None
+    assert app_mod._webapp_slug_for_host(host="x--agent.example.com", public_hostname=public) is None
+    assert app_mod._webapp_slug_for_host(host="-agent.example.com", public_hostname=public) is None
+    assert app_mod._webapp_slug_for_host(host="my-dash-board-agent.example.com", public_hostname=None) is None
 
 
 def test_public_grant_allows_anonymous_and_strips_spoofed_identity(policy_proxy_config, fake_jwks_client) -> None:
@@ -61,7 +62,7 @@ def test_public_grant_allows_anonymous_and_strips_spoofed_identity(policy_proxy_
     assert response.status_code == 200
     assert response.text == "public content"
     url, payload = seen_payloads[0]
-    assert payload == {"app_id": "vmendi-hermes", "webapp_slug": "dashboard", "path": "/"}
+    assert payload == {"app_id": "vmendihermes", "webapp_slug": "dashboard", "path": "/"}
 
 
 def test_public_request_cannot_forge_underscore_identity_alias(

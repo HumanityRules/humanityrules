@@ -2,7 +2,7 @@
 
 The policy proxy enforces authentication and ABAC authorization for apps deployed by HUMR. It is the runtime counterpart to the ABAC model described in `authorization_design_abac.md` — it sits in front of each protected app, resolves the caller's identity via SSO, asks HUMR's PDP for a decision, and either proxies or rejects the request.
 
-The first use case is the Personal Assistant (Hermes) deployment, where each employee gets a personalized URL (e.g. `vmendi-hermes.chsandbox.com`) and only the owner plus system admins may access it.
+The first use case is the Personal Assistant (Hermes) deployment, where each employee gets a personalized URL (e.g. `hermesvmendi00.chsandbox.com`) and only the owner plus system admins may access it.
 
 
 ## Scope
@@ -113,7 +113,7 @@ Request:
 
 ```json
 {
-  "app_id": "vmendi-hermes",
+  "app_id": "hermesvmendi00",
   "oidc_sub": "00u1a2b3c4...",
   "username": "vmendi",
   "path": "/chat/new"
@@ -166,7 +166,7 @@ Deploy-time wiring:
   - Non-admins see it prefilled to `self` and locked — self-serve only.
   - Admins see a user search/dropdown and can deploy on behalf of another employee.
 - At deploy time, HUMR sets the `owner` tag on the app to the owner's `username`, validated server-side against the User table. The form value is not trusted.
-- The subdomain (`<slug>-hermes.<env-domain>`) is baked at deploy time and never changes, even if the user's `username` later changes.
+- The deployment subdomain is the dashless app slug derived from the submitted Agent name. The template form defaults to `hermes<username><index>`; onboarding defaults to the user's first name. It is baked at deploy time and never changes.
 
 Authorization:
 

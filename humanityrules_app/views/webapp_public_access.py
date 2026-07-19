@@ -64,8 +64,8 @@ def _subhosting_enabled(app: App) -> bool:
     return bool(app.source_template and app.source_template.enable_subhosting)
 
 
-def _agent_hostname(app: App, environment: Environment) -> str | None:
-    """The agent's public hostname on *environment*, or None if not derivable."""
+def _app_hostname(app: App, environment: Environment) -> str | None:
+    """The app's public hostname on *environment*, or None if not derivable."""
     zone = environment.shared_alb_hosted_zone
     if not zone:
         return None
@@ -75,10 +75,10 @@ def _agent_hostname(app: App, environment: Environment) -> str | None:
 
 
 def _public_url(grant: WebappPublicGrant) -> str | None:
-    host = _agent_hostname(app=grant.app, environment=grant.environment)
+    host = _app_hostname(app=grant.app, environment=grant.environment)
     if host is None:
         return None
-    return f"https://{grant.slug}.{host}/"
+    return f"https://{grant.slug}-{host}/"
 
 
 def _deployed_environments(app: App) -> list[Environment]:
@@ -133,7 +133,7 @@ def webapp_public_access_new(request: HttpRequest, app_slug: str) -> HttpRespons
     context = base.get_app_shell_context(request=request, current_page="workspaces")
     context["app"] = app
     context["environments"] = [
-        {"environment": e, "agent_hostname": _agent_hostname(app=app, environment=e), "selected": e == selected_environment}
+        {"environment": e, "app_hostname": _app_hostname(app=app, environment=e), "selected": e == selected_environment}
         for e in environments
     ]
     context["prefill_slug"] = prefill_slug if _SLUG_RE.match(prefill_slug) else ""
@@ -326,7 +326,7 @@ def webapp_public_access_revoke_confirm(request: HttpRequest, app_slug: str, gra
         context={
             "modal_title": "Revoke Public Access",
             "modal_message": (
-                f"Close public access to {grant.slug}.{grant.environment.slug}? "
+                f"Close public access to {grant.slug} on {grant.environment.name}? "
                 "Anonymous visitors will get a 403 within seconds."
             ),
             "confirm_url": f"/apps/{app.slug}/public-access/{grant.id}/revoke/",

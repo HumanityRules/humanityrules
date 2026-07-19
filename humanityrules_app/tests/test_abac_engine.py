@@ -2148,7 +2148,7 @@ class TestSelfReferentialEvaluation(TestCase):
         )
         self.pa_app = App.objects.create(
             organization=self.org, workspace=self.workspace, repository=self.repo,
-            name="VmendiPA", slug="vmendi-hermes", app_type="web",
+            name="VmendiPA", slug="vmendihermes", app_type="web",
             build_strategy="dockerfile", branch="main", container_port=8000,
             health_check_path="/health",
         )
@@ -2272,7 +2272,7 @@ class TestSelfReferentialEvaluation(TestCase):
             queryset=App.objects.filter(organization=self.org),
             resource_type="app", action="app:use",
         )
-        self.assertEqual(list(visible_for_owner.values_list("slug", flat=True)), ["vmendi-hermes"])
+        self.assertEqual(list(visible_for_owner.values_list("slug", flat=True)), ["vmendihermes"])
         visible_for_stranger = abac_service.filter_permitted_resources(
             organization=self.org, user=self.stranger,
             queryset=App.objects.filter(organization=self.org),

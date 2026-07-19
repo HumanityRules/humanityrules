@@ -270,7 +270,7 @@ def cmd_expose(args: argparse.Namespace) -> None:
 def main() -> None:
     p = argparse.ArgumentParser(
         prog="webapps",
-        description="Manage user-built web apps served at https://<slug>.<agent-host>/.",
+        description="Manage user-built web apps served at https://<slug>-<agent-host>/.",
     )
     sub = p.add_subparsers(dest="cmd", required=True)
 

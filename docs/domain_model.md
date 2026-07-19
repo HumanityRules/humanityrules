@@ -320,7 +320,7 @@ A single message in a conversation.
 ### Effective Values Resolution
 When deploying, several values are resolved from the blueprint + app + environment:
 - **Branch** — Blueprint's branch override, falling back to repository's default_branch
-- **Subdomain** — Blueprint's explicit subdomain, or app slug with automatic conflict-aware suffixing (`{app_slug}-{env_slug}` if `{app_slug}` conflicts with another active deployment on the same hosted zone)
+- **Subdomain** — Blueprint's explicit subdomain, or the app slug when blank; conflicts with active deployments on the same hosted zone are rejected and require an explicit dashless value
 - **URL** — `https://{subdomain}.{hosted_zone}` when the environment has a hosted zone
 
 ### Teardown Flows

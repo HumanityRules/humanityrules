@@ -292,7 +292,7 @@ class TestPublicAccessViews(PublicAccessTestBase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'role="dialog"')
         self.assertContains(response, "Revoke Public Access")
-        self.assertContains(response, "dashboard.staging")
+        self.assertContains(response, "dashboard on staging")
         self.assertContains(response, 'hx-target="#public-access-section"')
         self.assertContains(response, 'hx-swap="outerHTML"')
         self.assertContains(response, 'hx-push-url="false"')
@@ -366,4 +366,12 @@ class TestPublicAccessViews(PublicAccessTestBase):
         self.client.force_login(self.admin)
         response = self.client.get(f"/apps/{self.app.slug}/", HTTP_HX_REQUEST="true")
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "https://dashboard.wolfie.staging.example.com/")
+        self.assertContains(response, "https://dashboard-wolfie.staging.example.com/")
+
+    def test_public_url_preserves_dashed_webapp_slug(self) -> None:
+        grant = self._grant(slug="my-dash-board")
+
+        self.assertEqual(
+            webapp_public_access._public_url(grant=grant),
+            "https://my-dash-board-wolfie.staging.example.com/",
+        )
