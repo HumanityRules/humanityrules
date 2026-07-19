@@ -74,11 +74,18 @@ class Command(BaseCommand):
                 return
 
             self.stdout.write("Applying shared sandbox base infra (slow)...")
+            # SANDBOX_ENI_TRUNKING_ENABLED is the single trunking switch: enforce
+            # the ECS account setting here so it can't desync from the flag. It's
+            # per account+region and only affects instances at registration time.
+            trunking_value = "enabled" if sandbox_service.SANDBOX_ENI_TRUNKING_ENABLED else "disabled"
+            session.client("ecs").put_account_setting_default(name="awsvpcTrunking", value=trunking_value)
+            self.stdout.write(f"ECS awsvpcTrunking account setting: {trunking_value}.")
             success = infra_customer.deploy_base.deploy(
                 session=session,
                 env_slug=HUMR_SANDBOX_ENV_SLUG,
                 synth_only=False,
                 shared_alb_hosted_zone=settings.HUMR_SANDBOX_HOSTED_ZONE or None,
+                eni_trunking_enabled=sandbox_service.SANDBOX_ENI_TRUNKING_ENABLED,
             )
             if success:
                 self.stdout.write(self.style.SUCCESS("Shared sandbox base infra applied."))

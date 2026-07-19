@@ -88,6 +88,20 @@ class TestSandboxProvisioning(TestCase):
             1,
         )
 
+    def test_ensure_org_sandbox_enforces_eni_trunking_on_existing_rows(self) -> None:
+        # Every org's sandbox env shares one cluster, so the rows must agree
+        # with the SANDBOX_ENI_TRUNKING_ENABLED switch — including rows created
+        # before the switch existed.
+        org = models.Organization.objects.create(name="Acme", slug="acme")
+        env = models.Environment.objects.get(aws_account__organization=org, slug="sandbox")
+        self.assertEqual(env.eni_trunking_enabled, sandbox_service.SANDBOX_ENI_TRUNKING_ENABLED)
+
+        env.eni_trunking_enabled = not sandbox_service.SANDBOX_ENI_TRUNKING_ENABLED
+        env.save(update_fields=["eni_trunking_enabled"])
+        sandbox_service.ensure_org_sandbox(organization=org)
+        env.refresh_from_db()
+        self.assertEqual(env.eni_trunking_enabled, sandbox_service.SANDBOX_ENI_TRUNKING_ENABLED)
+
 
 @override_settings(
     HUMR_SANDBOX_AWS_ACCOUNT_ID="",
