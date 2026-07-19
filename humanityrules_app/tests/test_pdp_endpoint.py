@@ -272,6 +272,34 @@ class TestPDPEvaluation(PDPTestBase):
         self.assertEqual(body["decision"], "deny")
         self.assertEqual(body["reason"], "user-not-found")
 
+    def test_superuser_from_another_org_receives_platform_admin_allow(self) -> None:
+        other_org = Organization.objects.create(name="Admin Org", slug="admin-org")
+        superuser = User.objects.create_user(
+            username="platform-admin",
+            password="pw",
+            current_organization=other_org,
+            oidc_sub="okta|platform-admin",
+            is_superuser=True,
+        )
+        OrganizationMembership.objects.create(
+            user=superuser, organization=other_org, role=OrganizationMembership.Role.MEMBER,
+        )
+
+        status, body = self._post(
+            body={
+                "app_id": "vmendihermes",
+                "provider": "oidc",
+                "sub": "okta|platform-admin",
+                "username": "platform-admin",
+                "path": "/chat/new",
+            },
+            token=self.raw_token,
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(body["decision"], "allow")
+        self.assertEqual(body["reason"], "platform-admin")
+
     def test_workos_owner_receives_allow(self) -> None:
         """A user looked up by workos_user_id is authorized identically to the OIDC path."""
         self.owner.workos_user_id = "user_01H_vmendi"
