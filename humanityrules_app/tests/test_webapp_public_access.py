@@ -51,7 +51,7 @@ class PublicAccessTestBase(TestCase):
             name="Hermes", slug="hermes", description="agent", icon="app",
             category="agent", cpu=1024, memory=2048,
             containers=[{"name": "agent", "image_source": "app"}],
-            enable_subhosting=True, is_active=True,
+            enable_webapp_hosts=True, is_active=True,
         )
         self.admin = User.objects.create_user(username="pub_admin", password="x", current_organization=self.org)
         OrganizationMembership.objects.create(organization=self.org, user=self.admin, role=OrganizationMembership.Role.ADMIN)
@@ -235,9 +235,9 @@ class TestPublicAccessViews(PublicAccessTestBase):
         grant = WebappPublicGrant.objects.get(app=self.app, slug="dashboard")
         self.assertEqual(grant.environment, self.environment)
 
-    def test_template_without_subhosting_rejected(self) -> None:
-        self.template.enable_subhosting = False
-        self.template.save(update_fields=["enable_subhosting"])
+    def test_template_without_webapp_hosts_rejected(self) -> None:
+        self.template.enable_webapp_hosts = False
+        self.template.save(update_fields=["enable_webapp_hosts"])
         response = self._create(user=self.admin, slug="dashboard", expiry="24h", environment=None)
         self.assertEqual(response.status_code, 422)
 

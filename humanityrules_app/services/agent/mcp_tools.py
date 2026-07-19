@@ -634,7 +634,7 @@ def create_humanityrules_mcp_server(conversation: Conversation):
                 "environment_variables": {"type": "array", "description": "List of {name, value} dicts. Omit to keep existing, [] to clear."},
                 "app_secrets": {"type": "object", "description": "Dict of secret names to values. Omit to keep existing, {} to clear."},
                 "datastore_id": {"type": "string", "description": "UUID of datastore to bind. Omit if app doesn't need a database."},
-                "subdomain": {"type": "string", "description": "Route53 subdomain override. Defaults to app slug."},
+                "subdomain": {"type": "string", "description": "Hostname label override. Defaults to app slug."},
             },
             "required": [],
         },

@@ -116,7 +116,7 @@ Deployment target with shared infrastructure. Account-scoped.
 - **status** — draft / pending / provisioning / ready / error / discarded / teardown_pending / tearing_down
 - **vpc_stack_name, cluster_stack_name** — CloudFormation stack names (set when provisioning starts)
 - **vpc_id, cluster_arn** — AWS resource IDs (populated after provisioning)
-- **shared_alb_hosted_zone** — Hosted zone for wildcard cert (e.g., "dev.example.com"). Empty = HTTP only.
+- **shared_alb_hosted_zone** — Environment-owned hosted zone for the wildcard certificate and A alias (e.g., "dev.example.com"). Empty = HTTP only.
 - Unique constraint: (aws_account, slug)
 
 Status lifecycle: draft → pending → provisioning → ready. Error can occur from provisioning. Teardown: teardown_pending → tearing_down → (deleted). Discarded = abandoned draft.
@@ -157,7 +157,7 @@ Desired deployable state for one (App, Environment) pair.
 - **environment_variables** — List of {name, value} objects
 - **app_secrets** — Dict mapping secret field names to values (null value = auto-generate a random value)
 - **datastore** — FK to Datastore (optional binding)
-- **subdomain** — Route53 subdomain override (blank = use app slug; conflicts require an explicit dashless value)
+- **subdomain** — Hostname label for the deployment (blank = use app slug; conflicts require an explicit dashless value)
 
 Status lifecycle: draft → deploying → active (on success) / failed. Discarded after teardown.
 
@@ -305,7 +305,7 @@ A single message in a conversation.
 ### Environment Provisioning Flow
 1. Agent creates an Environment record (status: draft or pending)
 2. Job worker claims pending environments, transitions to provisioning
-3. CDK deploys base infrastructure: VPC, ECS cluster, shared ALB (with optional wildcard cert)
+3. CDK deploys base infrastructure: VPC, ECS cluster, shared ALB, and optional wildcard certificate plus A alias
 4. On success: vpc_id and cluster_arn are synced from CloudFormation outputs, status → ready
 5. On failure: status → error
 
@@ -313,7 +313,7 @@ A single message in a conversation.
 1. Agent tool `deploy_blueprint` creates a Deployment record (status: pending) and sets blueprint to deploying
 2. Job worker claims pending deployments, transitions to building
 3. Executor clones repository, builds AppConfig from blueprint, deploys via CDK
-4. CDK creates/updates: ECR repository, ECS task definition, ECS service, ALB target group, Route53 records
+4. CDK creates/updates: ECR repository, ECS task definition, ECS service, ALB target group, and listener rules
 5. On success: deployment status → succeeded, blueprint → active, service_url populated
 6. On failure: both deployment and blueprint → failed
 
@@ -365,6 +365,7 @@ App slugs are unique per organization (not globally or per workspace) because:
 ### Domain and URL Resolution
 Apps use shared ALB with host-based routing:
 - Environment has `shared_alb_hosted_zone` (e.g., `dev.example.com`)
+- Environment's `*.{shared_alb_hosted_zone}` A alias sends every hostname in the zone to the shared ALB
 - App gets domain `{subdomain}.{shared_alb_hosted_zone}` (e.g., `myapp.dev.example.com`)
 - Subdomain defaults to the app slug; conflicts require an explicit dashless subdomain
 

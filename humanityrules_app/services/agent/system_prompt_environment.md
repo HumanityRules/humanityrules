@@ -110,10 +110,10 @@ CRITICAL domain selection rules:
 </domain_selection>
 
 <https_configuration>
-- If `hosted_zone_name` is provided, the environment uses a wildcard SSL certificate (creates one if none exists, otherwise reuses the existing certificate)
-- This enables HTTPS for all apps deployed to this environment
-- Each app creates its own DNS record: `{app-slug}.{hosted_zone_name}`
-- Multiple environments can share the same hosted zone — each app gets its own DNS record pointing to its environment's load balancer
+- If `hosted_zone_name` is provided, the environment uses a wildcard SSL certificate and a wildcard A alias to its shared load balancer
+- The environment owns the hosted zone exclusively; `*.{hosted_zone_name}` is its only DNS record
+- The certificate and DNS alias cover every single-label agent root and webapp hostname in the zone
+- Each agent deployment creates ALB listener rules for its hostname patterns
 </https_configuration>
 
 <after_success>

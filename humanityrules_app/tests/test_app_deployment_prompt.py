@@ -45,7 +45,7 @@ class TestAppDeploymentPrompt(TestCase):
             slug="staging",
             aws_region="us-east-1",
             status=models.Environment.Status.READY,
-            shared_alb_hosted_zone="example.com",
+            shared_alb_hosted_zone="staging.example.com",
         )
         self.conversation = models.Conversation.objects.create(
             user=self.user,
@@ -63,9 +63,11 @@ class TestAppDeploymentPrompt(TestCase):
         self.assertIn("Never offer combined options like `Both`, `All environments`", prompt)
         self.assertIn("handle them as separate deployments with one environment choice at a time", prompt)
 
-    def test_prompt_requires_dashless_explicit_subdomain_on_conflict(self) -> None:
+    def test_prompt_explains_dashless_subdomains_and_exclusive_environment_zones(self) -> None:
         prompt = async_to_sync(agent_build_prompt.build_system_prompt)(conversation=self.conversation)
 
         self.assertIn("App slugs and subdomains contain lowercase letters and digits only", prompt)
-        self.assertIn('specify `subdomain: "myappstaging"`', prompt)
+        self.assertIn("Each environment owns its hosted zone exclusively", prompt)
+        self.assertIn("The same app can use its default subdomain", prompt)
+        self.assertIn('subdomain: "internalmyapp"', prompt)
         self.assertNotIn("automatically suffixed", prompt)

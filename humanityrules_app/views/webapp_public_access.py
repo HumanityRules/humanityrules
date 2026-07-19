@@ -60,8 +60,8 @@ def _org_admin_denied(request: HttpRequest) -> HttpResponse | None:
     return HttpResponse("Only organization admins can manage public access.", status=403)
 
 
-def _subhosting_enabled(app: App) -> bool:
-    return bool(app.source_template and app.source_template.enable_subhosting)
+def _webapp_hosts_enabled(app: App) -> bool:
+    return bool(app.source_template and app.source_template.enable_webapp_hosts)
 
 
 def _app_hostname(app: App, environment: Environment) -> str | None:
@@ -93,14 +93,14 @@ def _deployed_environments(app: App) -> list[Environment]:
 
 
 def build_public_access_context(request: HttpRequest, app: App) -> dict[str, object]:
-    """Context for the app-detail panel; empty grants list when subhosting is off."""
+    """Context for the app-detail panel; empty grants list when webapp hosts are disabled."""
     grants = []
-    if _subhosting_enabled(app=app):
+    if _webapp_hosts_enabled(app=app):
         grants = list(
             WebappPublicGrant.live().filter(app=app).select_related("environment", "granted_by").order_by("environment__slug", "slug"),
         )
     return {
-        "public_access_enabled": _subhosting_enabled(app=app),
+        "public_access_enabled": _webapp_hosts_enabled(app=app),
         "public_grants": [{"grant": grant, "url": _public_url(grant=grant)} for grant in grants],
         "can_publish": abac_service.is_org_admin(organization=request.user.current_organization, user=request.user),
     }
@@ -120,7 +120,7 @@ def webapp_public_access_new(request: HttpRequest, app_slug: str) -> HttpRespons
     denied = _org_admin_denied(request=request)
     if denied:
         return denied
-    if not _subhosting_enabled(app=app):
+    if not _webapp_hosts_enabled(app=app):
         return HttpResponse("This app's template does not serve webapps.", status=422)
 
     environments = _deployed_environments(app=app)
@@ -175,7 +175,7 @@ def webapp_public_access_create(request: HttpRequest, app_slug: str) -> HttpResp
     denied = _org_admin_denied(request=request)
     if denied:
         return denied
-    if not _subhosting_enabled(app=app):
+    if not _webapp_hosts_enabled(app=app):
         return HttpResponse("This app's template does not serve webapps.", status=422)
 
     slug = request.POST.get("slug", "").strip().lower()

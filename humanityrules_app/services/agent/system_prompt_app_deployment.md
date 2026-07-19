@@ -231,18 +231,20 @@ Each deployment gets a URL based on its **subdomain** and the environment's **ho
 
 **Same app to multiple environments:**
 
-When deploying the same app to multiple environments that share the same hosted zone (domain),
-each deployment must claim a unique subdomain:
+Each environment owns its hosted zone exclusively. The same app can use its default subdomain
+in every environment because each resulting hostname belongs to a different zone:
 
-- First deployment: `myapp` → `https://myapp.example.com`
-- Second deployment to staging: specify `subdomain: "myappstaging"` → `https://myappstaging.example.com`
+- Production: `myapp` + `example.com` → `https://myapp.example.com`
+- Staging: `myapp` + `staging.example.com` → `https://myapp.staging.example.com`
 
 **Explicit subdomain control:**
 
 Users can override the subdomain using the `subdomain` parameter in `save_blueprint`:
 
-- `myapp` to production with default subdomain → `https://myapp.example.com`
-- `myapp` to staging with `subdomain: "myappstg"` → `https://myappstg.example.com`
+Within production's `example.com` zone:
+
+- `myapp` with the default subdomain → `https://myapp.example.com`
+- `myapp` with `subdomain: "internalmyapp"` → `https://internalmyapp.example.com`
 
 This keeps the app identity the same while controlling the URL.
 
