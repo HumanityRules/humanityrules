@@ -16,6 +16,7 @@ from aws_cdk import aws_elasticloadbalancingv2 as elbv2
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_logs as logs
 from aws_cdk import aws_route53 as route53
+from aws_cdk import aws_route53_targets as targets
 from constructs import Construct
 
 from . import acm_utils
@@ -437,9 +438,15 @@ class EcsClusterStack(Stack):
                 ),
             )
 
-            # NOTE: No wildcard DNS record here. Each app creates its own DNS record
-            # pointing to this environment's ALB. This allows multiple environments
-            # to share the same hosted zone without DNS conflicts.
+            # The environment owns its hosted zone. This record sends every
+            # agent root and webapp host in the zone to the shared ALB, whose
+            # listener rules dispatch traffic by hostname.
+            route53.ARecord(
+                self, "WildcardDnsRecord",
+                zone=hosted_zone,
+                record_name=f"*.{shared_hosted_zone_name}",
+                target=route53.RecordTarget.from_alias(targets.LoadBalancerTarget(self.shared_alb)),
+            )
 
             # Export HTTPS-specific values
             CfnOutput(self, "SharedAlbHttpsListenerArn", value=self.https_listener.listener_arn, export_name=f"{prefix}-shared-alb-https-listener-arn")

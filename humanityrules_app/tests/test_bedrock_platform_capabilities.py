@@ -42,7 +42,6 @@ def _bedrock_actions_from_stack(app_config: AppConfig) -> list[str]:
         subdomain="myhermes",
         database_connection_secret=None,
         shared_alb_hosted_zone=None,
-        shared_hosted_zone_id=None,
         env_bearer_shared_secrets_arn=None,
         auth_base_url=None,
     )

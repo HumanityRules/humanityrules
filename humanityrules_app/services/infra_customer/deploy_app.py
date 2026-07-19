@@ -10,7 +10,6 @@ import boto3
 
 from humanityrules_app.models import Environment
 from aws_cdk import App, Aws, CfnOutput, Duration, Fn, RemovalPolicy, SecretValue, Stack, Tags
-from aws_cdk import aws_certificatemanager as acm
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_ecr as ecr
 from aws_cdk import aws_ecs as ecs
@@ -19,8 +18,6 @@ from aws_cdk import aws_elasticloadbalancingv2 as elbv2
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_logs as logs
 from aws_cdk import aws_rds as rds
-from aws_cdk import aws_route53 as route53
-from aws_cdk import aws_route53_targets as targets
 from aws_cdk import aws_secretsmanager as secretsmanager
 from constructs import Construct
 
@@ -29,7 +26,6 @@ from . import cdk_utils
 from . import cloudformation_utils
 from . import deploy_base
 from . import ecr_utils
-from . import route53_utils
 from . import secrets_utils
 
 
@@ -508,79 +504,6 @@ def _compute_listener_rule_priority(app_name: str) -> int:
     return (hash(app_name) % 40000) + 1000
 
 
-def cert_stack_name(env_slug: str, app_name: str) -> str:
-    """Per-app wildcard cert stack name. Created only when enable_subhosting=True."""
-    return f"humr-{env_slug}-{app_name}-cert"
-
-
-def subhosting_wildcard_cert_export_name(resource_prefix: str) -> str:
-    """CFN export of the wildcard cert ARN, written by CertStack and read by AppStack.
-
-    Distinct from the legacy `{prefix}-subhosting-wildcard-cert-arn` that
-    pre-Option-B `-app` stacks emitted: those are still live until each app
-    gets its first redeploy under the new layout, so a colliding name would
-    refuse the new `-cert` stack creation.
-    """
-    return f"{resource_prefix}-cert-stack-wildcard-arn"
-
-
-class CertStack(Stack):
-    """Per-agent wildcard ACM cert (`*.<agent-host>`), isolated from app lifecycle.
-
-    Owns only the cert resource and a CFN export of its ARN. The app stack
-    imports the ARN and owns the SAN attachment to the shared ALB listener.
-
-    Why a separate stack: ACM's `DeleteCertificate` is eventually consistent
-    with respect to listener-certificate detach. Destroying the cert and
-    the attachment in one CFN destroy hits a `ResourceInUseException` race
-    (~10s window). With the cert in its own stack, an app-stack teardown
-    only detaches; the cert is never a candidate for delete in that path.
-    Full agent removal then deletes this stack on its own — by then the
-    attachment has been gone for a while, ACM has caught up, no race.
-
-    See aws/aws-cdk#36265, hashicorp/terraform-provider-aws#3866.
-    """
-
-    def __init__(
-        self,
-        scope: Construct,
-        construct_id: str,
-        app_config: appconfig.AppConfig,
-        env_slug: str,
-        resource_prefix: str,
-        subdomain: str,
-        shared_alb_hosted_zone: str,
-        shared_hosted_zone_id: str,
-        **kwargs,
-    ) -> None:
-        super().__init__(scope, construct_id, **kwargs)
-
-        app_hostname = f"{subdomain}.{shared_alb_hosted_zone}"
-
-        hosted_zone = route53.HostedZone.from_hosted_zone_attributes(
-            self, "HostedZone",
-            hosted_zone_id=shared_hosted_zone_id,
-            zone_name=shared_alb_hosted_zone,
-        )
-
-        # ACM wildcards only match one label deep, so the env-level
-        # *.<env-domain> doesn't cover sub-subdomains under <agent-host>.
-        # DNS-validated through the same hosted zone — fully automated.
-        wildcard_cert = acm.Certificate(
-            self, "WildcardCertificate",
-            domain_name=f"*.{app_hostname}",
-            validation=acm.CertificateValidation.from_dns(hosted_zone),
-        )
-        Tags.of(wildcard_cert).add("App", app_config.app_name)
-        Tags.of(wildcard_cert).add("Env", env_slug)
-
-        CfnOutput(
-            self, "WildcardCertificateArn",
-            value=wildcard_cert.certificate_arn,
-            export_name=subhosting_wildcard_cert_export_name(resource_prefix=resource_prefix),
-        )
-
-
 class AppStack(Stack):
     """HumanityRules App Stack - ECS Service with shared ALB routing."""
 
@@ -595,7 +518,6 @@ class AppStack(Stack):
         subdomain: str,
         database_connection_secret: secretsmanager.ISecret | None,
         shared_alb_hosted_zone: str | None,
-        shared_hosted_zone_id: str | None,
         env_bearer_shared_secrets_arn: str | None,
         auth_base_url: str | None,
         **kwargs,
@@ -1064,7 +986,7 @@ class AppStack(Stack):
             ),
         )
 
-        # Configure routing rules on the shared ALB and create per-app DNS record
+        # Configure routing rules on the shared ALB.
         self._setup_shared_alb_routing(
             app_config=app_config,
             subdomain=subdomain,
@@ -1072,7 +994,6 @@ class AppStack(Stack):
             resource_prefix=resource_prefix,
             target_group=target_group,
             shared_alb_hosted_zone=shared_alb_hosted_zone,
-            shared_hosted_zone_id=shared_hosted_zone_id,
         )
 
         # Circuit breaker: for desired_count=1, ECS trips after 3 consecutive
@@ -1160,21 +1081,13 @@ class AppStack(Stack):
         resource_prefix: str,
         target_group: elbv2.ApplicationTargetGroup,
         shared_alb_hosted_zone: str | None,
-        shared_hosted_zone_id: str | None,
     ) -> None:
-        """Configure routing rules on the shared ALB and create per-app DNS record.
+        """Configure the app's routing rules on the shared ALB.
 
-        When app_config.enable_subhosting is True (used by Hermes), the rule
-        also matches *.<agent-host> so the in-container Caddy sidecar can
-        serve user webapps as sub-subdomains. That requires the per-agent
-        wildcard ACM cert (provisioned in the sibling -cert stack) attached
-        to the HTTPS listener via SNI, plus a wildcard A-alias record. The
-        env-level wildcard cert only covers one label deep (*.<env-domain>),
-        so sub-subdomains need their own cert.
-
-        The cert lives in -cert, not here, so an -app-stack teardown only
-        detaches the cert (no DeleteCertificate call) and the ACM
-        eventual-consistency race is dodged on the common shutdown path.
+        The rule matches the agent hostname and, when webapp hosts are
+        enabled, *-<agent-host>. TLS comes from the environment listener's
+        default *.<zone> certificate. The base stack's *.<zone> DNS record
+        sends both hostname shapes to the shared ALB.
         """
         priority = _compute_listener_rule_priority(subdomain)
         prefix = f"humr-{env_slug}"
@@ -1187,15 +1100,13 @@ class AppStack(Stack):
             security_group=self.environment_infra.shared_alb_security_group,
         )
 
-        # Hermes (and any other template that opts in) routes traffic from
-        # both <agent-host> and *.<agent-host> to the same task — same ALB
-        # target group, same policy-proxy, same Caddy. Caddy then distinguishes
-        # by Host header. Both kinds of traffic share a single ALB rule.
-        subhosting = bool(app_config.enable_subhosting and shared_alb_hosted_zone)
+        # Both hostname shapes share one ALB rule and target group. Caddy
+        # distinguishes the agent root from webapp hosts by forwarded host.
+        webapp_hosts_enabled = bool(app_config.enable_webapp_hosts and shared_alb_hosted_zone)
 
         if shared_alb_hosted_zone:
             app_hostname = f"{subdomain}.{shared_alb_hosted_zone}"
-            host_patterns = [app_hostname, f"*.{app_hostname}"] if subhosting else [app_hostname]
+            host_patterns = [app_hostname, f"*-{app_hostname}"] if webapp_hosts_enabled else [app_hostname]
             host_condition = elbv2.ListenerCondition.host_headers(host_patterns)
         else:
             # HTTP-only mode: route by path prefix since no domain
@@ -1227,57 +1138,6 @@ class AppStack(Stack):
             )
 
             CfnOutput(self, "HttpsUrl", value=f"https://{app_hostname}", export_name=f"{resource_prefix}-https-url")
-        else:
-            https_listener = None
-
-        if shared_alb_hosted_zone and shared_hosted_zone_id and app_hostname:
-            hosted_zone = route53.HostedZone.from_hosted_zone_attributes(
-                self, "HostedZone",
-                hosted_zone_id=shared_hosted_zone_id,
-                zone_name=shared_alb_hosted_zone,
-            )
-
-            # DNS name and canonical hosted zone ID are required for Route53 alias records
-            shared_alb = elbv2.ApplicationLoadBalancer.from_application_load_balancer_attributes(
-                self, "ImportedSharedAlb",
-                load_balancer_arn=Fn.import_value(f"{prefix}-shared-alb-arn"),
-                security_group_id=self.environment_infra.shared_alb_security_group.security_group_id,
-                load_balancer_dns_name=shared_alb_dns,
-                load_balancer_canonical_hosted_zone_id=Fn.import_value(f"{prefix}-shared-alb-canonical-hz-id"),
-            )
-
-            route53.ARecord(
-                self, "AppDnsRecord",
-                zone=hosted_zone,
-                record_name=app_hostname,
-                target=route53.RecordTarget.from_alias(targets.LoadBalancerTarget(shared_alb)),
-            )
-
-            if subhosting:
-                # Wildcard A-alias so any sub-subdomain (e.g. hud.<agent-host>)
-                # also resolves to the ALB. Single record per agent; webapp
-                # creation in the container adds no DNS work.
-                route53.ARecord(
-                    self, "SubhostingWildcardDnsRecord",
-                    zone=hosted_zone,
-                    record_name=f"*.{app_hostname}",
-                    target=route53.RecordTarget.from_alias(targets.LoadBalancerTarget(shared_alb)),
-                )
-
-                if https_listener is not None:
-                    # Wildcard cert is owned by the sibling -cert stack;
-                    # we only attach it here as a SAN on the shared ALB
-                    # listener. ALB picks per-request via SNI alongside
-                    # the env-level *.<env-domain>.
-                    wildcard_cert = acm.Certificate.from_certificate_arn(
-                        self, "ImportedSubhostingWildcardCertificate",
-                        Fn.import_value(subhosting_wildcard_cert_export_name(resource_prefix=resource_prefix)),
-                    )
-                    elbv2.ApplicationListenerCertificate(
-                        self, "SubhostingWildcardListenerCertificate",
-                        listener=https_listener,
-                        certificates=[wildcard_cert],
-                    )
 
         CfnOutput(self, "SharedAlbDns", value=shared_alb_dns, export_name=f"{resource_prefix}-shared-alb-dns")
 
@@ -1311,7 +1171,7 @@ def deploy(
         app_config: Application configuration.
         image_tag: Docker image tag to deploy.
         env_slug: Environment slug (e.g., "default", "prod").
-        subdomain: Route53 subdomain for this deployment (may differ from app name).
+        subdomain: Hostname label this deployment is served under.
         synth_only: If True, only synthesize templates, don't deploy.
         shared_alb_hosted_zone: Hosted zone for shared ALB (e.g., "dev.example.com"). None = HTTP only.
     Returns:
@@ -1327,8 +1187,6 @@ def deploy(
     app_stack_names = [f"{resource_prefix}-ecr", f"{resource_prefix}-app"]
     if app_config.database_config:
         app_stack_names.append(f"{resource_prefix}-aurora")
-    if app_config.enable_subhosting:
-        app_stack_names.append(cert_stack_name(env_slug=env_slug, app_name=app_config.app_name))
     cloudformation_utils.cleanup_rollback_complete_stacks(cf_client, app_stack_names)
 
     # Verify infrastructure exists
@@ -1358,16 +1216,6 @@ def deploy(
         shared_secrets = secrets_utils.get_shared_secrets(session=session, env=environment)
         secrets_utils.ensure_app_secrets_exist(session=session, env_slug=env_slug, app_config=app_config, shared_secrets=shared_secrets)
 
-    # Look up hosted zone ID for per-app DNS record creation
-    shared_hosted_zone_id = None
-    if shared_alb_hosted_zone:
-        logger.info("Looking up hosted zone ID for '%(hosted_zone)s'", {"hosted_zone": shared_alb_hosted_zone})
-        shared_hosted_zone_id = route53_utils.get_hosted_zone_id(session=session, hosted_zone_name=shared_alb_hosted_zone)
-        if shared_hosted_zone_id:
-            logger.info("Found hosted zone ID: %(hosted_zone_id)s", {"hosted_zone_id": shared_hosted_zone_id})
-        else:
-            logger.error("Could not find hosted zone ID for '%(hosted_zone)s', DNS record will not be created", {"hosted_zone": shared_alb_hosted_zone})
-
     # Env-bearer prerequisite: shared-secrets entry + EnvironmentBearerToken row.
     # Any container in the app that needs the HUMR control-plane bearer needs
     # this. Idempotent; reused across apps sharing the env.
@@ -1384,7 +1232,7 @@ def deploy(
     # Policy-proxy prerequisites: per-env ECR repo + image push.
     policy_proxy_auth_base_url: str | None = None
     if policy_proxy_needed:
-        if not shared_alb_hosted_zone or not shared_hosted_zone_id:
+        if not shared_alb_hosted_zone:
             msg = "Policy-proxy apps require a hosted zone (HTTPS)"
             logger.error(msg)
             return DeployResult(success=False, error=msg, service_url="", alb_dns="")
@@ -1422,25 +1270,6 @@ def deploy(
         )
         aurora_connection_secret = aurora_stack.connection_secret
 
-    # Per-agent wildcard cert lives in its own stack so the cert outlives
-    # any single deployment. Created lazily; only Hermes uses subhosting today.
-    subhosting_active = bool(
-        app_config.enable_subhosting and shared_alb_hosted_zone and shared_hosted_zone_id
-    )
-    cert_stack = None
-    if subhosting_active:
-        assert shared_alb_hosted_zone is not None and shared_hosted_zone_id is not None
-        cert_stack = CertStack(
-            scope=cdk_app,
-            construct_id=cert_stack_name(env_slug=env_slug, app_name=app_config.app_name),
-            app_config=app_config,
-            env_slug=env_slug,
-            resource_prefix=resource_prefix,
-            subdomain=subdomain,
-            shared_alb_hosted_zone=shared_alb_hosted_zone,
-            shared_hosted_zone_id=shared_hosted_zone_id,
-        )
-
     app_stack = AppStack(
         scope=cdk_app,
         construct_id=f"{resource_prefix}-app",
@@ -1451,15 +1280,12 @@ def deploy(
         subdomain=subdomain,
         database_connection_secret=aurora_connection_secret,
         shared_alb_hosted_zone=shared_alb_hosted_zone,
-        shared_hosted_zone_id=shared_hosted_zone_id,
         env_bearer_shared_secrets_arn=env_bearer_shared_secrets_arn,
         auth_base_url=policy_proxy_auth_base_url,
     )
     app_stack.add_dependency(ecr_stack)
     if aurora_stack:
         app_stack.add_dependency(aurora_stack)
-    if cert_stack:
-        app_stack.add_dependency(cert_stack)
 
     assembly_dir = cdk_utils.synth_cdk_app(cdk_app)
 
@@ -1502,13 +1328,10 @@ def deploy(
 
     # Phase 1b: Deploy stacks the App stack depends on. ECR must exist before
     # we push images. Aurora must exist before the App stack imports its
-    # connection secret. The wildcard cert stack must exist before the App
-    # stack's listener-certificate attachment imports its ARN.
+    # connection secret.
     pre_app_stacks = [f"{resource_prefix}-ecr"]
     if aurora_stack:
         pre_app_stacks.append(f"{resource_prefix}-aurora")
-    if cert_stack:
-        pre_app_stacks.append(cert_stack_name(env_slug=env_slug, app_name=app_config.app_name))
 
     if not cdk_utils.deploy_from_assembly(assembly_dir=assembly_dir, session=session, stack_names=pre_app_stacks):
         logger.error("CDK deployment failed (pre-app stacks)")
@@ -1596,12 +1419,6 @@ def teardown(
 
     Prebuilt-container repos are per-env shared resources and are not torn
     down here — only the per-app dockerfile ECR repos get emptied.
-
-    The per-agent wildcard cert stack (-cert, when subhosting is enabled)
-    is deliberately left in place: an app-stack teardown is the "shutdown
-    until next deploy" path, and keeping the cert means the redeploy
-    skips the DNS-validation round-trip and avoids the ACM in-use race.
-    Full agent removal calls teardown_cert_stack to clean it up.
     """
     cf_client = session.client("cloudformation")
 
@@ -1635,36 +1452,3 @@ def teardown(
     logger.error("Some stacks failed to delete")
 
     return all_success
-
-
-def teardown_cert_stack(session: boto3.Session, env_slug: str, app_name: str) -> bool:
-    """Delete the per-agent wildcard cert stack as part of full app removal.
-
-    Lives outside the per-deployment teardown so a normal "shutdown" keeps
-    the cert around for redeploy. Called only by app removal.
-
-    By the time we reach this path the listener-certificate attachment
-    (in the -app stack) has been gone for a while, so ACM's `InUseBy`
-    cache should have cleared. As insurance against the eventual-consistency
-    window, retry once after a 60s sleep on failure — CFN re-skips
-    already-deleted resources, so the second attempt is the one cert delete
-    that hadn't propagated the first time.
-    """
-    import time
-
-    cf_client = session.client("cloudformation")
-    stack_name = cert_stack_name(env_slug=env_slug, app_name=app_name)
-
-    if not cloudformation_utils.stack_exists(cf_client, stack_name):
-        logger.info("No cert stack '%(stack)s' to delete (skipping)", {"stack": stack_name})
-        return True
-
-    logger.info("Tearing down cert stack '%(stack)s'", {"stack": stack_name})
-    if cloudformation_utils.delete_stack_and_wait(cf_client, stack_name=stack_name):
-        return True
-
-    logger.error(
-        "Cert stack delete failed; retrying once after ACM eventual-consistency window (60s)"
-    )
-    time.sleep(60)
-    return cloudformation_utils.delete_stack_and_wait(cf_client, stack_name=stack_name)

@@ -89,7 +89,7 @@
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Couldn't load Route53 hosted zones for this account — enter a hosted zone name manually, or leave empty for HTTP only.</p>
             {% else %}
             {% include "humanityrules_app/partials/_dropdown_select.html#dropdown_select" with dropdown_id="shared_alb_hosted_zone" dropdown_name="shared_alb_hosted_zone" dropdown_value=selected_domain dropdown_selected_label=selected_domain_label dropdown_options=domain_options %}
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Route53 hosted zone for the shared ALB's wildcard HTTPS certificate. Choose “None (HTTP only)” for plain HTTP.</p>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Environment-owned Route53 hosted zone for the shared ALB's wildcard HTTPS certificate and A alias. Choose “None (HTTP only)” for plain HTTP.</p>
             {% endif %}
         </div>
 

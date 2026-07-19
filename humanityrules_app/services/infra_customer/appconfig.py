@@ -320,13 +320,11 @@ class AppConfig:
     # user. None for apps without an owner tag (typical multi-user apps).
     owner_username: str | None = None
 
-    # When True, deploy provisions per-agent wildcard infra so user webapps
-    # can be reached at <slug>.<agent-host> instead of <agent-host>/webapps/<slug>/.
-    # CDK issues an ACM cert for *.<agent-host>, a wildcard A-alias DNS
-    # record, and widens the ALB listener-rule host condition to include
-    # *.<agent-host>. The in-container Caddy sidecar then routes by Host
-    # header. See docs/webapps_design.md.
-    enable_subhosting: bool = False
+    # When True, the ALB listener rule also matches *-<agent-host> so Caddy
+    # can route user webapps by hostname. TLS and DNS come from the
+    # environment's *.<zone> certificate and wildcard record. See
+    # docs/webapps_design.md.
+    enable_webapp_hosts: bool = False
 
     def container_needs_env_bearer(self, container: ContainerConfig) -> bool:
         """True if this container should receive the HUMR control-plane bearer overlay."""

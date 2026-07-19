@@ -6,9 +6,9 @@ routes.caddy is regenerated from it on every mutation. See
 docs/webapps_design.md.
 
 User webapps live at <slug>-<agent-host> (Host-based Caddy routing). The
-per-agent ALB wildcard cert + Route 53 wildcard record + listener-rule host
-condition that make those URLs resolve are provisioned at agent-deploy time
-when the AppTemplate sets `enable_subhosting=True`.
+environment's wildcard DNS record and certificate cover these dash hosts.
+The per-agent ALB host condition is added at agent-deploy time when the
+AppTemplate sets `enable_webapp_hosts=True`.
 
 Platform-internal slugs (those starting with `__`, e.g. `__admin`) stay at
 <agent-host>/webapps/<slug>/ so the WebUI's same-origin extension can call
@@ -228,12 +228,12 @@ def public_hostname() -> str:
     return host
 
 
-def route_block_subhost(slug: str, port: int, base_host: str) -> str:
+def route_block_webapp_host(slug: str, port: int, base_host: str) -> str:
     """Caddy site-matcher block for a user webapp at <slug>-<base-host>.
 
-    Per-app wildcard cert + DNS + ALB host condition (provisioned at
-    agent-deploy time when enable_subhosting=True) make these reachable
-    end-to-end without per-webapp infra work.
+    The environment's wildcard DNS record and certificate cover this host.
+    The agent's ALB rule includes the webapp-host pattern when
+    enable_webapp_hosts=True.
 
     Matches on X-Forwarded-Host, not Host: policy-proxy strips Host (httpx
     rewrites it to the upstream's 127.0.0.1:8787) and copies the original
@@ -264,7 +264,7 @@ def route_block_internal(slug: str, port: int, base_host: str) -> str:
     if it needs to generate absolute URLs.
 
     Matches on X-Forwarded-Host (not Host) for the same reason as
-    route_block_subhost — policy-proxy rewrites Host on the way in.
+    route_block_webapp_host — policy-proxy rewrites Host on the way in.
     """
     name = matcher_name(slug)
     return (
@@ -300,7 +300,7 @@ def regenerate_routes(doc: dict) -> None:
         if is_internal_slug(slug):
             blocks.append(route_block_internal(slug=slug, port=port, base_host=base_host))
         else:
-            blocks.append(route_block_subhost(slug=slug, port=port, base_host=base_host))
+            blocks.append(route_block_webapp_host(slug=slug, port=port, base_host=base_host))
     route_file = WEBAPPS_PROJECT.route_file
     if route_file is None:
         die("webapps project is missing a Caddy routes file")

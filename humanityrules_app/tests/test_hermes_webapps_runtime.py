@@ -107,8 +107,8 @@ class TestHermesWebappsRuntimeContract(unittest.TestCase):
         self.assertFalse(hasattr(webapps_lib, "load_system_yaml"))
         self.assertFalse(hasattr(webapps_lib, "save_system_yaml"))
 
-    def test_subhost_route_uses_dash_join_for_dashed_slug(self) -> None:
-        route = webapps_lib.route_block_subhost(
+    def test_webapp_host_route_uses_dash_join_for_dashed_slug(self) -> None:
+        route = webapps_lib.route_block_webapp_host(
             slug="my-dash-board",
             port=4001,
             base_host="wolfie.humr.io",

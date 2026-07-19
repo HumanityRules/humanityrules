@@ -209,9 +209,10 @@ HERMES_PERSONAL_TEMPLATE = {
     # Force ECS to fully stop the old task before starting its replacement
     "serialize_task_replacement": True,
     # User webapps registered through the in-container `webapps` CLI are
-    # served at <slug>.<agent-host>, so the agent needs a per-agent wildcard
-    # cert + DNS + ALB host condition. See docs/webapps_design.md.
-    "enable_subhosting": True,
+    # served at <slug>-<agent-host>. The ALB rule matches those hosts; the
+    # environment wildcard DNS record and certificate cover them. See
+    # docs/webapps_design.md.
+    "enable_webapp_hosts": True,
     # ALB targets the policy proxy; the proxy forwards to the hermes container
     # over loopback after SSO + ABAC gates pass.
     "alb_target_container": "policy-proxy",

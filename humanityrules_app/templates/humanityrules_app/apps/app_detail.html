@@ -160,7 +160,7 @@
         {% endif %}
     </div>
 
-    {# Public Access section — only rendered for subhosting-capable templates #}
+    {# Public Access section — only rendered for templates with webapp hosts enabled #}
     {% include "humanityrules_app/apps/_app_public_access_section.html" %}
 
     {# Cost section — self-loads via HTMX; build_app_detail_context stays untouched #}

@@ -116,7 +116,7 @@ def run_provisioning(environment_id: str) -> bool:
 
             if shared_alb_hosted_zone:
                 logger.info(
-                    "HTTPS enabled with wildcard cert for '%(hosted_zone)s'",
+                    "HTTPS and wildcard DNS enabled for '%(hosted_zone)s'",
                     {"hosted_zone": shared_alb_hosted_zone},
                 )
 
