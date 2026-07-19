@@ -1094,35 +1094,16 @@ class AppStack(Stack):
 
         shared_alb_dns = Fn.import_value(f"{prefix}-shared-alb-dns")
 
-        http_listener = elbv2.ApplicationListener.from_application_listener_attributes(
-            self, "ImportedHttpListener",
-            listener_arn=self.environment_infra.shared_alb_http_listener_arn,
-            security_group=self.environment_infra.shared_alb_security_group,
-        )
-
         # Both hostname shapes share one ALB rule and target group. Caddy
         # distinguishes the agent root from webapp hosts by forwarded host.
         webapp_hosts_enabled = bool(app_config.enable_webapp_hosts and shared_alb_hosted_zone)
 
         if shared_alb_hosted_zone:
+            # HTTPS mode: one host rule on :443. The :80 listener's default
+            # redirects every host to HTTPS, so no per-host :80 rule is needed.
             app_hostname = f"{subdomain}.{shared_alb_hosted_zone}"
             host_patterns = [app_hostname, f"*-{app_hostname}"] if webapp_hosts_enabled else [app_hostname]
-            host_condition = elbv2.ListenerCondition.host_headers(host_patterns)
-        else:
-            # HTTP-only mode: route by path prefix since no domain
-            app_hostname = None
-            host_patterns = []
-            host_condition = elbv2.ListenerCondition.path_patterns([f"/{subdomain}/*"])
 
-        elbv2.ApplicationListenerRule(
-            self, "HttpListenerRule",
-            listener=http_listener,
-            priority=priority,
-            conditions=[host_condition],
-            target_groups=[target_group],
-        )
-
-        if shared_alb_hosted_zone and self.environment_infra.shared_alb_https_listener_arn:
             https_listener = elbv2.ApplicationListener.from_application_listener_attributes(
                 self, "ImportedHttpsListener",
                 listener_arn=self.environment_infra.shared_alb_https_listener_arn,
@@ -1138,6 +1119,21 @@ class AppStack(Stack):
             )
 
             CfnOutput(self, "HttpsUrl", value=f"https://{app_hostname}", export_name=f"{resource_prefix}-https-url")
+        else:
+            # HTTP-only mode: no HTTPS listener, so route by path prefix on :80.
+            http_listener = elbv2.ApplicationListener.from_application_listener_attributes(
+                self, "ImportedHttpListener",
+                listener_arn=self.environment_infra.shared_alb_http_listener_arn,
+                security_group=self.environment_infra.shared_alb_security_group,
+            )
+
+            elbv2.ApplicationListenerRule(
+                self, "HttpListenerRule",
+                listener=http_listener,
+                priority=priority,
+                conditions=[elbv2.ListenerCondition.path_patterns([f"/{subdomain}/*"])],
+                target_groups=[target_group],
+            )
 
         CfnOutput(self, "SharedAlbDns", value=shared_alb_dns, export_name=f"{resource_prefix}-shared-alb-dns")
 
