@@ -9,7 +9,6 @@ from django.shortcuts import get_object_or_404, render
 from django.views.decorators.http import require_POST
 
 from .. import models
-from ..services.agent import agent_service
 from ..services import permissions_service
 from . import abac_view_checks
 from . import base
@@ -19,29 +18,8 @@ logger = logging.getLogger(__name__)
 
 
 @login_required
-def security_permissions_statements(request: HttpRequest, app_permission_request_id: UUID) -> HttpResponse:
-    """Return rendered permission statements for HTMX refetch (triggered by SSE notify)."""
-    organization = request.user.current_organization
-    app_permission_request = get_object_or_404(
-        models.AppPermissionRequest.objects.select_related(
-            "app", "environment", "environment__aws_account",
-        ),
-        id=app_permission_request_id,
-        app__organization=organization,
-    )
-    permissions_service.ensure_statement_sids(app_permission_request)
-    available_resources = permissions_service.fetch_available_resources(app_permission_request)
-    service_groups = permissions_service.build_statement_groups(app_permission_request.statements or [], available_resources)
-    return render(
-        request=request,
-        template_name="humanityrules_app/security/_permission_statements.html",
-        context={"service_groups": service_groups, "app_permission_request": app_permission_request},
-    )
-
-
-@login_required
 def security_permissions_editor(request: HttpRequest) -> HttpResponse:
-    """Permissions editor: two-panel UI with policy editor + agent chat."""
+    """Permissions editor: full-width IAM policy editor for one (app, environment) draft."""
     if not request.htmx:
         context = base.get_app_shell_context(request=request, current_page="security")
         context["content_url"] = request.get_full_path()
@@ -64,23 +42,6 @@ def security_permissions_editor(request: HttpRequest) -> HttpResponse:
     app_permission_request = permissions_service.get_or_create_draft(app=app, environment=environment, user=request.user, app_permissions=app_permissions)
     permissions_service.ensure_statement_sids(app_permission_request)
 
-    conversation = models.Conversation.objects.filter(
-        context_app_permission_request=app_permission_request,
-        user=request.user,
-    ).first()
-    if not conversation:
-        conversation = agent_service.create_conversation(
-            user=request.user,
-            workspace_id=app.workspace_id,
-            repo_id=app.repository_id,
-            aws_account_id=environment.aws_account_id,
-            mode=models.Conversation.Mode.PERMISSIONS,
-            app_permission_request_id=app_permission_request.id,
-        )
-    messages = conversation.messages.exclude(
-        content_type=models.Message.ContentType.SYSTEM_TRIGGER,
-    ).order_by("created_at")
-
     available_resources = permissions_service.fetch_available_resources(app_permission_request)
     service_groups = permissions_service.build_statement_groups(app_permission_request.statements or [], available_resources)
     service_options = permissions_service.get_all_service_options()
@@ -90,8 +51,6 @@ def security_permissions_editor(request: HttpRequest) -> HttpResponse:
         "app_permission_request": app_permission_request,
         "app": app,
         "environment": environment,
-        "conversation": conversation,
-        "messages": messages,
         "service_groups": service_groups,
         "service_options_json": json.dumps(service_options),
         "security_querystring": urlencode(query={"context_app": app_slug, "context_environment": environment_slug}),
@@ -232,18 +191,6 @@ def security_permissions_editor_service_group(request: HttpRequest, app_permissi
         template_name="humanityrules_app/security/_permission_service_group.html",
         context={"group": group, "app_permission_request": app_permission_request},
     )
-
-
-@login_required
-def security_permissions_editor_description(request: HttpRequest, app_permission_request_id: UUID) -> HttpResponse:
-    """Return the current description as plain text (for SSE refetch)."""
-    organization = request.user.current_organization
-    app_permission_request = get_object_or_404(
-        models.AppPermissionRequest,
-        id=app_permission_request_id,
-        app__organization=organization,
-    )
-    return HttpResponse(app_permission_request.description, content_type="text/plain")
 
 
 @login_required

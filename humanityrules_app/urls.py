@@ -80,11 +80,9 @@ urlpatterns = [
     path("security/permissions/<uuid:app_permission_request_id>/apply/", views.security_permissions_editor_apply, name="security_permissions_editor_apply"),
     path("security/permissions/<uuid:app_permission_request_id>/cancel/", views.security_permissions_editor_cancel, name="security_permissions_editor_cancel"),
     path("security/permissions/<uuid:app_permission_request_id>/update-statement/", views.security_permissions_editor_update_statement, name="security_permissions_editor_update_statement"),
-    path("security/permissions/<uuid:app_permission_request_id>/description/", views.security_permissions_editor_description, name="security_permissions_editor_description"),
     path("security/permissions/<uuid:app_permission_request_id>/update-description/", views.security_permissions_editor_update_description, name="security_permissions_editor_update_description"),
     path("security/permissions/<uuid:app_permission_request_id>/refresh-resources/", views.security_permissions_editor_refresh_resources, name="security_permissions_editor_refresh_resources"),
     path("security/permissions/<uuid:app_permission_request_id>/service-group/", views.security_permissions_editor_service_group, name="security_permissions_editor_service_group"),
-    path("security/permissions/<uuid:app_permission_request_id>/statements/", views.security_permissions_statements, name="security_permissions_statements"),
     # ABAC security
     path("security/people/", views.security_people, name="security_people"),
     path("security/people/default-role/", views.security_people_default_role, name="security_people_default_role"),
