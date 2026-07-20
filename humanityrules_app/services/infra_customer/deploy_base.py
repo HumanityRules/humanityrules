@@ -319,7 +319,7 @@ class EcsClusterStack(Stack):
             vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
             launch_template=self.container_instance_launch_template,
             min_capacity=0,
-            max_capacity=4,
+            max_capacity=10,
             new_instances_protected_from_scale_in=False,
         )
         self.ec2_capacity_provider = ecs.AsgCapacityProvider(
