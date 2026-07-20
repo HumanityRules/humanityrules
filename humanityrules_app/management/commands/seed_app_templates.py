@@ -105,7 +105,6 @@ OPENCLAW_TEMPLATE = {
             ],
         },
     ],
-    "datastore_config": None,
     "efs_config": {
         "mounts": [
             {
@@ -203,7 +202,6 @@ HERMES_PERSONAL_TEMPLATE = {
     "cpu": 2048,
     "memory": 4096,
     "default_compute_mode": "ec2",
-    "datastore_config": None,
     "efs_config": _HERMES_CHECKPOINT_EFS_CONFIG,
     "platform_capabilities": ["bedrock-runtime"],
     # Force ECS to fully stop the old task before starting its replacement

@@ -62,35 +62,6 @@
         </div>
     </div>
 
-    {# Datastores section #}
-    <div class="mb-8">
-        <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Datastores</h2>
-        {% if datastores %}
-        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {% for datastore in datastores %}
-            <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-                <div class="flex items-start justify-between">
-                    <div>
-                        <h3 class="font-medium text-gray-900 dark:text-white">{{ datastore.name }}</h3>
-                        <p class="text-sm text-gray-500 dark:text-gray-400">{{ datastore.get_engine_display }}</p>
-                    </div>
-                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium
-                        {% if datastore.status == 'available' %}bg-green-100 text-green-700 dark:bg-green-500/10 dark:text-green-400
-                        {% elif datastore.status == 'pending' or datastore.status == 'creating' %}bg-yellow-100 text-yellow-700 dark:bg-yellow-500/10 dark:text-yellow-400
-                        {% else %}bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300{% endif %}">
-                        {{ datastore.get_status_display }}
-                    </span>
-                </div>
-            </div>
-            {% endfor %}
-        </div>
-        {% else %}
-        <div class="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 border-dashed rounded-lg p-6 text-center">
-            <p class="text-sm text-gray-500 dark:text-gray-400">No datastores configured.</p>
-        </div>
-        {% endif %}
-    </div>
-
     {# Recent Deployments section #}
     <div>
         <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Recent Deployments</h2>

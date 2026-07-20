@@ -36,7 +36,6 @@ def _render_app_stack(enable_webapp_hosts: bool) -> Template:
         env_slug="staging",
         resource_prefix="humr-staging-wolfie",
         subdomain="wolfie",
-        database_connection_secret=None,
         shared_alb_hosted_zone=HOSTED_ZONE,
         env_bearer_shared_secrets_arn=None,
         auth_base_url=None,

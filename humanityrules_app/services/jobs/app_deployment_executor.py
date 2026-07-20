@@ -61,7 +61,6 @@ def run_deployment(deployment_id: str) -> bool:
             "blueprint__app__repository",
             "blueprint__environment",
             "blueprint__environment__aws_account",
-            "blueprint__datastore",
             "app",
             "app__workspace",
             "app__repository",

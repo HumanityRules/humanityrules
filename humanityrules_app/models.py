@@ -562,7 +562,7 @@ class Environment(models.Model):
 
 
 class Workspace(models.Model):
-    """A workspace for governance and policy. Contains apps and datastores."""
+    """A workspace for governance and policy. Contains apps."""
 
     id = models.UUIDField(
         primary_key=True,
@@ -592,108 +592,6 @@ class Workspace(models.Model):
 
     def __str__(self) -> str:
         return self.name
-
-
-class Datastore(models.Model):
-    """A managed database within a workspace."""
-
-    class Engine(models.TextChoices):
-        AURORA_MYSQL = "aurora-mysql", "Aurora MySQL"
-        AURORA_POSTGRESQL = "aurora-postgresql", "Aurora PostgreSQL"
-
-    class DeploymentMode(models.TextChoices):
-        SERVERLESS_V2 = "aurora_serverless_v2", "Aurora Serverless v2"
-        PROVISIONED = "aurora_provisioned", "Aurora Provisioned"
-
-    class Status(models.TextChoices):
-        PENDING = "pending", "Pending"
-        CREATING = "creating", "Creating"
-        AVAILABLE = "available", "Available"
-        ERROR = "error", "Error"
-        DELETING = "deleting", "Deleting"
-
-    id = models.UUIDField(
-        primary_key=True,
-        default=uuid.uuid7,
-        editable=False,
-    )
-    workspace = models.ForeignKey(
-        Workspace,
-        on_delete=models.CASCADE,
-        related_name="datastores",
-    )
-    name = models.CharField(max_length=255)
-    slug = models.SlugField(max_length=255)
-
-    # Engine configuration
-    engine = models.CharField(
-        max_length=50,
-        choices=Engine.choices,
-    )
-    engine_version = models.CharField(
-        max_length=50,
-        blank=True,
-        help_text="Engine version (uses default if blank)",
-    )
-
-    # Deployment mode
-    deployment_mode = models.CharField(
-        max_length=50,
-        choices=DeploymentMode.choices,
-    )
-    serverless_min_acu = models.FloatField(
-        null=True,
-        blank=True,
-        help_text="Minimum ACUs for serverless mode",
-    )
-    serverless_max_acu = models.FloatField(
-        null=True,
-        blank=True,
-        help_text="Maximum ACUs for serverless mode",
-    )
-    provisioned_instance_class = models.CharField(
-        max_length=50,
-        blank=True,
-        help_text="Instance class for provisioned mode",
-    )
-
-    # Database
-    database_name = models.CharField(max_length=255)
-
-    # Security
-    storage_encrypted = models.BooleanField(default=True)
-    deletion_protection = models.BooleanField(default=False)
-    backup_retention_days = models.IntegerField(default=7)
-
-    # Status
-    status = models.CharField(
-        max_length=20,
-        choices=Status.choices,
-        default=Status.PENDING,
-    )
-    status_message = models.TextField(blank=True)
-
-    # AWS resources (populated after creation)
-    cluster_arn = models.CharField(max_length=2048, blank=True)
-    cluster_endpoint = models.CharField(max_length=255, blank=True)
-    credentials_secret_arn = models.CharField(max_length=2048, blank=True)
-    connection_secret_arn = models.CharField(max_length=2048, blank=True)
-
-    created_by = models.ForeignKey(
-        User,
-        on_delete=models.SET_NULL,
-        null=True,
-        related_name="created_datastores",
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        unique_together = [["workspace", "slug"]]
-        ordering = ["-created_at"]
-
-    def __str__(self) -> str:
-        return f"{self.name} ({self.engine})"
 
 
 class EcsComputeMode(models.TextChoices):
@@ -753,9 +651,6 @@ class AppTemplate(models.Model):
     # Name of the container in `containers` that receives ALB traffic.
     # Null = no ALB exposure (task-internal only).
     alb_target_container = models.CharField(max_length=64, null=True, blank=True)
-
-    # Datastore requirements (null = no datastore needed)
-    datastore_config = models.JSONField(null=True, blank=True)
 
     # EFS configuration. Shape:
     #   {"mounts": [{"name": str, "subpath": str, "container_path": str,
@@ -1003,14 +898,6 @@ class DeploymentBlueprint(models.Model):
     # _materialize_environment_variables / _materialize_app_secrets produce
     # from a container's configurable_variables.
     containers = models.JSONField(default=list)
-
-    datastore = models.ForeignKey(
-        Datastore,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="blueprints",
-    )
 
     subdomain = models.CharField(
         max_length=63,

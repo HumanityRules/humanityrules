@@ -34,12 +34,6 @@ def assert_deployment_consistent(deployment: Deployment) -> None:
             f"Deployment {deployment.id}: blueprint.environment org="
             f"{blueprint.environment.aws_account.organization_id} != deployment.environment org={env_org_id}"
         )
-    if blueprint.datastore_id is not None:
-        ds_org_id = blueprint.datastore.workspace.organization_id
-        if ds_org_id != app_org_id:
-            raise TenantConsistencyError(
-                f"Deployment {deployment.id}: datastore org={ds_org_id} != app org={app_org_id}"
-            )
 
 
 def assert_apr_consistent(apr: AppPermissionRequest) -> None:

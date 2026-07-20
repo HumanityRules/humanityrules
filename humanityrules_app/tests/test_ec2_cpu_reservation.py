@@ -38,7 +38,6 @@ def _render_ec2(containers: list[ContainerConfig], cpu: int, alb_target_containe
         env_slug="staging",
         resource_prefix="humr-staging-my-app",
         subdomain="myapp",
-        database_connection_secret=None,
         shared_alb_hosted_zone=None,
         env_bearer_shared_secrets_arn=SHARED_SECRETS_ARN,
         auth_base_url="https://humanityrules.io",
