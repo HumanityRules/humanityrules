@@ -144,14 +144,14 @@ def cleanup_repository(repo_path: Path) -> None:
     """
     Delete a cloned repository directory.
 
-    Only deletes paths within settings.CLAUDE_SANDBOX_DIR as a safety measure.
+    Only deletes paths within settings.REPO_CLONE_DIR as a safety measure.
 
     Args:
         repo_path: Path to the repository directory to delete.
     """
     # Safety check: only delete if under our clone base directory
     try:
-        repo_path.relative_to(settings.CLAUDE_SANDBOX_DIR)
+        repo_path.relative_to(settings.REPO_CLONE_DIR)
     except ValueError:
         logger.error(
             "Refusing to delete path outside clone directory: %(path)s",
