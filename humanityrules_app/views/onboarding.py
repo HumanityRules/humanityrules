@@ -8,7 +8,7 @@ from django.utils.text import slugify
 from .. import app_slugs
 from ..models import App, AppTemplate, Environment, Organization, OrganizationInvite, User, Workspace
 from ..services import abac_service
-from ..services.app_templates import template_deploy_service
+from ..services import template_deploy_service
 from . import invites as invites_views
 
 

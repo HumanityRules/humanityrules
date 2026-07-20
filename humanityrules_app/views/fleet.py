@@ -12,9 +12,7 @@ from django.shortcuts import get_object_or_404, render
 from django.views.decorators.http import require_GET, require_POST
 
 from humanityrules_app import models
-from humanityrules_app.services import fleet_recovery
-from humanityrules_app.services import fleet_redeploy
-from humanityrules_app.services import fleet_status
+from humanityrules_app.services import fleet_service
 
 FLEET_LOG_MAX_LINES = 300
 
@@ -31,7 +29,7 @@ def _staff_or_404(view_func):
 
 @_staff_or_404
 def fleet(request: HttpRequest) -> HttpResponse:
-    context = {"env_groups": fleet_status.build_fleet_snapshot()}
+    context = {"env_groups": fleet_service.build_fleet_snapshot()}
     template = "humanityrules_app/fleet/fleet.html"
     if request.htmx:
         template += "#fleet_list"
@@ -42,7 +40,7 @@ def fleet(request: HttpRequest) -> HttpResponse:
 @require_GET
 def fleet_redeploy_all_confirm(request: HttpRequest) -> HttpResponse:
     """Return the fleet-wide redeploy confirmation modal."""
-    context = {"preview": fleet_redeploy.build_redeploy_all_preview()}
+    context = {"preview": fleet_service.build_redeploy_all_preview()}
     return render(request, "humanityrules_app/fleet/_fleet_redeploy_all_confirm.html", context=context)
 
 
@@ -51,12 +49,12 @@ def fleet_redeploy_all_confirm(request: HttpRequest) -> HttpResponse:
 def fleet_redeploy_all(request: HttpRequest) -> HttpResponse:
     """Queue redeployments for the eligible current fleet rows."""
     include_failed = request.POST.get("include_failed") == "on"
-    redeploy_result = fleet_redeploy.queue_redeploy_all(
+    redeploy_result = fleet_service.queue_redeploy_all(
         created_by=request.user,
         include_failed=include_failed,
     )
     context = {
-        "env_groups": fleet_status.build_fleet_snapshot(),
+        "env_groups": fleet_service.build_fleet_snapshot(),
         "redeploy_result": redeploy_result,
     }
     return render(request, "humanityrules_app/fleet/fleet.html#fleet_list", context=context)
@@ -66,7 +64,7 @@ def fleet_redeploy_all(request: HttpRequest) -> HttpResponse:
 @require_GET
 def fleet_fail_transient_deployments_confirm(request: HttpRequest) -> HttpResponse:
     """Return the confirmation modal for the fleet recovery action."""
-    context = {"transient_count": fleet_recovery.count_transient_deployments()}
+    context = {"transient_count": fleet_service.count_transient_deployments()}
     return render(request, "humanityrules_app/fleet/_fleet_fail_transient_confirm.html", context=context)
 
 
@@ -74,9 +72,9 @@ def fleet_fail_transient_deployments_confirm(request: HttpRequest) -> HttpRespon
 @require_POST
 def fleet_fail_transient_deployments(request: HttpRequest) -> HttpResponse:
     """Mark all deployment jobs left in transient states as failed."""
-    recovery_result = fleet_recovery.fail_transient_deployments()
+    recovery_result = fleet_service.fail_transient_deployments()
     context = {
-        "env_groups": fleet_status.build_fleet_snapshot(),
+        "env_groups": fleet_service.build_fleet_snapshot(),
         "recovery_result": recovery_result,
     }
     return render(request, "humanityrules_app/fleet/fleet.html#fleet_list", context=context)
@@ -87,12 +85,12 @@ def fleet_fail_transient_deployments(request: HttpRequest) -> HttpResponse:
 def fleet_deployment_redeploy(request: HttpRequest, deployment_id: UUID) -> HttpResponse:
     """Queue a redeploy for one eligible HA row on the fleet page."""
     deployment = get_object_or_404(models.Deployment.objects.only("id"), id=deployment_id)
-    redeploy_result = fleet_redeploy.queue_redeploy(
+    redeploy_result = fleet_service.queue_redeploy(
         source_id=deployment.id,
         created_by=request.user,
     )
     context = {
-        "env_groups": fleet_status.build_fleet_snapshot(),
+        "env_groups": fleet_service.build_fleet_snapshot(),
         "redeploy_result": redeploy_result,
     }
     return render(request, "humanityrules_app/fleet/fleet.html#fleet_list", context=context)
@@ -117,6 +115,6 @@ def fleet_env_live_state(request: HttpRequest, environment_id: str) -> HttpRespo
     environment = get_object_or_404(models.Environment.objects.select_related("aws_account"), id=environment_id)
     context = {
         "environment": environment,
-        "live_state": fleet_status.fetch_env_live_state(environment),
+        "live_state": fleet_service.fetch_env_live_state(environment),
     }
     return render(request, "humanityrules_app/fleet/fleet.html#env_live_state", context=context)

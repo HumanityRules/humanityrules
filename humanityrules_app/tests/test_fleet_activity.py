@@ -6,7 +6,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from humanityrules_app import models
-from humanityrules_app.services import fleet_status
+from humanityrules_app.services import fleet_service
 
 
 class TestFleetActivity(TestCase):
@@ -75,7 +75,7 @@ class TestFleetActivity(TestCase):
             last_policy_proxy_activity_at=observed_at,
         )
 
-        groups = fleet_status.build_fleet_snapshot()
+        groups = fleet_service.build_fleet_snapshot()
 
         group = next(group for group in groups if group.environment == self.environment)
         self.assertEqual(group.deployments[0].last_policy_proxy_activity_at, observed_at)
