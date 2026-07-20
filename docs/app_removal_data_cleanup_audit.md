@@ -95,8 +95,6 @@ Three categories, but only two are exposed:
 
 - `delete_policies` — ABAC behavior is its own thing, not part of the
   data-cleanup category.
-- Conversation `context_app` — already handled via `SET_NULL`, which is
-  correct (preserve transcript history, drop the link).
 - Organization / workspace teardown — different lifecycle entirely.
 
 ## Action items

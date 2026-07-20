@@ -205,11 +205,10 @@ extension-owned container IDs, additive, reversible.
 4. `humr-permissions.js/.css` extension, full-width destination, container-agnostic.
 
 **Phase 2 (deferred):**
-- **Agent tools + skill.** Port `update_permission_draft`, `query_app_logs`,
-  `lookup_access_denied_events`, and add `get_permission_draft` (the conversation
-  FK binding is gone) as native Hermes plugin tools that call the broker; a skill
-  carries the least-privilege reasoning/workflow the old PERMISSIONS-mode system
-  prompt held. Apply/cancel stay human-only. All tools route agent → broker →
+- **Agent tools + skill.** Native Hermes plugin tools — `get_permission_draft`,
+  `update_permission_draft`, `query_app_logs`, `lookup_access_denied_events` —
+  that call the broker; a skill carries the least-privilege reasoning/workflow for
+  building a draft. Apply/cancel stay human-only. All tools route agent → broker →
   HUMR; the sandbox never holds the bearer or AWS creds.
 - **Layout move.** Editor → `#panelPermissions` sidebar, the dedicated permissions
   conversation → main view. Because a panel named `permissions` is not in

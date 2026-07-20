@@ -6,13 +6,12 @@
 ## Core Concepts
 
 - **Organization** — Top-level tenant. All resources, users, policies, and integrations are scoped to an organization.
-- **Workspace** — Governance container for Apps and Datastores. Used for access-control grouping. A "Default" workspace is auto-created with every new Organization.
+- **Workspace** — Governance container for Apps. Used for access-control grouping. A "Default" workspace is auto-created with every new Organization.
 - **Repository** — A Git repository connected to an organization via GitHub App integration.
 - **App** — Stable identity and build configuration for a deployable application. Belongs to a Workspace and sources code from a Repository.
-- **DeploymentBlueprint** — Desired deployable state for one (App, Environment) pair. Owns runtime configuration: cpu, memory, env vars, secrets, datastore binding, subdomain.
+- **DeploymentBlueprint** — Desired deployable state for one (App, Environment) pair. Owns runtime configuration: cpu, memory, env vars, secrets, subdomain.
 - **Deployment** — An execution record for one attempt to apply a Blueprint. Tracks build, deploy, and teardown lifecycle.
 - **Environment** — Deployment target with its own VPC, ECS cluster, and shared ALB. Scoped to an AWS Account. Multiple Workspaces can deploy Apps to the same Environment.
-- **Datastore** — Managed database (Aurora) provisioned within an Environment and bound to an App via a Blueprint.
 - **AppPermissions** — The last-applied IAM policy baseline for an (App, Environment) pair.
 - **AppPermissionRequest** — A request to modify IAM task-role policies for a deployed App, with approval workflow.
 - **ABAC (Attribute-Based Access Control)** — Authorization system based on identity attributes, resource tags, and policies. Access is derived, not directly assigned.
@@ -22,7 +21,7 @@
 
 - Organization owns AWS Accounts, Git integrations, Workspaces, and ABAC configuration.
 - AWS Account has Environments (shared infrastructure: VPC, ECS cluster, shared ALB).
-- Workspace contains definitions (Apps, Datastores) — the "what" to deploy.
+- Workspace contains definitions (Apps) — the "what" to deploy.
 - App sources code from a Repository and defines identity + build config.
 - DeploymentBlueprint pairs an App with an Environment and configures runtime settings — the "desired state."
 - Environment is where things run (AWS account + region + VPC + ECS cluster + shared ALB) — the "where."
@@ -42,21 +41,18 @@ Organization
 ├── Git Integrations
 │   └── Repositories
 ├── Workspaces
-│   ├── Apps → Repository (source)
-│   │   ├── DeploymentBlueprints → Environment (target)
-│   │   │   └── Deployments
-│   │   ├── AppPermissions → Environment
-│   │   └── AppPermissionRequests → Environment
-│   └── Datastores
-├── ABAC
-│   ├── IdentityAttributes → User
-│   ├── Groups
-│   │   ├── GroupMemberships → User
-│   │   └── GroupAttributes
-│   ├── ResourceTags → (Workspace | Environment | App)
-│   └── Policies
-└── Conversations
-    └── Messages
+│   └── Apps → Repository (source)
+│       ├── DeploymentBlueprints → Environment (target)
+│       │   └── Deployments
+│       ├── AppPermissions → Environment
+│       └── AppPermissionRequests → Environment
+└── ABAC
+    ├── IdentityAttributes → User
+    ├── Groups
+    │   ├── GroupMemberships → User
+    │   └── GroupAttributes
+    ├── ResourceTags → (Workspace | Environment | App)
+    └── Policies
 ```
 
 
@@ -156,24 +152,9 @@ Desired deployable state for one (App, Environment) pair.
 - **memory** — Fargate memory in MiB
 - **environment_variables** — List of {name, value} objects
 - **app_secrets** — Dict mapping secret field names to values (null value = auto-generate a random value)
-- **datastore** — FK to Datastore (optional binding)
 - **subdomain** — Hostname label for the deployment (blank = use app slug; conflicts require an explicit dashless value)
 
 Status lifecycle: draft → deploying → active (on success) / failed. Discarded after teardown.
-
-### Datastore
-Managed Aurora database definition.
-- **workspace** — FK to Workspace
-- **name, slug** — Display name and URL-safe identifier
-- **engine** — aurora-mysql / aurora-postgresql
-- **deployment_mode** — aurora_serverless_v2 / aurora_provisioned
-- **serverless_min_acu, serverless_max_acu** — ACU limits for serverless mode
-- **provisioned_instance_class** — Instance class for provisioned mode
-- **database_name** — Database name within the cluster
-- **storage_encrypted, deletion_protection, backup_retention_days** — Security/backup settings
-- **status** — pending / creating / available / error / deleting
-- **cluster_arn, cluster_endpoint, credentials_secret_arn, connection_secret_arn** — AWS outputs
-- Unique constraint: (workspace, slug)
 
 ### Deployment
 An execution record for one attempt to apply a Blueprint.
@@ -189,7 +170,6 @@ An execution record for one attempt to apply a Blueprint.
 - **service_url** — URL where the deployed service is accessible
 - **alb_dns** — ALB DNS name
 - **started_at, completed_at** — Timing
-- Linked to Conversations via M2M
 
 Status lifecycle: pending → building → pushing → deploying → starting → succeeded / failed. Teardown: teardown_pending → tearing_down → torn_down.
 
@@ -264,53 +244,23 @@ A request to modify task-role permissions.
 - **app** — FK to App
 - **environment** — FK to Environment
 - **statements** — Proposed policy statements
-- **description** — Human/agent-authored rationale
+- **description** — Human-authored rationale
 - **status** — draft / approved_pending_apply / applying / applied / failed
 
-Workflow: The permissions agent helps the user build a draft → user approves → job worker applies to IAM → on success, AppPermissions baseline is updated to match. Canceling resets the draft to the current baseline.
-
-
-## Conversation and Agent
-
-### Conversation
-A conversation between a user and the AI deployment agent.
-- **user** — FK to User
-- **organization** — FK to Organization
-- **status** — active / completed / abandoned
-- **mode** — general / environment_setup / app_deployment / permissions
-- **session_id** — Claude Agent SDK session ID
-- **deployments** — M2M to Deployment
-
-Context FKs (set via UI before conversation starts, enriched by agent tools during):
-- **context_workspace** — Workspace scope
-- **context_repository** — Repository scope
-- **context_aws_account** — AWS Account scope (for environment setup)
-- **context_environment** — Environment scope (for environment setup)
-- **context_app** — App scope (set by save_app tool)
-- **context_deployment_blueprint** — Blueprint scope (set by save_blueprint tool)
-- **context_app_permission_request** — Permission request scope (for permissions mode)
-
-Mode determines system prompt, available tools, and model selection.
-
-### Message
-A single message in a conversation.
-- **role** — user / agent / system
-- **content_type** — text / markdown / code / progress / choice / deployment_log / error / tool_call / system_trigger
-- **content** — Message content (JSON for structured types, plain text for text/markdown)
-- **metadata** — JSON: code language, choice options, log level, etc.
+Workflow: The user builds a draft in the permissions editor → user approves → job worker applies to IAM → on success, AppPermissions baseline is updated to match. Canceling resets the draft to the current baseline.
 
 
 ## Key Domain Behaviors
 
 ### Environment Provisioning Flow
-1. Agent creates an Environment record (status: draft or pending)
+1. The environment setup form creates an Environment record (status: pending)
 2. Job worker claims pending environments, transitions to provisioning
 3. CDK deploys base infrastructure: VPC, ECS cluster, shared ALB, and optional wildcard certificate plus A alias
 4. On success: vpc_id and cluster_arn are synced from CloudFormation outputs, status → ready
 5. On failure: status → error
 
 ### Deployment Flow
-1. Agent tool `deploy_blueprint` creates a Deployment record (status: pending) and sets blueprint to deploying
+1. Deploying from a template creates the App, DeploymentBlueprint, and a Deployment record (status: pending), and sets the blueprint to deploying
 2. Job worker claims pending deployments, transitions to building
 3. Executor clones repository, builds AppConfig from blueprint, deploys via CDK
 4. CDK creates/updates: ECR repository, ECS task definition, ECS service, ALB target group, and listener rules
@@ -353,7 +303,6 @@ A polling-based background worker that claims pending jobs using `SELECT ... FOR
 - **Environment.slug** — Unique per AWS account
 - **Workspace.slug** — Unique per organization
 - **App.slug** — Unique per organization (enables short AWS resource names)
-- **Datastore.slug** — Unique per workspace
 - **Policy.name** — Unique per organization
 
 ### App Slug Uniqueness Rationale
@@ -373,7 +322,7 @@ Apps use shared ALB with host-based routing:
 - **Base infrastructure** — `humr-{env_slug}-*` (VPC, cluster, execution role)
 - **App resources** — `humr-{env_slug}-{app_slug}-*` (ALB target group, ECS service, task role)
 - **ECR path** — `humr/{env_slug}/{app_slug}`
-- **Secrets Manager** — `humr/{env_slug}/{app_slug}/secrets` (and `humr/{env_slug}/{app_slug}/aurora/*` for apps with a database)
+- **Secrets Manager** — `humr/{env_slug}/{app_slug}/secrets`
 
 ### Compute Substrate
 - v1 supports ECS/Fargate only

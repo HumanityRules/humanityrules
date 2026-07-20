@@ -14,7 +14,7 @@ With no query string this renders a **picker page**: a list of existing users (e
 Add `next` to land on a specific page after login (the picker forwards it too):
 
 ```
-http://127.0.0.1:8000/auth/dev-login/?email=alice@test.com&next=/deploy/new/default/<repo-id>/
+http://127.0.0.1:8000/auth/dev-login/?email=alice@test.com&next=/deploy/from-template/
 ```
 
 An invite link as `next` (`&next=/invite/<token>/`) routes a new user through invite-based onboarding instead of creating their own org.
