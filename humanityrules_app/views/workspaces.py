@@ -10,7 +10,7 @@ from django.urls import reverse
 from django.utils.text import slugify
 from django.views.decorators.http import require_GET, require_POST
 
-from humanityrules_app.models import App, Deployment, Repository, ResourceTag, Workspace
+from humanityrules_app.models import App, Deployment, ResourceTag, Workspace
 from humanityrules_app.services import abac_service
 
 from . import abac_view_checks
@@ -101,10 +101,6 @@ def workspace_detail(request: HttpRequest, workspace_slug: str) -> HttpResponse:
     apps = list(apps)
     datastores = workspace.datastores.order_by("name")
 
-    repositories = Repository.objects.filter(
-        organization=request.user.current_organization,
-    ).order_by("full_name")
-
     tags = ResourceTag.objects.filter(workspace=workspace).order_by("key", "value")
     can_edit = abac_service.check_action(request.user.current_organization, request.user, workspace, "workspace", "workspace:edit")
     can_admin = abac_service.check_action(request.user.current_organization, request.user, workspace, "workspace", "workspace:admin")
@@ -118,7 +114,6 @@ def workspace_detail(request: HttpRequest, workspace_slug: str) -> HttpResponse:
     context["apps"] = apps
     context["datastores"] = datastores
     context["deployments"] = deployments
-    context["repositories"] = repositories
     context["tags"] = tags
     context["tags_json"] = json.dumps([{"key": t.key, "value": t.value} for t in tags])
     context["can_edit"] = can_edit

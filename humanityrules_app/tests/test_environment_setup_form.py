@@ -1,13 +1,12 @@
-"""Tests for the non-agent environment setup form, provisioning-log tab, and retry.
+"""Tests for the environment setup form, provisioning-log tab, and retry.
 
-These cover the default state (AGENT_DEPLOYMENTS_ENABLED=False): the agent editor is
-blocked, env cards route to the detail page, and provisioning is configured through a
-plain form that creates a PENDING environment for the job worker to pick up.
+Env cards route to the detail page, and provisioning is configured through a form that
+creates a PENDING environment for the job worker to pick up.
 """
 
 from unittest.mock import patch
 
-from django.test import TestCase, override_settings
+from django.test import TestCase
 from django.urls import reverse
 
 import humanityrules_app.models as models
@@ -25,7 +24,7 @@ _ASSUME_ROLE_PATH = "humanityrules_app.services.infra_customer.iam_utils.get_ass
 
 
 class TestEnvironmentSetupForm(TestCase):
-    """Form-based environment provisioning + provisioning-log tab with agent deployments disabled."""
+    """Form-based environment provisioning + provisioning-log tab."""
 
     def setUp(self) -> None:
         self.organization = models.Organization.objects.create(name="Env Form Org", slug="env-form-org")
@@ -67,18 +66,9 @@ class TestEnvironmentSetupForm(TestCase):
             status=status,
         )
 
-    # --- Agent flow gated off (default) ---
+    # --- Environment cards ---
 
-    def test_agent_environment_editor_blocked_when_disabled(self) -> None:
-        self.client.force_login(self.admin_user)
-        new = self.client.get(f"{reverse('environment_editor_new')}?aws_account={self.aws_account.id}", **HTMX)
-        self.assertEqual(new.status_code, 404)
-
-        env = self._make_environment(models.Environment.Status.DRAFT)
-        resume = self.client.get(reverse("environment_editor", kwargs={"environment_id": env.id}), **HTMX)
-        self.assertEqual(resume.status_code, 404)
-
-    def test_admin_env_cards_route_to_detail_when_disabled(self) -> None:
+    def test_admin_env_cards_route_to_detail(self) -> None:
         env = self._make_environment(models.Environment.Status.DRAFT)
         self.client.force_login(self.admin_user)
         response = self.client.get(reverse("environments"), **HTMX)
@@ -89,7 +79,7 @@ class TestEnvironmentSetupForm(TestCase):
             reverse("environment_detail", kwargs={"environment_id": env.id}),
         )
 
-    def test_new_environment_links_directly_to_setup_form_when_disabled(self) -> None:
+    def test_new_environment_links_directly_to_setup_form(self) -> None:
         self.client.force_login(self.admin_user)
         response = self.client.get(reverse("environments"), **HTMX)
         self.assertEqual(response.status_code, 200)
@@ -326,29 +316,3 @@ class TestEnvironmentSetupForm(TestCase):
         self.assertEqual(response.status_code, 422)
         env.refresh_from_db()
         self.assertEqual(env.status, models.Environment.Status.READY)
-
-
-@override_settings(AGENT_DEPLOYMENTS_ENABLED=True)
-class TestEnvironmentSetupFormAgentEnabled(TestCase):
-    """With the agent flow on, the New Environment modal points back at the agent editor."""
-
-    def setUp(self) -> None:
-        self.organization = models.Organization.objects.create(name="Env Form Org 2", slug="env-form-org-2")
-        self.aws_account = models.AWSAccount.objects.create(
-            organization=self.organization, name="Form AWS 2", aws_account_id="210987654321",
-            status=models.AWSAccount.Status.CONNECTED,
-        )
-        self.admin_user = models.User.objects.create_user(
-            username="env-form-admin-2", password="x", current_organization=self.organization,
-        )
-        models.OrganizationMembership.objects.create(
-            organization=self.organization, user=self.admin_user,
-            role=models.OrganizationMembership.Role.ADMIN,
-        )
-        abac_service.bootstrap_organization(organization=self.organization, admin_user=self.admin_user)
-
-    def test_new_environment_modal_links_to_agent_editor(self) -> None:
-        self.client.force_login(self.admin_user)
-        response = self.client.get(reverse("environments"), **HTMX)
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, f"{reverse('environment_editor_new')}?aws_account={self.aws_account.id}")

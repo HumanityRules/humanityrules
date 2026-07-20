@@ -7,9 +7,7 @@ from django.test import TestCase
 
 import humanityrules_app.models as models
 import humanityrules_app.services.agent.agent_build_prompt as agent_build_prompt
-import humanityrules_app.services.agent.agent_service as agent_service
 import humanityrules_app.services.agent.tools as agent_tools
-import humanityrules_app.views.chat as chat_views
 
 
 class TestEnvironmentSetupFlow(TestCase):
@@ -151,21 +149,3 @@ class TestEnvironmentSetupFlow(TestCase):
         self.assertIn("Do NOT ask the user to type the domain choice when you already know the available options", prompt)
         self.assertIn("Do NOT call `provision_environment` in the same turn as `save_environment`", prompt)
         self.assertNotIn("Does this look good? Let me know if you'd like different settings.", prompt)
-
-    def test_save_environment_tool_result_emits_editor_refresh_notifications(self) -> None:
-        event = agent_service.AgentStreamEvent(
-            type="tool_result",
-            data={
-                "name": "mcp__humanityrules__save_environment",
-                "result": {
-                    "id": "env-123",
-                    "created": True,
-                },
-            },
-        )
-
-        sse_payload = chat_views._format_sse_event(event=event, show_costs=False)
-
-        self.assertIn('"event": "environment-created"', sse_payload)
-        self.assertIn('"environment_id": "env-123"', sse_payload)
-        self.assertIn('"event": "environment-changed-env-123"', sse_payload)

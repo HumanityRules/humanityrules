@@ -28,14 +28,8 @@ urlpatterns = [
     path("apps/<slug:app_slug>/tags/<uuid:tag_id>/remove/", views.app_tag_remove, name="app_tag_remove"),
     path("apps/<slug:app_slug>/tags/save/", views.app_tags_save, name="app_tags_save"),
 
-    path("deploy/new/<slug:workspace_slug>/<uuid:repo_id>/", views.deployment_editor_new, name="deployment_editor_new"),
-    path("deploy/fork/<uuid:conversation_id>/", views.deployment_editor_fork, name="deployment_editor_fork"),
     path("deploy/from-template/", views.template_deploy_picker, name="template_deploy_picker"),
     path("deploy/from-template/<slug:template_slug>/", views.template_deploy_form, name="template_deploy_form"),
-    path("deploy/<slug:app_slug>/", views.deployment_editor, name="deployment_editor"),
-    path("deploy/<slug:app_slug>/reset/", views.deployment_editor_reset, name="deployment_editor_reset"),
-    path("deploy/<slug:app_slug>/app-section/", views.deployment_editor_app_section, name="deployment_editor_app_section"),
-    path("deploy/<slug:app_slug>/blueprint-section/", views.deployment_editor_blueprint_section, name="deployment_editor_blueprint_section"),
 
     path("blueprints/<uuid:blueprint_id>/row-status/", views.blueprint_row_status, name="blueprint_row_status"),
     path("apps/<slug:app_slug>/deployments/<uuid:deployment_id>/teardown/", views.app_deployment_teardown, name="app_deployment_teardown"),
@@ -60,10 +54,6 @@ urlpatterns = [
     # Environments
     path("environments/", views.environments, name="environments"),
     path("environments/setup/", views.environment_setup_form, name="environment_setup_form"),
-    path("environments/new/", views.environment_editor_new, name="environment_editor_new"),
-    path("environments/<uuid:environment_id>/setup/", views.environment_editor, name="environment_editor"),
-    path("environments/<uuid:environment_id>/setup/section/", views.environment_editor_environment_section, name="environment_editor_environment_section"),
-    path("environments/<uuid:environment_id>/setup/reset/", views.environment_editor_reset, name="environment_editor_reset"),
     path("environments/<uuid:environment_id>/", views.environment_detail, name="environment_detail"),
     path("environments/<uuid:environment_id>/provisioning-log/", views.environment_provisioning_log, name="environment_provisioning_log"),
     path("environments/<uuid:environment_id>/status/", views.environment_status, name="environment_status"),
@@ -246,18 +236,4 @@ urlpatterns = [
     path("platform/fleet/env/<uuid:environment_id>/live/", views.fleet_env_live_state, name="fleet_env_live_state"),
     path("platform/fleet/deployment/<uuid:deployment_id>/redeploy/", views.fleet_deployment_redeploy, name="fleet_deployment_redeploy"),
     path("platform/fleet/deployment/<uuid:deployment_id>/log/", views.fleet_deployment_log, name="fleet_deployment_log"),
-
-    # Chat / Agent
-    path("chat/app_deploy/<slug:workspace_slug>/<str:repo_owner>/<str:repo_name>/", views.chat_app_deploy, name="chat_app_deploy_with_owner"),
-    path("chat/app_deploy/<slug:workspace_slug>/<str:repo_name>/", views.chat_app_deploy, name="chat_app_deploy"),
-    path("chat/", views.chat_list, name="chat_list"),
-    path("chat/new/", views.chat_new, name="chat_new"),
-    path("chat/<uuid:conversation_id>/", views.chat_view, name="chat_view"),
-    path("chat/<uuid:conversation_id>/send/", views.chat_send, name="chat_send"),
-    path("chat/<uuid:conversation_id>/stream/", views.chat_stream, name="chat_stream"),
-    path("chat/<uuid:conversation_id>/messages/", views.chat_messages, name="chat_messages"),
-    path("chat/<uuid:conversation_id>/close/", views.chat_close, name="chat_close"),
-    path("chat/<uuid:conversation_id>/fork/", views.chat_fork, name="chat_fork"),
-    path("chat/<uuid:conversation_id>/title/", views.chat_conversation_title, name="chat_conversation_title"),
-    path("chat/<uuid:conversation_id>/cost/", views.chat_conversation_cost, name="chat_conversation_cost"),
 ]
