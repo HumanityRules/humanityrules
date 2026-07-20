@@ -155,7 +155,6 @@ def _owner_options_for(request: HttpRequest, org: models.Organization) -> list[d
 
 
 @login_required
-@base.require_agent_deployments
 def template_deploy_picker(request: HttpRequest) -> HttpResponse:
     """Show a grid of all active templates."""
     if not request.htmx:
