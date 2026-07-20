@@ -34,10 +34,8 @@ from .security_permissions_editor import (
     security_permissions_editor_cancel,
     security_permissions_editor_refresh_resources,
     security_permissions_editor_service_group,
-    security_permissions_editor_description,
     security_permissions_editor_update_description,
     security_permissions_editor_update_statement,
-    security_permissions_statements,
 )
 from .permissions_api import (
     permissions_draft,
@@ -230,10 +228,8 @@ __all__ = [
     "security_permissions_editor_cancel",
     "security_permissions_editor_refresh_resources",
     "security_permissions_editor_service_group",
-    "security_permissions_editor_description",
     "security_permissions_editor_update_description",
     "security_permissions_editor_update_statement",
-    "security_permissions_statements",
     "permissions_draft",
     "permissions_statement",
     "permissions_description",
