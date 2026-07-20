@@ -13,7 +13,7 @@ from django.urls import reverse
 import humanityrules_app.management.commands.seed_app_templates as seed_app_templates
 from humanityrules_app import app_slugs
 from humanityrules_app import models
-from humanityrules_app.services.app_templates import template_deploy_service
+from humanityrules_app.services import template_deploy_service
 from humanityrules_app.views import template_deploy
 
 

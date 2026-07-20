@@ -3,7 +3,7 @@
 from django.test import TestCase
 
 from humanityrules_app import models
-from humanityrules_app.services import fleet_recovery
+from humanityrules_app.services import fleet_service
 from humanityrules_app.services.jobs import job_worker
 
 
@@ -169,7 +169,7 @@ class TestFleetRedeployAll(TestCase):
         for deployment in transient_deployments:
             deployment.refresh_from_db()
             self.assertEqual(deployment.status, models.Deployment.Status.FAILED)
-            self.assertEqual(deployment.status_message, fleet_recovery.RECOVERY_STATUS_MESSAGE)
+            self.assertEqual(deployment.status_message, fleet_service.RECOVERY_STATUS_MESSAGE)
             self.assertIsNotNone(deployment.completed_at)
         for deployment in terminal_deployments:
             deployment.refresh_from_db()

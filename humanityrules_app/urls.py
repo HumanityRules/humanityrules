@@ -6,15 +6,23 @@ urlpatterns = [
     # Health check for ALB/ECS
     path("health/", views.health_check, name="health_check"),
 
-    # App-detail cost panel (HTMX fragment; see docs/app_cost_tracking_design.md)
-    path("apps/<slug:app_slug>/cost-panel/", views.app_cost_panel, name="app_cost_panel"),
-
     path("", views.landing, name="landing"),
     path("devopshero-ai/", views.devopshero_landing, name="devopshero_landing"),
     path("waitlist/signup/", views.waitlist_signup, name="waitlist_signup"),
     path("dashboard/", views.dashboard, name="dashboard"),
+    path("random-quote/", views.random_quote, name="random_quote"),
+    path("switch-organization/", views.switch_organization, name="switch_organization"),
 
+    # Onboarding
+    path("onboarding/", views.onboarding, name="onboarding"),
+    path("onboarding/agent/", views.onboarding_agent, name="onboarding_agent"),
 
+    # Organization invites
+    path("invite/<uuid:token>/", views.accept_invite, name="invite_accept"),
+    path("settings/invites/create/", views.create_invite, name="invite_create"),
+    path("settings/invites/<uuid:invite_id>/revoke/", views.revoke_invite, name="invite_revoke"),
+
+    # Workspaces
     path("workspaces/", views.workspaces, name="workspaces"),
     path("workspaces/create/", views.workspace_create, name="workspace_create"),
     path("workspaces/<slug:workspace_slug>/", views.workspace_detail, name="workspace_detail"),
@@ -23,6 +31,8 @@ urlpatterns = [
     path("workspaces/<slug:workspace_slug>/tags/add/", views.workspace_tag_add, name="workspace_tag_add"),
     path("workspaces/<slug:workspace_slug>/tags/<uuid:tag_id>/remove/", views.workspace_tag_remove, name="workspace_tag_remove"),
     path("workspaces/<slug:workspace_slug>/tags/save/", views.workspace_tags_save, name="workspace_tags_save"),
+
+    # Apps
     path("apps/<slug:app_slug>/", views.app_detail, name="app_detail"),
     path("apps/<slug:app_slug>/tags/add/", views.app_tag_add, name="app_tag_add"),
     path("apps/<slug:app_slug>/tags/<uuid:tag_id>/remove/", views.app_tag_remove, name="app_tag_remove"),
@@ -32,24 +42,25 @@ urlpatterns = [
     path("deploy/from-template/<slug:template_slug>/", views.template_deploy_form, name="template_deploy_form"),
 
     path("blueprints/<uuid:blueprint_id>/row-status/", views.blueprint_row_status, name="blueprint_row_status"),
+
     path("apps/<slug:app_slug>/deployments/<uuid:deployment_id>/teardown/", views.app_deployment_teardown, name="app_deployment_teardown"),
     path("apps/<slug:app_slug>/deployments/<uuid:deployment_id>/redeploy/", views.app_deployment_redeploy, name="app_deployment_redeploy"),
     path("apps/<slug:app_slug>/deployments/<uuid:deployment_id>/status/", views.app_deployment_status, name="app_deployment_status"),
     path("apps/<slug:app_slug>/deployment-log/", views.app_deployment_log, name="app_deployment_log"),
     path("apps/<slug:app_slug>/card-status/", views.app_card_status, name="app_card_status"),
     path("apps/<slug:app_slug>/deployments/<uuid:deployment_id>/teardown-confirm/", views.app_teardown_confirm, name="app_teardown_confirm"),
-    path("apps/<slug:app_slug>/remove-confirm/", views.app_remove_confirm, name="app_remove_confirm"),
     path("apps/<slug:app_slug>/remove/", views.app_remove, name="app_remove"),
+    path("apps/<slug:app_slug>/remove-confirm/", views.app_remove_confirm, name="app_remove_confirm"),
+
     path("apps/<slug:app_slug>/public-access/new", views.webapp_public_access_new, name="webapp_public_access_new"),
     path("apps/<slug:app_slug>/public-access/", views.webapp_public_access_create, name="webapp_public_access_create"),
     path("apps/<slug:app_slug>/public-access/<uuid:grant_id>/", views.webapp_public_access_status, name="webapp_public_access_status"),
     path("apps/<slug:app_slug>/public-access/<uuid:grant_id>/check/", views.webapp_public_access_check, name="webapp_public_access_check"),
-    path(
-        "apps/<slug:app_slug>/public-access/<uuid:grant_id>/revoke-confirm/",
-        views.webapp_public_access_revoke_confirm,
-        name="webapp_public_access_revoke_confirm",
-    ),
+    path("apps/<slug:app_slug>/public-access/<uuid:grant_id>/revoke-confirm/", views.webapp_public_access_revoke_confirm, name="webapp_public_access_revoke_confirm"),
     path("apps/<slug:app_slug>/public-access/<uuid:grant_id>/revoke/", views.webapp_public_access_revoke, name="webapp_public_access_revoke"),
+
+    # App-detail cost panel (HTMX fragment; see docs/app_cost_tracking_design.md)
+    path("apps/<slug:app_slug>/cost-panel/", views.app_cost_panel, name="app_cost_panel"),
 
     # Environments
     path("environments/", views.environments, name="environments"),
@@ -73,6 +84,7 @@ urlpatterns = [
     path("security/permissions/<uuid:app_permission_request_id>/update-description/", views.security_permissions_editor_update_description, name="security_permissions_editor_update_description"),
     path("security/permissions/<uuid:app_permission_request_id>/refresh-resources/", views.security_permissions_editor_refresh_resources, name="security_permissions_editor_refresh_resources"),
     path("security/permissions/<uuid:app_permission_request_id>/service-group/", views.security_permissions_editor_service_group, name="security_permissions_editor_service_group"),
+    
     # ABAC security
     path("security/people/", views.security_people, name="security_people"),
     path("security/people/default-role/", views.security_people_default_role, name="security_people_default_role"),
@@ -95,13 +107,12 @@ urlpatterns = [
     path("security/policies/<uuid:policy_id>/", views.security_policy_detail, name="security_policy_detail"),
     path("security/policies/<uuid:policy_id>/delete-confirm/", views.security_policy_delete_confirm, name="security_policy_delete_confirm"),
     path("security/policies/<uuid:policy_id>/delete/", views.security_policy_delete, name="security_policy_delete"),
+
     path("settings/", views.settings, name="settings"),
     path("settings/personal/", views.settings_personal, name="settings_personal"),
     path("settings/organization/", views.settings_organization, name="settings_organization"),
     path("settings/billing/", views.settings_billing, name="settings_billing"),
 
-    path("random-quote/", views.random_quote, name="random_quote"),
-    path("switch-organization/", views.switch_organization, name="switch_organization"),
 
     # Authentication
     path("auth/dev-login/", views.dev_login, name="dev_login"),
@@ -115,15 +126,6 @@ urlpatterns = [
     path("auth/env-start", views.env_start, name="env_start"),
     path("auth/env-callback", views.env_callback, name="env_callback"),
     path(".well-known/jwks.json", views.env_jwks, name="env_jwks"),
-
-    # Onboarding
-    path("onboarding/", views.onboarding, name="onboarding"),
-    path("onboarding/agent/", views.onboarding_agent, name="onboarding_agent"),
-
-    # Organization invites
-    path("invite/<uuid:token>/", views.accept_invite, name="invite_accept"),
-    path("settings/invites/create/", views.create_invite, name="invite_create"),
-    path("settings/invites/<uuid:invite_id>/revoke/", views.revoke_invite, name="invite_revoke"),
 
     # Integrations — organization-level (org admin configures once at /integrations/;
     # persists AWSAccount / IntegrationGitProvider keyed by organization).
@@ -221,16 +223,8 @@ urlpatterns = [
 
     # Staff-only platform fleet dashboard (cross-org by design; gated by is_staff)
     path("platform/fleet/", views.fleet, name="fleet"),
-    path(
-        "platform/fleet/fail-transient/confirm/",
-        views.fleet_fail_transient_deployments_confirm,
-        name="fleet_fail_transient_deployments_confirm",
-    ),
-    path(
-        "platform/fleet/fail-transient/",
-        views.fleet_fail_transient_deployments,
-        name="fleet_fail_transient_deployments",
-    ),
+    path("platform/fleet/fail-transient/confirm/", views.fleet_fail_transient_deployments_confirm, name="fleet_fail_transient_deployments_confirm"),
+    path("platform/fleet/fail-transient/", views.fleet_fail_transient_deployments, name="fleet_fail_transient_deployments"),
     path("platform/fleet/redeploy-all/confirm/", views.fleet_redeploy_all_confirm, name="fleet_redeploy_all_confirm"),
     path("platform/fleet/redeploy-all/", views.fleet_redeploy_all, name="fleet_redeploy_all"),
     path("platform/fleet/env/<uuid:environment_id>/live/", views.fleet_env_live_state, name="fleet_env_live_state"),

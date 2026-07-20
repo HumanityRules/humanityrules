@@ -32,7 +32,7 @@ from django.db import transaction
 
 from humanityrules_app import app_slugs
 from humanityrules_app import models
-from humanityrules_app.services.app_templates import template_deploy_service
+from humanityrules_app.services import template_deploy_service
 from humanityrules_app.services.infra_customer import iam_utils
 from humanityrules_app.services.jobs import environment_operation_gate
 

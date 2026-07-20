@@ -17,7 +17,7 @@ from humanityrules_app import app_slugs
 from humanityrules_app import models
 from humanityrules_app.services import abac_service
 from humanityrules_app.services import llm_preset_service
-from humanityrules_app.services.app_templates import template_deploy_service
+from humanityrules_app.services import template_deploy_service
 from humanityrules_app.views import base
 
 logger = logging.getLogger(__name__)
