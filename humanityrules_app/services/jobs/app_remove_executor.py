@@ -192,9 +192,8 @@ def run_removal(job_id: str) -> bool:
         # not teardown, frees the slug — a torn-down app keeps its App row and can redeploy.
         sandbox_service.release_sandbox_app_slug(app_slug=app.slug, organization_id=app.organization_id)
         # Cascade deletes DeploymentBlueprint, Deployment, DeploymentLog, AppPermissions,
-        # AppPermissionRequest, and ResourceTag rows that point at this app.
-        # Conversation.context_app is SET_NULL. Policy has no FK to App; matching rows
-        # are handled above when delete_policies is set.
+        # AppPermissionRequest, and ResourceTag rows that point at this app. Policy has no
+        # FK to App; matching rows are handled above when delete_policies is set.
         app.delete()
 
     _mark(job, models.AppRemovalJob.Status.SUCCEEDED, f"App removed: '{job.app_name_snapshot}' ({job.app_slug_snapshot}).")
