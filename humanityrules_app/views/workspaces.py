@@ -57,7 +57,7 @@ def workspaces(request: HttpRequest) -> HttpResponse:
 
 @login_required
 def workspace_detail(request: HttpRequest, workspace_slug: str) -> HttpResponse:
-    """Show workspace detail with apps, datastores, and conversations."""
+    """Show workspace detail with apps and deployments."""
     if not request.htmx:
         context = base.get_app_shell_context(request=request, current_page="workspaces")
         context["content_url"] = f"/workspaces/{workspace_slug}/"
@@ -99,7 +99,6 @@ def workspace_detail(request: HttpRequest, workspace_slug: str) -> HttpResponse:
         deployed_service_url=Subquery(latest_deployed_service_url),
     ).order_by("name")
     apps = list(apps)
-    datastores = workspace.datastores.order_by("name")
 
     tags = ResourceTag.objects.filter(workspace=workspace).order_by("key", "value")
     can_edit = abac_service.check_action(request.user.current_organization, request.user, workspace, "workspace", "workspace:edit")
@@ -112,7 +111,6 @@ def workspace_detail(request: HttpRequest, workspace_slug: str) -> HttpResponse:
     context = base.get_app_shell_context(request=request, current_page="workspaces")
     context["workspace"] = workspace
     context["apps"] = apps
-    context["datastores"] = datastores
     context["deployments"] = deployments
     context["tags"] = tags
     context["tags_json"] = json.dumps([{"key": t.key, "value": t.value} for t in tags])
@@ -164,13 +162,11 @@ def workspace_remove_confirm(request: HttpRequest, workspace_slug: str) -> HttpR
         return denied
 
     app_count = workspace.apps.count()
-    datastore_count = workspace.datastores.count()
     context = {
         "workspace": workspace,
         "post_url": reverse("workspace_remove", kwargs={"workspace_slug": workspace.slug}),
         "app_count": app_count,
-        "datastore_count": datastore_count,
-        "is_empty": app_count == 0 and datastore_count == 0,
+        "is_empty": app_count == 0,
     }
     return render(request, "humanityrules_app/workspaces/_workspace_remove_confirm_modal.html", context=context)
 
@@ -178,17 +174,17 @@ def workspace_remove_confirm(request: HttpRequest, workspace_slug: str) -> HttpR
 @login_required
 @require_POST
 def workspace_remove(request: HttpRequest, workspace_slug: str) -> HttpResponse:
-    """Delete a workspace. Refuses (422) while it still contains apps or datastores."""
+    """Delete a workspace. Refuses (422) while it still contains apps."""
     workspace = get_object_or_404(Workspace, slug=workspace_slug, organization=request.user.current_organization)
 
     denied = abac_view_checks.check_abac(request, workspace, "workspace", "workspace:admin")
     if denied:
         return denied
 
-    # Block deletion of a non-empty workspace: apps and datastores back real infrastructure
+    # Block deletion of a non-empty workspace: apps back real infrastructure
     # and must be torn down through their own removal flows first. A bare workspace.delete()
     # would DB-cascade those rows away without any teardown, orphaning the resources.
-    if workspace.apps.exists() or workspace.datastores.exists():
+    if workspace.apps.exists():
         return HttpResponse(status=422)
 
     workspace.delete()

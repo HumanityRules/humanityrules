@@ -42,7 +42,6 @@ def _render(
         env_slug="staging",
         resource_prefix="humr-staging-my-app",
         subdomain="myapp",
-        database_connection_secret=None,
         shared_alb_hosted_zone=shared_alb_hosted_zone,
         env_bearer_shared_secrets_arn=SHARED_SECRETS_ARN,
         auth_base_url="https://humanityrules.io",

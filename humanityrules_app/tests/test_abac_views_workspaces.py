@@ -7,7 +7,6 @@ from django.test import TestCase
 
 from humanityrules_app.models import (
     App,
-    Datastore,
     IdentityAttribute,
     Organization,
     OrganizationMembership,
@@ -172,28 +171,21 @@ class TestWorkspaceEndpoints(TestCase):
         self.assertEqual(response.status_code, 422)
         self.assertTrue(Workspace.objects.filter(pk=self.ws_eng.pk).exists())
 
-    def test_admin_cannot_delete_workspace_with_datastore(self) -> None:
-        self.client.force_login(self.admin_user)
-        Datastore.objects.create(
-            workspace=self.ws_fin, name="Primary", slug="primary",
-            engine="aurora-postgresql", engine_version="15.4",
-            deployment_mode="aurora_serverless_v2", database_name="appdb",
-        )
-        response = self.client.post("/workspaces/finance/remove/")
-        self.assertEqual(response.status_code, 422)
-        self.assertTrue(Workspace.objects.filter(pk=self.ws_fin.pk).exists())
-
     def test_remove_confirm_reports_non_empty(self) -> None:
         self.client.force_login(self.admin_user)
-        Datastore.objects.create(
-            workspace=self.ws_fin, name="Primary", slug="primary",
-            engine="aurora-postgresql", engine_version="15.4",
-            deployment_mode="aurora_serverless_v2", database_name="appdb",
+        repo = Repository.objects.create(
+            organization=self.org, provider="github", name="fin-repo",
+            full_name="org/fin-repo", clone_url="https://github.com/org/fin-repo.git",
+        )
+        App.objects.create(
+            organization=self.org, workspace=self.ws_fin, repository=repo,
+            name="FinApp", slug="finapp", app_type="web", build_strategy="dockerfile",
+            branch="main", container_port=8000, health_check_path="/health",
         )
         response = self.client.get("/workspaces/finance/remove-confirm/", **HTMX)
         self.assertEqual(response.status_code, 200)
         self.assertFalse(response.context["is_empty"])
-        self.assertEqual(response.context["datastore_count"], 1)
+        self.assertEqual(response.context["app_count"], 1)
 
     def test_viewer_gets_403_on_workspace_remove(self) -> None:
         self.client.force_login(self.viewer_user)

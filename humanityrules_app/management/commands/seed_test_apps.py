@@ -13,7 +13,6 @@ from humanityrules_app.services import abac_service
 from humanityrules_app.models import (
     AWSAccount,
     App,
-    Datastore,
     Environment,
     Group,
     GroupAttribute,
@@ -76,30 +75,6 @@ MOCK_ORGS = [
             _github_repo("graphql-api"),
             _github_repo("django-postgres-app"),
             _github_repo("scheduled-tasks"),
-        ],
-        "datastores": [
-            {
-                "workspace_slug": "data-platform",
-                "name": "ML Feature Store",
-                "slug": "ml-feature-store",
-                "engine": Datastore.Engine.AURORA_POSTGRESQL,
-                "deployment_mode": Datastore.DeploymentMode.SERVERLESS_V2,
-                "serverless_min_acu": 0.5,
-                "serverless_max_acu": 8.0,
-                "database_name": "feature_store",
-                "status": Datastore.Status.AVAILABLE,
-            },
-            {
-                "workspace_slug": "internal-tools",
-                "name": "Portal Database",
-                "slug": "portal-database",
-                "engine": Datastore.Engine.AURORA_MYSQL,
-                "deployment_mode": Datastore.DeploymentMode.SERVERLESS_V2,
-                "serverless_min_acu": 1.0,
-                "serverless_max_acu": 16.0,
-                "database_name": "portal_db",
-                "status": Datastore.Status.AVAILABLE,
-            },
         ],
         "apps": [
             {
@@ -369,22 +344,6 @@ class Command(BaseCommand):
                     status=env_data["status"],
                 )
                 self.stdout.write(f"      Environment: {env_data['name']} ({env_data['status']})")
-
-        for ds_data in org_data.get("datastores", []):
-            workspace = Workspace.objects.get(organization=org, slug=ds_data["workspace_slug"])
-            Datastore.objects.create(
-                workspace=workspace,
-                name=ds_data["name"],
-                slug=ds_data["slug"],
-                engine=ds_data["engine"],
-                deployment_mode=ds_data["deployment_mode"],
-                serverless_min_acu=ds_data["serverless_min_acu"],
-                serverless_max_acu=ds_data["serverless_max_acu"],
-                database_name=ds_data["database_name"],
-                status=ds_data["status"],
-                created_by=user,
-            )
-            self.stdout.write(f"    Datastore: {ds_data['name']} -> {ds_data['workspace_slug']}")
 
         for repo_data in org_data["repositories"]:
             Repository.objects.create(

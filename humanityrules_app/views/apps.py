@@ -91,7 +91,7 @@ def get_open_blueprint(app: App) -> DeploymentBlueprint | None:
     """Return the latest in-progress blueprint for an app, if any."""
     return (
         DeploymentBlueprint.objects.filter(app=app, status__in=OPEN_BLUEPRINT_STATUSES)
-        .select_related("app", "environment", "datastore")
+        .select_related("app", "environment")
         .order_by("-created_at")
         .first()
     )
@@ -160,7 +160,7 @@ def _build_deployed_environment_rows(app: App) -> list[DeployedEnvironmentRow]:
     blueprints = list(
         DeploymentBlueprint.objects.filter(app=app)
         .exclude(status=DeploymentBlueprint.Status.DISCARDED)
-        .select_related("environment", "environment__aws_account", "datastore")
+        .select_related("environment", "environment__aws_account")
         .annotate(
             current_deployment_id=Subquery(current_deployment_id_subquery),
             current_deployment_created_at=Subquery(current_deployment_created_at_subquery),
@@ -384,7 +384,7 @@ def blueprint_row_status(request: HttpRequest, blueprint_id: UUID) -> HttpRespon
     """Return updated blueprint row inner HTML for self-terminating polling."""
     blueprint = get_object_or_404(
         DeploymentBlueprint.objects.select_related(
-            "app", "app__workspace", "environment", "environment__aws_account", "datastore",
+            "app", "app__workspace", "environment", "environment__aws_account",
         ),
         id=blueprint_id,
         app__organization=request.user.current_organization,

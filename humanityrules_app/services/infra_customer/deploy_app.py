@@ -9,7 +9,7 @@ from pathlib import Path
 import boto3
 
 from humanityrules_app.models import Environment
-from aws_cdk import App, Aws, CfnOutput, Duration, Fn, RemovalPolicy, SecretValue, Stack, Tags
+from aws_cdk import App, Aws, CfnOutput, Duration, Fn, RemovalPolicy, Stack, Tags
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_ecr as ecr
 from aws_cdk import aws_ecs as ecs
@@ -17,7 +17,6 @@ from aws_cdk import aws_efs as efs
 from aws_cdk import aws_elasticloadbalancingv2 as elbv2
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_logs as logs
-from aws_cdk import aws_rds as rds
 from aws_cdk import aws_secretsmanager as secretsmanager
 from constructs import Construct
 
@@ -102,50 +101,6 @@ class DeployResult:
 # =============================================================================
 # CDK STACKS
 # =============================================================================
-
-AURORA_MYSQL_DEFAULT_VERSION = "3.08.0"
-AURORA_POSTGRES_DEFAULT_VERSION = "16.4"
-
-
-def get_engine_port(engine_family: str) -> int:
-    if engine_family == "aurora-postgresql":
-        return 5432
-    if engine_family == "aurora-mysql":
-        return 3306
-    raise ValueError(f"Unsupported engine family: {engine_family}")
-
-
-def get_engine_scheme(engine_family: str) -> str:
-    if engine_family == "aurora-postgresql":
-        return "postgresql"
-    if engine_family == "aurora-mysql":
-        return "mysql"
-    raise ValueError(f"Unsupported engine family: {engine_family}")
-
-
-def get_engine_version(engine_config: appconfig.EngineConfig) -> "rds.IClusterEngine":
-    """Get CDK engine version from config. Uses sensible defaults if version not specified."""
-    if engine_config.family == "aurora-mysql":
-        version_str = engine_config.version or AURORA_MYSQL_DEFAULT_VERSION
-        major = version_str.split(".")[0]
-        version = rds.AuroraMysqlEngineVersion.of(
-            aurora_mysql_full_version=version_str,
-            aurora_mysql_major_version=major,
-        )
-        return rds.DatabaseClusterEngine.aurora_mysql(version=version)
-    if engine_config.family == "aurora-postgresql":
-        version_str = engine_config.version or AURORA_POSTGRES_DEFAULT_VERSION
-        major = version_str.split(".")[0]
-        version = rds.AuroraPostgresEngineVersion.of(
-            aurora_postgres_full_version=version_str,
-            aurora_postgres_major_version=major,
-        )
-        return rds.DatabaseClusterEngine.aurora_postgres(version=version)
-    raise ValueError(f"Unsupported engine family: {engine_config.family}")
-
-
-def get_connection_env_var_name(connection_config: appconfig.ConnectionConfig) -> str:
-    return connection_config.env_var_name or "DATABASE_URL"
 
 
 def _container_dependency_condition(cond: str) -> ecs.ContainerDependencyCondition:
@@ -318,186 +273,6 @@ class PolicyProxyEcrStack(Stack):
         )
 
 
-class AuroraClusterStack(Stack):
-    """
-    Aurora cluster for apps that need a database.
-    Creates a connection secret derived from the Aurora-managed secret.
-    """
-
-    def __init__(
-        self,
-        scope: Construct,
-        construct_id: str,
-        app_config: appconfig.AppConfig,
-        env_slug: str,
-        resource_prefix: str,
-        **kwargs,
-    ) -> None:
-        super().__init__(scope, construct_id, **kwargs)
-
-        database_config = app_config.database_config
-        if not database_config:
-            raise ValueError("DatabaseConfig is required for Aurora cluster creation")
-
-        # Import environment infrastructure (Aurora doesn't need shared ALB info, pass None)
-        self.environment_infra = deploy_base.import_environment_infrastructure(
-            scope=self,
-            env_slug=env_slug,
-            shared_alb_hosted_zone=None,
-        )
-
-        # Validate database name: alphanumeric and underscores, 1-64 chars, must start with letter
-        db_name = database_config.name
-        if not db_name or len(db_name) > 64:
-            raise ValueError("Database name must be 1-64 characters")
-        if not db_name[0].isalpha():
-            raise ValueError("Database name must start with a letter")
-        if not all(c.isalnum() or c == "_" for c in db_name):
-            raise ValueError("Database name must contain only alphanumeric characters and underscores")
-
-        # Validate backup retention: Aurora limits are 1-35 days
-        retention_days = database_config.backups.retention_days
-        if retention_days < 1 or retention_days > 35:
-            raise ValueError("Backup retention days must be between 1 and 35")
-
-        engine = get_engine_version(database_config.engine)
-        engine_port = get_engine_port(database_config.engine.family)
-
-        # Security group for Aurora - allows MySQL access from VPC
-        self.security_group = ec2.SecurityGroup(
-            self, "AuroraSecurityGroup",
-            vpc=self.environment_infra.vpc,
-            description="Security group for Aurora - allows database access from VPC",
-            allow_all_outbound=True,
-        )
-        # Allow database access from the default security group (used by ECS tasks)
-        self.security_group.add_ingress_rule(
-            peer=self.environment_infra.default_security_group, connection=ec2.Port.tcp(engine_port), description="Allow database access from ECS tasks",
-        )
-
-        # Subnet group for Aurora (private subnets)
-        subnet_group = rds.SubnetGroup(
-            self, "AuroraSubnetGroup",
-            description="Subnet group for Aurora",
-            vpc=self.environment_infra.vpc,
-            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
-            removal_policy=RemovalPolicy.DESTROY,
-        )
-
-        deployment = database_config.deployment
-        if deployment.mode == "aurora_serverless_v2":
-            if not deployment.serverless_v2:
-                raise ValueError("Serverless v2 config is required for aurora_serverless_v2")
-            if deployment.provisioned:
-                raise ValueError("Provisioned config must be null for aurora_serverless_v2")
-            writer = rds.ClusterInstance.serverless_v2("writer")
-            serverless_min_capacity = deployment.serverless_v2.min_acu
-            serverless_max_capacity = deployment.serverless_v2.max_acu
-            if serverless_min_capacity > serverless_max_capacity:
-                raise ValueError("Serverless v2 min_acu must be <= max_acu")
-            if round(serverless_min_capacity * 2) != serverless_min_capacity * 2:
-                raise ValueError("Serverless v2 min_acu must be in 0.5 increments")
-            if round(serverless_max_capacity * 2) != serverless_max_capacity * 2:
-                raise ValueError("Serverless v2 max_acu must be in 0.5 increments")
-            if serverless_min_capacity < 0.5 or serverless_min_capacity > 128:
-                raise ValueError("Serverless v2 min_acu must be between 0.5 and 128")
-            if serverless_max_capacity < 0.5 or serverless_max_capacity > 128:
-                raise ValueError("Serverless v2 max_acu must be between 0.5 and 128")
-        elif deployment.mode == "aurora_provisioned":
-            if not deployment.provisioned:
-                raise ValueError("Provisioned config is required for aurora_provisioned")
-            if deployment.serverless_v2:
-                raise ValueError("Serverless v2 config must be null for aurora_provisioned")
-            instance_class = deployment.provisioned.instance_class
-            instance_type = ec2.InstanceType(instance_class.removeprefix("db."))
-            writer = rds.ClusterInstance.provisioned(
-                "writer",
-                instance_type=instance_type,
-                auto_minor_version_upgrade=database_config.engine.auto_minor_version_upgrade,
-            )
-            serverless_min_capacity = None
-            serverless_max_capacity = None
-        else:
-            raise ValueError(f"Unsupported deployment mode: {deployment.mode}")
-
-        cluster_identifier = f"{resource_prefix}-aurora"[:63]
-        secret_name = f"humr/{env_slug}/{app_config.app_name}/aurora/credentials"
-
-        self.cluster = rds.DatabaseCluster(
-            self, "AuroraCluster",
-            engine=engine,
-            cluster_identifier=cluster_identifier,
-            default_database_name=database_config.name,
-            credentials=rds.Credentials.from_generated_secret("dbadmin", secret_name=secret_name),
-            vpc=self.environment_infra.vpc,
-            subnet_group=subnet_group,
-            security_groups=[self.security_group],
-            serverless_v2_min_capacity=serverless_min_capacity,
-            serverless_v2_max_capacity=serverless_max_capacity,
-            writer=writer,
-            readers=[],
-            storage_encrypted=database_config.security.storage_encrypted,
-            backup=rds.BackupProps(retention=Duration.days(database_config.backups.retention_days)),
-            copy_tags_to_snapshot=database_config.backups.copy_tags_to_snapshot,
-            deletion_protection=database_config.security.deletion_protection,
-            removal_policy=RemovalPolicy.DESTROY,
-        )
-
-        # Connection data is provided via a derived Secrets Manager secret
-        self.endpoint = self.cluster.cluster_endpoint.hostname
-        self.port = str(self.cluster.cluster_endpoint.port)
-        self.secret_arn = self.cluster.secret.secret_arn
-
-        connection_secret_name = f"humr/{env_slug}/{app_config.app_name}/aurora/connection"
-        self.connection_secret = self._create_connection_secret(
-            connection_secret_name=connection_secret_name,
-            engine_family=database_config.engine.family,
-        )
-        self.connection_secret.node.add_dependency(self.cluster)
-
-        Tags.of(self.cluster).add("App", app_config.app_name)
-        Tags.of(self.connection_secret).add("App", app_config.app_name)
-
-        CfnOutput(self, "ClusterEndpoint", value=self.endpoint, export_name=f"{resource_prefix}-aurora-endpoint")
-        CfnOutput(self, "ClusterPort", value=self.port, export_name=f"{resource_prefix}-aurora-port")
-        CfnOutput(self, "DatabaseName", value=database_config.name, export_name=f"{resource_prefix}-aurora-database")
-        CfnOutput(self, "SecretArn", value=self.secret_arn, export_name=f"{resource_prefix}-aurora-secret-arn")
-        CfnOutput(self, "ConnectionSecretArn", value=self.connection_secret.secret_arn, export_name=f"{resource_prefix}-aurora-connection-secret-arn")
-
-    def _create_connection_secret(
-        self,
-        connection_secret_name: str,
-        engine_family: str,
-    ) -> secretsmanager.Secret:
-        aurora_secret = self.cluster.secret
-        if not aurora_secret:
-            raise ValueError("Aurora secret is required for connection secret creation")
-
-        secret_id = aurora_secret.secret_arn
-        username_ref = SecretValue.secrets_manager(secret_id=secret_id, json_field="username").to_string()
-        password_ref = SecretValue.secrets_manager(secret_id=secret_id, json_field="password").to_string()
-        host_ref = SecretValue.secrets_manager(secret_id=secret_id, json_field="host").to_string()
-        port_ref = SecretValue.secrets_manager(secret_id=secret_id, json_field="port").to_string()
-        dbname_ref = SecretValue.secrets_manager(secret_id=secret_id, json_field="dbname").to_string()
-
-        scheme = get_engine_scheme(engine_family)
-        database_url = f"{scheme}://{username_ref}:{password_ref}@{host_ref}:{port_ref}/{dbname_ref}"
-
-        return secretsmanager.Secret(
-            self,
-            "ConnectionSecret",
-            secret_name=connection_secret_name,
-            secret_object_value={
-                "url": SecretValue.unsafe_plain_text(database_url),
-                "host": SecretValue.secrets_manager(secret_id=secret_id, json_field="host"),
-                "port": SecretValue.secrets_manager(secret_id=secret_id, json_field="port"),
-                "dbname": SecretValue.secrets_manager(secret_id=secret_id, json_field="dbname"),
-                "username": SecretValue.secrets_manager(secret_id=secret_id, json_field="username"),
-                "password": SecretValue.secrets_manager(secret_id=secret_id, json_field="password"),
-            },
-        )
-
-
 def _compute_listener_rule_priority(app_name: str) -> int:
     """Compute a deterministic listener rule priority from app name."""
     # Use hash to get a deterministic priority. Range: 1000-41000 (leaving room for manual overrides)
@@ -516,7 +291,6 @@ class AppStack(Stack):
         env_slug: str,
         resource_prefix: str,
         subdomain: str,
-        database_connection_secret: secretsmanager.ISecret | None,
         shared_alb_hosted_zone: str | None,
         env_bearer_shared_secrets_arn: str | None,
         auth_base_url: str | None,
@@ -593,11 +367,6 @@ class AppStack(Stack):
                 actions=["secretsmanager:GetSecretValue"],
                 resources=[f"arn:aws:secretsmanager:{Aws.REGION}:{Aws.ACCOUNT_ID}:secret:humr/{env_slug}/{app_config.app_name}/*"],
             ))
-        if database_connection_secret:
-            task_role.add_to_policy(iam.PolicyStatement(
-                actions=["secretsmanager:GetSecretValue"],
-                resources=[database_connection_secret.secret_arn],
-            ))
         if app_config.needs_env_bearer():
             # Containers needing env-bearer read HUMR_ENV_BEARER from the env's
             # shared-secrets entry via ECS secret injection.
@@ -648,18 +417,6 @@ class AppStack(Stack):
                     },
                 },
             ))
-
-        # Database env vars + secrets are projected into the ALB-target container only —
-        # sibling containers (sidecars, MCP servers, etc.) have no database contract.
-        alb_target_database_secrets: dict[str, ecs.Secret] = {}
-        if database_connection_secret and app_config.database_config:
-            env_var_name = get_connection_env_var_name(app_config.database_config.connection)
-            alb_target_database_secrets[env_var_name] = ecs.Secret.from_secrets_manager(database_connection_secret, field="url")
-            alb_target_database_secrets["DATABASE_HOST"] = ecs.Secret.from_secrets_manager(database_connection_secret, field="host")
-            alb_target_database_secrets["DATABASE_PORT"] = ecs.Secret.from_secrets_manager(database_connection_secret, field="port")
-            alb_target_database_secrets["DATABASE_NAME"] = ecs.Secret.from_secrets_manager(database_connection_secret, field="dbname")
-            alb_target_database_secrets["DATABASE_USERNAME"] = ecs.Secret.from_secrets_manager(database_connection_secret, field="username")
-            alb_target_database_secrets["DATABASE_PASSWORD"] = ecs.Secret.from_secrets_manager(database_connection_secret, field="password")
 
         # Shared task-level Secrets Manager bag. Each container only sees the
         # fields it declared in its own ContainerConfig.app_secrets.
@@ -832,14 +589,11 @@ class AppStack(Stack):
                 environment.update(policy_proxy_environment_overlay)
 
             # Secrets: the container's declared fields from the shared app_secrets bag,
-            # plus database_connection_secret pieces on the ALB-target container only,
             # plus HUMR_ENV_BEARER on any container that needs it.
             secrets: dict[str, ecs.Secret] = {}
             if app_secret_resource is not None and c.app_secrets:
                 for field_name in c.app_secrets:
                     secrets[field_name] = ecs.Secret.from_secrets_manager(app_secret_resource, field=field_name)
-            if c.name == alb_target.name:
-                secrets.update(alb_target_database_secrets)
             if container_needs_env_bearer:
                 secrets.update(env_bearer_secret_overlay)
 
@@ -1181,8 +935,6 @@ def deploy(
     cf_client = session.client("cloudformation")
 
     app_stack_names = [f"{resource_prefix}-ecr", f"{resource_prefix}-app"]
-    if app_config.database_config:
-        app_stack_names.append(f"{resource_prefix}-aurora")
     cloudformation_utils.cleanup_rollback_complete_stacks(cf_client, app_stack_names)
 
     # Verify infrastructure exists
@@ -1253,19 +1005,6 @@ def deploy(
             env_slug=env_slug,
         )
 
-    # Optionally create Aurora cluster (imports VPC from environment's VPC stack exports)
-    aurora_stack = None
-    aurora_connection_secret = None
-    if app_config.database_config:
-        aurora_stack = AuroraClusterStack(
-            scope=cdk_app,
-            construct_id=f"{resource_prefix}-aurora",
-            app_config=app_config,
-            env_slug=env_slug,
-            resource_prefix=resource_prefix,
-        )
-        aurora_connection_secret = aurora_stack.connection_secret
-
     app_stack = AppStack(
         scope=cdk_app,
         construct_id=f"{resource_prefix}-app",
@@ -1274,14 +1013,11 @@ def deploy(
         env_slug=env_slug,
         resource_prefix=resource_prefix,
         subdomain=subdomain,
-        database_connection_secret=aurora_connection_secret,
         shared_alb_hosted_zone=shared_alb_hosted_zone,
         env_bearer_shared_secrets_arn=env_bearer_shared_secrets_arn,
         auth_base_url=policy_proxy_auth_base_url,
     )
     app_stack.add_dependency(ecr_stack)
-    if aurora_stack:
-        app_stack.add_dependency(aurora_stack)
 
     assembly_dir = cdk_utils.synth_cdk_app(cdk_app)
 
@@ -1323,11 +1059,8 @@ def deploy(
                 return DeployResult(success=False, error="Policy-proxy image build/push failed", service_url="", alb_dns="")
 
     # Phase 1b: Deploy stacks the App stack depends on. ECR must exist before
-    # we push images. Aurora must exist before the App stack imports its
-    # connection secret.
+    # we push images.
     pre_app_stacks = [f"{resource_prefix}-ecr"]
-    if aurora_stack:
-        pre_app_stacks.append(f"{resource_prefix}-aurora")
 
     if not cdk_utils.deploy_from_assembly(assembly_dir=assembly_dir, session=session, stack_names=pre_app_stacks):
         logger.error("CDK deployment failed (pre-app stacks)")
@@ -1408,10 +1141,9 @@ def teardown(
     session: boto3.Session,
     env_slug: str,
     app_name: str,
-    has_database: bool,
     dockerfile_ecr_repo_names: list[str],
 ) -> bool:
-    """Delete app-specific CDK stacks (ECR, ALB, ECS service, Aurora if applicable).
+    """Delete app-specific CDK stacks (ECR, ALB, ECS service).
 
     Prebuilt-container repos are per-env shared resources and are not torn
     down here — only the per-app dockerfile ECR repos get emptied.
@@ -1422,8 +1154,6 @@ def teardown(
 
     # App-specific stacks in reverse dependency order
     stacks_to_delete = [f"{resource_prefix}-app"]
-    if has_database:
-        stacks_to_delete.append(f"{resource_prefix}-aurora")
     stacks_to_delete.append(f"{resource_prefix}-ecr")
 
     logger.info("Tearing down app: %(app_name)s", {"app_name": app_name})

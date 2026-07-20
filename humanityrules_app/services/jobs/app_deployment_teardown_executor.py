@@ -75,7 +75,6 @@ def run_teardown(deployment_id: str) -> bool:
     try:
         deployment = models.Deployment.objects.select_related(
             "blueprint",
-            "blueprint__datastore",
             "app",
             "app__workspace",
             "app__source_template",
@@ -125,7 +124,6 @@ def run_teardown(deployment_id: str) -> bool:
                 session=session,
                 env_slug=environment.slug,
                 app_name=app.slug,
-                has_database=deployment.blueprint.datastore_id is not None,
                 dockerfile_ecr_repo_names=_dockerfile_ecr_repo_names(deployment),
             )
 

@@ -36,9 +36,6 @@
                     <span>Config</span>
                 </button>
                 <span x-show="!open" class="inline-flex items-center gap-1.5 ml-1 text-xs">
-                    {% if blueprint.datastore %}
-                    <span class="inline-flex items-center rounded bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:text-gray-300">{{ blueprint.datastore.name }}</span>
-                    {% endif %}
                     <span class="inline-flex items-center rounded bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:text-gray-300">{{ blueprint.containers|length }} container{{ blueprint.containers|length|pluralize }}</span>
                 </span>
                 <div x-show="open" x-cloak
@@ -47,10 +44,6 @@
                      x-transition:enter-end="opacity-100"
                      class="mt-2 w-full rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60 px-3 py-2">
                     <dl class="grid gap-x-4 gap-y-1.5 text-xs" style="grid-template-columns: auto 1fr;">
-                        {% if blueprint.datastore %}
-                        <dt class="text-gray-500 dark:text-gray-400">Datastore</dt>
-                        <dd class="text-gray-900 dark:text-white font-medium">{{ blueprint.datastore.name }}</dd>
-                        {% endif %}
                         {% for container in blueprint.containers %}
                         <dt class="text-gray-500 dark:text-gray-400 pt-0.5">{{ container.name }} env</dt>
                         <dd class="text-gray-900 dark:text-white">

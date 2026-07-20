@@ -3,7 +3,7 @@ from django.db.models import Max, OuterRef, Subquery
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
 
-from ..models import App, Datastore, Deployment, Workspace
+from ..models import App, Deployment, Workspace
 from ..services import abac_service
 from . import base
 
@@ -43,11 +43,9 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         .order_by("-created_at")
     )
     apps = list(apps)
-    datastores = Datastore.objects.filter(workspace__in=visible_workspaces).select_related("workspace").order_by("-created_at")
 
     context = base.get_app_shell_context(request=request, current_page="dashboard")
     context["apps"] = apps
-    context["datastores"] = datastores
 
     return render(request, "humanityrules_app/dashboard.html", context=context)
 
