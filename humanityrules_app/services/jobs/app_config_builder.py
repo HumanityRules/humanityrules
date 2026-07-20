@@ -9,7 +9,7 @@ from pathlib import Path
 
 from humanityrules_app.models import App, AppTemplate, DeploymentBlueprint, ResourceTag
 from humanityrules_app.services import infra_customer
-from humanityrules_app.services.app_templates import template_deploy_service
+from humanityrules_app.services import template_deploy_service
 from humanityrules_app.services.infra_customer.appconfig import (
     AppConfig,
     ContainerConfig,

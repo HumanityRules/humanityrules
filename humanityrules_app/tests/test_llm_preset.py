@@ -15,7 +15,7 @@ from django.test import SimpleTestCase, TestCase
 from humanityrules_app import models
 from humanityrules_app.management.commands import seed_app_templates
 from humanityrules_app.services import llm_preset_service
-from humanityrules_app.services.app_templates import template_deploy_service
+from humanityrules_app.services import template_deploy_service
 from humanityrules_app.views import template_deploy
 
 CODEX_MAIN_MODEL = "gpt-5.5"
