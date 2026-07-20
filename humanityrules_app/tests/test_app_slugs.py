@@ -11,7 +11,6 @@ from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 
 import humanityrules_app.management.commands.seed_app_templates as seed_app_templates
-import humanityrules_app.services.agent.tools as agent_tools
 from humanityrules_app import app_slugs
 from humanityrules_app import models
 from humanityrules_app.services.app_templates import template_deploy_service
@@ -233,12 +232,12 @@ class TemplateDeployConflictTests(TestCase):
 
 
 class SaveAppSlugTests(TestCase):
-    """Verify the agent App creation tool uses dashless derivation."""
+    """Verify creating an App from a display name derives a dashless slug."""
 
     def setUp(self) -> None:
-        self.organization = models.Organization.objects.create(name="Agent Tools", slug="agent-tools")
+        self.organization = models.Organization.objects.create(name="App Slug Org", slug="app-slug-org")
         self.user = models.User.objects.create_user(
-            username="agent-user",
+            username="app-slug-user",
             password="x",
             current_organization=self.organization,
         )
@@ -254,31 +253,24 @@ class SaveAppSlugTests(TestCase):
             clone_url="https://github.com/org/repo.git",
             default_branch="main",
         )
-        self.conversation = models.Conversation.objects.create(
-            user=self.user,
-            organization=self.organization,
-            mode=models.Conversation.Mode.APP_DEPLOYMENT,
-            context_workspace=self.workspace,
-            context_repository=self.repository,
-        )
 
-    def test_save_app_derives_dashless_slug(self) -> None:
-        result = async_to_sync(agent_tools.save_app)(
-            conversation=self.conversation,
+    def test_app_creation_derives_dashless_slug(self) -> None:
+        slug = app_slugs.derive_app_slug(value="Café Agent-007")
+        app = models.App.objects.create(
+            organization=self.organization,
             workspace=self.workspace,
             repository=self.repository,
-            user=self.user,
             name="Café Agent-007",
+            slug=slug,
             app_type=models.App.AppType.WEB,
             build_strategy=models.App.BuildStrategy.DOCKERFILE,
+            branch=self.repository.default_branch,
             container_port=8000,
             health_check_path="/health",
-            dockerfile_path=None,
-            health_check_command=None,
-            repo_subpath=None,
+            created_by=self.user,
         )
 
-        self.assertEqual(result.slug, "cafeagent007")
+        self.assertEqual(app.slug, "cafeagent007")
         self.assertTrue(models.App.objects.filter(organization=self.organization, slug="cafeagent007").exists())
 
 

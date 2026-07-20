@@ -6,9 +6,9 @@ from asgiref.sync import async_to_sync
 from django.test import TestCase, override_settings
 
 import humanityrules_app.models as models
-import humanityrules_app.services.agent.tools as agent_tools
 import humanityrules_app.services.jobs.app_deployment_debug_simulator as app_deployment_debug_simulator
 import humanityrules_app.services.jobs.app_deployment_executor as app_deployment_executor
+from humanityrules_app.services import sandbox_service
 
 
 class TestAppDeploymentExecutor(TestCase):
@@ -55,31 +55,36 @@ class TestAppDeploymentExecutor(TestCase):
             status=models.Environment.Status.READY,
             shared_alb_hosted_zone="example.com",
         )
-        self.conversation = models.Conversation.objects.create(
-            user=self.user,
-            organization=self.organization,
-            context_repository=self.repository,
-            context_workspace=self.workspace,
-            context_app=self.app,
-            mode=models.Conversation.Mode.APP_DEPLOYMENT,
+
+    def _create_pending_deployment(self) -> models.Deployment:
+        """Build the blueprint + PENDING deployment rows the deploy path would have produced."""
+        blueprint = models.DeploymentBlueprint.objects.create(
+            app=self.app,
+            environment=self.environment,
+            status=models.DeploymentBlueprint.Status.DEPLOYING,
+            status_message="Deployment triggered",
+            branch="",
+            cpu=256,
+            memory=512,
+            containers=[{"name": self.app.slug, "environment_variables": [], "app_secrets": {}}],
+            subdomain="",
+            created_by=self.user,
+        )
+        return models.Deployment.objects.create(
+            blueprint=blueprint,
+            app=self.app,
+            environment=self.environment,
+            subdomain=self.app.slug,
+            git_ref="main",
+            image_tag="myapp-main-20260720",
+            status=models.Deployment.Status.PENDING,
+            status_message="Deployment queued",
+            created_by=self.user,
         )
 
     @override_settings(HUMR_DEBUG_DEPLOYMENTS=True, HUMR_RUN_JOB_WORKER=True)
     def test_run_deployment_debug_mode_succeeds_without_external_calls(self) -> None:
-        async_to_sync(agent_tools.save_blueprint)(
-            conversation=self.conversation,
-            workspace=self.workspace,
-            user=self.user,
-            environment_slug=self.environment.slug,
-            branch=None,
-            cpu=256,
-            memory=512,
-            environment_variables=None,
-            app_secrets=None,
-            datastore_id=None,
-            subdomain=None,
-        )
-        deploy_result = async_to_sync(agent_tools.deploy_blueprint)(conversation=self.conversation)
+        deployment_row = self._create_pending_deployment()
 
         with (
             patch("humanityrules_app.services.jobs.app_deployment_debug_simulator.time.sleep") as sleep_mock,
@@ -88,7 +93,7 @@ class TestAppDeploymentExecutor(TestCase):
             patch("humanityrules_app.services.jobs.app_deployment_executor.infra_customer.deploy_app.deploy") as deploy_app_mock,
             patch("humanityrules_app.services.jobs.app_deployment_executor._get_aws_session") as get_aws_session_mock,
         ):
-            success = app_deployment_executor.run_deployment(deployment_id=deploy_result.deployment_id)
+            success = app_deployment_executor.run_deployment(deployment_id=str(deployment_row.id))
 
         self.assertTrue(success)
         self.assertEqual(
@@ -103,8 +108,8 @@ class TestAppDeploymentExecutor(TestCase):
         deploy_app_mock.assert_not_called()
         get_aws_session_mock.assert_not_called()
 
-        deployment = models.Deployment.objects.get(id=deploy_result.deployment_id)
-        blueprint = models.DeploymentBlueprint.objects.get(id=deploy_result.blueprint_id)
+        deployment = models.Deployment.objects.get(id=deployment_row.id)
+        blueprint = models.DeploymentBlueprint.objects.get(id=deployment_row.blueprint_id)
 
         self.assertEqual(deployment.status, models.Deployment.Status.SUCCEEDED)
         self.assertEqual(deployment.status_message, "Debug deployment completed successfully")
@@ -171,30 +176,21 @@ class TestAppDeploymentExecutor(TestCase):
         self.assertEqual(deployment.status, models.Deployment.Status.FAILED)
         self.assertIn("Refused", deployment.status_message)
 
-    def test_deploy_blueprint_rejects_cross_org_sandbox_slug(self) -> None:
-        """End-to-end through the agent deploy path: a slug another org already holds in the
-        shared sandbox is rejected (by the slug reservation) before any Deployment is created.
-        The template path (deploy_from_template) reserves via the same aclaim_sandbox_app_slug."""
+    def test_sandbox_slug_reservation_rejects_cross_org_slug(self) -> None:
+        """A slug another org already holds in the shared sandbox is rejected by the slug
+        reservation before any Deployment is created. Every deploy path (template and CLI)
+        reserves via this same aclaim_sandbox_app_slug."""
         self.aws_account.is_humr_sandbox = True
         self.aws_account.save(update_fields=["is_humr_sandbox"])
         other_org = models.Organization.objects.create(name="Other Sandbox Org", slug="other-sb")
         models.SandboxSlugClaim.objects.create(slug=self.app.slug, organization=other_org)
 
-        async_to_sync(agent_tools.save_blueprint)(
-            conversation=self.conversation,
-            workspace=self.workspace,
-            user=self.user,
-            environment_slug=self.environment.slug,
-            branch=None,
-            cpu=256,
-            memory=512,
-            environment_variables=None,
-            app_secrets=None,
-            datastore_id=None,
-            subdomain=None,
-        )
         with self.assertRaises(ValueError):
-            async_to_sync(agent_tools.deploy_blueprint)(conversation=self.conversation)
+            async_to_sync(sandbox_service.aclaim_sandbox_app_slug)(
+                app_slug=self.app.slug,
+                organization_id=self.app.organization_id,
+                environment=self.environment,
+            )
 
         # Rejected before creating a Deployment row for this org's app.
         self.assertFalse(models.Deployment.objects.filter(app=self.app).exists())
