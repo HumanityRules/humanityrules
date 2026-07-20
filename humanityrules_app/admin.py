@@ -10,7 +10,6 @@ from humanityrules_app.models import (
     AppPermissions,
     AppRemovalJob,
     AppTemplate,
-    Conversation,
     Datastore,
     Deployment,
     DeploymentBlueprint,
@@ -25,8 +24,6 @@ from humanityrules_app.models import (
     IntegrationGitProvider,
     IntegrationSharedCredential,
     IntegrationUserCredential,
-    LLMUsageLog,
-    Message,
     Organization,
     OrganizationMembership,
     AwsResourceCache,
@@ -212,43 +209,6 @@ class DatastoreAdmin(admin.ModelAdmin):
     autocomplete_fields = ["workspace", "created_by"]
 
 
-@admin.register(Conversation)
-class ConversationAdmin(admin.ModelAdmin):
-    list_display = [
-        "title", "mode", "status", "user", "organization", "context_workspace",
-        "context_repository", "context_aws_account", "context_environment",
-        "context_app", "context_deployment_blueprint", "updated_at",
-    ]
-    list_filter = ["mode", "status", "organization", "context_workspace"]
-    search_fields = [
-        "title", "user__email", "user__username", "organization__name", "context_workspace__name",
-        "context_repository__full_name", "context_aws_account__name", "context_environment__name",
-        "context_app__name", "session_id",
-    ]
-    readonly_fields = ["id", "created_at", "updated_at"]
-    autocomplete_fields = [
-        "user", "organization", "context_workspace", "context_repository", "context_aws_account",
-        "context_environment", "context_app", "context_deployment_blueprint",
-        "context_app_permission_request",
-    ]
-    filter_horizontal = ["deployments"]
-
-
-@admin.register(Message)
-class MessageAdmin(admin.ModelAdmin):
-    list_display = ["created_at", "conversation", "role", "content_type", "short_content"]
-    list_filter = ["role", "content_type"]
-    search_fields = ["conversation__title", "conversation__user__email", "content"]
-    readonly_fields = ["id", "created_at"]
-    autocomplete_fields = ["conversation"]
-
-    @admin.display(description="Content")
-    def short_content(self, obj: Message) -> str:
-        if not obj.content:
-            return ""
-        return obj.content[:120]
-
-
 @admin.register(Deployment)
 class DeploymentAdmin(admin.ModelAdmin):
     list_display = ["app", "environment", "blueprint", "git_ref", "status", "created_at", "completed_at", "service_url"]
@@ -294,28 +254,6 @@ class EnvironmentLogAdmin(admin.ModelAdmin):
         if not obj.message:
             return ""
         return obj.message[:120]
-
-
-@admin.register(LLMUsageLog)
-class LLMUsageLogAdmin(admin.ModelAdmin):
-    list_display = ["created_at", "organization", "user", "conversation", "source", "model_alias", "input_tokens", "output_tokens", "cost_usd", "duration_ms"]
-    list_filter = ["source", "model_alias", "organization"]
-    search_fields = ["organization__name", "user__email", "conversation__title", "model_alias"]
-    readonly_fields = [
-        "id", "organization", "user", "conversation", "source",
-        "model_alias", "model_id", "input_tokens", "output_tokens",
-        "cost_usd", "duration_ms", "num_turns", "created_at",
-    ]
-    autocomplete_fields = []
-
-    def has_add_permission(self, request: HttpRequest) -> bool:
-        return False
-
-    def has_change_permission(self, request: HttpRequest, obj: LLMUsageLog | None = None) -> bool:
-        return False
-
-    def has_delete_permission(self, request: HttpRequest, obj: LLMUsageLog | None = None) -> bool:
-        return False
 
 
 @admin.register(AppPermissions)
