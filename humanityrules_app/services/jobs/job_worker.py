@@ -10,6 +10,7 @@ import logging
 import threading
 import time
 
+from django.conf import settings
 from django.db import IntegrityError, connections, transaction
 from django.db.models import Exists, OuterRef
 
@@ -32,11 +33,16 @@ _stop_flag = threading.Event()
 # Track the worker thread
 _worker_thread: threading.Thread | None = None
 
+# Bound memory-heavy CDK work within this process. Jobs remain pending until a
+# slot is available instead of accumulating claimed jobs or blocked threads.
+_cdk_job_slots = threading.BoundedSemaphore(value=settings.HUMR_MAX_CONCURRENT_CDK_JOBS)
+
 # Worker label. Empty string = unscoped (main worker), claims only rows whose
 # App has label="". A non-empty label scopes the worker to App rows with that
 # exact label and skips env-level jobs entirely (those are reserved for the
 # unscoped main worker).
 _worker_label: str = ""
+
 
 def _claim_pending_app_deployment(label: str) -> Deployment | None:
     """Claim a pending deployment without overlapping work for the same app."""
@@ -133,6 +139,39 @@ def _run_app_deployment_thread(deployment_id: str) -> None:
         connections.close_all()
 
 
+def _run_app_deployment_with_cdk_slot(deployment_id: str) -> None:
+    """Run a claimed deployment and always return its CDK capacity slot."""
+    try:
+        _run_app_deployment_thread(deployment_id=deployment_id)
+    finally:
+        _cdk_job_slots.release()
+
+
+def _start_pending_app_deployment(label: str) -> None:
+    """Start one pending app deployment when CDK capacity is available."""
+    if not _cdk_job_slots.acquire(blocking=False):
+        return
+
+    slot_handed_off = False
+    try:
+        deployment = _claim_pending_app_deployment(label=label)
+        if deployment is None:
+            return
+
+        thread = threading.Thread(
+            target=_run_app_deployment_with_cdk_slot,
+            args=(str(deployment.id),),
+            name=f"app-deploy-{deployment.id.hex[:8]}",
+            daemon=True,
+        )
+        thread.start()
+        slot_handed_off = True
+        logger.info(f"Spawned thread for app deployment {deployment.id}")
+    finally:
+        if not slot_handed_off:
+            _cdk_job_slots.release()
+
+
 def _run_environment_provisioning_thread(environment_id: str) -> None:
     """Thread target that runs a single environment provisioning."""
     try:
@@ -141,6 +180,39 @@ def _run_environment_provisioning_thread(environment_id: str) -> None:
         logger.exception(f"Unhandled error in environment provisioning {environment_id}")
     finally:
         connections.close_all()
+
+
+def _run_environment_provisioning_with_cdk_slot(environment_id: str) -> None:
+    """Run claimed provisioning and always return its CDK capacity slot."""
+    try:
+        _run_environment_provisioning_thread(environment_id=environment_id)
+    finally:
+        _cdk_job_slots.release()
+
+
+def _start_pending_environment_provisioning() -> None:
+    """Start one pending environment provisioning job when CDK capacity is available."""
+    if not _cdk_job_slots.acquire(blocking=False):
+        return
+
+    slot_handed_off = False
+    try:
+        environment = _claim_pending_environment_provisioning()
+        if environment is None:
+            return
+
+        thread = threading.Thread(
+            target=_run_environment_provisioning_with_cdk_slot,
+            args=(str(environment.id),),
+            name=f"env-provision-{environment.id.hex[:8]}",
+            daemon=True,
+        )
+        thread.start()
+        slot_handed_off = True
+        logger.info(f"Spawned thread for environment provisioning {environment.id}")
+    finally:
+        if not slot_handed_off:
+            _cdk_job_slots.release()
 
 
 def _run_app_deployment_teardown_thread(deployment_id: str) -> None:
@@ -377,29 +449,11 @@ def _worker_loop() -> None:
     while not _stop_flag.is_set():
         try:
             # Check for pending app deployments
-            app_deployment = _claim_pending_app_deployment(label=label)
-            if app_deployment:
-                thread = threading.Thread(
-                    target=_run_app_deployment_thread,
-                    args=(str(app_deployment.id),),
-                    name=f"app-deploy-{app_deployment.id.hex[:8]}",
-                    daemon=True,
-                )
-                thread.start()
-                logger.info(f"Spawned thread for app deployment {app_deployment.id}")
+            _start_pending_app_deployment(label=label)
 
             # Environment provisioning is unscoped — only the main worker handles it.
             if not label:
-                env_provisioning = _claim_pending_environment_provisioning()
-                if env_provisioning:
-                    thread = threading.Thread(
-                        target=_run_environment_provisioning_thread,
-                        args=(str(env_provisioning.id),),
-                        name=f"env-provision-{env_provisioning.id.hex[:8]}",
-                        daemon=True,
-                    )
-                    thread.start()
-                    logger.info(f"Spawned thread for environment provisioning {env_provisioning.id}")
+                _start_pending_environment_provisioning()
 
             # Check for pending app deployment teardowns
             app_deployment_teardown = _claim_pending_app_deployment_teardown(label=label)
