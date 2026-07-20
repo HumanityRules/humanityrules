@@ -245,6 +245,8 @@ HUMR_PLATFORM_OWNER_ORG_SLUG = os.environ.get("HUMR_PLATFORM_OWNER_ORG_SLUG", "h
 # Job Worker - enable with HUMR_RUN_JOB_WORKER=1
 HUMR_RUN_JOB_WORKER = os.environ.get("HUMR_RUN_JOB_WORKER") == "1"
 HUMR_MAX_CONCURRENT_CDK_JOBS = int(os.environ.get("HUMR_MAX_CONCURRENT_CDK_JOBS", "2"))
+HUMR_STALE_JOB_TIMEOUT_MINUTES = int(os.environ.get("HUMR_STALE_JOB_TIMEOUT_MINUTES", "30"))
+HUMR_DEAD_WORKER_TIMEOUT_MINUTES = int(os.environ.get("HUMR_DEAD_WORKER_TIMEOUT_MINUTES", "2"))
 
 # Agent-driven deployments. When False, users deploy only from templates: the agent
 # "Deployment" editor and the "From Repository" new-app flow are hidden in the UI and

@@ -524,6 +524,15 @@ class Environment(models.Model):
     # services/infra_customer/node_packing.py. Not exposed in any UI yet.
     eni_trunking_enabled = models.BooleanField(default=False)
 
+    claimed_by_run = models.ForeignKey(
+        "humanityrules_app.JobWorkerRun",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        help_text="Worker run that claimed this job; liveness input for stale-job detection",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1322,6 +1331,14 @@ class Deployment(models.Model):
         help_text="ALB DNS name",
     )
 
+    claimed_by_run = models.ForeignKey(
+        "humanityrules_app.JobWorkerRun",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        help_text="Worker run that claimed this job; liveness input for stale-job detection",
+    )
     created_by = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
@@ -1630,6 +1647,14 @@ class AppPermissionRequest(models.Model):
     status = models.CharField(max_length=30, choices=Status.choices, default=Status.DRAFT)
     description = models.TextField(blank=True, help_text="Human/agent-authored rationale for the permission changes")
     status_message = models.TextField(blank=True)
+    claimed_by_run = models.ForeignKey(
+        "humanityrules_app.JobWorkerRun",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        help_text="Worker run that claimed this job; liveness input for stale-job detection",
+    )
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name="created_app_permission_requests")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -1685,6 +1710,14 @@ class AppRemovalJob(models.Model):
     teardown_first = models.BooleanField(default=False)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     status_message = models.TextField(blank=True)
+    claimed_by_run = models.ForeignKey(
+        "humanityrules_app.JobWorkerRun",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        help_text="Worker run that claimed this job; liveness input for stale-job detection",
+    )
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -2222,6 +2255,14 @@ class CostRefreshJob(models.Model):
     app = models.ForeignKey("humanityrules_app.App", on_delete=models.CASCADE, related_name="cost_refresh_jobs")
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     status_message = models.TextField(blank=True)
+    claimed_by_run = models.ForeignKey(
+        "humanityrules_app.JobWorkerRun",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        help_text="Worker run that claimed this job; liveness input for stale-job detection",
+    )
     result = models.JSONField(
         default=dict,
         help_text="Recompute summary, e.g. {'rolling_24h_usd': '1.23', 'rolling_24h_by_source': {...}}.",
@@ -2247,6 +2288,26 @@ class CostRefreshJob(models.Model):
 
     def __str__(self) -> str:
         return f"CostRefreshJob {self.id} app={self.app_id} {self.status}"
+
+
+class JobWorkerRun(models.Model):
+    """One incarnation of a job worker process, heartbeating while alive.
+
+    Job rows stamp ``claimed_by_run`` on claim; a claimed executing row whose
+    run stopped heartbeating has no live thread behind it and is reaped fast,
+    without waiting out the no-progress timeout.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
+    label = models.CharField(max_length=64, blank=True, help_text="Worker scope label; empty = unscoped main worker")
+    started_at = models.DateTimeField(auto_now_add=True)
+    heartbeat_at = models.DateTimeField(help_text="Last proof of life")
+
+    class Meta:
+        ordering = ["-started_at"]
+
+    def __str__(self) -> str:
+        return f"JobWorkerRun {self.id} (label={self.label!r})"
 
 
 class WebappPublicGrant(models.Model):
