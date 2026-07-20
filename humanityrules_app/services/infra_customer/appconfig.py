@@ -53,55 +53,6 @@ class ContainerDependencyConfig:
 
 
 @dataclass
-class EngineConfig:
-    """Aurora engine configuration."""
-    family: str  # "aurora-mysql" or "aurora-postgresql"
-    version: str | None  # Version catalog key, None = default
-    auto_minor_version_upgrade: bool
-
-
-@dataclass
-class ServerlessV2Config:
-    """Aurora Serverless v2 scaling configuration."""
-    min_acu: float
-    max_acu: float
-
-
-@dataclass
-class ProvisionedConfig:
-    """Aurora provisioned instance configuration."""
-    instance_class: str  # e.g., "db.r6g.large"
-
-
-@dataclass
-class DeploymentConfig:
-    """Aurora deployment mode configuration."""
-    mode: str  # "aurora_serverless_v2" or "aurora_provisioned"
-    serverless_v2: ServerlessV2Config | None
-    provisioned: ProvisionedConfig | None
-
-
-@dataclass
-class BackupConfig:
-    """Backup configuration."""
-    retention_days: int
-    copy_tags_to_snapshot: bool
-
-
-@dataclass
-class SecurityConfig:
-    """Security settings."""
-    storage_encrypted: bool
-    deletion_protection: bool
-
-
-@dataclass
-class ConnectionConfig:
-    """Connection injection settings."""
-    env_var_name: str | None
-
-
-@dataclass
 class EfsMount:
     """One EFS access point on the task's shared filesystem, mountable by any container."""
     name: str                  # Stable identifier referenced from ContainerConfig.efs_mounts
@@ -134,17 +85,6 @@ class HostMount:
     """One EC2 host-path bind mount for an EC2-backed ECS container."""
     source_path: str
     container_path: str
-
-
-@dataclass
-class DatabaseConfig:
-    """Configuration for an Aurora database."""
-    name: str  # Database name, e.g., "myapp_prod"
-    engine: EngineConfig
-    deployment: DeploymentConfig
-    backups: BackupConfig
-    security: SecurityConfig
-    connection: ConnectionConfig
 
 
 @dataclass
@@ -287,9 +227,6 @@ class AppConfig:
     # Name of the container in `containers` that receives ALB traffic.
     # None = no ALB exposure.
     alb_target_container: str | None = None
-
-    # Database configuration (None = no database)
-    database_config: DatabaseConfig | None = None
 
     # Task-level shared-bag app secrets. Computed as the collision-checked
     # union of every container's app_secrets (same field across containers

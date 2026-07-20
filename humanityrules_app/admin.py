@@ -10,7 +10,6 @@ from humanityrules_app.models import (
     AppPermissions,
     AppRemovalJob,
     AppTemplate,
-    Datastore,
     Deployment,
     DeploymentBlueprint,
     DeploymentLog,
@@ -196,17 +195,7 @@ class DeploymentBlueprintAdmin(admin.ModelAdmin):
     list_filter = ["status", "compute_mode"]
     search_fields = ["app__name", "app__slug", "environment__name", "branch"]
     readonly_fields = ["id", "created_at", "updated_at"]
-    autocomplete_fields = ["app", "environment", "datastore", "created_by"]
-
-
-@admin.register(Datastore)
-class DatastoreAdmin(admin.ModelAdmin):
-    list_display = ["name", "slug", "workspace", "engine", "deployment_mode", "status", "updated_at"]
-    list_filter = ["engine", "deployment_mode", "status", "workspace__organization"]
-    search_fields = ["name", "slug", "workspace__name", "workspace__organization__name", "database_name"]
-    prepopulated_fields = {"slug": ("name",)}
-    readonly_fields = ["id", "created_at", "updated_at"]
-    autocomplete_fields = ["workspace", "created_by"]
+    autocomplete_fields = ["app", "environment", "created_by"]
 
 
 @admin.register(Deployment)

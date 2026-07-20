@@ -1,13 +1,13 @@
 """
 Build AppConfig from Django models.
 
-Converts a Django App model (with related Workspace, Datastore, Environment)
+Converts a Django App model (with related Workspace, Environment)
 into an appconfig.AppConfig suitable for CDK deployment.
 """
 
 from pathlib import Path
 
-from humanityrules_app.models import App, AppTemplate, Datastore, DeploymentBlueprint, ResourceTag
+from humanityrules_app.models import App, AppTemplate, DeploymentBlueprint, ResourceTag
 from humanityrules_app.services import infra_customer
 from humanityrules_app.services.app_templates import template_deploy_service
 from humanityrules_app.services.infra_customer.appconfig import (
@@ -16,52 +16,6 @@ from humanityrules_app.services.infra_customer.appconfig import (
     ContainerDependencyConfig,
     ImageSource,
 )
-
-
-def build_database_config(datastore: Datastore) -> infra_customer.appconfig.DatabaseConfig:
-    """Build DatabaseConfig from Django Datastore model."""
-    # Engine config
-    engine = infra_customer.appconfig.EngineConfig(
-        family=datastore.engine,
-        version=datastore.engine_version or None,
-        auto_minor_version_upgrade=True,
-    )
-
-    # Deployment config
-    if datastore.deployment_mode == Datastore.DeploymentMode.SERVERLESS_V2:
-        deployment = infra_customer.appconfig.DeploymentConfig(
-            mode="aurora_serverless_v2",
-            serverless_v2=infra_customer.appconfig.ServerlessV2Config(
-                min_acu=datastore.serverless_min_acu or 0.5,
-                max_acu=datastore.serverless_max_acu or 2.0,
-            ),
-            provisioned=None,
-        )
-    else:
-        deployment = infra_customer.appconfig.DeploymentConfig(
-            mode="aurora_provisioned",
-            serverless_v2=None,
-            provisioned=infra_customer.appconfig.ProvisionedConfig(
-                instance_class=datastore.provisioned_instance_class or "db.r6g.large",
-            ),
-        )
-
-    return infra_customer.appconfig.DatabaseConfig(
-        name=datastore.database_name,
-        engine=engine,
-        deployment=deployment,
-        backups=infra_customer.appconfig.BackupConfig(
-            retention_days=datastore.backup_retention_days,
-            copy_tags_to_snapshot=True,
-        ),
-        security=infra_customer.appconfig.SecurityConfig(
-            storage_encrypted=datastore.storage_encrypted,
-            deletion_protection=datastore.deletion_protection,
-        ),
-        connection=infra_customer.appconfig.ConnectionConfig(
-            env_var_name="DATABASE_URL",
-        ),
-    )
 
 
 def _merge_container_environment(
@@ -222,10 +176,6 @@ def build_app_config_from_blueprint(blueprint: DeploymentBlueprint, repo_path: P
     if app.repo_subpath:
         app_source_path = repo_path / app.repo_subpath
 
-    database_config = None
-    if blueprint.datastore:
-        database_config = build_database_config(blueprint.datastore)
-
     efs_config = None
     if template.efs_config:
         raw = template.efs_config
@@ -275,7 +225,6 @@ def build_app_config_from_blueprint(blueprint: DeploymentBlueprint, repo_path: P
         compute_mode=blueprint.compute_mode,
         app_source_path=app_source_path,
         alb_target_container=template.alb_target_container,
-        database_config=database_config,
         app_secrets=app_secrets_union or None,
         efs_config=efs_config,
         platform_capabilities=list(template.platform_capabilities or []),
