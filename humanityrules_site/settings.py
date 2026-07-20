@@ -250,25 +250,11 @@ HUMR_DEAD_WORKER_TIMEOUT_MINUTES = int(os.environ.get("HUMR_DEAD_WORKER_TIMEOUT_
 # Local-only debug deployment mode - simulated success after ~10 seconds with no repo clone or AWS calls
 HUMR_DEBUG_DEPLOYMENTS = DEBUG and os.environ.get("HUMR_DEBUG_DEPLOYMENTS") == "1"
 
-# Claude Agent Configuration
-# Priority: ANTHROPIC_API_KEY > AWS_BEDROCK_REGION
-# Bedrock credentials: AWS_BEDROCK_ACCESS_KEY_ID + AWS_BEDROCK_SECRET_ACCESS_KEY (optional, falls back to boto3 chain)
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
-AWS_BEDROCK_REGION = os.environ.get("AWS_BEDROCK_REGION")
-AWS_BEDROCK_ACCESS_KEY_ID = os.environ.get("AWS_BEDROCK_ACCESS_KEY_ID")
-AWS_BEDROCK_SECRET_ACCESS_KEY = os.environ.get("AWS_BEDROCK_SECRET_ACCESS_KEY")
-
-# Claude model aliases per conversation mode (opus-4.8, sonnet-4.6, opus-4.5, sonnet-4.5, haiku-4.5)
-CLAUDE_MODEL_GENERAL = os.environ.get("CLAUDE_MODEL_GENERAL", "opus-4.8")
-CLAUDE_MODEL_ENVIRONMENT = os.environ.get("CLAUDE_MODEL_ENVIRONMENT", "opus-4.8")
-CLAUDE_MODEL_APP_DEPLOYMENT = os.environ.get("CLAUDE_MODEL_APP_DEPLOYMENT", "opus-4.8")
-
-# Claude Agent Sandbox: Base directory for agent sandbox (cloned repos, temp files, etc.)
-CLAUDE_SANDBOX_DIR = BASE_DIR / "local" / "sandbox"
+# Base directory the deployment job pipeline clones repositories into before build.
+REPO_CLONE_DIR = BASE_DIR / "local" / "sandbox"
 
 # App Templates: bundled template repositories
 TEMPLATE_REPOS_DIR = BASE_DIR / "template_repos"
-SANITIZE_SANDBOX_PATHS = True
 
 def posthog_request_filter(request):
     """Skip PostHog tracking for admin, health checks, and static files."""

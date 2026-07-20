@@ -122,7 +122,7 @@ def run_deployment(deployment_id: str) -> bool:
 
         try:
             # Clone the repository
-            cloned_repo_path = settings.CLAUDE_SANDBOX_DIR / f"deployment-{deployment_id}"
+            cloned_repo_path = settings.REPO_CLONE_DIR / f"deployment-{deployment_id}"
             repo_service.clone_repository(
                 repository=app.repository,
                 branch=deployment.git_ref,
