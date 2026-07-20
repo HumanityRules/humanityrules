@@ -9,24 +9,11 @@ This document defines the current live-update pattern in Humanity Rules. The goa
 - The same fragment should be used for initial render and refresh responses whenever practical.
 - Use the narrowest HTMX swap target that keeps the UI correct.
 
-## Two Refresh Mechanisms
+## Refresh Mechanism: self-terminating HTMX polling
 
-We use two different mechanisms today, and each has a clear job.
+Live updates are driven entirely by HTMX — direct user interactions plus self-terminating polling. There is no SSE or WebSocket channel in the app; every refresh is a plain fragment fetch.
 
-### 1. Chat-scoped SSE invalidation
-
-Use chat SSE only on pages that already render the chat panel.
-
-- The browser opens an SSE connection through `chat_stream`.
-- `chat_stream` can emit `sse-notify` messages.
-- The chat panel turns those into `humr:*` document events.
-- Other widgets on the same page can listen for those events and refetch their own fragment endpoints.
-
-This is an invalidation mechanism, not a general event bus.
-
-### 2. Self-terminating HTMX polling
-
-Use polling for state changes that can happen outside the current page interaction, especially background job updates.
+Polling handles state changes that happen outside the current page interaction, especially background job updates (app deployment, environment provisioning, AWS account connection).
 
 - The widget polls only while the underlying resource is in a transient state.
 - The server re-renders the fragment.
@@ -40,36 +27,21 @@ Every live widget should follow this shape:
 
 - It has a stable wrapper element.
 - It has one fragment endpoint that returns the widget fragment.
-- It may listen for zero or more `humr:*` invalidation events.
 - It may self-poll only while the resource is transient.
 - The server decides whether polling continues by including or omitting the polling attributes in the returned fragment.
 
-## Current Architectural Boundary
-
-The only SSE channel in the app today is the chat stream, and it is scoped to pages that include the chat panel.
-
-That means:
-
-- SSE-driven invalidation is available only when the chat panel is present.
-- Pages without the chat panel must rely on direct HTMX interactions or polling.
-- Background-worker state changes should not depend on chat SSE.
-
 ## Why This Is The Default Pattern
 
-This split is the simplest model to maintain:
+This is the simplest model to maintain:
 
-- Chat pages can refresh nearby widgets with lightweight invalidation events.
-- Non-chat pages remain straightforward because each widget declares its own refresh behavior.
+- Each widget declares its own refresh behavior in its own template.
 - Background jobs are handled by self-terminating polling instead of hidden global plumbing.
+- There is no global event bus or persistent connection to reason about.
 
 ## Current Examples
 
 - `humanityrules_app/templates/humanityrules_app/partials/_app_card_status.html`
 - `humanityrules_app/templates/humanityrules_app/apps/app_detail.html`
-- `humanityrules_app/templates/humanityrules_app/deploy/_blueprint_section.html`
-- `humanityrules_app/templates/humanityrules_app/environments/_environment_editor_setup_section.html`
 - `humanityrules_app/templates/humanityrules_app/environments/_environment_status.html`
 - `humanityrules_app/templates/humanityrules_app/integrations/_aws_connect_poll.html` (connect modal polls until the account connects; a headless poller with no visible content, so it uses htmx's `every 30s` interval trigger and stops when the terminal response removes the element, rather than the self-replacing `load delay` fragment the visible widgets use)
 - `humanityrules_app/templates/humanityrules_app/integrations/aws_accounts.html` (the AWS accounts list self-polls `every 30s` while any account is pending — the visible self-terminating pattern — so a row that was left pending after the modal was closed still updates to connected)
-- `humanityrules_app/templates/humanityrules_app/chat/_chat_panel.html`
-- `humanityrules_app/views/chat.py`
