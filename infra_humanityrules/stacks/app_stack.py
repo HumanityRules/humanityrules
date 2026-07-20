@@ -184,6 +184,7 @@ class AppStack(Stack):
             environment={
                 "DJANGO_DEBUG": "0",
                 "HUMR_RUN_JOB_WORKER": "1",
+                "HUMR_MAX_CONCURRENT_CDK_JOBS": "2",
                 "HUMR_USE_REMOTE_BUILDER": "1",
                 "CLAUDE_CODE_USE_BEDROCK": "1",
                 "CLAUDE_CONFIG_DIR": "/home/appuser/.claude",
