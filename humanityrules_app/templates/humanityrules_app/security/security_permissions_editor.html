@@ -25,10 +25,8 @@
         </p>
     </div>
 
-    {# Two-panel body #}
     <div class="flex flex-1 overflow-hidden">
-        {# LEFT PANEL: Policy Editor #}
-        <div class="w-1/2 overflow-y-auto border-r border-gray-200 dark:border-gray-700 dark-scrollbar">
+        <div class="flex-1 overflow-y-auto dark-scrollbar">
             <div class="p-5">
                 <div class="flex items-center justify-between">
                     <h2 class="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Policy statements</h2>
@@ -64,7 +62,7 @@
                     </div>
                 </div>
 
-                {# Statements container - updated via htmx POSTs and SSE OOB swaps #}
+                {# Statements container - updated via htmx POSTs #}
                 <div class="mt-4" id="statements-container">
                     {% include "humanityrules_app/security/_permission_statements.html" %}
                 </div>
@@ -116,17 +114,6 @@
                 </div>
             </div>
         </div>
-
-        {# RIGHT PANEL: Agent Chat #}
-        <div class="w-1/2 flex flex-col">
-            {% if conversation %}
-            {% include "humanityrules_app/chat/_chat_panel.html" %}
-            {% else %}
-            <div class="flex flex-1 items-center justify-center text-gray-500 dark:text-gray-400">
-                <p class="text-sm">No conversation linked to this session.</p>
-            </div>
-            {% endif %}
-        </div>
     </div>
 </div>
 
@@ -137,16 +124,13 @@
  * Permissions editor — server-as-source-of-truth.
  *
  * All mutations (add/remove service, level, resource) POST to the server
- * via htmx attributes on the template elements. Agent changes arrive as
- * SSE notifications that trigger a refetch of the statements.
+ * via htmx attributes on the template elements.
  *
  * JS only handles: service picker UI and resource dropdown population.
  */
 
 const SERVICE_OPTIONS = JSON.parse(document.getElementById('service-options-data').textContent);
 const UPDATE_URL = "{% url 'security_permissions_editor_update_statement' app_permission_request_id=app_permission_request.id %}";
-const STATEMENTS_URL = "{% url 'security_permissions_statements' app_permission_request_id=app_permission_request.id %}";
-const DESCRIPTION_URL = "{% url 'security_permissions_editor_description' app_permission_request_id=app_permission_request.id %}";
 
 // ─── Service Picker ───────────────────────────────────────────────
 
@@ -220,24 +204,6 @@ document.body.addEventListener('htmx:afterRequest', (e) => {
         if (cancel) cancel.disabled = false;
         if (apply) apply.disabled = false;
     }
-});
-
-// ─── Refetch statements + description and enable buttons when agent updates the draft ────
-document.addEventListener('humr:permissions-changed-{{ app_permission_request.id }}', () => {
-    htmx.ajax('GET', STATEMENTS_URL, {
-        target: '#statements-container',
-        swap: 'innerHTML',
-    });
-    const textarea = document.querySelector('#description-container textarea');
-    if (textarea && document.activeElement !== textarea) {
-        fetch(DESCRIPTION_URL).then(r => r.text()).then(text => {
-            if (document.activeElement !== textarea) textarea.value = text;
-        });
-    }
-    const cancel = document.getElementById('cancel-btn');
-    const apply = document.getElementById('apply-btn');
-    if (cancel) cancel.disabled = false;
-    if (apply) apply.disabled = false;
 });
 
 </script>
