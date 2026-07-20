@@ -9,12 +9,15 @@ job execution mechanism for background tasks.
 import logging
 import threading
 import time
+import uuid
+from datetime import timedelta
 
 from django.conf import settings
 from django.db import IntegrityError, connections, transaction
 from django.db.models import Exists, OuterRef
+from django.utils import timezone
 
-from humanityrules_app.models import App, AppPermissionRequest, AppRemovalJob, CostRefreshJob, Deployment, DeploymentBlueprint, Environment
+from humanityrules_app.models import App, AppPermissionRequest, AppRemovalJob, CostRefreshJob, Deployment, DeploymentBlueprint, Environment, JobWorkerRun
 
 from . import app_deployment_executor
 from . import app_deployment_teardown_executor
@@ -23,6 +26,7 @@ from . import environment_provisioning_executor
 from . import environment_operation_gate
 from . import environment_teardown_executor
 from . import permissions_apply_executor
+from . import stale_job_reaper
 from humanityrules_app.services.cost import cost_refresh
 
 logger = logging.getLogger(__name__)
@@ -37,11 +41,33 @@ _worker_thread: threading.Thread | None = None
 # slot is available instead of accumulating claimed jobs or blocked threads.
 _cdk_job_slots = threading.BoundedSemaphore(value=settings.HUMR_MAX_CONCURRENT_CDK_JOBS)
 
+# How often the unscoped worker sweeps for jobs abandoned in executing states.
+_STALE_REAP_INTERVAL_SECONDS = 60.0
+
+# How often this worker run proves it is alive. Must stay well under the
+# HUMR_DEAD_WORKER_TIMEOUT_MINUTES threshold the reaper uses.
+_HEARTBEAT_INTERVAL_SECONDS = 15.0
+
+# This worker incarnation's JobWorkerRun id, stamped on claimed jobs. Assigned
+# on the first heartbeat of the loop; None before the worker has ever beaten.
+_worker_run_id: uuid.UUID | None = None
+
 # Worker label. Empty string = unscoped (main worker), claims only rows whose
 # App has label="". A non-empty label scopes the worker to App rows with that
 # exact label and skips env-level jobs entirely (those are reserved for the
 # unscoped main worker).
 _worker_label: str = ""
+
+
+def _beat_worker_run(label: str) -> None:
+    """Create or refresh this worker run's proof-of-life row."""
+    global _worker_run_id
+    if _worker_run_id is None:
+        _worker_run_id = uuid.uuid7()
+    JobWorkerRun.objects.update_or_create(
+        id=_worker_run_id,
+        defaults={"label": label, "heartbeat_at": timezone.now()},
+    )
 
 
 def _claim_pending_app_deployment(label: str) -> Deployment | None:
@@ -71,7 +97,8 @@ def _claim_pending_app_deployment(label: str) -> Deployment | None:
         if deployment:
             deployment.status = Deployment.Status.BUILDING
             deployment.status_message = "Claimed by worker"
-            deployment.save(update_fields=["status", "status_message", "updated_at"])
+            deployment.claimed_by_run_id = _worker_run_id
+            deployment.save(update_fields=["status", "status_message", "claimed_by_run", "updated_at"])
             logger.info(f"Claimed app deployment {deployment.id} for app '{deployment.app.name}'")
             return deployment
 
@@ -92,7 +119,8 @@ def _claim_pending_environment_provisioning() -> Environment | None:
         if environment:
             environment.status = Environment.Status.PROVISIONING
             environment.status_message = "Claimed by worker"
-            environment.save(update_fields=["status", "status_message", "updated_at"])
+            environment.claimed_by_run_id = _worker_run_id
+            environment.save(update_fields=["status", "status_message", "claimed_by_run", "updated_at"])
             logger.info(f"Claimed environment provisioning {environment.id} '{environment.name}'")
             return environment
 
@@ -122,7 +150,8 @@ def _claim_pending_app_deployment_teardown(label: str) -> Deployment | None:
         if deployment:
             deployment.status = Deployment.Status.TEARING_DOWN
             deployment.status_message = "Claimed by worker"
-            deployment.save(update_fields=["status", "status_message", "updated_at"])
+            deployment.claimed_by_run_id = _worker_run_id
+            deployment.save(update_fields=["status", "status_message", "claimed_by_run", "updated_at"])
             logger.info(f"Claimed app deployment teardown {deployment.id} for app '{deployment.app.name}'")
             return deployment
 
@@ -252,7 +281,8 @@ def _claim_pending_permissions_apply(label: str) -> AppPermissionRequest | None:
             if apr:
                 apr.status = AppPermissionRequest.Status.APPLYING
                 apr.status_message = "Claimed by worker"
-                apr.save(update_fields=["status", "status_message", "updated_at"])
+                apr.claimed_by_run_id = _worker_run_id
+                apr.save(update_fields=["status", "status_message", "claimed_by_run", "updated_at"])
                 logger.info(f"Claimed permissions apply {apr.id} for app '{apr.app.name}'")
                 return apr
     except IntegrityError:
@@ -298,7 +328,8 @@ def _claim_pending_environment_teardown() -> Environment | None:
         if environment:
             environment.status = Environment.Status.TEARING_DOWN
             environment.status_message = "Claimed by worker"
-            environment.save(update_fields=["status", "status_message", "updated_at"])
+            environment.claimed_by_run_id = _worker_run_id
+            environment.save(update_fields=["status", "status_message", "claimed_by_run", "updated_at"])
             logger.info(f"Claimed environment teardown {environment.id} '{environment.name}'")
             return environment
 
@@ -368,7 +399,8 @@ def _claim_pending_app_removal(label: str) -> AppRemovalJob | None:
 
                 job.status = AppRemovalJob.Status.RUNNING
                 job.status_message = "Claimed by worker"
-                job.save(update_fields=["status", "status_message", "updated_at"])
+                job.claimed_by_run_id = _worker_run_id
+                job.save(update_fields=["status", "status_message", "claimed_by_run", "updated_at"])
                 logger.info(f"Claimed app removal {job.id} for app '{job.app_slug_snapshot}'")
                 return job
     except IntegrityError:
@@ -421,7 +453,8 @@ def _claim_pending_cost_refresh(label: str) -> CostRefreshJob | None:
             if job:
                 job.status = CostRefreshJob.Status.RUNNING
                 job.status_message = "Claimed by worker"
-                job.save(update_fields=["status", "status_message", "updated_at"])
+                job.claimed_by_run_id = _worker_run_id
+                job.save(update_fields=["status", "status_message", "claimed_by_run", "updated_at"])
                 logger.info(f"Claimed cost refresh {job.id} for app '{job.app.slug}'")
                 return job
     except IntegrityError:
@@ -446,8 +479,25 @@ def _worker_loop() -> None:
     scope_desc = f"label={label!r}" if label else "unscoped (label='')"
     logger.info(f"Job worker started ({scope_desc})")
 
+    last_beat_monotonic: float | None = None
+    last_reap_monotonic: float | None = None
+
     while not _stop_flag.is_set():
         try:
+            # Heartbeat first: claims stamp _worker_run_id, so the run row must
+            # exist before any claim references it.
+            if last_beat_monotonic is None or time.monotonic() - last_beat_monotonic >= _HEARTBEAT_INTERVAL_SECONDS:
+                _beat_worker_run(label=label)
+                last_beat_monotonic = time.monotonic()
+
+            # Stale-job reaping is unscoped — only the main worker handles it.
+            if not label and (last_reap_monotonic is None or time.monotonic() - last_reap_monotonic >= _STALE_REAP_INTERVAL_SECONDS):
+                stale_job_reaper.reap_stale_jobs(
+                    no_progress_timeout=timedelta(minutes=settings.HUMR_STALE_JOB_TIMEOUT_MINUTES),
+                    dead_worker_timeout=timedelta(minutes=settings.HUMR_DEAD_WORKER_TIMEOUT_MINUTES),
+                )
+                last_reap_monotonic = time.monotonic()
+
             # Check for pending app deployments
             _start_pending_app_deployment(label=label)
 
@@ -536,13 +586,14 @@ def start_worker(label: str) -> None:
     Safe to call multiple times — only one worker will run per process.
     Call this from AppConfig.ready() or a management command.
     """
-    global _worker_thread, _worker_label
+    global _worker_thread, _worker_label, _worker_run_id
 
     if _worker_thread is not None and _worker_thread.is_alive():
         logger.error("Job worker already running")
         return
 
     _worker_label = label
+    _worker_run_id = None
     _stop_flag.clear()
     _worker_thread = threading.Thread(
         target=_worker_loop,
