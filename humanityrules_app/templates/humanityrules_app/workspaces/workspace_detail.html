@@ -47,17 +47,7 @@
             {% for app in apps %}
             {% include "humanityrules_app/partials/_app_card.html" %}
             {% endfor %}
-            {# New App: when agent deployments are off, go straight to the template picker. #}
-            {% if agent_deployments_enabled %}
-            <button type="button"
-                    onclick="document.getElementById('new-app-source-modal').classList.remove('hidden')"
-                    class="flex flex-col items-center justify-center p-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg hover:border-indigo-500 dark:hover:border-indigo-400 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors group min-h-[104px]">
-                <svg class="w-8 h-8 text-gray-400 group-hover:text-indigo-500 dark:group-hover:text-indigo-400 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-                </svg>
-                <span class="mt-2 text-sm font-medium text-gray-500 dark:text-gray-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">New Agent</span>
-            </button>
-            {% else %}
+            {# New Agent: go straight to the personal-assistant template deploy form. #}
             <a href="{% url 'template_deploy_form' template_slug='hermes-personal' %}"
                hx-get="{% url 'template_deploy_form' template_slug='hermes-personal' %}"
                hx-target="#main-content"
@@ -69,11 +59,9 @@
                 </svg>
                 <span class="mt-2 text-sm font-medium text-gray-500 dark:text-gray-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">New Agent</span>
             </a>
-            {% endif %}
         </div>
     </div>
 
-    {% if agent_deployments_enabled %}
     {# Datastores section #}
     <div class="mb-8">
         <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Datastores</h2>
@@ -102,7 +90,6 @@
         </div>
         {% endif %}
     </div>
-    {% endif %}
 
     {# Recent Deployments section #}
     <div>
@@ -136,9 +123,3 @@
         {% endif %}
     </div>
 </div>
-
-{# New App source picker + repo picker modals — only the agent flow uses these. #}
-{% if agent_deployments_enabled %}
-{% include "humanityrules_app/workspaces/_new_app_source_modal.html" %}
-{% include "humanityrules_app/workspaces/_repo_picker_modal.html" %}
-{% endif %}

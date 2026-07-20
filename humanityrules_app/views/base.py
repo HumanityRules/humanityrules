@@ -1,9 +1,5 @@
-import functools
-from collections.abc import Callable
-from typing import Any
-
 from django.conf import settings as django_settings
-from django.http import Http404, HttpRequest, HttpResponse, HttpResponseForbidden
+from django.http import HttpResponseForbidden
 from django.templatetags.static import static
 
 from ..models import OrganizationMembership
@@ -16,16 +12,6 @@ def require_org_admin(request):
     if abac_service.is_org_admin(organization=org, user=request.user):
         return None
     return HttpResponseForbidden("You do not have permission to access this page.")
-
-
-def require_agent_deployments(view_func: Callable[..., HttpResponse]) -> Callable[..., HttpResponse]:
-    """Block a view with a 404 when agent-driven deployments are disabled (settings.AGENT_DEPLOYMENTS_ENABLED)."""
-    @functools.wraps(view_func)
-    def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
-        if not django_settings.AGENT_DEPLOYMENTS_ENABLED:
-            raise Http404("Agent-driven deployments are disabled.")
-        return view_func(request, *args, **kwargs)
-    return wrapper
 
 
 def get_app_shell_context(request, current_page):

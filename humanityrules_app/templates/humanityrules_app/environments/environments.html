@@ -37,22 +37,9 @@
         </a>
         {% endfor %}
 
-        {% comment %}
-        New Environment card - org-admin only, requires AWS accounts. This is the single gate for
-        the agent flow: with agent deployments on it opens the account picker → agent editor;
-        otherwise it jumps straight to the setup form (which has its own account dropdown).
-        {% endcomment %}
+        {# New Environment card — org-admin only, requires AWS accounts. Jumps to the setup form,
+           which has its own account dropdown. #}
         {% if user_is_org_admin and aws_accounts %}
-        {% if agent_deployments_enabled %}
-        <button type="button"
-                onclick="document.getElementById('aws-account-picker-modal').classList.remove('hidden')"
-                class="flex flex-col items-center justify-center p-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg hover:border-indigo-500 dark:hover:border-indigo-400 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors group min-h-[104px]">
-            <svg class="w-8 h-8 text-gray-400 group-hover:text-indigo-500 dark:group-hover:text-indigo-400 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-            </svg>
-            <span class="mt-2 text-sm font-medium text-gray-500 dark:text-gray-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">New Environment</span>
-        </button>
-        {% else %}
         <a href="{% url 'environment_setup_form' %}"
            hx-get="{% url 'environment_setup_form' %}"
            hx-target="#main-content"
@@ -64,7 +51,6 @@
             </svg>
             <span class="mt-2 text-sm font-medium text-gray-500 dark:text-gray-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">New Environment</span>
         </a>
-        {% endif %}
         {% endif %}
     </div>
 
@@ -98,8 +84,3 @@
     </div>
     {% endif %}
 </div>
-
-{# AWS Account picker modal — only the agent flow uses it (the form flow has its own dropdown). #}
-{% if agent_deployments_enabled %}
-{% include "humanityrules_app/environments/_aws_account_picker_modal.html" %}
-{% endif %}

@@ -21,12 +21,6 @@ from .webapp_public_access import (
     webapp_public_access_revoke,
 )
 from .environments import environments, environment_detail, environment_setup_form, environment_provisioning_log, environment_status, environment_retry, environment_teardown_confirm, environment_teardown, environment_tag_add, environment_tag_remove, environment_tags_save
-from .environment_editor import (
-    environment_editor,
-    environment_editor_new,
-    environment_editor_environment_section,
-    environment_editor_reset,
-)
 from .security_hub import security_hub
 from .security_permissions_editor import (
     security_permissions_editor,
@@ -117,27 +111,6 @@ from .invites import accept_invite, create_invite, revoke_invite
 from .health import health_check
 from .pdp import pdp_evaluate, pdp_evaluate_public
 from .policy_proxy_activity import policy_proxy_activity
-from .chat import (
-    chat_app_deploy,
-    chat_list,
-    chat_new,
-    chat_view,
-    chat_send,
-    chat_stream,
-    chat_messages,
-    chat_close,
-    chat_fork,
-    chat_conversation_title,
-    chat_conversation_cost,
-)
-from .deployment_editor import (
-    deployment_editor,
-    deployment_editor_new,
-    deployment_editor_reset,
-    deployment_editor_app_section,
-    deployment_editor_blueprint_section,
-    deployment_editor_fork,
-)
 from .template_deploy import (
     template_deploy_picker,
     template_deploy_form,
@@ -218,10 +191,6 @@ __all__ = [
     "environment_tag_add",
     "environment_tag_remove",
     "environment_tags_save",
-    "environment_editor",
-    "environment_editor_new",
-    "environment_editor_environment_section",
-    "environment_editor_reset",
     "security_hub",
     "security_permissions_editor",
     "security_permissions_editor_apply",
@@ -298,23 +267,6 @@ __all__ = [
     "integrations_org_github_setup",
     "integrations_org_github_select_installation",
     "github_webhook",
-    "chat_app_deploy",
-    "chat_list",
-    "chat_new",
-    "chat_view",
-    "chat_send",
-    "chat_stream",
-    "chat_messages",
-    "chat_close",
-    "chat_fork",
-    "chat_conversation_title",
-    "chat_conversation_cost",
-    "deployment_editor",
-    "deployment_editor_new",
-    "deployment_editor_reset",
-    "deployment_editor_app_section",
-    "deployment_editor_blueprint_section",
-    "deployment_editor_fork",
     "template_deploy_picker",
     "template_deploy_form",
     "waitlist_signup",
