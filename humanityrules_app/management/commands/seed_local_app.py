@@ -14,14 +14,19 @@ tunnel.
 Usage:
     uv run manage.py seed_local_app \\
         --aws-account "Humanity Rules Sandbox" \\
+        --org OrgLocal \\
         --app-slug hermesvmendi00 \\
         --owner-username vmendi@gmail.com
+
+The account name is shared across orgs (every org gets a sandbox account of
+that name), so --org is required to disambiguate.
 """
 
 import hashlib
 from typing import Any
 
 from django.core.management.base import BaseCommand, CommandError, CommandParser
+from django.db.models import Q
 
 from humanityrules_app import app_slugs
 from humanityrules_app.models import (
@@ -48,6 +53,7 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument("--aws-account", required=True, help="AWS account name the env lives under (e.g. 'Humanity Rules Sandbox').")
+        parser.add_argument("--org", help="Organization name or slug that owns the account; required when the account name is shared across orgs.")
         parser.add_argument("--app-slug", required=True, help="App slug the local container impersonates (e.g. 'hermesvmendi00').")
         parser.add_argument("--owner-username", required=True, help="Username that owns --app-slug (e.g. 'vmendi@gmail.com').")
         parser.add_argument("--env-slug", default=DEFAULT_ENV_SLUG, help=f"Environment slug to create (default '{DEFAULT_ENV_SLUG}').")
@@ -72,7 +78,7 @@ class Command(BaseCommand):
         except ValueError as exc:
             raise CommandError(str(exc)) from exc
 
-        aws_account = self._resolve_aws_account(name=options["aws_account"])
+        aws_account = self._resolve_aws_account(name=options["aws_account"], org=options["org"])
         env = self._ensure_environment(
             aws_account=aws_account,
             env_slug=options["env_slug"],
@@ -91,13 +97,19 @@ class Command(BaseCommand):
         self._mint_bearer(env=env, raw=raw)
         self._print_summary(env=env, app_slug=app_slug, owner_username=options["owner_username"], raw=raw)
 
-    def _resolve_aws_account(self, name: str) -> AWSAccount:
-        """Return the AWSAccount by name, or fail with the available choices."""
+    def _resolve_aws_account(self, name: str, org: str | None) -> AWSAccount:
+        """Return the AWSAccount by name (scoped to --org when the name is shared)."""
+        qs = AWSAccount.objects.select_related("organization").filter(name=name)
+        if org is not None:
+            qs = qs.filter(Q(organization__name=org) | Q(organization__slug=org))
         try:
-            return AWSAccount.objects.select_related("organization").get(name=name)
+            return qs.get()
         except AWSAccount.DoesNotExist:
             available = ", ".join(sorted(a.name for a in AWSAccount.objects.all())) or "(none)"
-            raise CommandError(f"No AWSAccount named {name!r}. Available: {available}")
+            raise CommandError(f"No AWSAccount named {name!r}{f' in org {org!r}' if org else ''}. Available: {available}")
+        except AWSAccount.MultipleObjectsReturned:
+            orgs = ", ".join(sorted(f"{a.organization.name} (slug={a.organization.slug})" for a in qs))
+            raise CommandError(f"AWSAccount name {name!r} is shared across orgs; pass --org to pick one of: {orgs}")
 
     def _ensure_environment(self, aws_account: AWSAccount, env_slug: str, hosted_zone: str, region: str) -> Environment:
         """Create or update the local Environment as READY so the provisioning worker ignores it."""
