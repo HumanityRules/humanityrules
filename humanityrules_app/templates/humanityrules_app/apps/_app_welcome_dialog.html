@@ -80,7 +80,7 @@ failure the log tells the story.
                 if (!status) return;
                 // Concluded either way: step aside. On success the deploy-success
                 // dialog pops on this same event; on failure the log tells the story.
-                if (["succeeded", "failed", "rolled_back", "torn_down"].indexOf(status) !== -1) {
+                if (["succeeded", "failed", "torn_down"].indexOf(status) !== -1) {
                     dialog.remove();
                 }
             });
