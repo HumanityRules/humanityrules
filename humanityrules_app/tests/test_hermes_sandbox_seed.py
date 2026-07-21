@@ -101,8 +101,11 @@ class TestHermesSandboxSeed(unittest.TestCase):
 
         self.assertEqual(
             set(extensions),
-            {"humr-integrations", "humr-webapps", "humr-permissions"},
+            {"humr-integrations", "humr-widgets", "humr-webapps", "humr-permissions"},
         )
+        extension_order = [entry["id"] for entry in manifest["extensions"]]
+        widgets_index = extension_order.index("humr-widgets")
+        self.assertEqual(extension_order[widgets_index + 1], "humr-webapps")
         self.assertEqual(
             extensions["humr-integrations"]["scripts"],
             [
@@ -116,6 +119,8 @@ class TestHermesSandboxSeed(unittest.TestCase):
             ],
         )
         self.assertIn("humr-model-picker.css", extensions["humr-integrations"]["stylesheets"])
+        self.assertEqual(extensions["humr-widgets"]["scripts"], ["humr-panel.js", "humr-widgets.js"])
+        self.assertEqual(extensions["humr-widgets"]["stylesheets"], ["humr-widgets.css"])
         self.assertEqual(extensions["humr-webapps"]["scripts"], ["humr-panel.js", "humr-webapps.js"])
         self.assertEqual(extensions["humr-permissions"]["scripts"], ["humr-permissions.js"])
 
