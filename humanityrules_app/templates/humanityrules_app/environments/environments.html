@@ -1,4 +1,4 @@
-<div class="max-w-5xl">
+<div class="max-w-4xl">
     <div class="flex items-center justify-between mb-6">
         <div>
             <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Environments</h1>
@@ -37,8 +37,8 @@
         </a>
         {% endfor %}
 
-        {# New Environment card — org-admin only, requires AWS accounts. Jumps to the setup form,
-           which has its own account dropdown. #}
+        {% comment %} New Environment card — org-admin only, requires AWS accounts. Jumps to the setup form,
+           which has its own account dropdown. {% endcomment %}
         {% if user_is_org_admin and aws_accounts %}
         <a href="{% url 'environment_setup_form' %}"
            hx-get="{% url 'environment_setup_form' %}"
