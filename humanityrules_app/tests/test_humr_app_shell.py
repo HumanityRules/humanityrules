@@ -48,7 +48,6 @@ def _app(template: AppTemplate | None) -> App:
         source_template=template,
         name="My App",
         slug="my-app",
-        app_type=App.AppType.WEB,
         build_strategy=App.BuildStrategy.DOCKERFILE,
         container_port=8080,
         health_check_path="/health",

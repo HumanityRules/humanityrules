@@ -391,7 +391,7 @@ class TestPermissionsEditorEndpoints(TestCase):
         )
         self.app = App.objects.create(
             organization=self.org, workspace=self.workspace, repository=self.repo,
-            environment=self.env, name="PEApp", slug="peapp", app_type="web",
+            environment=self.env, name="PEApp", slug="peapp",
             build_strategy="dockerfile", container_port=8000, health_check_path="/health",
             cpu=256, memory=512,
         )
@@ -502,7 +502,7 @@ class TestPermissionsEditorStatementRendering(TestCase):
         )
         self.app = App.objects.create(
             organization=self.org, workspace=self.workspace, repository=self.repo,
-            environment=self.env, name="PSRApp", slug="psrapp", app_type="web",
+            environment=self.env, name="PSRApp", slug="psrapp",
             build_strategy="dockerfile", container_port=8000, health_check_path="/health",
             cpu=256, memory=512,
         )

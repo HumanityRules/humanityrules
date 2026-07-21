@@ -232,7 +232,6 @@ async def deploy_from_template(
         source_template=template,
         name=app_name,
         slug=app_slug,
-        app_type=models.App.AppType.WEB,
         build_strategy=models.App.BuildStrategy.DOCKERFILE,
         dockerfile_path=primary.get("dockerfile_path", ""),
         container_port=primary["container_port"],

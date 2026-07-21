@@ -1,0 +1,151 @@
+{% comment %} Deployment hero + details card. Rendered inline from app_detail.html and re-rendered
+by the self-terminating status poll (app_deployment_section_status), which swaps the innerHTML of
+#deployment-section-{{ app.id }}. Alpine state (configOpen, copied) lives on a wrapper OUTSIDE that
+target in app_detail.html so it survives the swap. {% endcomment %}
+{% partialdef deployment_section %}
+<div {% if current_deployment and not current_deployment.is_settled %}
+     hx-get="{% url 'app_deployment_section_status' app_slug=app.slug %}"
+     hx-trigger="load delay:10s"
+     hx-target="#deployment-section-{{ app.id }}"
+     hx-swap="innerHTML"
+     {% endif %}>
+    {% if current_deployment %}
+    {# Hero: the deployment URL is the page's primary element #}
+    <div class="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+        <div class="min-w-0">
+            {% if current_deployment.service_url %}
+            <div class="flex items-center gap-2 min-w-0">
+                <a href="{{ current_deployment.service_url }}" target="_blank" rel="noopener noreferrer"
+                   class="truncate text-xl font-semibold text-indigo-600 dark:text-indigo-400 hover:underline">{{ current_deployment.service_url }}</a>
+                <button type="button"
+                        @click="navigator.clipboard.writeText('{{ current_deployment.service_url|escapejs }}'); copied = true; setTimeout(() => copied = false, 1500)"
+                        class="shrink-0 rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+                        title="Copy URL">
+                    <svg x-show="!copied" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
+                    </svg>
+                    <svg x-show="copied" x-cloak class="h-4 w-4 text-green-600 dark:text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                    </svg>
+                </button>
+            </div>
+            {% endif %}
+            <div class="mt-3 flex items-center gap-2">
+                {% include "humanityrules_app/partials/_status_pill.html" with status=current_deployment.status label=current_deployment.get_status_display only %}
+                <span class="text-xs text-gray-500 dark:text-gray-400">{{ current_deployment.created_at|timesince }} ago</span>
+            </div>
+        </div>
+        {% if app.status != 'pending_removal' %}
+        <div class="flex shrink-0 items-center gap-2 pt-1">
+            {% if current_deployment.status == 'succeeded' or current_deployment.status == 'failed' or current_deployment.status == 'torn_down' %}
+            <button hx-post="{% url 'app_deployment_redeploy' app_slug=app.slug deployment_id=current_deployment.id %}"
+                    hx-target="#main-content"
+                    hx-swap="innerHTML"
+                    class="rounded-lg bg-white dark:bg-gray-800 px-3 py-1.5 text-sm font-medium text-gray-900 dark:text-white ring-1 ring-inset ring-gray-300 dark:ring-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700">Redeploy</button>
+            {% endif %}
+            {% if current_deployment.status == 'succeeded' %}
+            <a href="{% url 'security_permissions_editor' %}?context_app={{ app.slug }}"
+               hx-get="{% url 'security_permissions_editor' %}?context_app={{ app.slug }}"
+               hx-target="#main-content"
+               hx-swap="innerHTML"
+               hx-push-url="true"
+               class="rounded-lg bg-white dark:bg-gray-800 px-3 py-1.5 text-sm font-medium text-gray-900 dark:text-white ring-1 ring-inset ring-gray-300 dark:ring-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700">Permissions</a>
+            {% endif %}
+            {% if current_deployment.status == 'succeeded' or current_deployment.status == 'failed' %}
+            <button type="button"
+                    hx-get="{% url 'app_teardown_confirm' app_slug=app.slug deployment_id=current_deployment.id %}?render=app_detail"
+                    hx-target="#modal-container"
+                    hx-swap="innerHTML"
+                    class="rounded-lg bg-white dark:bg-gray-800 px-3 py-1.5 text-sm font-medium text-gray-900 dark:text-white ring-1 ring-inset ring-gray-300 dark:ring-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700">Tear Down</button>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+
+    {# Details card: environment, provenance, config #}
+    <div class="mt-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+        <dl class="flex flex-wrap gap-x-12 gap-y-6 text-sm">
+            <div class="min-w-0">
+                <dt class="text-gray-500 dark:text-gray-400">Environment</dt>
+                <dd class="mt-1 font-medium truncate">
+                    <a href="{% url 'environment_detail' environment_id=app.environment.id %}"
+                       hx-get="{% url 'environment_detail' environment_id=app.environment.id %}"
+                       hx-target="#main-content"
+                       hx-swap="innerHTML"
+                       hx-push-url="true"
+                       class="text-indigo-600 dark:text-indigo-400 hover:underline">{{ app.environment.name }}</a>
+                </dd>
+            </div>
+            <div class="min-w-0">
+                <dt class="text-gray-500 dark:text-gray-400">AWS Account</dt>
+                <dd class="mt-1 font-medium text-gray-900 dark:text-white truncate">{{ app.environment.aws_account.name }} · {{ app.environment.aws_region }}</dd>
+            </div>
+            <div class="min-w-0">
+                <dt class="text-gray-500 dark:text-gray-400">Created</dt>
+                <dd class="mt-1 font-medium text-gray-900 dark:text-white">{{ app.created_at|date:"M j, Y" }}</dd>
+            </div>
+            <div class="min-w-0">
+                <dt class="text-gray-500 dark:text-gray-400">Created By</dt>
+                <dd class="mt-1 font-medium text-gray-900 dark:text-white truncate"
+                    {% if app.created_by.email %}title="{{ app.created_by.email }}"{% endif %}>{{ app.created_by.email|default:"—" }}</dd>
+            </div>
+        </dl>
+        <div class="mt-4 border-t border-gray-200 dark:border-gray-700 pt-3 flex flex-wrap items-center">
+            <button @click="configOpen = !configOpen" type="button"
+                    class="inline-flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300">
+                <svg class="h-3 w-3 shrink-0 transition-transform duration-150" :class="{ 'rotate-90': configOpen }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+                <span>Config</span>
+            </button>
+            <span x-show="!configOpen" class="inline-flex items-center gap-1.5 ml-2 text-xs">
+                <span class="inline-flex items-center rounded bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:text-gray-300">{{ app.containers|length }} container{{ app.containers|length|pluralize }}</span>
+            </span>
+            <div x-show="configOpen" x-cloak
+                 x-transition:enter="transition ease-out duration-150"
+                 x-transition:enter-start="opacity-0"
+                 x-transition:enter-end="opacity-100"
+                 class="mt-2 w-full rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60 px-3 py-2">
+                <dl class="grid gap-x-4 gap-y-1.5 text-xs" style="grid-template-columns: auto 1fr;">
+                    {% for container in app.containers %}
+                    <dt class="text-gray-500 dark:text-gray-400 pt-0.5">{{ container.name }} env</dt>
+                    <dd class="text-gray-900 dark:text-white">
+                        {% if container.environment_variables %}
+                        <ul class="space-y-0.5 font-mono text-[11px]">
+                            {% for var in container.environment_variables %}
+                            <li>
+                                <span class="text-gray-500 dark:text-gray-400">{{ var.name }}</span><span class="text-gray-300 dark:text-gray-600">=</span><span class="break-all">{{ var.value }}</span>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                        {% else %}
+                        <span class="text-gray-400 dark:text-gray-500 italic">None</span>
+                        {% endif %}
+                    </dd>
+                    <dt class="text-gray-500 dark:text-gray-400 pt-0.5">{{ container.name }} secrets</dt>
+                    <dd class="text-gray-900 dark:text-white">
+                        {% if container.app_secrets %}
+                        <ul class="space-y-0.5 font-mono text-[11px]">
+                            {% for key, val in container.app_secrets.items %}
+                            <li>
+                                <span class="text-gray-500 dark:text-gray-400">{{ key }}</span><span class="text-gray-300 dark:text-gray-600">=</span><span class="text-gray-400 dark:text-gray-500">••••••••</span>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                        {% else %}
+                        <span class="text-gray-400 dark:text-gray-500 italic">None</span>
+                        {% endif %}
+                    </dd>
+                    {% endfor %}
+                </dl>
+            </div>
+        </div>
+    </div>
+    {% else %}
+    <div class="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 border-dashed rounded-lg p-4 text-center">
+        <p class="text-sm text-gray-500 dark:text-gray-400">No deployments yet.</p>
+    </div>
+    <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">Created {{ app.created_at|date:"M j, Y" }} by {{ app.created_by.email|default:"—" }}</p>
+    {% endif %}
+</div>
+{% endpartialdef %}

@@ -259,8 +259,8 @@ def app_deployment_log(request: HttpRequest, app_slug: str) -> HttpResponse:
 
 @login_required
 @require_GET
-def app_environment_row_status(request: HttpRequest, app_slug: str) -> HttpResponse:
-    """Return updated environment row inner HTML for self-terminating polling."""
+def app_deployment_section_status(request: HttpRequest, app_slug: str) -> HttpResponse:
+    """Return updated deployment section inner HTML for self-terminating polling."""
     app = _get_app_for_user(request, app_slug)
 
     denied = abac_view_checks.check_abac(request, app.workspace, "workspace", "workspace:view")
@@ -277,7 +277,7 @@ def app_environment_row_status(request: HttpRequest, app_slug: str) -> HttpRespo
     }
     return render(
         request,
-        "humanityrules_app/apps/_app_environment_row.html#environment_row_content",
+        "humanityrules_app/apps/_app_deployment_section.html#deployment_section",
         context=context,
     )
 

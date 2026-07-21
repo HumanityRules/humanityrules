@@ -61,7 +61,7 @@ class PublicAccessTestBase(TestCase):
         self.app = App.objects.create(
             organization=self.org, workspace=self.workspace, repository=self.repo,
             source_template=self.template, environment=self.environment,
-            name="Wolfie", slug="wolfie", app_type="web", build_strategy="dockerfile",
+            name="Wolfie", slug="wolfie", build_strategy="dockerfile",
             container_port=8000, health_check_path="/health", cpu=256, memory=512,
         )
         Deployment.objects.create(
