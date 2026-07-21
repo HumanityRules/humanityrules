@@ -57,7 +57,6 @@ class TestFleetRedeployAll(TestCase):
             repository=self.repository,
             name=name,
             slug=slug,
-            app_type=models.App.AppType.WEB,
             build_strategy=models.App.BuildStrategy.DOCKERFILE,
             container_port=8787,
             health_check_path="/health",

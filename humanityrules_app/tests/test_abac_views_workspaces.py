@@ -170,7 +170,7 @@ class TestWorkspaceEndpoints(TestCase):
         )
         App.objects.create(
             organization=self.org, workspace=self.ws_eng, repository=repo,
-            environment=self.env, name="MyApp", slug="myapp", app_type="web",
+            environment=self.env, name="MyApp", slug="myapp",
             build_strategy="dockerfile", container_port=8000, health_check_path="/health",
             cpu=256, memory=512,
         )
@@ -186,7 +186,7 @@ class TestWorkspaceEndpoints(TestCase):
         )
         App.objects.create(
             organization=self.org, workspace=self.ws_fin, repository=repo,
-            environment=self.env, name="FinApp", slug="finapp", app_type="web",
+            environment=self.env, name="FinApp", slug="finapp",
             build_strategy="dockerfile", container_port=8000, health_check_path="/health",
             cpu=256, memory=512,
         )

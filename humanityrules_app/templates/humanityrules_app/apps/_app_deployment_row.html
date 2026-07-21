@@ -20,10 +20,7 @@
             {% elif mode == 'app_history' %}
             <h3 class="text-sm font-medium text-gray-900 dark:text-white"><span class="text-xs text-gray-400 dark:text-gray-500">Environment:</span> <a href="{% url 'environment_detail' environment_id=deployment.app.environment.id %}" hx-get="{% url 'environment_detail' environment_id=deployment.app.environment.id %}" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true" class="text-indigo-600 dark:text-indigo-400 hover:underline">{{ deployment.app.environment.name }}</a></h3>
             <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                <span class="text-gray-400 dark:text-gray-500">Account:</span> {{ deployment.app.environment.aws_account.name }} · <span class="text-gray-400 dark:text-gray-500">Region:</span> {{ deployment.app.environment.aws_region }}
-            </p>
-            <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                <span class="text-gray-400 dark:text-gray-500">Ref:</span> {{ deployment.git_ref }}{% if deployment.git_commit_sha %} · {{ deployment.git_commit_sha|slice:":7" }}{% endif %}
+                <span class="text-gray-400 dark:text-gray-500">AWS Account:</span> {{ deployment.app.environment.aws_account.name }} · <span class="text-gray-400 dark:text-gray-500">Region:</span> {{ deployment.app.environment.aws_region }}
             </p>
             {% else %}
             <span class="text-xs text-red-600 dark:text-red-400">Unknown deployment row mode: {{ mode }}</span>

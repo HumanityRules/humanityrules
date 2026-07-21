@@ -42,7 +42,6 @@ class TestJobWorkerEnvironmentCoordination(TestCase):
             repository=self.repository,
             name="Coordination Agent",
             slug="coordination-agent",
-            app_type=models.App.AppType.WEB,
             build_strategy=models.App.BuildStrategy.DOCKERFILE,
             container_port=8787,
             health_check_path="/health",

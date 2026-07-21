@@ -221,7 +221,6 @@ class Command(BaseCommand):
             source_template=template,
             name=app_slug.replace("-", " ").title(),
             slug=app_slug,
-            app_type=App.AppType.WEB,
             build_strategy=App.BuildStrategy.DOCKERFILE,
             dockerfile_path=primary.get("dockerfile_path", ""),
             container_port=primary["container_port"],

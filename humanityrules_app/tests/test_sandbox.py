@@ -40,7 +40,6 @@ def _make_app(organization: models.Organization, slug: str, environment: models.
         repository=repository,
         name=slug,
         slug=slug,
-        app_type="web",
         build_strategy="dockerfile",
         container_port=8000,
         health_check_path="/health",

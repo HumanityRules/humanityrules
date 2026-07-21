@@ -14,7 +14,7 @@ Common queries:
     humr_query Environment name slug aws_region status
 
   Apps and deployments:
-    humr_query App name slug app_type build_strategy
+    humr_query App name slug build_strategy
     humr_query Deployment id status created_at --order created_at --desc --limit 10
     humr_query Deployment status --filter status=failed --limit 10
     humr_query DeploymentLog level source message --filter deployment_id=123 --order created_at --desc

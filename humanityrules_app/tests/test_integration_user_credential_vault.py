@@ -99,7 +99,6 @@ class _CredentialVaultTestBase(TestCase):
             repository=self.repository,
             name="Hermes",
             slug="hermes",
-            app_type=App.AppType.WEB,
             build_strategy=App.BuildStrategy.DOCKERFILE,
             environment=self.env,
             container_port=8000,

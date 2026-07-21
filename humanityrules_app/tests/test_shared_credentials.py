@@ -55,13 +55,13 @@ class SharedCredentialTestBase(TestCase):
 
         self.app_eng = App.objects.create(
             organization=self.org, workspace=self.ws_eng, repository=self.repo,
-            environment=self.env, name="AliceHermes", slug="alice-hermes", app_type="web",
+            environment=self.env, name="AliceHermes", slug="alice-hermes",
             build_strategy="dockerfile", container_port=8000,
             health_check_path="/health", cpu=256, memory=512,
         )
         self.app_sales = App.objects.create(
             organization=self.org, workspace=self.ws_sales, repository=self.repo,
-            environment=self.env, name="SalesHermes", slug="sales-hermes", app_type="web",
+            environment=self.env, name="SalesHermes", slug="sales-hermes",
             build_strategy="dockerfile", container_port=8000,
             health_check_path="/health", cpu=256, memory=512,
         )

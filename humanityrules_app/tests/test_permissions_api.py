@@ -85,7 +85,7 @@ class TestPermissionsApi(TestCase):
     def _make_app(self, slug: str, name: str, owner_username: str | None) -> App:
         app = App.objects.create(
             organization=self.org, workspace=self.workspace, repository=self.repository,
-            environment=self.env, name=name, slug=slug, app_type=App.AppType.WEB,
+            environment=self.env, name=name, slug=slug,
             build_strategy=App.BuildStrategy.DOCKERFILE,
             container_port=8000, health_check_path="/health", cpu=256, memory=512,
         )

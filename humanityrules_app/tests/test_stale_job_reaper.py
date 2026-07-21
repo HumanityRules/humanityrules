@@ -47,7 +47,6 @@ class TestStaleJobReaper(TestCase):
             repository=self.repository,
             name="Stale Agent",
             slug="stale-agent",
-            app_type=models.App.AppType.WEB,
             build_strategy=models.App.BuildStrategy.DOCKERFILE,
             container_port=8787,
             health_check_path="/health",

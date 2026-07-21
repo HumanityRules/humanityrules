@@ -47,7 +47,7 @@ class TestAppEndpoints(TestCase):
         )
         self.app = App.objects.create(
             organization=self.org, workspace=self.workspace, repository=self.repo,
-            environment=self.env, name="MyApp", slug="myapp", app_type="web",
+            environment=self.env, name="MyApp", slug="myapp",
             build_strategy="dockerfile", container_port=8000, health_check_path="/health",
             cpu=256, memory=512,
         )
@@ -110,7 +110,7 @@ class TestAppEndpoints(TestCase):
         response = self.client.get("/apps/myapp/", **HTMX)
         self.assertEqual(response.status_code, 200)
 
-    def test_app_detail_environment_row_uses_deployment_outside_recent_deployments_window(self) -> None:
+    def test_app_detail_deployment_section_uses_deployment_outside_recent_deployments_window(self) -> None:
         # 25 newer failed attempts push the succeeded deployment out of the
         # recent-20 window; the environment row must still show it.
         for index in range(25):
@@ -130,7 +130,7 @@ class TestAppEndpoints(TestCase):
         self.assertEqual(len(response.context["deployments"]), 20)
         self.assertNotIn(self.deployment.id, {d.id for d in response.context["deployments"]})
 
-    def test_app_detail_environment_row_prefers_succeeded_over_newer_failed_attempt(self) -> None:
+    def test_app_detail_deployment_section_prefers_succeeded_over_newer_failed_attempt(self) -> None:
         succeeded = Deployment.objects.create(
             app=self.app,
             git_ref="release",
@@ -155,7 +155,7 @@ class TestAppEndpoints(TestCase):
         self.assertNotEqual(current.id, failed_attempt.id)
         self.assertEqual(current.status, Deployment.Status.SUCCEEDED)
 
-    def test_app_detail_environment_row_prefers_unsettled_redeploy(self) -> None:
+    def test_app_detail_deployment_section_prefers_unsettled_redeploy(self) -> None:
         redeploy_attempt = Deployment.objects.create(
             app=self.app,
             git_ref="main",
@@ -172,7 +172,7 @@ class TestAppEndpoints(TestCase):
         self.assertEqual(current.id, redeploy_attempt.id)
         self.assertEqual(current.status, Deployment.Status.PENDING)
         self.assertNotContains(response, "Redeploy")
-        self.assertContains(response, "/apps/myapp/environment-row-status/")
+        self.assertContains(response, "/apps/myapp/deployment-section-status/")
         self.assertContains(response, 'hx-trigger="load delay:10s"')
 
     def test_app_detail_shows_teardown_in_deployed_environments_not_recent_deployments(self) -> None:
@@ -206,22 +206,22 @@ class TestAppEndpoints(TestCase):
         response = self.client.get(f"/apps/myapp/deployments/{self.deployment.id}/status/")
         self.assertEqual(response.status_code, 403)
 
-    # --- App Environment Row Status Polling (requires workspace:view) ---
+    # --- App Deployment Section Status Polling (requires workspace:view) ---
 
-    def test_ws_viewer_can_poll_environment_row_status(self) -> None:
+    def test_ws_viewer_can_poll_deployment_section_status(self) -> None:
         self.client.force_login(self.ws_viewer)
-        response = self.client.get("/apps/myapp/environment-row-status/")
+        response = self.client.get("/apps/myapp/deployment-section-status/")
         self.assertEqual(response.status_code, 200)
 
-    def test_no_access_gets_403_on_environment_row_status(self) -> None:
+    def test_no_access_gets_403_on_deployment_section_status(self) -> None:
         self.client.force_login(self.no_access_user)
-        response = self.client.get("/apps/myapp/environment-row-status/")
+        response = self.client.get("/apps/myapp/deployment-section-status/")
         self.assertEqual(response.status_code, 403)
 
-    def test_environment_row_status_404_without_visible_deployment(self) -> None:
+    def test_deployment_section_status_404_without_visible_deployment(self) -> None:
         self.deployment.delete()
         self.client.force_login(self.ws_viewer)
-        response = self.client.get("/apps/myapp/environment-row-status/")
+        response = self.client.get("/apps/myapp/deployment-section-status/")
         self.assertEqual(response.status_code, 404)
 
     # --- App Teardown Confirm Modal (requires workspace:view) ---

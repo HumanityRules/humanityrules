@@ -43,7 +43,6 @@ class PolicyProxyActivityTestBase(TestCase):
             repository=repository,
             name="Activity Agent",
             slug="activity-agent",
-            app_type=models.App.AppType.WEB,
             build_strategy=models.App.BuildStrategy.DOCKERFILE,
             container_port=8787,
             health_check_path="/health",

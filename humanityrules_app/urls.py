@@ -41,7 +41,7 @@ urlpatterns = [
     path("deploy/from-template/", views.template_deploy_picker, name="template_deploy_picker"),
     path("deploy/from-template/<slug:template_slug>/", views.template_deploy_form, name="template_deploy_form"),
 
-    path("apps/<slug:app_slug>/environment-row-status/", views.app_environment_row_status, name="app_environment_row_status"),
+    path("apps/<slug:app_slug>/deployment-section-status/", views.app_deployment_section_status, name="app_deployment_section_status"),
 
     path("apps/<slug:app_slug>/deployments/<uuid:deployment_id>/teardown/", views.app_deployment_teardown, name="app_deployment_teardown"),
     path("apps/<slug:app_slug>/deployments/<uuid:deployment_id>/redeploy/", views.app_deployment_redeploy, name="app_deployment_redeploy"),
