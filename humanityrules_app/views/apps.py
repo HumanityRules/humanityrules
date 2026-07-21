@@ -63,7 +63,7 @@ def _get_deployment_for_app(app: App, deployment_id: UUID) -> Deployment:
 
 
 def get_current_deployment(app: App) -> Deployment | None:
-    """Return the app's most relevant visible deployment.
+    """Return the app's most relevant deployment.
 
     Chosen by priority: transient operations first (deploys and teardowns in
     flight), then terminal authoritative conclusions (succeeded or torn down)
@@ -81,7 +81,7 @@ def get_current_deployment(app: App) -> Deployment | None:
         output_field=IntegerField(),
     )
     return (
-        Deployment.objects.filter(app=app, status__in=Deployment.VISIBLE_STATUSES)
+        Deployment.objects.filter(app=app)
         .annotate(status_priority=status_priority)
         .order_by("status_priority", "-created_at")
         .first()

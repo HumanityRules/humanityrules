@@ -146,11 +146,6 @@ class TestFleetRedeployAll(TestCase):
             ),
             self._create_deployment(
                 app=self.app,
-                status=models.Deployment.Status.ROLLED_BACK,
-                suffix="rolled-back",
-            ),
-            self._create_deployment(
-                app=self.app,
                 status=models.Deployment.Status.TORN_DOWN,
                 suffix="torn-down",
             ),

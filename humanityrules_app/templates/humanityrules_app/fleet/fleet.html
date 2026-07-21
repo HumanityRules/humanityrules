@@ -93,7 +93,7 @@
                     <span class="font-mono text-sm text-gray-900 dark:text-white w-64 truncate">{{ deployment.app.slug }}</span>
                     <span class="text-sm px-2 py-0.5 rounded-full
                         {% if deployment.status == 'succeeded' %}bg-green-100 text-green-800 dark:bg-green-500/10 dark:text-green-400
-                        {% elif deployment.status == 'failed' or deployment.status == 'rolled_back' %}bg-red-100 text-red-800 dark:bg-red-500/10 dark:text-red-400
+                        {% elif deployment.status == 'failed' %}bg-red-100 text-red-800 dark:bg-red-500/10 dark:text-red-400
                         {% elif deployment.is_transient %}bg-yellow-100 text-yellow-800 dark:bg-yellow-500/10 dark:text-yellow-400
                         {% else %}bg-gray-100 text-gray-600 dark:bg-white/5 dark:text-gray-400{% endif %}">
                         {{ deployment.get_status_display }}

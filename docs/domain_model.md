@@ -150,7 +150,7 @@ An execution record for one attempt to deploy an App.
 - **git_commit_sha** — Resolved commit SHA
 - **image_tag** — Docker image tag (generated: `{app_slug}-{short_ref}-{timestamp}`)
 - **image_uri** — Full ECR image URI (set after push)
-- **status** — pending / building / pushing / deploying / starting / succeeded / failed / rolled_back / torn_down / teardown_pending / tearing_down
+- **status** — pending / building / pushing / deploying / starting / succeeded / failed / torn_down / teardown_pending / tearing_down
 - **service_url** — URL where the deployed service is accessible
 - **alb_dns** — ALB DNS name
 - **started_at, completed_at** — Timing
