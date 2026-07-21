@@ -1,4 +1,4 @@
-<div class="relative z-50" role="dialog" aria-modal="true" aria-labelledby="fleet-fail-transient-title">
+<div class="relative z-50" role="dialog" aria-modal="true" aria-labelledby="fleet-fail-unsettled-title">
     <div class="fixed inset-0 bg-gray-500/75 dark:bg-gray-900/80 transition-opacity"></div>
 
     <div class="fixed inset-0 z-10 w-screen overflow-y-auto">
@@ -22,16 +22,16 @@
                         </svg>
                     </div>
                     <div>
-                        <h3 id="fleet-fail-transient-title" class="text-lg font-semibold text-gray-900 dark:text-white">Fail stuck deployments?</h3>
+                        <h3 id="fleet-fail-unsettled-title" class="text-lg font-semibold text-gray-900 dark:text-white">Fail stuck deployments?</h3>
                         <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">
-                            This will mark {{ transient_count }} deployment{{ transient_count|pluralize }} in a transient state as failed.
+                            This will mark {{ unsettled_count }} unfinished deployment{{ unsettled_count|pluralize }} as failed.
                         </p>
                     </div>
                 </div>
 
                 <div class="mt-4 ml-14 text-sm text-gray-500 dark:text-gray-400 space-y-2">
-                    <p>This is intended to recover jobs stranded when the control plane restarted. It affects pending deploys, active deploy stages, and incomplete teardowns.</p>
-                    <p>Succeeded, failed, rolled-back, and torn-down deployments will not change.</p>
+                    <p>This is intended to recover jobs stranded when the control plane restarted. It affects pending and running deploys, plus incomplete teardowns.</p>
+                    <p>Succeeded, failed, and torn-down deployments will not change.</p>
                 </div>
 
                 <div class="mt-6 ml-14 flex justify-end gap-3">
@@ -41,13 +41,13 @@
                         Cancel
                     </button>
                     <button type="button"
-                            hx-post="{% url 'fleet_fail_transient_deployments' %}"
+                            hx-post="{% url 'fleet_fail_unsettled_deployments' %}"
                             hx-target="#fleet-list"
                             hx-swap="innerHTML"
                             hx-on::after-request="if (event.detail.successful) document.getElementById('modal-container').innerHTML = ''"
-                            {% if not transient_count %}disabled{% endif %}
+                            {% if not unsettled_count %}disabled{% endif %}
                             class="rounded-md bg-red-600 px-3 py-2 text-sm font-semibold text-white shadow-xs hover:bg-red-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-red-500 dark:hover:bg-red-400">
-                        Mark {{ transient_count }} failed
+                        Mark {{ unsettled_count }} failed
                     </button>
                 </div>
             </div>

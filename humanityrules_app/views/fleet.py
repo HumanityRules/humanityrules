@@ -62,17 +62,17 @@ def fleet_redeploy_all(request: HttpRequest) -> HttpResponse:
 
 @_staff_or_404
 @require_GET
-def fleet_fail_transient_deployments_confirm(request: HttpRequest) -> HttpResponse:
+def fleet_fail_unsettled_deployments_confirm(request: HttpRequest) -> HttpResponse:
     """Return the confirmation modal for the fleet recovery action."""
-    context = {"transient_count": fleet_service.count_transient_deployments()}
-    return render(request, "humanityrules_app/fleet/_fleet_fail_transient_confirm.html", context=context)
+    context = {"unsettled_count": fleet_service.count_unsettled_deployments()}
+    return render(request, "humanityrules_app/fleet/_fleet_fail_unsettled_confirm.html", context=context)
 
 
 @_staff_or_404
 @require_POST
-def fleet_fail_transient_deployments(request: HttpRequest) -> HttpResponse:
-    """Mark all deployment jobs left in transient states as failed."""
-    recovery_result = fleet_service.fail_transient_deployments()
+def fleet_fail_unsettled_deployments(request: HttpRequest) -> HttpResponse:
+    """Mark all deployment jobs left in unsettled states as failed."""
+    recovery_result = fleet_service.fail_unsettled_deployments()
     context = {
         "env_groups": fleet_service.build_fleet_snapshot(),
         "recovery_result": recovery_result,

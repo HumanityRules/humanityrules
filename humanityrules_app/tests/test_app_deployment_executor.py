@@ -1,6 +1,6 @@
 """Tests for app deployment executor behavior."""
 
-from unittest.mock import call, patch
+from unittest.mock import patch
 
 from asgiref.sync import async_to_sync
 from django.test import TestCase, override_settings
@@ -84,12 +84,8 @@ class TestAppDeploymentExecutor(TestCase):
             success = app_deployment_executor.run_deployment(deployment_id=str(deployment_row.id))
 
         self.assertTrue(success)
-        self.assertEqual(
-            sleep_mock.call_args_list,
-            [
-                call(app_deployment_debug_simulator.DEBUG_DEPLOYMENT_STEP_DELAY_SECONDS),
-                call(app_deployment_debug_simulator.DEBUG_DEPLOYMENT_STEP_DELAY_SECONDS),
-            ],
+        sleep_mock.assert_called_once_with(
+            app_deployment_debug_simulator.DEBUG_DEPLOYMENT_STEP_DELAY_SECONDS,
         )
         clone_repository_mock.assert_not_called()
         cleanup_repository_mock.assert_not_called()
@@ -180,4 +176,3 @@ class TestAppDeploymentExecutor(TestCase):
 
         # Rejected before creating a Deployment row for this org's app.
         self.assertFalse(models.Deployment.objects.filter(app=self.app).exists())
-

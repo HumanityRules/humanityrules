@@ -104,7 +104,7 @@ class TestJobWorkerEnvironmentCoordination(TestCase):
         self.assertIsNone(permission_apply)
 
     def test_environment_teardown_waits_for_a_running_deployment(self) -> None:
-        deployment = self._create_deployment(status=models.Deployment.Status.BUILDING, suffix="building")
+        deployment = self._create_deployment(status=models.Deployment.Status.DEPLOYING, suffix="deploying")
         self.environment.status = models.Environment.Status.TEARDOWN_PENDING
         self.environment.save(update_fields=["status", "updated_at"])
 
@@ -185,7 +185,7 @@ class TestJobWorkerEnvironmentCoordination(TestCase):
         self.assertEqual(self.environment.status, models.Environment.Status.TEARDOWN_PENDING)
 
     def test_teardown_queue_rejects_running_app_work(self) -> None:
-        self._create_deployment(status=models.Deployment.Status.BUILDING, suffix="building")
+        self._create_deployment(status=models.Deployment.Status.DEPLOYING, suffix="deploying")
 
         result = environment_operation_gate.queue_environment_teardown(
             environment_id=self.environment.id,
@@ -240,7 +240,7 @@ class TestJobWorkerEnvironmentCoordination(TestCase):
         self.assertEqual(self.environment.status, models.Environment.Status.TEARDOWN_PENDING)
 
     def test_force_teardown_recovers_stranded_environment_work(self) -> None:
-        deployment = self._create_deployment(status=models.Deployment.Status.BUILDING, suffix="building")
+        deployment = self._create_deployment(status=models.Deployment.Status.DEPLOYING, suffix="deploying")
         permission_request = self._create_permission_request(status=models.AppPermissionRequest.Status.APPLYING)
         self.environment.status = models.Environment.Status.PROVISIONING
         self.environment.save(update_fields=["status", "updated_at"])
@@ -290,7 +290,7 @@ class TestJobWorkerEnvironmentCoordination(TestCase):
         self.assertIn("cannot skip required app cleanup", stderr.getvalue())
 
     def test_management_command_teardown_rejects_running_app_work(self) -> None:
-        self._create_deployment(status=models.Deployment.Status.BUILDING, suffix="building")
+        self._create_deployment(status=models.Deployment.Status.DEPLOYING, suffix="deploying")
         stdout = StringIO()
         stderr = StringIO()
 
@@ -310,7 +310,7 @@ class TestJobWorkerEnvironmentCoordination(TestCase):
         self.assertIn("while an app deployment", stderr.getvalue())
 
     def test_web_teardown_rejects_running_app_work(self) -> None:
-        self._create_deployment(status=models.Deployment.Status.BUILDING, suffix="building")
+        self._create_deployment(status=models.Deployment.Status.DEPLOYING, suffix="deploying")
         self.client.force_login(self.user)
 
         response = self.client.post(reverse("environment_teardown", kwargs={"environment_id": self.environment.id}))

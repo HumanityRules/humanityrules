@@ -1,5 +1,5 @@
 <div id="app-status-{{ app.slug }}" class="flex items-center justify-between"
-    {% if app.latest_status == 'pending' or app.latest_status == 'building' or app.latest_status == 'pushing' or app.latest_status == 'deploying' or app.latest_status == 'starting' or app.latest_status == 'teardown_pending' or app.latest_status == 'tearing_down' %}
+    {% if app.latest_status == 'pending' or app.latest_status == 'deploying' or app.latest_status == 'teardown_pending' or app.latest_status == 'tearing_down' %}
     hx-get="{% url 'app_card_status' app_slug=app.slug %}"
     hx-trigger="load delay:10s"
     hx-swap="outerHTML"

@@ -28,7 +28,7 @@ _AWS_CLIENT_CONFIG = Config(connect_timeout=5, read_timeout=15, retries={"max_at
 
 RECOVERY_STATUS_MESSAGE = "Marked failed by the fleet recovery action after a control plane interruption"
 
-SKIP_APP_BUSY = "Deployment already in progress"
+SKIP_APP_BUSY = "Deployment or teardown already in progress"
 SKIP_APP_PENDING_REMOVAL = "App pending removal"
 SKIP_ENVIRONMENT_NOT_READY = "Environment not ready"
 SKIP_FAILED_NOT_INCLUDED = "Failed not included"
@@ -115,16 +115,16 @@ def build_fleet_snapshot() -> list[EnvGroup]:
         )
         .order_by("app__slug")
     )
-    apps_with_in_progress_deployments = get_apps_with_in_progress_deployments()
+    apps_with_unsettled_deployments = get_apps_with_unsettled_deployments()
     for deployment in deployments:
         deployment.redeploy_skip_reason = get_redeploy_skip_reason(
             source=deployment,
-            apps_with_in_progress_deployments=apps_with_in_progress_deployments,
+            apps_with_unsettled_deployments=apps_with_unsettled_deployments,
         )
         groups[deployment.app.environment_id].deployments.append(deployment)
 
     for group in groups.values():
-        group.deployments.sort(key=lambda d: (not d.is_transient, d.app.slug))
+        group.deployments.sort(key=lambda d: (d.is_settled, d.app.slug))
 
     return sorted(groups.values(), key=lambda g: (g.organization.slug, g.environment.slug))
 
@@ -294,18 +294,18 @@ def _latest_deployment_per_app() -> QuerySet[models.Deployment]:
     )
 
 
-def get_apps_with_in_progress_deployments() -> set[UUID]:
-    """Return app IDs that currently have a deployment attempt in progress."""
+def get_apps_with_unsettled_deployments() -> set[UUID]:
+    """Return app IDs with queued or running deployment or teardown work."""
     return set(
-        models.Deployment.objects.filter(status__in=models.Deployment.IN_PROGRESS_STATUSES).values_list("app_id", flat=True)
+        models.Deployment.objects.exclude(status__in=models.Deployment.SETTLED_STATUSES).values_list("app_id", flat=True)
     )
 
 
-def get_redeploy_skip_reason(source: models.Deployment, apps_with_in_progress_deployments: set[UUID]) -> str | None:
+def get_redeploy_skip_reason(source: models.Deployment, apps_with_unsettled_deployments: set[UUID]) -> str | None:
     """Return why a current fleet row cannot redeploy, or None when eligible."""
     if source.app.status == models.App.Status.PENDING_REMOVAL:
         return SKIP_APP_PENDING_REMOVAL
-    if source.app_id in apps_with_in_progress_deployments:
+    if source.app_id in apps_with_unsettled_deployments:
         return SKIP_APP_BUSY
     if source.status == models.Deployment.Status.TORN_DOWN:
         return SKIP_TORN_DOWN
@@ -318,7 +318,7 @@ def get_redeploy_skip_reason(source: models.Deployment, apps_with_in_progress_de
 
 def _collect_candidates() -> _FleetRedeployCandidates:
     """Classify current fleet rows without mutating them."""
-    apps_with_in_progress_deployments = get_apps_with_in_progress_deployments()
+    apps_with_unsettled_deployments = get_apps_with_unsettled_deployments()
     succeeded: list[models.Deployment] = []
     failed: list[models.Deployment] = []
     skipped_counts: Counter[str] = Counter()
@@ -326,7 +326,7 @@ def _collect_candidates() -> _FleetRedeployCandidates:
     for source in _latest_deployment_per_app():
         skip_reason = get_redeploy_skip_reason(
             source=source,
-            apps_with_in_progress_deployments=apps_with_in_progress_deployments,
+            apps_with_unsettled_deployments=apps_with_unsettled_deployments,
         )
         if skip_reason is not None:
             skipped_counts[skip_reason] += 1
@@ -405,7 +405,7 @@ def queue_redeploy(source_id: UUID, created_by: models.User) -> FleetRedeployRes
 
         skip_reason = get_redeploy_skip_reason(
             source=source,
-            apps_with_in_progress_deployments=get_apps_with_in_progress_deployments(),
+            apps_with_unsettled_deployments=get_apps_with_unsettled_deployments(),
         )
         if skip_reason is not None:
             return FleetRedeployResult(
@@ -459,23 +459,23 @@ def queue_redeploy_all(created_by: models.User, include_failed: bool) -> FleetRe
 
 @dataclass(frozen=True)
 class FleetRecoveryResult:
-    """Outcome of failing every deployment left in a transient state."""
+    """Outcome of failing every deployment left in an unsettled state."""
 
     failed_count: int
 
 
-def count_transient_deployments() -> int:
+def count_unsettled_deployments() -> int:
     """Return the number of deployment jobs that the recovery action would fail."""
-    return models.Deployment.objects.filter(status__in=models.Deployment.TRANSIENT_STATUSES).count()
+    return models.Deployment.objects.exclude(status__in=models.Deployment.SETTLED_STATUSES).count()
 
 
-def fail_transient_deployments() -> FleetRecoveryResult:
-    """Atomically mark every currently transient deployment as failed."""
+def fail_unsettled_deployments() -> FleetRecoveryResult:
+    """Atomically mark every currently unsettled deployment as failed."""
     with transaction.atomic():
         deployment_ids = list(
             models.Deployment.objects
             .select_for_update()
-            .filter(status__in=models.Deployment.TRANSIENT_STATUSES)
+            .exclude(status__in=models.Deployment.SETTLED_STATUSES)
             .order_by("id")
             .values_list("id", flat=True)
         )
@@ -483,9 +483,8 @@ def fail_transient_deployments() -> FleetRecoveryResult:
             return FleetRecoveryResult(failed_count=0)
 
         completed_at = timezone.now()
-        failed_count = models.Deployment.objects.filter(
-            id__in=deployment_ids,
-            status__in=models.Deployment.TRANSIENT_STATUSES,
+        failed_count = models.Deployment.objects.filter(id__in=deployment_ids).exclude(
+            status__in=models.Deployment.SETTLED_STATUSES,
         ).update(
             status=models.Deployment.Status.FAILED,
             status_message=RECOVERY_STATUS_MESSAGE,

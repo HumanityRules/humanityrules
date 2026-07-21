@@ -21,10 +21,7 @@ FORCE_TEARDOWNABLE_ENVIRONMENT_STATUSES = (
 )
 
 EXECUTING_DEPLOYMENT_STATUSES = (
-    models.Deployment.Status.BUILDING,
-    models.Deployment.Status.PUSHING,
     models.Deployment.Status.DEPLOYING,
-    models.Deployment.Status.STARTING,
     models.Deployment.Status.TEARING_DOWN,
 )
 

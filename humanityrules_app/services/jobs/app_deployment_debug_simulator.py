@@ -28,23 +28,13 @@ def _build_debug_alb_dns(deployment: models.Deployment) -> str:
 
 def run_debug_deployment(deployment: models.Deployment) -> bool:
     """Simulate a successful deployment without cloning or touching AWS."""
-    deployment.status = models.Deployment.Status.BUILDING
-    deployment.status_message = "Debug deployment: simulating build"
+    deployment.status = models.Deployment.Status.DEPLOYING
+    deployment.status_message = "Debug deployment: simulating deployment"
     deployment.started_at = timezone.now()
     deployment.save(update_fields=["status", "status_message", "started_at", "updated_at"])
 
     logger.info(
         "Debug deployment mode enabled for %(deployment_id)s; skipping repository clone and AWS calls",
-        {"deployment_id": str(deployment.id)},
-    )
-    time.sleep(DEBUG_DEPLOYMENT_STEP_DELAY_SECONDS)
-
-    deployment.status = models.Deployment.Status.DEPLOYING
-    deployment.status_message = "Debug deployment: simulating rollout"
-    deployment.save(update_fields=["status", "status_message", "updated_at"])
-
-    logger.info(
-        "Debug deployment %(deployment_id)s entered simulated rollout",
         {"deployment_id": str(deployment.id)},
     )
     time.sleep(DEBUG_DEPLOYMENT_STEP_DELAY_SECONDS)

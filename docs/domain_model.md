@@ -150,12 +150,12 @@ An execution record for one attempt to deploy an App.
 - **git_commit_sha** — Resolved commit SHA
 - **image_tag** — Docker image tag (generated: `{app_slug}-{short_ref}-{timestamp}`)
 - **image_uri** — Full ECR image URI (set after push)
-- **status** — pending / building / pushing / deploying / starting / succeeded / failed / torn_down / teardown_pending / tearing_down
+- **status** — pending / deploying / succeeded / failed / teardown_pending / tearing_down / torn_down
 - **service_url** — URL where the deployed service is accessible
 - **alb_dns** — ALB DNS name
 - **started_at, completed_at** — Timing
 
-Status lifecycle: pending → building → pushing → deploying → starting → succeeded / failed. Teardown: teardown_pending → tearing_down → torn_down.
+Status lifecycle: pending → deploying → succeeded / failed. Teardown: teardown_pending → tearing_down → torn_down / failed.
 
 
 ## ABAC Authorization System
@@ -243,7 +243,7 @@ Workflow: The user builds a draft in the permissions editor → user approves �
 
 ### Deployment Flow
 1. Deploying from a template creates the App (with its environment and materialized runtime config) and a Deployment record (status: pending)
-2. Job worker claims pending deployments once the app's environment is READY, transitions to building
+2. Job worker claims pending deployments once the app's environment is READY, transitions to deploying
 3. Executor clones repository, builds AppConfig from the App + template, deploys via CDK
 4. CDK creates/updates: ECR repository, ECS task definition, ECS service, ALB target group, and listener rules
 5. On success: deployment status → succeeded, service_url populated

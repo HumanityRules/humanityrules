@@ -7,7 +7,7 @@
 </tr>
 
 {% partialdef environment_row_content %}
-<div {% if current_deployment.is_transient %}
+<div {% if not current_deployment.is_settled %}
      hx-get="{% url 'app_environment_row_status' app_slug=app.slug %}"
      hx-trigger="load delay:10s"
      hx-target="#environment-row-inner-{{ app.id }}"
