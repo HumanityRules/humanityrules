@@ -85,9 +85,9 @@ class TestPermissionsApi(TestCase):
     def _make_app(self, slug: str, name: str, owner_username: str | None) -> App:
         app = App.objects.create(
             organization=self.org, workspace=self.workspace, repository=self.repository,
-            name=name, slug=slug, app_type=App.AppType.WEB,
-            build_strategy=App.BuildStrategy.DOCKERFILE, branch="main",
-            container_port=8000, health_check_path="/health",
+            environment=self.env, name=name, slug=slug, app_type=App.AppType.WEB,
+            build_strategy=App.BuildStrategy.DOCKERFILE,
+            container_port=8000, health_check_path="/health", cpu=256, memory=512,
         )
         if owner_username is not None:
             ResourceTag.objects.create(
@@ -137,7 +137,7 @@ class TestPermissionsApi(TestCase):
         self.assertEqual(draft["app"], {"slug": "hermes", "name": "Hermes"})
         self.assertEqual(draft["environment"]["slug"], "default")
         self.assertEqual(draft["environment"]["aws_account"], "111122223333")
-        self.assertEqual(AppPermissionRequest.objects.filter(app=self.app, environment=self.env).count(), 1)
+        self.assertEqual(AppPermissionRequest.objects.filter(app=self.app).count(), 1)
 
     def test_draft_poll_by_request_id_returns_live_status(self) -> None:
         draft = self._open_draft()
@@ -150,7 +150,7 @@ class TestPermissionsApi(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "applying")
         # A bare resolve must NOT spawn a second request behind the in-flight one.
-        self.assertEqual(AppPermissionRequest.objects.filter(app=self.app, environment=self.env).count(), 1)
+        self.assertEqual(AppPermissionRequest.objects.filter(app=self.app).count(), 1)
 
     def test_draft_poll_unknown_request_id_returns_404(self) -> None:
         response = self._post(
@@ -182,7 +182,7 @@ class TestPermissionsApi(TestCase):
 
     def test_agent_upsert_keys_by_service_and_resources(self) -> None:
         apr = AppPermissionRequest.objects.create(
-            app=self.app, environment=self.env, status=AppPermissionRequest.Status.DRAFT,
+            app=self.app, status=AppPermissionRequest.Status.DRAFT,
         )
         table_arn = "arn:aws:dynamodb:us-east-1:111122223333:table/Orders"
         # Distinct resource sets → two statements; same resource set → merge levels.
@@ -253,7 +253,7 @@ class TestPermissionsApi(TestCase):
 
     def test_cancel_resets_to_baseline(self) -> None:
         AppPermissions.objects.create(
-            app=self.app, environment=self.env,
+            app=self.app,
             statements=[{"service": "sqs", "effect": "Allow", "access_levels": ["Read"], "resources": []}],
         )
         draft = self._open_draft()

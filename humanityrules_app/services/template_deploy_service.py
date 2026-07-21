@@ -1,8 +1,8 @@
 """
 Deploy an application from an AppTemplate.
 
-Creates the full record chain (Repository, App, DeploymentBlueprint, Deployment)
-and queues the deployment for the job worker.
+Creates the full record chain (Repository, App, Deployment) and queues the
+deployment for the job worker.
 """
 
 import logging
@@ -10,7 +10,6 @@ from datetime import datetime
 
 from humanityrules_app import app_slugs
 from humanityrules_app import models
-from humanityrules_app.services import deployment_blueprint_effective_values
 from humanityrules_app.services import llm_preset_service
 from humanityrules_app.services import sandbox_service
 
@@ -52,8 +51,8 @@ def _materialize_app_secrets(configurable_variables: list[dict]) -> dict[str, st
     return secrets
 
 
-def _materialize_blueprint_containers(template_containers: list[dict]) -> list[dict]:
-    """Project template.containers into DeploymentBlueprint.containers shape.
+def _materialize_app_containers(template_containers: list[dict]) -> list[dict]:
+    """Project template.containers into App.containers shape.
 
     Each entry carries `name` (the container identifier), plus the
     materialized `environment_variables` and `app_secrets` derived from that
@@ -152,6 +151,16 @@ async def _stamp_template_tags(
         )
 
 
+async def _araise_for_hostname_label_conflict(environment: models.Environment, app_slug: str) -> None:
+    """Reject a slug whose hostname label an existing app already holds on the environment's hosted zone."""
+    hosted_zone = environment.shared_alb_hosted_zone
+    if not hosted_zone:
+        return
+    label_taken = await models.App.objects.filter(environment__shared_alb_hosted_zone=hosted_zone, slug=app_slug).aexists()
+    if label_taken:
+        raise ValueError(f"'{app_slug}.{hosted_zone}' is already in use. Please choose a different name.")
+
+
 async def deploy_from_template(
     template: models.AppTemplate,
     organization: models.Organization,
@@ -165,16 +174,13 @@ async def deploy_from_template(
     compute_mode: str,
     label: str,
 ) -> models.Deployment:
-    """Create Repository + App + Blueprint + Deployment from a template and queue for deployment."""
+    """Create Repository + App + Deployment from a template and queue for deployment."""
     app_slugs.require_valid_app_hostname_label(value=app_slug)
 
-    # The template blueprint carries no explicit subdomain, so the app serves at its slug.
-    # Check the label before any write: a conflict must abort with nothing persisted — no
-    # slug claim, App, or blueprint — so the user can simply retry with a different name.
-    await deployment_blueprint_effective_values.araise_for_new_app_subdomain_conflict(
-        environment=environment,
-        subdomain=app_slug,
-    )
+    # The app serves at its slug. Check the label before any write: a conflict must
+    # abort with nothing persisted — no slug claim, no App — so the user can simply
+    # retry with a different name.
+    await _araise_for_hostname_label_conflict(environment=environment, app_slug=app_slug)
 
     # Reserve the slug before creating any rows: in the shared sandbox app resources are named
     # humr-sandbox-{slug}-* across all orgs, so the slug is global and first-come. Raises a
@@ -210,9 +216,18 @@ async def deploy_from_template(
         },
     )
 
+    # Persist the org's stable LLM preset name; the Hermes container expands it
+    # into concrete provider/model settings during startup. Explicit caller
+    # overrides (CLI --var) are applied afterward so they still win.
+    preset_overrides = llm_preset_service.llm_overrides_for(organization=organization)
+    containers_with_preset = _apply_variable_overrides(template.containers, preset_overrides)
+    containers_with_overrides = _apply_variable_overrides(containers_with_preset, runtime_variable_overrides)
+    app_containers = _materialize_app_containers(containers_with_overrides)
+
     app = await models.App.objects.acreate(
         organization=organization,
         workspace=workspace,
+        environment=environment,
         repository=repo,
         source_template=template,
         name=app_name,
@@ -224,7 +239,10 @@ async def deploy_from_template(
         health_check_path=primary.get("health_check_path", ""),
         health_check_command=primary.get("health_check_command", ""),
         health_check_grace_period=primary.get("health_check_grace_period", 0),
-        branch="",
+        cpu=template.cpu,
+        memory=template.memory,
+        compute_mode=compute_mode,
+        containers=app_containers,
         created_by=created_by,
         label=label,
     )
@@ -234,39 +252,11 @@ async def deploy_from_template(
         owner_username=owner_username,
     )
 
-    # Persist the org's stable LLM preset name; the Hermes container expands it
-    # into concrete provider/model settings during startup. Explicit caller
-    # overrides (CLI --var) are applied afterward so they still win.
-    preset_overrides = llm_preset_service.llm_overrides_for(organization=organization)
-    containers_with_preset = _apply_variable_overrides(template.containers, preset_overrides)
-    containers_with_overrides = _apply_variable_overrides(containers_with_preset, runtime_variable_overrides)
-    blueprint_containers = _materialize_blueprint_containers(containers_with_overrides)
-
-    blueprint = await models.DeploymentBlueprint.objects.acreate(
-        app=app,
-        environment=environment,
-        status=models.DeploymentBlueprint.Status.DEPLOYING,
-        status_message="Deployment triggered from template",
-        cpu=template.cpu,
-        memory=template.memory,
-        compute_mode=compute_mode,
-        containers=blueprint_containers,
-        subdomain="",
-        created_by=created_by,
-    )
-
-    effective_values = await deployment_blueprint_effective_values.aresolve_deployment_blueprint_effective_values(
-        app=app,
-        blueprint=blueprint,
-    )
-    git_ref = effective_values.branch
+    git_ref = repo.default_branch
     image_tag = _generate_image_tag(app_slug=app_slug, git_ref=git_ref)
 
     deployment = await models.Deployment.objects.acreate(
-        blueprint=blueprint,
         app=app,
-        environment=environment,
-        subdomain=effective_values.subdomain,
         git_ref=git_ref,
         git_commit_sha="",
         git_commit_message="",

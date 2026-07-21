@@ -16,7 +16,6 @@ from django.db import transaction
 from django.db.models import OuterRef, QuerySet, Subquery
 from django.utils import timezone
 
-import humanityrules_app.app_slugs as app_slugs
 from humanityrules_app import models
 from humanityrules_app.services.infra_customer import iam_utils
 
@@ -33,7 +32,6 @@ SKIP_APP_BUSY = "Deployment already in progress"
 SKIP_APP_PENDING_REMOVAL = "App pending removal"
 SKIP_ENVIRONMENT_NOT_READY = "Environment not ready"
 SKIP_FAILED_NOT_INCLUDED = "Failed not included"
-SKIP_INVALID_SUBDOMAIN = app_slugs.APP_HOSTNAME_LABEL_ERROR
 SKIP_NEWER_DEPLOYMENT = "Newer deployment exists"
 SKIP_NOT_REDEPLOYABLE = "Not redeployable"
 SKIP_TORN_DOWN = "Torn down"
@@ -85,9 +83,9 @@ def build_fleet_snapshot() -> list[EnvGroup]:
     for environment in environments:
         groups[environment.id] = EnvGroup(organization=environment.aws_account.organization, environment=environment)
 
-    latest_per_app_env = (
+    latest_per_app = (
         models.Deployment.objects
-        .filter(app=OuterRef("app"), environment=OuterRef("environment"))
+        .filter(app=OuterRef("app"))
         .order_by("-created_at")
         .values("id")[:1]
     )
@@ -95,7 +93,7 @@ def build_fleet_snapshot() -> list[EnvGroup]:
     # in-progress redeploy must not hide the URL that is still serving.
     latest_succeeded_url = (
         models.Deployment.objects
-        .filter(app=OuterRef("app"), environment=OuterRef("environment"), status=models.Deployment.Status.SUCCEEDED)
+        .filter(app=OuterRef("app"), status=models.Deployment.Status.SUCCEEDED)
         .order_by("-created_at")
         .values("service_url")[:1]
     )
@@ -104,14 +102,13 @@ def build_fleet_snapshot() -> list[EnvGroup]:
         .filter(
             organization_id=OuterRef("app__organization_id"),
             app_id=OuterRef("app_id"),
-            environment_id=OuterRef("environment_id"),
         )
         .values("last_policy_proxy_activity_at")[:1]
     )
     deployments = (
         models.Deployment.objects
-        .filter(id=Subquery(latest_per_app_env))
-        .select_related("app", "environment")
+        .filter(id=Subquery(latest_per_app))
+        .select_related("app", "app__environment")
         .annotate(
             live_service_url=Subquery(latest_succeeded_url),
             last_policy_proxy_activity_at=Subquery(latest_policy_proxy_activity),
@@ -124,7 +121,7 @@ def build_fleet_snapshot() -> list[EnvGroup]:
             source=deployment,
             apps_with_in_progress_deployments=apps_with_in_progress_deployments,
         )
-        groups[deployment.environment_id].deployments.append(deployment)
+        groups[deployment.app.environment_id].deployments.append(deployment)
 
     for group in groups.values():
         group.deployments.sort(key=lambda d: (not d.is_transient, d.app.slug))
@@ -281,19 +278,19 @@ class _FleetRedeployCandidates:
     skipped_counts: dict[str, int]
 
 
-def _latest_deployment_per_app_environment() -> QuerySet[models.Deployment]:
-    """Return the newest deployment attempt for every app/environment pair."""
+def _latest_deployment_per_app() -> QuerySet[models.Deployment]:
+    """Return the newest deployment attempt for every app."""
     latest_deployment_id = (
         models.Deployment.objects
-        .filter(app_id=OuterRef("app_id"), environment_id=OuterRef("environment_id"))
+        .filter(app_id=OuterRef("app_id"))
         .order_by("-created_at")
         .values("id")[:1]
     )
     return (
         models.Deployment.objects
         .filter(id=Subquery(latest_deployment_id))
-        .select_related("app", "environment")
-        .order_by("app__organization__slug", "environment__slug", "app__slug")
+        .select_related("app", "app__environment")
+        .order_by("app__organization__slug", "app__environment__slug", "app__slug")
     )
 
 
@@ -314,12 +311,8 @@ def get_redeploy_skip_reason(source: models.Deployment, apps_with_in_progress_de
         return SKIP_TORN_DOWN
     if source.status not in (models.Deployment.Status.SUCCEEDED, models.Deployment.Status.FAILED):
         return SKIP_NOT_REDEPLOYABLE
-    if source.environment.status != models.Environment.Status.READY:
+    if source.app.environment.status != models.Environment.Status.READY:
         return SKIP_ENVIRONMENT_NOT_READY
-    try:
-        app_slugs.require_valid_app_hostname_label(value=source.subdomain or source.app.slug)
-    except ValueError:
-        return SKIP_INVALID_SUBDOMAIN
     return None
 
 
@@ -330,7 +323,7 @@ def _collect_candidates() -> _FleetRedeployCandidates:
     failed: list[models.Deployment] = []
     skipped_counts: Counter[str] = Counter()
 
-    for source in _latest_deployment_per_app_environment():
+    for source in _latest_deployment_per_app():
         skip_reason = get_redeploy_skip_reason(
             source=source,
             apps_with_in_progress_deployments=apps_with_in_progress_deployments,
@@ -372,8 +365,8 @@ def _lock_deployed_apps() -> None:
 
 
 def _build_image_tag(source: models.Deployment) -> str:
-    """Build a fresh image tag that remains distinct across app environments."""
-    git_ref = source.git_ref or source.app.branch
+    """Build a fresh image tag that stays distinct across concurrent redeploys."""
+    git_ref = source.git_ref
     short_ref = git_ref[:8] if len(git_ref) > 8 else git_ref
     timestamp = timezone.now().strftime("%Y%m%d%H%M%S%f")
     return f"{source.app.slug}-{short_ref}-{timestamp}-{source.id.hex[:8]}"
@@ -381,13 +374,9 @@ def _build_image_tag(source: models.Deployment) -> str:
 
 def _queue_source(source: models.Deployment, created_by: models.User, status_message: str) -> None:
     """Clone a source deployment into the normal pending deployment queue."""
-    app_slugs.require_valid_app_hostname_label(value=source.subdomain or source.app.slug)
     models.Deployment.objects.create(
-        blueprint_id=source.blueprint_id,
         app=source.app,
-        environment=source.environment,
-        subdomain=source.subdomain,
-        git_ref=source.git_ref or source.app.branch,
+        git_ref=source.git_ref,
         image_tag=_build_image_tag(source=source),
         status=models.Deployment.Status.PENDING,
         status_message=status_message,
@@ -398,12 +387,12 @@ def _queue_source(source: models.Deployment, created_by: models.User, status_mes
 def queue_redeploy(source_id: UUID, created_by: models.User) -> FleetRedeployResult:
     """Queue one current fleet row when it remains eligible."""
     with transaction.atomic():
-        source_identity = models.Deployment.objects.only("app_id", "environment_id").get(id=source_id)
+        source_identity = models.Deployment.objects.only("app_id").get(id=source_id)
         models.App.objects.select_for_update().get(id=source_identity.app_id)
         source = (
             models.Deployment.objects
-            .filter(app_id=source_identity.app_id, environment_id=source_identity.environment_id)
-            .select_related("app", "environment")
+            .filter(app_id=source_identity.app_id)
+            .select_related("app", "app__environment")
             .order_by("-created_at")
             .first()
         )

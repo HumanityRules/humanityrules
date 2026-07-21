@@ -1,23 +1,23 @@
-<tr x-data="{ open: false }" id="blueprint-{{ blueprint.id }}">
+<tr x-data="{ open: false }" id="environment-row-{{ app.id }}">
     <td class="p-0">
-        <div id="blueprint-inner-{{ blueprint.id }}">
-            {% partial blueprint_row_content %}
+        <div id="environment-row-inner-{{ app.id }}">
+            {% partial environment_row_content %}
         </div>
     </td>
 </tr>
 
-{% partialdef blueprint_row_content %}
+{% partialdef environment_row_content %}
 <div {% if current_deployment.is_transient %}
-     hx-get="{% url 'blueprint_row_status' blueprint_id=blueprint.id %}"
+     hx-get="{% url 'app_environment_row_status' app_slug=app.slug %}"
      hx-trigger="load delay:10s"
-     hx-target="#blueprint-inner-{{ blueprint.id }}"
+     hx-target="#environment-row-inner-{{ app.id }}"
      hx-swap="innerHTML"
      {% endif %}>
     <div class="flex items-center">
         <div class="flex-1 min-w-0 px-4 py-3">
-            <h3 class="text-sm font-medium text-gray-900 dark:text-white"><span class="text-xs text-gray-400 dark:text-gray-500">Environment:</span> <a href="{% url 'environment_detail' environment_id=blueprint.environment.id %}" hx-get="{% url 'environment_detail' environment_id=blueprint.environment.id %}" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true" class="text-indigo-600 dark:text-indigo-400 hover:underline">{{ blueprint.environment.name }}</a></h3>
+            <h3 class="text-sm font-medium text-gray-900 dark:text-white"><span class="text-xs text-gray-400 dark:text-gray-500">Environment:</span> <a href="{% url 'environment_detail' environment_id=app.environment.id %}" hx-get="{% url 'environment_detail' environment_id=app.environment.id %}" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true" class="text-indigo-600 dark:text-indigo-400 hover:underline">{{ app.environment.name }}</a></h3>
             <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                <span class="text-gray-400 dark:text-gray-500">Account:</span> {{ blueprint.environment.aws_account.name }} · <span class="text-gray-400 dark:text-gray-500">Region:</span> {{ blueprint.environment.aws_region }}
+                <span class="text-gray-400 dark:text-gray-500">Account:</span> {{ app.environment.aws_account.name }} · <span class="text-gray-400 dark:text-gray-500">Region:</span> {{ app.environment.aws_region }}
             </p>
             <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                 <span class="text-gray-400 dark:text-gray-500">Ref:</span> {{ current_deployment.git_ref }}{% if current_deployment.git_commit_sha %} · {{ current_deployment.git_commit_sha|slice:":7" }}{% endif %}
@@ -36,7 +36,7 @@
                     <span>Config</span>
                 </button>
                 <span x-show="!open" class="inline-flex items-center gap-1.5 ml-1 text-xs">
-                    <span class="inline-flex items-center rounded bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:text-gray-300">{{ blueprint.containers|length }} container{{ blueprint.containers|length|pluralize }}</span>
+                    <span class="inline-flex items-center rounded bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:text-gray-300">{{ app.containers|length }} container{{ app.containers|length|pluralize }}</span>
                 </span>
                 <div x-show="open" x-cloak
                      x-transition:enter="transition ease-out duration-150"
@@ -44,7 +44,7 @@
                      x-transition:enter-end="opacity-100"
                      class="mt-2 w-full rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60 px-3 py-2">
                     <dl class="grid gap-x-4 gap-y-1.5 text-xs" style="grid-template-columns: auto 1fr;">
-                        {% for container in blueprint.containers %}
+                        {% for container in app.containers %}
                         <dt class="text-gray-500 dark:text-gray-400 pt-0.5">{{ container.name }} env</dt>
                         <dd class="text-gray-900 dark:text-white">
                             {% if container.environment_variables %}
@@ -94,8 +94,8 @@
                         hx-swap="innerHTML"
                         class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">Redeploy</button>
                 {% if current_deployment.status == 'succeeded' %}
-                <a href="{% url 'security_permissions_editor' %}?context_app={{ app.slug }}&context_environment={{ blueprint.environment.slug }}"
-                   hx-get="{% url 'security_permissions_editor' %}?context_app={{ app.slug }}&context_environment={{ blueprint.environment.slug }}"
+                <a href="{% url 'security_permissions_editor' %}?context_app={{ app.slug }}"
+                   hx-get="{% url 'security_permissions_editor' %}?context_app={{ app.slug }}"
                    hx-target="#main-content"
                    hx-swap="innerHTML"
                    hx-push-url="true"

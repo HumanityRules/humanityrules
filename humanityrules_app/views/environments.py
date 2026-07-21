@@ -125,7 +125,7 @@ def build_environment_detail_context(request: HttpRequest, environment: models.E
     """Build the shared context for environment detail rendering."""
     context = base.get_app_shell_context(request=request, current_page="environments")
     deployments = models.Deployment.objects.filter(
-        environment=environment,
+        app__environment=environment,
     ).select_related("app", "app__workspace").order_by("-created_at")[:20]
     tags = models.ResourceTag.objects.filter(environment=environment).order_by("key", "value")
     org = request.user.current_organization

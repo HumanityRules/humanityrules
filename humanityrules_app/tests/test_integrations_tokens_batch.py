@@ -82,9 +82,9 @@ class _BatchTokensEndpointTestBase(TransactionTestCase):
         )
         self.app = App.objects.create(
             organization=self.org, workspace=self.workspace, repository=self.repo,
-            name="Hermes", slug="hermes", app_type="web",
-            build_strategy="dockerfile", branch="main", container_port=8000,
-            health_check_path="/health",
+            environment=self.env, name="Hermes", slug="hermes", app_type="web",
+            build_strategy="dockerfile", container_port=8000,
+            health_check_path="/health", cpu=256, memory=512,
         )
         ResourceTag.objects.create(
             organization=self.org, resource_type=ResourceTag.ResourceType.APP,
@@ -605,9 +605,9 @@ class TestAppOwnership(_BatchTokensEndpointTestBase):
         )
         app = App.objects.create(
             organization=self.org, workspace=self.workspace, repository=repo,
-            name=slug, slug=slug, app_type="web",
-            build_strategy="dockerfile", branch="main", container_port=8000,
-            health_check_path="/health",
+            environment=self.env, name=slug, slug=slug, app_type="web",
+            build_strategy="dockerfile", container_port=8000,
+            health_check_path="/health", cpu=256, memory=512,
         )
         if owner_username is not None:
             ResourceTag.objects.create(

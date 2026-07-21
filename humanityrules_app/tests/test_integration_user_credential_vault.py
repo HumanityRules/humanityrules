@@ -101,9 +101,11 @@ class _CredentialVaultTestBase(TestCase):
             slug="hermes",
             app_type=App.AppType.WEB,
             build_strategy=App.BuildStrategy.DOCKERFILE,
-            branch="main",
+            environment=self.env,
             container_port=8000,
             health_check_path="/health",
+            cpu=256,
+            memory=512,
         )
         ResourceTag.objects.create(
             organization=self.org,

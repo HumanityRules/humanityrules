@@ -35,18 +35,6 @@ class TestAppDeploymentExecutor(TestCase):
             name="Engineering",
             slug="engineering",
         )
-        self.app = models.App.objects.create(
-            organization=self.organization,
-            workspace=self.workspace,
-            repository=self.repository,
-            name="MyApp",
-            slug="myapp",
-            app_type="web",
-            build_strategy="dockerfile",
-            branch="main",
-            container_port=8000,
-            health_check_path="/health",
-        )
         self.environment = models.Environment.objects.create(
             aws_account=self.aws_account,
             name="Staging",
@@ -55,26 +43,26 @@ class TestAppDeploymentExecutor(TestCase):
             status=models.Environment.Status.READY,
             shared_alb_hosted_zone="example.com",
         )
-
-    def _create_pending_deployment(self) -> models.Deployment:
-        """Build the blueprint + PENDING deployment rows the deploy path would have produced."""
-        blueprint = models.DeploymentBlueprint.objects.create(
-            app=self.app,
+        self.app = models.App.objects.create(
+            organization=self.organization,
+            workspace=self.workspace,
             environment=self.environment,
-            status=models.DeploymentBlueprint.Status.DEPLOYING,
-            status_message="Deployment triggered",
-            branch="",
+            repository=self.repository,
+            name="MyApp",
+            slug="myapp",
+            app_type="web",
+            build_strategy="dockerfile",
+            container_port=8000,
+            health_check_path="/health",
             cpu=256,
             memory=512,
-            containers=[{"name": self.app.slug, "environment_variables": [], "app_secrets": {}}],
-            subdomain="",
-            created_by=self.user,
+            containers=[{"name": "myapp", "environment_variables": [], "app_secrets": {}}],
         )
+
+    def _create_pending_deployment(self) -> models.Deployment:
+        """Build the PENDING deployment row the deploy path would have produced."""
         return models.Deployment.objects.create(
-            blueprint=blueprint,
             app=self.app,
-            environment=self.environment,
-            subdomain=self.app.slug,
             git_ref="main",
             image_tag="myapp-main-20260720",
             status=models.Deployment.Status.PENDING,
@@ -109,7 +97,6 @@ class TestAppDeploymentExecutor(TestCase):
         get_aws_session_mock.assert_not_called()
 
         deployment = models.Deployment.objects.get(id=deployment_row.id)
-        blueprint = models.DeploymentBlueprint.objects.get(id=deployment_row.blueprint_id)
 
         self.assertEqual(deployment.status, models.Deployment.Status.SUCCEEDED)
         self.assertEqual(deployment.status_message, "Debug deployment completed successfully")
@@ -117,9 +104,6 @@ class TestAppDeploymentExecutor(TestCase):
         self.assertEqual(deployment.alb_dns, "myapp-staging.debug-alb.local")
         self.assertIsNotNone(deployment.started_at)
         self.assertIsNotNone(deployment.completed_at)
-
-        self.assertEqual(blueprint.status, models.DeploymentBlueprint.Status.ACTIVE)
-        self.assertEqual(blueprint.status_message, "Debug deployment succeeded")
 
         log_messages = list(
             models.DeploymentLog.objects.filter(deployment=deployment)
@@ -131,7 +115,7 @@ class TestAppDeploymentExecutor(TestCase):
         )
 
     def test_run_deployment_refuses_cross_tenant_row(self) -> None:
-        """A Deployment whose app and environment belong to different orgs must be refused."""
+        """A Deployment whose app points at another org's environment must be refused."""
         other_org = models.Organization.objects.create(name="Other Org", slug="other-org")
         other_aws_account = models.AWSAccount.objects.create(organization=other_org, name="Other AWS")
         other_env = models.Environment.objects.create(
@@ -142,25 +126,27 @@ class TestAppDeploymentExecutor(TestCase):
             status=models.Environment.Status.READY,
             shared_alb_hosted_zone="other.example.com",
         )
-        blueprint = models.DeploymentBlueprint.objects.create(
-            app=self.app,
+        cross_tenant_app = models.App.objects.create(
+            organization=self.organization,
+            workspace=self.workspace,
             environment=other_env,
-            status=models.DeploymentBlueprint.Status.DRAFT,
-            branch="main",
+            repository=self.repository,
+            name="CrossTenant",
+            slug="crosstenant",
+            app_type="web",
+            build_strategy="dockerfile",
+            container_port=8000,
+            health_check_path="/health",
             cpu=256,
             memory=512,
-            containers=[{"name": "myapp", "environment_variables": [], "app_secrets": {}}],
-            subdomain="",
             created_by=self.user,
         )
         deployment = models.Deployment.objects.create(
-            blueprint=blueprint,
-            app=self.app,
-            environment=other_env,
+            app=cross_tenant_app,
             git_ref="main",
             git_commit_sha="",
             git_commit_message="",
-            image_tag="myapp-test",
+            image_tag="crosstenant-test",
             status=models.Deployment.Status.PENDING,
             status_message="",
             created_by=self.user,

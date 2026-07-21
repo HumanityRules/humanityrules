@@ -38,19 +38,14 @@ class TestJobWorkerEnvironmentCoordination(TestCase):
         self.app = models.App.objects.create(
             organization=self.organization,
             workspace=self.workspace,
+            environment=self.environment,
             repository=self.repository,
             name="Coordination Agent",
             slug="coordination-agent",
             app_type=models.App.AppType.WEB,
             build_strategy=models.App.BuildStrategy.DOCKERFILE,
-            branch="main",
             container_port=8787,
             health_check_path="/health",
-        )
-        self.blueprint = models.DeploymentBlueprint.objects.create(
-            app=self.app,
-            environment=self.environment,
-            status=models.DeploymentBlueprint.Status.ACTIVE,
             cpu=256,
             memory=512,
         )
@@ -69,9 +64,7 @@ class TestJobWorkerEnvironmentCoordination(TestCase):
     def _create_deployment(self, status: str, suffix: str) -> models.Deployment:
         """Create a deployment attempt in the coordinated environment."""
         return models.Deployment.objects.create(
-            blueprint=self.blueprint,
             app=self.app,
-            environment=self.environment,
             git_ref="main",
             image_tag=f"coordination-agent-main-{suffix}",
             status=status,
@@ -81,7 +74,6 @@ class TestJobWorkerEnvironmentCoordination(TestCase):
         """Create a permission request in the coordinated environment."""
         return models.AppPermissionRequest.objects.create(
             app=self.app,
-            environment=self.environment,
             status=status,
         )
 

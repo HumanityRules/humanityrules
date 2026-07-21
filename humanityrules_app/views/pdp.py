@@ -14,7 +14,7 @@ from django.http import HttpRequest, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
-from ..models import App, DeploymentBlueprint, User, WebappPublicGrant
+from ..models import App, User, WebappPublicGrant
 from ..services import abac_service
 from . import env_bearer_auth
 
@@ -56,7 +56,11 @@ def pdp_evaluate_public(request: HttpRequest) -> JsonResponse:
         logger.info("pdp-public deny reason=app-not-in-org env=%s app_id=%s webapp=%s", environment.slug, app_id, webapp_slug)
         return JsonResponse({"decision": "deny", "reason": "app-not-in-org"})
 
-    grant_is_live = WebappPublicGrant.live().filter(app=app, environment=environment, slug=webapp_slug).exists()
+    if app.environment_id != environment.id:
+        logger.info("pdp-public deny reason=app-not-in-env env=%s app=%s webapp=%s", environment.slug, app.slug, webapp_slug)
+        return JsonResponse({"decision": "deny", "reason": "app-not-in-env"})
+
+    grant_is_live = WebappPublicGrant.live().filter(app=app, slug=webapp_slug).exists()
     if grant_is_live:
         logger.info("pdp-public allow env=%s app=%s webapp=%s", environment.slug, app.slug, webapp_slug)
         return JsonResponse({"decision": "allow", "reason": "public-webapp"})
@@ -119,8 +123,7 @@ def pdp_evaluate(request: HttpRequest) -> JsonResponse:
         )
         return JsonResponse({"decision": "deny", "reason": "app-not-in-org"})
 
-    blueprint_exists = DeploymentBlueprint.objects.filter(app=app, environment=environment).exists()
-    if not blueprint_exists:
+    if app.environment_id != environment.id:
         logger.info(
             "pdp deny reason=app-not-in-env env=%s app=%s provider=%s sub=%s path=%s",
             environment.slug, app.slug, provider, sub, path,

@@ -52,7 +52,7 @@ def policy_proxy_activity(request: HttpRequest) -> JsonResponse:
     app = models.App.objects.filter(
         organization=organization,
         slug=app_id,
-        blueprints__environment=environment,
+        environment=environment,
     ).first()
     if app is None:
         return JsonResponse({"error": "app not found in environment"}, status=404)
@@ -60,7 +60,6 @@ def policy_proxy_activity(request: HttpRequest) -> JsonResponse:
     activity, created = models.AppEnvironmentActivity.objects.get_or_create(
         organization=organization,
         app=app,
-        environment=environment,
         defaults={"last_policy_proxy_activity_at": observed_at},
     )
     if not created:

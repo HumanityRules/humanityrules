@@ -611,7 +611,7 @@ class AppTemplate(models.Model):
     icon = models.CharField(max_length=50, help_text="Emoji or icon class for template picker UI")
     category = models.CharField(max_length=50, help_text="e.g. ai-assistant, web-app, api")
 
-    # Blueprint defaults (task-level)
+    # Runtime defaults (task-level)
     cpu = models.IntegerField()
     memory = models.IntegerField()
     default_compute_mode = models.CharField(
@@ -734,6 +734,12 @@ class App(models.Model):
         on_delete=models.CASCADE,
         related_name="apps",
     )
+    environment = models.ForeignKey(
+        Environment,
+        on_delete=models.PROTECT,
+        related_name="apps",
+        help_text="The environment this app deploys to. Set at creation, immutable; the app is deleted when its environment is torn down.",
+    )
     repository = models.ForeignKey(
         Repository,
         on_delete=models.PROTECT,
@@ -761,20 +767,19 @@ class App(models.Model):
         choices=BuildStrategy.choices,
     )
 
-    # Source configuration
+    # Source configuration. The build branch is Repository.default_branch.
     repo_subpath = models.CharField(
         max_length=500,
         blank=True,
         help_text="Subdirectory within repository (for monorepos, optional)",
     )
-    branch = models.CharField(max_length=255)
     dockerfile_path = models.CharField(
         max_length=500,
         blank=True,
         help_text="Path to Dockerfile if using dockerfile build strategy",
     )
 
-    # Container configuration (identity/build — runtime fields moved to DeploymentBlueprint)
+    # Container configuration
     container_port = models.IntegerField()
     health_check_path = models.CharField(max_length=255)
     health_check_command = models.CharField(
@@ -783,6 +788,24 @@ class App(models.Model):
         help_text="Health check command for non-HTTP health checks",
     )
     health_check_grace_period = models.IntegerField(default=0, help_text="ECS health check grace period in seconds. 0 = use environment default.")
+
+    # Runtime configuration
+    cpu = models.IntegerField(help_text="ECS task CPU units (256, 512, 1024, etc.)")
+    memory = models.IntegerField(help_text="ECS task memory in MiB")
+    compute_mode = models.CharField(
+        max_length=20,
+        choices=EcsComputeMode.choices,
+        default=EcsComputeMode.FARGATE,
+        help_text="ECS compute backend for this app.",
+    )
+
+    # Per-container materialized runtime values. Mirrors the template's
+    # `containers` shape (one entry per container, ordered), each carrying
+    # its own `environment_variables` (list of {name, value}) and
+    # `app_secrets` (dict of field -> value|""|None). Same schema that
+    # _materialize_environment_variables / _materialize_app_secrets produce
+    # from a container's configurable_variables.
+    containers = models.JSONField(default=list)
 
     status = models.CharField(
         max_length=20,
@@ -845,87 +868,8 @@ class SandboxSlugClaim(models.Model):
         return self.slug
 
 
-class DeploymentBlueprint(models.Model):
-    """Desired deployable state for one (app, environment) pair."""
-
-    class Status(models.TextChoices):
-        DRAFT = "draft", "Draft"
-        DEPLOYING = "deploying", "Deploying"
-        FAILED = "failed", "Failed"
-        ACTIVE = "active", "Active"
-        DISCARDED = "discarded", "Discarded"
-
-    id = models.UUIDField(
-        primary_key=True,
-        default=uuid.uuid7,
-        editable=False,
-    )
-    app = models.ForeignKey(
-        App,
-        on_delete=models.CASCADE,
-        related_name="blueprints",
-    )
-    environment = models.ForeignKey(
-        Environment,
-        on_delete=models.PROTECT,
-        related_name="blueprints",
-    )
-    status = models.CharField(
-        max_length=20,
-        choices=Status.choices,
-        default=Status.DRAFT,
-    )
-    status_message = models.TextField(blank=True)
-
-    branch = models.CharField(
-        max_length=255,
-        blank=True,
-        help_text="Branch override for this environment. Blank = use Repository.default_branch.",
-    )
-    cpu = models.IntegerField(help_text="ECS task CPU units (256, 512, 1024, etc.)")
-    memory = models.IntegerField(help_text="ECS task memory in MiB")
-    compute_mode = models.CharField(
-        max_length=20,
-        choices=EcsComputeMode.choices,
-        default=EcsComputeMode.FARGATE,
-        help_text="ECS compute backend for this app in this environment.",
-    )
-
-    # Per-container materialized runtime values. Mirrors the template's
-    # `containers` shape (one entry per container, ordered), each carrying
-    # its own `environment_variables` (list of {name, value}) and
-    # `app_secrets` (dict of field -> value|""|None). Same schema that
-    # _materialize_environment_variables / _materialize_app_secrets produce
-    # from a container's configurable_variables.
-    containers = models.JSONField(default=list)
-
-    subdomain = models.CharField(
-        max_length=63,
-        blank=True,
-        validators=[app_slugs.validate_app_hostname_label],
-        help_text="Hostname label containing lowercase letters and digits only. Blank defaults to the app slug.",
-    )
-
-    created_by = models.ForeignKey(
-        User,
-        on_delete=models.SET_NULL,
-        null=True,
-        related_name="created_blueprints",
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        verbose_name = "Deployment Blueprint"
-        verbose_name_plural = "Deployment Blueprints"
-        ordering = ["-created_at"]
-
-    def __str__(self) -> str:
-        return f"{self.app.name} -> {self.environment.name} ({self.status})"
-
-
 class Deployment(models.Model):
-    """An execution record for one attempt to apply a blueprint."""
+    """An execution record for one attempt to deploy an app."""
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
@@ -972,21 +916,10 @@ class Deployment(models.Model):
         default=uuid.uuid7,
         editable=False,
     )
-    blueprint = models.ForeignKey(
-        DeploymentBlueprint,
-        on_delete=models.CASCADE,
-        related_name="deployments",
-    )
     app = models.ForeignKey(
         App,
         on_delete=models.CASCADE,
         related_name="deployments",
-    )
-    environment = models.ForeignKey(
-        Environment,
-        on_delete=models.PROTECT,
-        related_name="deployments",
-        help_text="The environment this deployment targets",
     )
 
     # Source
@@ -1021,14 +954,6 @@ class Deployment(models.Model):
     status_message = models.TextField(blank=True)
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
-
-    # Routing
-    subdomain = models.CharField(
-        max_length=63,
-        blank=True,
-        validators=[app_slugs.validate_app_hostname_label],
-        help_text="Resolved hostname label containing lowercase letters and digits only. Blank defaults to the app slug.",
-    )
 
     # Outputs
     service_url = models.URLField(
@@ -1082,7 +1007,7 @@ class Deployment(models.Model):
 
 
 class AppEnvironmentActivity(models.Model):
-    """Latest runtime activity observed for one app in one environment."""
+    """Latest runtime activity observed for one app in its environment."""
 
     id = models.UUIDField(
         primary_key=True,
@@ -1094,15 +1019,10 @@ class AppEnvironmentActivity(models.Model):
         on_delete=models.CASCADE,
         related_name="app_environment_activities",
     )
-    app = models.ForeignKey(
+    app = models.OneToOneField(
         App,
         on_delete=models.CASCADE,
-        related_name="environment_activities",
-    )
-    environment = models.ForeignKey(
-        Environment,
-        on_delete=models.CASCADE,
-        related_name="app_activities",
+        related_name="environment_activity",
     )
     last_policy_proxy_activity_at = models.DateTimeField()
     updated_at = models.DateTimeField(auto_now=True)
@@ -1110,18 +1030,12 @@ class AppEnvironmentActivity(models.Model):
     class Meta:
         verbose_name = "App Environment Activity"
         verbose_name_plural = "App Environment Activities"
-        constraints = [
-            models.UniqueConstraint(
-                fields=["app", "environment"],
-                name="unique_app_environment_activity",
-            ),
-        ]
         indexes = [
             models.Index(fields=["organization", "last_policy_proxy_activity_at"]),
         ]
 
     def __str__(self) -> str:
-        return f"{self.app.slug}/{self.environment.slug}: {self.last_policy_proxy_activity_at}"
+        return f"{self.app.slug}: {self.last_policy_proxy_activity_at}"
 
 
 class DeploymentLog(models.Model):
@@ -1248,19 +1162,15 @@ class WaitlistSignup(models.Model):
 
 
 class AppPermissions(models.Model):
-    """The current (last-applied) permissions for an app in an environment."""
+    """The current (last-applied) permissions for an app."""
     id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
-    app = models.ForeignKey(App, on_delete=models.CASCADE, related_name="app_permissions")
-    environment = models.ForeignKey(Environment, on_delete=models.CASCADE, related_name="app_permissions")
+    app = models.OneToOneField(App, on_delete=models.CASCADE, related_name="app_permissions")
     statements = models.JSONField(default=list)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-    class Meta:
-        unique_together = [("app", "environment")]
-
     def __str__(self) -> str:
-        return f"AppPermissions {self.app.slug}/{self.environment.slug}"
+        return f"AppPermissions {self.app.slug}"
 
 
 class AppPermissionRequest(models.Model):
@@ -1275,7 +1185,6 @@ class AppPermissionRequest(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
     app = models.ForeignKey(App, on_delete=models.CASCADE, related_name="app_permission_requests")
-    environment = models.ForeignKey(Environment, on_delete=models.CASCADE, related_name="app_permission_requests")
     statements = models.JSONField(default=list, help_text="List of policy statement dicts")
     status = models.CharField(max_length=30, choices=Status.choices, default=Status.DRAFT)
     description = models.TextField(blank=True, help_text="Human/agent-authored rationale for the permission changes")
@@ -1296,9 +1205,9 @@ class AppPermissionRequest(models.Model):
         ordering = ["-created_at"]
         constraints = [
             models.UniqueConstraint(
-                fields=["app", "environment"],
+                fields=["app"],
                 condition=models.Q(status="applying"),
-                name="unique_applying_permission_request_per_target",
+                name="unique_applying_permission_request_per_app",
             ),
         ]
 
@@ -1944,7 +1853,7 @@ class JobWorkerRun(models.Model):
 
 
 class WebappPublicGrant(models.Model):
-    """Anonymous-internet access to one agent webapp on one environment.
+    """Anonymous-internet access to one agent webapp.
 
     A live row makes ``https://<slug>-<agent-host>/`` reachable without a
     session: the PDP answers allow for that host and the policy proxy forwards
@@ -1955,8 +1864,8 @@ class WebappPublicGrant(models.Model):
     exposure history stays queryable (same pattern as ``OrganizationInvite``).
     Each row is one continuous exposure window: extending a live grant updates
     ``expires_at``; re-publishing after expiry revokes the old row and inserts
-    a fresh one. At most one non-revoked row exists per (app, environment,
-    slug). Expiry is evaluated lazily at PDP query time; no background job.
+    a fresh one. At most one non-revoked row exists per (app, slug). Expiry is
+    evaluated lazily at PDP query time; no background job.
     """
 
     # User webapp slugs as accepted by the agent's `webapps` CLI, minus the
@@ -1966,7 +1875,6 @@ class WebappPublicGrant(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
     app = models.ForeignKey(App, on_delete=models.CASCADE, related_name="webapp_public_grants")
-    environment = models.ForeignKey(Environment, on_delete=models.CASCADE, related_name="webapp_public_grants")
     slug = models.CharField(max_length=32, help_text="Webapp hostname prefix, e.g. 'dashboard' in dashboard-<agent-host>.")
     granted_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="webapp_grants_created")
     expires_at = models.DateTimeField(null=True, blank=True, help_text="Null = public until revoked.")
@@ -1980,13 +1888,13 @@ class WebappPublicGrant(models.Model):
         ordering = ["-created_at"]
         constraints = [
             models.UniqueConstraint(
-                fields=["app", "environment", "slug"],
+                fields=["app", "slug"],
                 condition=models.Q(revoked_at__isnull=True),
                 name="unique_unrevoked_webapp_grant",
             ),
         ]
         indexes = [
-            models.Index(fields=["app", "environment", "slug"]),
+            models.Index(fields=["app", "slug"], name="webapp_grant_app_slug_idx"),
         ]
 
     @classmethod
@@ -2001,7 +1909,7 @@ class WebappPublicGrant(models.Model):
         return self.revoked_at is None and (self.expires_at is None or self.expires_at > timezone.now())
 
     def __str__(self) -> str:
-        return f"WebappPublicGrant {self.slug} app={self.app_id} env={self.environment_id}"
+        return f"WebappPublicGrant {self.slug} app={self.app_id}"
 
 
 # =============================================================================

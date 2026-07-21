@@ -4,7 +4,7 @@ from django.core.management.base import CommandError
 from django.test import TestCase
 
 from humanityrules_app.management.commands import humr_app_shell
-from humanityrules_app.models import App, AppTemplate, Organization, Repository, Workspace
+from humanityrules_app.models import App, AppTemplate, AWSAccount, Environment, Organization, Repository, Workspace
 
 
 def _template(slug: str, containers: list[dict], alb_target_container: str | None) -> AppTemplate:
@@ -25,6 +25,14 @@ def _template(slug: str, containers: list[dict], alb_target_container: str | Non
 def _app(template: AppTemplate | None) -> App:
     org = Organization.objects.create(name="Org", slug=f"org-{App.objects.count()}")
     workspace = Workspace.objects.get(organization=org, slug="default")
+    aws_account = AWSAccount.objects.create(organization=org, name="Shell AWS")
+    environment = Environment.objects.create(
+        aws_account=aws_account,
+        name="Production",
+        slug="production",
+        aws_region="us-east-1",
+        status=Environment.Status.READY,
+    )
     repo = Repository.objects.create(
         organization=org,
         full_name=f"template/{template.slug if template else 'legacy'}",
@@ -35,15 +43,17 @@ def _app(template: AppTemplate | None) -> App:
     return App.objects.create(
         organization=org,
         workspace=workspace,
+        environment=environment,
         repository=repo,
         source_template=template,
         name="My App",
         slug="my-app",
         app_type=App.AppType.WEB,
         build_strategy=App.BuildStrategy.DOCKERFILE,
-        branch="main",
         container_port=8080,
         health_check_path="/health",
+        cpu=256,
+        memory=512,
     )
 
 

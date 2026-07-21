@@ -10,7 +10,6 @@ from humanityrules_app.models import (
     AWSAccount,
     App,
     Deployment,
-    DeploymentBlueprint,
     Environment,
     IdentityAttribute,
     Organization,
@@ -43,22 +42,17 @@ class TestAppEndpoints(TestCase):
             key="domain", value="engineering",
         )
 
-        self.app = App.objects.create(
-            organization=self.org, workspace=self.workspace, repository=self.repo,
-            name="MyApp", slug="myapp", app_type="web", build_strategy="dockerfile",
-            branch="main", container_port=8000, health_check_path="/health",
-        )
-
         self.env = Environment.objects.create(
             aws_account=self.aws_account, name="Staging", slug="staging", aws_region="us-east-1",
         )
-        self.blueprint = DeploymentBlueprint.objects.create(
-            app=self.app, environment=self.env, status=DeploymentBlueprint.Status.ACTIVE,
-            cpu=256, memory=512, subdomain="myappstaging", created_by=None,
+        self.app = App.objects.create(
+            organization=self.org, workspace=self.workspace, repository=self.repo,
+            environment=self.env, name="MyApp", slug="myapp", app_type="web",
+            build_strategy="dockerfile", container_port=8000, health_check_path="/health",
+            cpu=256, memory=512,
         )
         self.deployment = Deployment.objects.create(
-            blueprint=self.blueprint, app=self.app, environment=self.env,
-            subdomain="myappstaging", git_ref="main", image_tag="myapp-main-20260227",
+            app=self.app, git_ref="main", image_tag="myapp-main-20260227",
             status=Deployment.Status.SUCCEEDED, status_message="Running",
         )
 
@@ -104,11 +98,6 @@ class TestAppEndpoints(TestCase):
             key="removable", value="yes",
         )
 
-    def _set_open_blueprint_status(self, status: str) -> None:
-        self.deployment.delete()
-        self.blueprint.status = status
-        self.blueprint.save(update_fields=["status", "updated_at"])
-
     # --- App Detail (requires workspace:view on parent workspace) ---
 
     def test_admin_can_view_app_detail(self) -> None:
@@ -121,104 +110,36 @@ class TestAppEndpoints(TestCase):
         response = self.client.get("/apps/myapp/", **HTMX)
         self.assertEqual(response.status_code, 200)
 
-    def test_app_detail_deployed_environments_uses_blueprints_outside_recent_deployments_window(self) -> None:
-        legacy_env = Environment.objects.create(
-            aws_account=self.aws_account,
-            name="Legacy",
-            slug="legacy",
-            aws_region="us-east-1",
-        )
-        legacy_blueprint = DeploymentBlueprint.objects.create(
-            app=self.app,
-            environment=legacy_env,
-            status=DeploymentBlueprint.Status.ACTIVE,
-            cpu=256,
-            memory=512,
-            subdomain="myapplegacy",
-            created_by=None,
-        )
-        Deployment.objects.create(
-            blueprint=legacy_blueprint,
-            app=self.app,
-            environment=legacy_env,
-            subdomain="myapplegacy",
-            git_ref="main",
-            image_tag="myapp-legacy-20260311",
-            status=Deployment.Status.SUCCEEDED,
-            status_message="Running",
-        )
+    def test_app_detail_environment_row_uses_deployment_outside_recent_deployments_window(self) -> None:
+        # 25 newer failed attempts push the succeeded deployment out of the
+        # recent-20 window; the environment row must still show it.
         for index in range(25):
             Deployment.objects.create(
-                blueprint=self.blueprint,
                 app=self.app,
-                environment=self.env,
-                subdomain="myappstaging",
                 git_ref="main",
                 image_tag=f"myapp-main-{index}",
-                status=Deployment.Status.SUCCEEDED,
-                status_message="Running",
+                status=Deployment.Status.FAILED,
+                status_message="Build failed",
             )
 
         self.client.force_login(self.ws_editor)
         response = self.client.get("/apps/myapp/", **HTMX)
 
         self.assertEqual(response.status_code, 200)
-        row_blueprint_ids = {row.blueprint.id for row in response.context["environment_rows"]}
-        self.assertIn(self.blueprint.id, row_blueprint_ids)
-        self.assertIn(legacy_blueprint.id, row_blueprint_ids)
+        self.assertEqual(response.context["current_deployment"].id, self.deployment.id)
         self.assertEqual(len(response.context["deployments"]), 20)
-        self.assertContains(response, "Legacy")
+        self.assertNotIn(self.deployment.id, {d.id for d in response.context["deployments"]})
 
-    def test_app_detail_deployed_environments_excludes_unlaunched_blueprints(self) -> None:
-        preview_env = Environment.objects.create(
-            aws_account=self.aws_account,
-            name="Preview",
-            slug="preview",
-            aws_region="us-east-1",
-        )
-        preview_blueprint = DeploymentBlueprint.objects.create(
+    def test_app_detail_environment_row_prefers_succeeded_over_newer_failed_attempt(self) -> None:
+        succeeded = Deployment.objects.create(
             app=self.app,
-            environment=preview_env,
-            status=DeploymentBlueprint.Status.DRAFT,
-            cpu=256,
-            memory=512,
-            subdomain="myapppreview",
-            created_by=None,
-        )
-
-        self.client.force_login(self.ws_editor)
-        response = self.client.get("/apps/myapp/", **HTMX)
-
-        self.assertEqual(response.status_code, 200)
-        row_blueprint_ids = {row.blueprint.id for row in response.context["environment_rows"]}
-        self.assertIn(self.blueprint.id, row_blueprint_ids)
-        self.assertNotIn(preview_blueprint.id, row_blueprint_ids)
-
-    def test_app_detail_deployed_environments_uses_latest_launched_blueprint_per_environment(self) -> None:
-        newer_blueprint = DeploymentBlueprint.objects.create(
-            app=self.app,
-            environment=self.env,
-            status=DeploymentBlueprint.Status.FAILED,
-            cpu=256,
-            memory=512,
-            subdomain="myappstagingv2",
-            created_by=None,
-        )
-        Deployment.objects.create(
-            blueprint=newer_blueprint,
-            app=self.app,
-            environment=self.env,
-            subdomain="myappstagingv2",
             git_ref="release",
             image_tag="myapp-release-1",
             status=Deployment.Status.SUCCEEDED,
             status_message="Running",
         )
         failed_attempt = Deployment.objects.create(
-            blueprint=newer_blueprint,
             app=self.app,
-            environment=self.env,
-            subdomain="myappstagingv2",
             git_ref="release",
             image_tag="myapp-release-2",
             status=Deployment.Status.FAILED,
@@ -229,18 +150,14 @@ class TestAppEndpoints(TestCase):
         response = self.client.get("/apps/myapp/", **HTMX)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.context["environment_rows"]), 1)
-        row = response.context["environment_rows"][0]
-        self.assertEqual(row.blueprint.id, newer_blueprint.id)
-        self.assertNotEqual(row.current_deployment.id, failed_attempt.id)
-        self.assertEqual(row.current_deployment.status, Deployment.Status.SUCCEEDED)
+        current = response.context["current_deployment"]
+        self.assertEqual(current.id, succeeded.id)
+        self.assertNotEqual(current.id, failed_attempt.id)
+        self.assertEqual(current.status, Deployment.Status.SUCCEEDED)
 
-    def test_app_detail_deployed_environments_prefers_in_progress_redeploy_on_current_blueprint(self) -> None:
+    def test_app_detail_environment_row_prefers_in_progress_redeploy(self) -> None:
         redeploy_attempt = Deployment.objects.create(
-            blueprint=self.blueprint,
             app=self.app,
-            environment=self.env,
-            subdomain="myappstaging",
             git_ref="main",
             image_tag="myapp-main-20260311-redeploy",
             status=Deployment.Status.PENDING,
@@ -251,13 +168,11 @@ class TestAppEndpoints(TestCase):
         response = self.client.get("/apps/myapp/", **HTMX)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.context["environment_rows"]), 1)
-        row = response.context["environment_rows"][0]
-        self.assertEqual(row.blueprint.id, self.blueprint.id)
-        self.assertEqual(row.current_deployment.id, redeploy_attempt.id)
-        self.assertEqual(row.current_deployment.status, Deployment.Status.PENDING)
+        current = response.context["current_deployment"]
+        self.assertEqual(current.id, redeploy_attempt.id)
+        self.assertEqual(current.status, Deployment.Status.PENDING)
         self.assertNotContains(response, "Redeploy")
-        self.assertContains(response, f"/blueprints/{self.blueprint.id}/row-status/")
+        self.assertContains(response, "/apps/myapp/environment-row-status/")
         self.assertContains(response, 'hx-trigger="load delay:10s"')
 
     def test_app_detail_shows_teardown_in_deployed_environments_not_recent_deployments(self) -> None:
@@ -290,6 +205,24 @@ class TestAppEndpoints(TestCase):
         self.client.force_login(self.no_access_user)
         response = self.client.get(f"/apps/myapp/deployments/{self.deployment.id}/status/")
         self.assertEqual(response.status_code, 403)
+
+    # --- App Environment Row Status Polling (requires workspace:view) ---
+
+    def test_ws_viewer_can_poll_environment_row_status(self) -> None:
+        self.client.force_login(self.ws_viewer)
+        response = self.client.get("/apps/myapp/environment-row-status/")
+        self.assertEqual(response.status_code, 200)
+
+    def test_no_access_gets_403_on_environment_row_status(self) -> None:
+        self.client.force_login(self.no_access_user)
+        response = self.client.get("/apps/myapp/environment-row-status/")
+        self.assertEqual(response.status_code, 403)
+
+    def test_environment_row_status_404_without_visible_deployment(self) -> None:
+        self.deployment.delete()
+        self.client.force_login(self.ws_viewer)
+        response = self.client.get("/apps/myapp/environment-row-status/")
+        self.assertEqual(response.status_code, 404)
 
     # --- App Teardown Confirm Modal (requires workspace:view) ---
 
@@ -326,29 +259,6 @@ class TestAppEndpoints(TestCase):
         self.client.force_login(self.ws_editor)
         response = self.client.post(f"/apps/myapp/deployments/{self.deployment.id}/redeploy/")
         self.assertEqual(response.status_code, 200)
-
-    def test_ws_editor_redeploy_rejects_invalid_source_subdomain(self) -> None:
-        self.deployment.subdomain = "legacy-subdomain"
-        self.deployment.save(update_fields=["subdomain", "updated_at"])
-        self.client.force_login(self.ws_editor)
-
-        response = self.client.post(f"/apps/myapp/deployments/{self.deployment.id}/redeploy/")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Agent hostname labels must contain lowercase letters and digits only.")
-        self.assertEqual(Deployment.objects.filter(app=self.app).count(), 1)
-
-    def test_ws_editor_redeploy_allows_blank_source_subdomain_with_valid_app_slug(self) -> None:
-        self.deployment.subdomain = ""
-        self.deployment.save(update_fields=["subdomain", "updated_at"])
-        self.client.force_login(self.ws_editor)
-
-        response = self.client.post(f"/apps/myapp/deployments/{self.deployment.id}/redeploy/")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertNotContains(response, "Agent hostname labels must contain lowercase letters and digits only.")
-        pending = Deployment.objects.get(app=self.app, status=Deployment.Status.PENDING)
-        self.assertEqual(pending.subdomain, "")
 
     def test_ws_viewer_gets_403_on_redeploy(self) -> None:
         self.client.force_login(self.ws_viewer)

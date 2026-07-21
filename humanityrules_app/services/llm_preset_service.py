@@ -1,10 +1,10 @@
 """Resolve the LLM preset for a deployed Hermes personal assistant.
 
 A preset is a stable HUMR-owned name chosen per organization. The control plane
-persists only ``HUMR_LLM_PRESET`` in the deployment blueprint; the Hermes
-container expands that value into concrete provider/model configuration during
-startup. Model-version policy therefore stays out of immutable blueprint
-snapshots and takes effect on the next redeploy.
+persists only ``HUMR_LLM_PRESET`` in the app's materialized containers; the
+Hermes container expands that value into concrete provider/model configuration
+during startup. Model-version policy therefore stays out of the persisted
+snapshot and takes effect on the next redeploy.
 
 Codex is the default; flip a specific org to Bedrock in the Django admin. There
 is intentionally no env/global configuration — the per-org field is the only knob.

@@ -2,12 +2,12 @@
 Confirm page for making one webapp public — the deep-link target printed by
 the agent's `webapps expose`. Plain (non-HTMX) form: the POST redirects to the
 grant's status page, which polls the public URL until it answers.
-Context: app, environments [{environment, app_hostname, selected}], prefill_slug.
+Context: app, app_hostname, prefill_slug.
 {% endcomment %}
 <div class="max-w-2xl"
      x-data="{
         slug: '{{ prefill_slug|escapejs }}',
-        host: document.querySelector('input[name=environment]:checked')?.dataset.hostname || '',
+        host: '{{ app_hostname|default:''|escapejs }}',
         url() { return this.slug && this.host ? 'https://' + this.slug + '-' + this.host + '/' : ''; },
      }">
     <div class="mb-6">
@@ -34,21 +34,12 @@ Context: app, environments [{environment, app_hostname, selected}], prefill_slug
                 <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">The agent uses this in the address shown below.</p>
             </div>
 
-            <fieldset>
-                <legend class="block text-sm font-medium text-gray-900 dark:text-white">Environment</legend>
-                <div class="mt-2 space-y-2">
-                    {% for row in environments %}
-                    <label class="flex items-center gap-2 text-sm text-gray-900 dark:text-white">
-                        <input type="radio" name="environment" value="{{ row.environment.id }}"
-                               data-hostname="{{ row.app_hostname|default:'' }}"
-                               @change="host = $el.dataset.hostname"
-                               {% if row.selected %}checked{% endif %} required>
-                        <span>{{ row.environment.name }}</span>
-                        {% if row.app_hostname %}<span class="font-mono text-xs text-gray-500 dark:text-gray-400">{{ row.app_hostname }}</span>{% endif %}
-                    </label>
-                    {% endfor %}
-                </div>
-            </fieldset>
+            <div>
+                <span class="block text-sm font-medium text-gray-900 dark:text-white">Environment</span>
+                <p class="mt-1 text-sm text-gray-900 dark:text-white">{{ app.environment.name }}
+                    {% if app_hostname %}<span class="font-mono text-xs text-gray-500 dark:text-gray-400">{{ app_hostname }}</span>{% endif %}
+                </p>
+            </div>
 
             <fieldset>
                 <legend class="block text-sm font-medium text-gray-900 dark:text-white">Public for</legend>
@@ -69,7 +60,7 @@ Context: app, environments [{environment, app_hostname, selected}], prefill_slug
                 <p class="text-sm text-amber-800 dark:text-amber-300">
                     This will be reachable by <strong>anyone on the internet</strong>:
                 </p>
-                <p class="mt-1 font-mono text-sm text-amber-900 dark:text-amber-200" x-text="url() || '(pick a webapp name and environment)'"></p>
+                <p class="mt-1 font-mono text-sm text-amber-900 dark:text-amber-200" x-text="url() || '(pick a webapp name)'"></p>
             </div>
 
             <div class="flex justify-end gap-3">

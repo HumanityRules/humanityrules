@@ -1,5 +1,4 @@
 import json
-from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -13,8 +12,7 @@ from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
 
-import humanityrules_app.app_slugs as app_slugs
-from humanityrules_app.models import App, AppRemovalJob, Deployment, DeploymentBlueprint, DeploymentLog, ResourceTag
+from humanityrules_app.models import App, AppRemovalJob, Deployment, DeploymentLog, Environment, ResourceTag
 from humanityrules_app.services import abac_service
 from humanityrules_app.services.cost import panel as cost_panel
 from humanityrules_app.services.jobs import environment_operation_gate
@@ -23,29 +21,15 @@ from . import abac_view_checks
 from . import base
 from . import webapp_public_access
 
-OPEN_BLUEPRINT_STATUSES = (
-    DeploymentBlueprint.Status.DRAFT,
-    DeploymentBlueprint.Status.FAILED,
-    DeploymentBlueprint.Status.DEPLOYING,
-)
-
 # Cap rendered log lines; the deployment-log fragment re-renders every second while polling.
 MAX_DEPLOYMENT_LOG_LINES = 1000
 
 def app_is_live(app: App) -> bool:
-    """An app is 'live' if the latest deployment in any environment is not TORN_DOWN.
-
-    Historical FAILED rows in an environment whose latest deployment later went TORN_DOWN
-    don't count — the UI shows one row per environment, so this matches what the user sees.
-    """
-    latest_by_env: dict = {}
-    for env_id, status, created_at in Deployment.objects.filter(app=app).values_list(
-        "environment_id", "status", "created_at",
-    ):
-        existing = latest_by_env.get(env_id)
-        if existing is None or created_at > existing[1]:
-            latest_by_env[env_id] = (status, created_at)
-    return any(status != Deployment.Status.TORN_DOWN for status, _ in latest_by_env.values())
+    """An app is 'live' if its latest deployment is not TORN_DOWN."""
+    latest_status = (
+        Deployment.objects.filter(app=app).order_by("-created_at").values_list("status", flat=True).first()
+    )
+    return latest_status is not None and latest_status != Deployment.Status.TORN_DOWN
 
 
 def _app_has_persistent_data(app: App) -> bool:
@@ -61,71 +45,31 @@ def _app_has_persistent_data(app: App) -> bool:
     return False
 
 
-@dataclass
-class DeployedEnvironmentRow:
-    """Blueprint-backed summary row for one deployed environment."""
-
-    blueprint: DeploymentBlueprint
-    current_deployment: Deployment
-
-
 def _get_app_for_user(request: HttpRequest, app_slug: str) -> App:
     """Get an app that belongs to the current user's organization."""
     return get_object_or_404(
-        App.objects.select_related("workspace", "repository", "created_by", "source_template"),
+        App.objects.select_related(
+            "workspace", "repository", "created_by", "source_template",
+            "environment", "environment__aws_account",
+        ),
         slug=app_slug,
         organization=request.user.current_organization,
     )
 
 
 def _get_deployment_for_app(app: App, deployment_id: UUID) -> Deployment:
-    """Get a deployment that belongs to the given app, with related environment."""
-    return get_object_or_404(
-        Deployment.objects.select_related("environment", "environment__aws_account"),
-        id=deployment_id,
-        app=app,
-    )
+    """Get a deployment that belongs to the given app."""
+    return get_object_or_404(Deployment, id=deployment_id, app=app)
 
 
-def get_open_blueprint(app: App) -> DeploymentBlueprint | None:
-    """Return the latest in-progress blueprint for an app, if any."""
-    return (
-        DeploymentBlueprint.objects.filter(app=app, status__in=OPEN_BLUEPRINT_STATUSES)
-        .select_related("app", "environment")
-        .order_by("-created_at")
-        .first()
-    )
+def get_current_deployment(app: App) -> Deployment | None:
+    """Return the app's most relevant visible deployment.
 
-
-
-def _get_current_launched_blueprint(blueprints: list[DeploymentBlueprint]) -> DeploymentBlueprint | None:
-    """Return the current launched blueprint for one environment."""
-    current_blueprints = [
-        blueprint
-        for blueprint in blueprints
-        if getattr(blueprint, "current_launched_deployment_created_at", None) is not None
-    ]
-    if current_blueprints:
-        current_blueprints.sort(
-            key=lambda blueprint: (
-                blueprint.current_launched_deployment_created_at,
-                blueprint.created_at,
-            ),
-            reverse=True,
-        )
-        return current_blueprints[0]
-    return None
-
-
-def _build_deployed_environment_rows(app: App) -> list[DeployedEnvironmentRow]:
-    """Build one summary row per deployed environment, showing the most relevant deployment.
-
-    For each environment the app has been deployed to, finds the latest launched blueprint
-    and pairs it with a "current" deployment chosen by priority: transient operations first
-    (deploys and teardowns in flight), then terminal authoritative conclusions (succeeded or
-    torn down) picked by recency, then everything else. This means a failed redeploy attempt
-    won't hide the last successful deployment, while a completed teardown correctly supersedes
-    a prior success.
+    Chosen by priority: transient operations first (deploys and teardowns in
+    flight), then terminal authoritative conclusions (succeeded or torn down)
+    picked by recency, then everything else. This means a failed redeploy
+    attempt won't hide the last successful deployment, while a completed
+    teardown correctly supersedes a prior success.
     """
     status_priority = Case(
         When(status__in=Deployment.TRANSIENT_STATUSES, then=Value(0)),
@@ -136,82 +80,20 @@ def _build_deployed_environment_rows(app: App) -> list[DeployedEnvironmentRow]:
         default=Value(2),
         output_field=IntegerField(),
     )
-    current_deployment_id_subquery = (
-        Deployment.objects.filter(blueprint=OuterRef("pk"))
-        .filter(status__in=Deployment.VISIBLE_STATUSES)
+    return (
+        Deployment.objects.filter(app=app, status__in=Deployment.VISIBLE_STATUSES)
         .annotate(status_priority=status_priority)
         .order_by("status_priority", "-created_at")
-        .values("id")[:1]
+        .first()
     )
-    current_deployment_created_at_subquery = (
-        Deployment.objects.filter(blueprint=OuterRef("pk"))
-        .filter(status__in=Deployment.VISIBLE_STATUSES)
-        .annotate(status_priority=status_priority)
-        .order_by("status_priority", "-created_at")
-        .values("created_at")[:1]
-    )
-    current_launched_deployment_created_at_subquery = (
-        Deployment.objects.filter(blueprint=OuterRef("pk"))
-        .filter(status__in=Deployment.CONCLUDED_STATUSES)
-        .order_by("-created_at")
-        .values("created_at")[:1]
-    )
-
-    blueprints = list(
-        DeploymentBlueprint.objects.filter(app=app)
-        .exclude(status=DeploymentBlueprint.Status.DISCARDED)
-        .select_related("environment", "environment__aws_account")
-        .annotate(
-            current_deployment_id=Subquery(current_deployment_id_subquery),
-            current_deployment_created_at=Subquery(current_deployment_created_at_subquery),
-            current_launched_deployment_created_at=Subquery(current_launched_deployment_created_at_subquery),
-        )
-    )
-
-    blueprints_by_environment_id: dict[UUID, list[DeploymentBlueprint]] = {}
-    for blueprint in blueprints:
-        blueprints_by_environment_id.setdefault(blueprint.environment_id, []).append(blueprint)
-
-    current_blueprints = []
-    for environment_blueprints in blueprints_by_environment_id.values():
-        current_blueprint = _get_current_launched_blueprint(blueprints=environment_blueprints)
-        if current_blueprint:
-            current_blueprints.append(current_blueprint)
-
-    current_deployment_ids = [
-        blueprint.current_deployment_id
-        for blueprint in current_blueprints
-        if getattr(blueprint, "current_deployment_id", None)
-    ]
-    current_deployments_by_id = {
-        deployment.id: deployment
-        for deployment in Deployment.objects.filter(id__in=current_deployment_ids).select_related(
-            "app",
-            "environment",
-            "environment__aws_account",
-        )
-    }
-
-    environment_rows = [
-        DeployedEnvironmentRow(
-            blueprint=blueprint,
-            current_deployment=current_deployments_by_id[blueprint.current_deployment_id],
-        )
-        for blueprint in current_blueprints
-    ]
-    environment_rows.sort(key=lambda row: row.current_deployment.created_at, reverse=True)
-    return environment_rows
 
 
 def build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
     """Build the shared context dict for app detail rendering."""
     context = base.get_app_shell_context(request=request, current_page="workspaces")
 
-    deployments = Deployment.objects.filter(
-        app=app,
-    ).select_related("environment", "environment__aws_account").order_by("-created_at")[:20]
-    open_blueprint = get_open_blueprint(app=app)
-    environment_rows = _build_deployed_environment_rows(app=app)
+    deployments = Deployment.objects.filter(app=app).order_by("-created_at")[:20]
+    current_deployment = get_current_deployment(app=app)
 
     # Tags
     direct_tags = ResourceTag.objects.filter(app=app).order_by("key", "value")
@@ -221,8 +103,7 @@ def build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
 
     context["app"] = app
     context["deployments"] = deployments
-    context["environment_rows"] = environment_rows
-    context["open_blueprint"] = open_blueprint
+    context["current_deployment"] = current_deployment
     # Deployment Log tab: enabled once there's something to show (any logged deployment, or one
     # currently in flight). When a deployment is in progress we open that tab by default, so a
     # freshly started deploy lands straight on its live log instead of the Overview.
@@ -236,9 +117,8 @@ def build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
         # Address shown by the welcome + deploy-success dialogs. Computed here so
         # every renderer of app_detail.html (detail, redeploy, teardown) includes
         # the deploy-success watcher, not just the app_detail view.
-        zone = latest_deployment.environment.shared_alb_hosted_zone
-        subdomain = latest_deployment.subdomain or app.slug
-        context["deploy_address"] = f"{subdomain}.{zone}" if zone else subdomain
+        zone = app.environment.shared_alb_hosted_zone
+        context["deploy_address"] = f"{app.slug}.{zone}" if zone else app.slug
     org = request.user.current_organization
     context["direct_tags"] = direct_tags
     context["inherited_tags"] = inherited_tags
@@ -354,7 +234,6 @@ def app_deployment_log(request: HttpRequest, app_slug: str) -> HttpResponse:
 
     deployment = (
         Deployment.objects.filter(app=app)
-        .select_related("environment", "environment__aws_account")
         .order_by("-created_at")
         .first()
     )
@@ -380,36 +259,25 @@ def app_deployment_log(request: HttpRequest, app_slug: str) -> HttpResponse:
 
 @login_required
 @require_GET
-def blueprint_row_status(request: HttpRequest, blueprint_id: UUID) -> HttpResponse:
-    """Return updated blueprint row inner HTML for self-terminating polling."""
-    blueprint = get_object_or_404(
-        DeploymentBlueprint.objects.select_related(
-            "app", "app__workspace", "environment", "environment__aws_account",
-        ),
-        id=blueprint_id,
-        app__organization=request.user.current_organization,
-    )
+def app_environment_row_status(request: HttpRequest, app_slug: str) -> HttpResponse:
+    """Return updated environment row inner HTML for self-terminating polling."""
+    app = _get_app_for_user(request, app_slug)
 
-    denied = abac_view_checks.check_abac(request, blueprint.app.workspace, "workspace", "workspace:view")
+    denied = abac_view_checks.check_abac(request, app.workspace, "workspace", "workspace:view")
     if denied:
         return denied
 
-    current_deployment = (
-        Deployment.objects.filter(blueprint=blueprint, status__in=Deployment.VISIBLE_STATUSES)
-        .order_by("-created_at")
-        .first()
-    )
+    current_deployment = get_current_deployment(app=app)
     if not current_deployment:
         return HttpResponse(status=404)
 
     context = {
-        "app": blueprint.app,
-        "blueprint": blueprint,
+        "app": app,
         "current_deployment": current_deployment,
     }
     return render(
         request,
-        "humanityrules_app/apps/_app_blueprint_row.html#blueprint_row_content",
+        "humanityrules_app/apps/_app_environment_row.html#environment_row_content",
         context=context,
     )
 
@@ -490,23 +358,13 @@ def app_deployment_redeploy(request: HttpRequest, app_slug: str, deployment_id: 
     if Deployment.objects.filter(app=app, status__in=Deployment.IN_PROGRESS_STATUSES).exists():
         return HttpResponse(status=422)
 
-    try:
-        app_slugs.require_valid_app_hostname_label(value=deployment.subdomain or app.slug)
-    except ValueError as exc:
-        context = build_app_detail_context(request=request, app=app)
-        context["redeploy_error"] = str(exc)
-        return render(request=request, template_name="humanityrules_app/apps/app_detail.html", context=context)
-
-    git_ref = deployment.git_ref or app.branch
+    git_ref = deployment.git_ref
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
     short_ref = git_ref[:8] if len(git_ref) > 8 else git_ref
     image_tag = f"{app.slug}-{short_ref}-{timestamp}"
 
     Deployment.objects.create(
-        blueprint=deployment.blueprint,
         app=app,
-        environment=deployment.environment,
-        subdomain=deployment.subdomain,
         git_ref=git_ref,
         image_tag=image_tag,
         status=Deployment.Status.PENDING,
@@ -655,8 +513,8 @@ def app_remove(request: HttpRequest, app_slug: str) -> HttpResponse:
         if app_is_live(locked_app):
             return HttpResponse(status=422)
 
-        environments = environment_operation_gate.lock_app_environments_for_removal(app_id=locked_app.id)
-        if environment_operation_gate.has_tearing_down_environment(environments=environments):
+        environment = environment_operation_gate.lock_app_environment_for_removal(app_id=locked_app.id)
+        if environment.status == Environment.Status.TEARING_DOWN:
             return HttpResponse(status=422)
 
         AppRemovalJob.objects.create(
