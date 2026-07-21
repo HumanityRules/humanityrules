@@ -362,12 +362,20 @@ class Command(BaseCommand):
             return
 
         try:
-            app = models.App.objects.get(slug=app_slug)
+            app = models.App.objects.select_related("environment", "environment__aws_account").get(slug=app_slug)
         except models.App.DoesNotExist:
             self.stderr.write(self.style.ERROR(f"App '{app_slug}' not found"))
             return
 
         if remove_app:
+            # Sandbox slugs are reusable across orgs, so a released slug must never leave data
+            # behind. Force a full purge regardless of the flags the caller passed.
+            if app.environment.aws_account.is_humr_sandbox and not (delete_secrets and delete_persistent_data and delete_policies):
+                self.stdout.write(self.style.WARNING(
+                    "Sandbox account: forcing --delete-secrets --delete-persistent-data --delete-policies "
+                    "(sandbox slug release requires a full data purge)"
+                ))
+                delete_secrets = delete_persistent_data = delete_policies = True
             self._queue_app_removal(
                 app=app,
                 delete_secrets=delete_secrets,

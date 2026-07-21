@@ -487,6 +487,7 @@ def app_remove_confirm(request: HttpRequest, app_slug: str) -> HttpResponse:
         "app": app,
         "post_url": reverse("app_remove", kwargs={"app_slug": app.slug}),
         "has_persistent_data": _app_has_persistent_data(app),
+        "is_sandbox": app.environment.aws_account.is_humr_sandbox,
     }
     return render(request, "humanityrules_app/apps/_app_remove_confirm_modal.html", context=context)
 
@@ -501,7 +502,10 @@ def app_remove(request: HttpRequest, app_slug: str) -> HttpResponse:
     if denied:
         return denied
 
-    delete_all_data = request.POST.get("delete_all_data") == "on"
+    # Sandbox slugs are reusable across orgs, so a released slug must never leave data behind:
+    # the full-purge choice is mandatory, not a user checkbox.
+    is_sandbox = app.environment.aws_account.is_humr_sandbox
+    delete_all_data = is_sandbox or request.POST.get("delete_all_data") == "on"
     with transaction.atomic():
         locked_app = get_object_or_404(
             App.objects.select_for_update().select_related("workspace"),

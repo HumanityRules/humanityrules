@@ -18,6 +18,7 @@ from humanityrules_app.services import infra_customer
 from humanityrules_app.services import sandbox_service
 
 from . import app_deployment_teardown_executor
+from . import app_remove_executor
 from . import job_logging
 
 logger = logging.getLogger(__name__)
@@ -92,16 +93,33 @@ def _teardown_all_deployments(environment: models.Environment) -> bool:
     return True
 
 
-def _delete_environment_apps(environment: models.Environment) -> None:
+def _delete_environment_apps(environment: models.Environment) -> bool:
     """Delete the environment's apps (cascading their deployments, permissions, activity, and logs).
 
     Apps live and die with their environment; releasing each sandbox slug claim
     here frees the name for reuse, and removing the App rows satisfies the
     PROTECT FK so the environment row itself can be deleted.
+
+    In a sandbox account the slug is reusable across orgs, so releasing it while its
+    data survives would let the next claimant inherit it. Each app's namespaces are
+    therefore purged BEFORE its slug is released; on the first purge failure we stop
+    and return False (the caller sets the env to ERROR) so a slug is never released
+    with data left behind.
     """
-    for app in models.App.objects.filter(environment=environment):
+    is_sandbox = environment.aws_account.is_humr_sandbox
+    apps = models.App.objects.filter(environment=environment).select_related("source_template")
+    for app in apps:
+        if is_sandbox:
+            ok, message = app_remove_executor.purge_app_namespace_data(app=app, env=environment)
+            if not ok:
+                logger.error(
+                    "Sandbox data purge failed for app '%(app_slug)s' - stopping environment teardown: %(message)s",
+                    {"app_slug": app.slug, "message": message},
+                )
+                return False
         sandbox_service.release_sandbox_app_slug(app_slug=app.slug, organization_id=app.organization_id)
         app.delete()
+    return True
 
 
 def run_environment_teardown(environment_id: str) -> bool:
@@ -153,7 +171,11 @@ def run_environment_teardown(environment_id: str) -> bool:
                     "Sandbox environment '%(env_name)s': skipping shared base infra teardown",
                     {"env_name": environment.name},
                 )
-                _delete_environment_apps(environment=environment)
+                if not _delete_environment_apps(environment=environment):
+                    environment.status = models.Environment.Status.ERROR
+                    environment.status_message = "Environment teardown failed: sandbox data purge failed"
+                    environment.save(update_fields=["status", "status_message", "updated_at"])
+                    return False
                 environment.delete()
                 return True
 
@@ -176,6 +198,8 @@ def run_environment_teardown(environment_id: str) -> bool:
                     "Environment '%(env_name)s' torn down and deleted successfully",
                     {"env_name": env_name},
                 )
+                # Dedicated (non-sandbox) accounts never claim slugs, so the purge does not
+                # run and _delete_environment_apps cannot fail here — no ERROR branch needed.
                 _delete_environment_apps(environment=environment)
                 environment.delete()
                 return True
