@@ -81,7 +81,7 @@ ensure_caddy_fragments() {
 }
 
 reconcile_widgets() {
-    widgets apply --all \
+    widgets apply --all --bootstrap \
         || echo "[webui] Widget reconciliation failed (non-fatal); continuing with last-good routes."
 }
 

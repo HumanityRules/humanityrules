@@ -84,8 +84,14 @@ SYSTEM_PROJECT = ProcessComposeProject(
 SLUG_PATTERN = re.compile(r"^(?:__)?[a-z][a-z0-9-]{0,30}[a-z0-9]$")
 INTERNAL_SLUG_PREFIX = "__"
 SYSTEM_SLUG_PREFIX = "system."
+WIDGET_PROCESS_PREFIX = "widget."
+MANAGED_PORT_KEYS = {"WEBAPP_PORT", "WIDGET_PORT"}
 
 PUBLIC_HOSTNAME_ENV = "HUMR_PUBLIC_HOSTNAME"
+
+
+class ManagedPortError(ValueError):
+    """Report invalid or ambiguous managed ports in the shared project."""
 
 
 def die(msg: str, code: int = 1) -> None:
@@ -126,8 +132,13 @@ def load_process_compose_yaml(project: ProcessComposeProject) -> dict:
 
 def save_process_compose_yaml(project: ProcessComposeProject, doc: dict) -> None:
     tmp = project.yaml_path.with_suffix(".yaml.tmp")
-    tmp.write_text(yaml.safe_dump(doc, sort_keys=False))
+    tmp.write_text(render_process_compose_yaml(doc=doc))
     tmp.replace(project.yaml_path)
+
+
+def render_process_compose_yaml(doc: dict) -> str:
+    """Serialize the shared supervisor document for atomic external publication."""
+    return yaml.safe_dump(doc, sort_keys=False)
 
 
 def run_process_compose(*args: str, project: ProcessComposeProject, check: bool, capture: bool) -> subprocess.CompletedProcess:
@@ -161,8 +172,64 @@ def process_compose_states(project: ProcessComposeProject) -> list[dict]:
     return json.loads(res.stdout or "[]")
 
 
+def process_compose_states_or_raise(project: ProcessComposeProject) -> list[dict]:
+    """Read supervisor state without terminating a calling lifecycle CLI."""
+    result = run_process_compose(
+        "list",
+        "-o",
+        "json",
+        project=project,
+        check=False,
+        capture=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"process-compose list failed: {result.stderr.strip() or 'unknown error'}"
+        )
+    try:
+        states = json.loads(result.stdout or "[]")
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("process-compose returned invalid JSON state") from exc
+    if not isinstance(states, list) or any(not isinstance(state, dict) for state in states):
+        raise RuntimeError("process-compose returned invalid process state")
+    return states
+
+
 def process_compose_state_for(project: ProcessComposeProject, slug: str) -> dict | None:
     return next((s for s in process_compose_states(project=project) if s.get("name") == slug), None)
+
+
+def wait_for_process_ready(
+    project: ProcessComposeProject,
+    process_name: str,
+    timeout: int,
+) -> dict:
+    """Wait until one process is ready, terminal, or the timeout expires."""
+    deadline = time.monotonic() + timeout
+    last_state: dict | None = None
+    while True:
+        last_state = next(
+            (
+                state
+                for state in process_compose_states_or_raise(project=project)
+                if state.get("name") == process_name
+            ),
+            None,
+        )
+        if last_state is not None:
+            if last_state.get("is_ready") == "Ready":
+                return last_state
+            if process_compose_state_failed_before_ready(state=last_state):
+                return last_state
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(0.5, remaining))
+    return last_state or {
+        "name": process_name,
+        "status": "unknown",
+        "is_ready": "Unknown",
+    }
 
 
 def port_from_entry(entry: dict) -> int | None:
@@ -172,21 +239,76 @@ def port_from_entry(entry: dict) -> int | None:
     return None
 
 
+def managed_port_from_entry(entry: dict, process_name: str) -> int | None:
+    """Return one validated Web App or Widget port from a process entry."""
+    environment = entry.get("environment", [])
+    if not isinstance(environment, list):
+        raise ManagedPortError(
+            f"process {process_name!r} environment must be a list of strings"
+        )
+
+    declarations: list[tuple[str, str]] = []
+    for index, item in enumerate(environment):
+        if not isinstance(item, str):
+            raise ManagedPortError(
+                f"process {process_name!r} environment item {index} must be a string"
+            )
+        key, separator, value = item.partition("=")
+        if key not in MANAGED_PORT_KEYS:
+            continue
+        if not separator or not value or re.fullmatch(r"[0-9]+", value) is None:
+            raise ManagedPortError(
+                f"process {process_name!r} has malformed {key} declaration"
+            )
+        declarations.append((key, value))
+
+    if len(declarations) > 1:
+        names = ", ".join(key for key, _value in declarations)
+        raise ManagedPortError(
+            f"process {process_name!r} has multiple managed port declarations: {names}"
+        )
+    if not declarations:
+        return None
+
+    key, value = declarations[0]
+    port = int(value)
+    if not PORT_MIN <= port <= PORT_MAX:
+        raise ManagedPortError(
+            f"process {process_name!r} has out-of-range {key}={port}; "
+            f"expected {PORT_MIN}-{PORT_MAX}"
+        )
+    return port
+
+
 def used_ports(doc: dict) -> set[int]:
-    ports: set[int] = set()
-    for entry in doc.get("processes", {}).values():
-        port = port_from_entry(entry)
+    processes = doc.get("processes", {})
+    if not isinstance(processes, dict):
+        raise ManagedPortError("process-compose processes must be a mapping")
+    owners: dict[int, str] = {}
+    for name, entry in processes.items():
+        if not isinstance(name, str) or not isinstance(entry, dict):
+            raise ManagedPortError("process-compose process entries must be named mappings")
+        port = managed_port_from_entry(entry=entry, process_name=name)
         if port is not None:
-            ports.add(port)
-    return ports
+            prior_owner = owners.get(port)
+            if prior_owner is not None:
+                raise ManagedPortError(
+                    f"managed port {port} is assigned to both "
+                    f"{prior_owner!r} and {name!r}"
+                )
+            owners[port] = name
+    return set(owners)
 
 
 def next_free_port(doc: dict) -> int:
-    used = used_ports(doc)
+    try:
+        used = used_ports(doc)
+    except ManagedPortError as exc:
+        die(f"invalid shared process-compose ports: {exc}")
     for port in range(PORT_MIN, PORT_MAX + 1):
         if port not in used:
             return port
-    die(f"no free ports in {PORT_MIN}-{PORT_MAX}; delete an app first")
+    die(f"no free ports in {PORT_MIN}-{PORT_MAX}; delete a Web App or Widget first")
 
 
 def validate_slug(slug: str) -> None:
@@ -206,6 +328,25 @@ def validate_slug(slug: str) -> None:
 def is_internal_slug(slug: str) -> bool:
     """Platform-internal slug (`__admin`, future runtime-admin webapps)."""
     return slug.startswith(INTERNAL_SLUG_PREFIX)
+
+
+def widget_process_name(slug: str) -> str:
+    """Map a validated Widget slug into its collision-proof supervisor namespace."""
+    return f"{WIDGET_PROCESS_PREFIX}{slug}"
+
+
+def is_widget_process_name(name: str) -> bool:
+    """Identify supervisor entries exclusively owned by Widgets reconciliation."""
+    return name.startswith(WIDGET_PROCESS_PREFIX)
+
+
+def webapp_processes(doc: dict) -> dict:
+    """Return only Web App-owned processes from the shared supervisor document."""
+    return {
+        name: entry
+        for name, entry in doc.get("processes", {}).items()
+        if not is_widget_process_name(name=name)
+    }
 
 
 def matcher_name(slug: str) -> str:
@@ -292,6 +433,8 @@ def regenerate_routes(doc: dict) -> None:
     base_host = public_hostname()
     blocks: list[str] = []
     for slug, entry in sorted(doc.get("processes", {}).items()):
+        if is_widget_process_name(name=slug):
+            continue
         if entry.get("disabled"):
             continue
         port = port_from_entry(entry)

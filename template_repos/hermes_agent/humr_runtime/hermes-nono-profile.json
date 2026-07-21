@@ -76,6 +76,7 @@
       "/opt/humr/runtime/widgets/widgets",
       "/opt/humr/runtime/widgets/widgets_core.py",
       "/opt/humr/runtime/widgets/widgets_runtime.py",
+      "/opt/humr/runtime/widgets/widget-unavailable.html",
       "/opt/humr/bin/aws",
       "/opt/humr/bin/gws",
       "/opt/humr/bin/gh",

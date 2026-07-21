@@ -1,22 +1,28 @@
-"""Static routing and lifecycle reconciliation for HumR Widgets."""
+"""Routing and lifecycle reconciliation for HumR Widgets."""
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import secrets
 import shutil
 import stat
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from typing import Any
 
+import webapps_lib
 import widgets_core
 
 
 WIDGETS_CADDY_PATH = Path("/workspace/.config/caddy/widgets.caddy")
 WIDGETS_STATIC_ROOT = widgets_core.WIDGETS_CONFIG_ROOT / "static"
 WIDGETS_TOMBSTONES_ROOT = widgets_core.WIDGETS_ROOT.parent / ".widgets-tombstones"
+WIDGETS_LOGS_ROOT = widgets_core.WIDGETS_CONFIG_ROOT / "logs"
+WIDGET_UNAVAILABLE_PATH = Path("/opt/humr/runtime/widgets/widget-unavailable.html")
+DEFAULT_APPLY_TIMEOUT_SECONDS = webapps_lib.DEFAULT_TIMEOUT_SECONDS
 
 _DIRECTORY_OPEN_FLAGS = (
     os.O_RDONLY
@@ -37,6 +43,9 @@ class WidgetRuntimePaths:
     routes_path: Path
     static_root: Path
     tombstones_root: Path
+    logs_root: Path
+    unavailable_path: Path
+    process_project: webapps_lib.ProcessComposeProject
     lock_path: Path
 
 
@@ -64,31 +73,68 @@ class WidgetReconciliationError(RuntimeError):
     """Report a reconciliation-wide failure that must preserve derived state."""
 
 
+class WidgetDeletionCommittedError(WidgetReconciliationError):
+    """Report committed deletion whose isolated residuals still need cleanup."""
+
+
 DEFAULT_PATHS = WidgetRuntimePaths(
     widgets_root=widgets_core.WIDGETS_ROOT,
     registry_path=widgets_core.REGISTRY_PATH,
     routes_path=WIDGETS_CADDY_PATH,
     static_root=WIDGETS_STATIC_ROOT,
     tombstones_root=WIDGETS_TOMBSTONES_ROOT,
+    logs_root=WIDGETS_LOGS_ROOT,
+    unavailable_path=WIDGET_UNAVAILABLE_PATH,
+    process_project=webapps_lib.WEBAPPS_PROJECT,
     lock_path=widgets_core.LOCK_PATH,
 )
 
 
-def build_widgets_caddy_fragment(widgets: Iterable[widgets_core.WidgetManifest], static_root: Path, registry_path: Path) -> str:
-    """Render deterministic same-origin registry and static Widget routes."""
+def build_widgets_caddy_fragment(
+    widgets: Iterable[widgets_core.WidgetManifest],
+    static_root: Path,
+    registry_path: Path,
+    backend_ports: Mapping[str, int],
+    unavailable_path: Path,
+) -> str:
+    """Render deterministic same-origin registry, static, and backend routes."""
     blocks = [_registry_route_block(registry_path=registry_path)]
     for widget in sorted(widgets, key=lambda item: item.slug):
-        if widget.frontend.mode != "static":
-            continue
-        blocks.append(_static_widget_route_block(widget=widget, static_root=static_root))
+        port = backend_ports.get(widget.slug)
+        blocks.append(_widget_root_redirect_block(slug=widget.slug))
+        if port is not None:
+            blocks.append(
+                _widget_api_route_block(
+                    widget=widget,
+                    port=port,
+                )
+            )
+        if widget.frontend.mode == "static":
+            blocks.append(_static_widget_route_block(widget=widget, static_root=static_root))
+        elif port is not None:
+            blocks.append(
+                _widget_backend_frontend_route_block(
+                    widget=widget,
+                    port=port,
+                    unavailable_path=unavailable_path,
+                )
+            )
+    if backend_ports:
+        blocks.append(_widget_backend_error_routes(unavailable_path=unavailable_path))
     return "\n".join(blocks)
 
 
-def reconcile_widgets(paths: WidgetRuntimePaths, target_slug: str | None) -> WidgetReconcileResult:
+def reconcile_widgets(paths: WidgetRuntimePaths, target_slug: str | None, update_processes: bool) -> WidgetReconcileResult:
     """Rebuild registry, static snapshots, and routes from authoritative manifests."""
     paths.widgets_root.mkdir(parents=True, exist_ok=True)
+    paths.logs_root.mkdir(parents=True, exist_ok=True)
     with widgets_core.WidgetsLock(lock_path=paths.lock_path):
-        return _reconcile_widgets_unlocked(paths=paths, target_slug=target_slug)
+        with webapps_lib.ProcessComposeLock(project=paths.process_project):
+            return _reconcile_widgets_unlocked(
+                paths=paths,
+                target_slug=target_slug,
+                update_processes=update_processes,
+            )
 
 
 def list_widgets(paths: WidgetRuntimePaths) -> widgets_core.WidgetDiscovery:
@@ -98,7 +144,26 @@ def list_widgets(paths: WidgetRuntimePaths) -> widgets_core.WidgetDiscovery:
         return widgets_core.discover_widgets(widgets_root=paths.widgets_root)
 
 
-def delete_widget(paths: WidgetRuntimePaths, slug: str, confirmed: bool) -> WidgetReconcileResult:
+def wait_for_widget_ready(
+    paths: WidgetRuntimePaths,
+    slug: str,
+    timeout: int,
+) -> dict[str, Any]:
+    """Wait for one reconciled Widget backend's namespaced process."""
+    process_name = webapps_lib.widget_process_name(slug=slug)
+    state = webapps_lib.wait_for_process_ready(
+        project=paths.process_project,
+        process_name=process_name,
+        timeout=timeout,
+    )
+    if not isinstance(state, dict):
+        raise WidgetReconciliationError(
+            f"process-compose returned invalid state for {process_name!r}"
+        )
+    return state
+
+
+def delete_widget(paths: WidgetRuntimePaths, slug: str, confirmed: bool, update_processes: bool) -> WidgetReconcileResult:
     """Permanently remove exactly one Widget after reversible reconciliation."""
     if not confirmed:
         raise widgets_core.WidgetValidationError(
@@ -106,36 +171,255 @@ def delete_widget(paths: WidgetRuntimePaths, slug: str, confirmed: bool) -> Widg
         )
     widgets_core.validate_slug(slug=slug)
     paths.widgets_root.mkdir(parents=True, exist_ok=True)
+    paths.logs_root.mkdir(parents=True, exist_ok=True)
 
     with widgets_core.WidgetsLock(lock_path=paths.lock_path):
-        widget_path = _validated_delete_path(widgets_root=paths.widgets_root, slug=slug)
-        paths.tombstones_root.mkdir(parents=True, exist_ok=True)
-        _require_tombstones_outside_discovery(
-            widgets_root=paths.widgets_root,
-            tombstones_root=paths.tombstones_root,
-            slug=slug,
-        )
-        if widget_path.parent.stat().st_dev != paths.tombstones_root.stat().st_dev:
-            raise widgets_core.WidgetValidationError(
-                slug=slug, message="Widget source and deletion tombstone are not on the same filesystem"
+        with webapps_lib.ProcessComposeLock(project=paths.process_project):
+            paths.tombstones_root.mkdir(parents=True, exist_ok=True)
+            _require_tombstones_outside_discovery(
+                widgets_root=paths.widgets_root,
+                tombstones_root=paths.tombstones_root,
+                slug=slug,
             )
-        tombstone_path = paths.tombstones_root / f"{slug}.{os.getpid()}.{secrets.token_hex(8)}"
-        os.replace(src=widget_path, dst=tombstone_path)
-        try:
-            result = _reconcile_widgets_unlocked(paths=paths, target_slug=None)
-        except BaseException:
+            tombstone_path = paths.tombstones_root / slug
+            widget_path = paths.widgets_root / slug
+            if _path_exists(path=tombstone_path):
+                if _path_exists(path=widget_path):
+                    raise WidgetReconciliationError(
+                        f"Widget {slug!r} has both source and deletion residuals; "
+                        "refusing ambiguous cleanup"
+                    )
+                result = _reconcile_widgets_unlocked(
+                    paths=paths,
+                    target_slug=None,
+                    update_processes=update_processes,
+                )
+                _finish_committed_delete_cleanup(
+                    tombstone_path=tombstone_path,
+                    slug=slug,
+                )
+                return result
+
+            widget_path = _validated_delete_path(
+                widgets_root=paths.widgets_root,
+                slug=slug,
+            )
+            if widget_path.parent.stat().st_dev != paths.tombstones_root.stat().st_dev:
+                raise widgets_core.WidgetValidationError(
+                    slug=slug, message="Widget source and deletion tombstone are not on the same filesystem"
+                )
+            log_path = paths.logs_root / f"{slug}.log"
+            if (
+                _path_exists(path=log_path)
+                and log_path.parent.stat().st_dev
+                != paths.tombstones_root.stat().st_dev
+            ):
+                raise widgets_core.WidgetValidationError(
+                    slug=slug,
+                    message=(
+                        "Widget log and deletion tombstone are not on the same "
+                        "filesystem"
+                    ),
+                )
+            tombstone_path.mkdir()
+            source_tombstone = tombstone_path / "source"
+            log_tombstone = tombstone_path / "backend.log"
             try:
-                os.replace(src=tombstone_path, dst=widget_path)
-            except OSError as restore_error:
+                _move_delete_artifacts_to_tombstone(
+                    widget_path=widget_path,
+                    log_path=log_path,
+                    source_tombstone=source_tombstone,
+                    log_tombstone=log_tombstone,
+                )
+            except BaseException:
+                _restore_delete_artifacts(
+                    widget_path=widget_path,
+                    log_path=log_path,
+                    source_tombstone=source_tombstone,
+                    log_tombstone=log_tombstone,
+                    slug=slug,
+                )
+                raise
+            try:
+                result = _reconcile_widgets_unlocked(
+                    paths=paths,
+                    target_slug=None,
+                    update_processes=update_processes,
+                )
+            except BaseException:
+                _restore_delete_artifacts(
+                    widget_path=widget_path,
+                    log_path=log_path,
+                    source_tombstone=source_tombstone,
+                    log_tombstone=log_tombstone,
+                    slug=slug,
+                )
+                raise
+            _finish_committed_delete_cleanup(
+                tombstone_path=tombstone_path,
+                slug=slug,
+            )
+            return result
+
+
+def reconcile_widget_processes(
+    document: dict[str, Any],
+    widgets: Iterable[widgets_core.WidgetManifest],
+    widgets_root: Path,
+    logs_root: Path,
+) -> tuple[dict[str, Any], dict[str, int]]:
+    """Replace only Widget-owned supervisor entries and allocate stable shared ports."""
+    reconciled = copy.deepcopy(document)
+    raw_processes = reconciled.get("processes", {})
+    if not isinstance(raw_processes, dict):
+        raise WidgetReconciliationError("process-compose processes must be a mapping")
+    processes: dict[str, Any] = raw_processes
+    backend_widgets = tuple(
+        sorted(
+            (widget for widget in widgets if widget.backend is not None),
+            key=lambda widget: widget.slug,
+        )
+    )
+
+    used_ports: set[int] = set()
+    preserved_port_owners: dict[int, str] = {}
+    preserved_processes: dict[str, Any] = {}
+    for name, entry in processes.items():
+        if webapps_lib.is_widget_process_name(name=name):
+            continue
+        preserved_processes[name] = entry
+        port = _managed_port(entry=entry, process_name=name)
+        if port is not None:
+            prior_owner = preserved_port_owners.get(port)
+            if prior_owner is not None:
                 raise WidgetReconciliationError(
-                    f"failed to restore Widget {slug!r} from {tombstone_path}: {restore_error}"
-                ) from restore_error
-            raise
-        shutil.rmtree(tombstone_path)
-        return result
+                    f"managed port {port} is assigned to both "
+                    f"{prior_owner!r} and {name!r}"
+                )
+            preserved_port_owners[port] = name
+            used_ports.add(port)
+
+    backend_ports: dict[str, int] = {}
+    for widget in backend_widgets:
+        process_name = webapps_lib.widget_process_name(slug=widget.slug)
+        existing_entry = processes.get(process_name)
+        existing_port = _widget_port(
+            entry=existing_entry,
+            process_name=process_name,
+        )
+        if (
+            existing_port is not None
+            and webapps_lib.PORT_MIN <= existing_port <= webapps_lib.PORT_MAX
+            and existing_port not in used_ports
+        ):
+            backend_ports[widget.slug] = existing_port
+            used_ports.add(existing_port)
+
+    for widget in backend_widgets:
+        if widget.slug in backend_ports:
+            continue
+        port = _next_widget_port(used_ports=used_ports)
+        backend_ports[widget.slug] = port
+        used_ports.add(port)
+
+    for widget in backend_widgets:
+        process_name = webapps_lib.widget_process_name(slug=widget.slug)
+        preserved_processes[process_name] = make_widget_process_entry(
+            widget=widget,
+            widgets_root=widgets_root,
+            logs_root=logs_root,
+            port=backend_ports[widget.slug],
+        )
+    reconciled["processes"] = preserved_processes
+    return reconciled, backend_ports
 
 
-def _reconcile_widgets_unlocked(paths: WidgetRuntimePaths, target_slug: str | None) -> WidgetReconcileResult:
+def make_widget_process_entry(
+    widget: widgets_core.WidgetManifest, widgets_root: Path, logs_root: Path, port: int
+) -> dict[str, Any]:
+    """Build one declarative Widget backend process-compose entry."""
+    if widget.backend is None:
+        raise ValueError(f"Widget {widget.slug!r} has no backend")
+    return {
+        "command": widget.backend.command,
+        "working_dir": str(widgets_root / widget.slug),
+        "log_location": str(logs_root / f"{widget.slug}.log"),
+        "log_configuration": webapps_lib.plain_text_log_configuration(),
+        "environment": [
+            f"WIDGET_SLUG={widget.slug}",
+            f"WIDGET_BASE_PATH=/widgets/{widget.slug}",
+            f"WIDGET_PORT={port}",
+        ],
+        "availability": {
+            "restart": "on_failure",
+            "backoff_seconds": 2,
+            "max_restarts": 5,
+        },
+        "readiness_probe": {
+            "exec": {
+                "command": webapps_lib.readiness_probe_command(port=port),
+            },
+            "initial_delay_seconds": 5,
+            "period_seconds": 10,
+            "timeout_seconds": 2,
+            "success_threshold": 1,
+            "failure_threshold": 6,
+        },
+    }
+
+
+def _managed_port(entry: object, process_name: str) -> int | None:
+    if not isinstance(entry, dict):
+        raise WidgetReconciliationError(
+            f"process-compose entry {process_name!r} must be a mapping"
+        )
+    try:
+        port = webapps_lib.managed_port_from_entry(
+            entry=entry,
+            process_name=process_name,
+        )
+    except (TypeError, ValueError) as exc:
+        raise WidgetReconciliationError(
+            f"process-compose entry {process_name!r} has an invalid managed port: {exc}"
+        ) from exc
+    if port is None or isinstance(port, int):
+        return port
+    raise WidgetReconciliationError(
+        f"process-compose entry {process_name!r} has an invalid managed port"
+    )
+
+
+def _widget_port(entry: object, process_name: str) -> int | None:
+    if entry is None:
+        return None
+    port = _managed_port(entry=entry, process_name=process_name)
+    if port is None:
+        return None
+    if not isinstance(entry, dict):
+        raise WidgetReconciliationError(
+            f"process-compose entry {process_name!r} must be a mapping"
+        )
+    if any(
+        isinstance(item, str) and item.partition("=")[0] == "WIDGET_PORT"
+        for item in entry.get("environment", [])
+    ):
+        return port
+    return None
+
+
+def _next_widget_port(used_ports: set[int]) -> int:
+    for port in range(webapps_lib.PORT_MIN, webapps_lib.PORT_MAX + 1):
+        if port not in used_ports:
+            return port
+    raise WidgetReconciliationError(
+        f"no free ports in {webapps_lib.PORT_MIN}-{webapps_lib.PORT_MAX}; "
+        "delete a Web App or Widget first"
+    )
+
+
+def _reconcile_widgets_unlocked(
+    paths: WidgetRuntimePaths, target_slug: str | None, update_processes: bool
+) -> WidgetReconcileResult:
     if target_slug is not None:
         widgets_core.load_widget(widgets_root=paths.widgets_root, slug=target_slug)
 
@@ -151,6 +435,7 @@ def _reconcile_widgets_unlocked(paths: WidgetRuntimePaths, target_slug: str | No
     staged_snapshot = _new_staging_path(destination_path=paths.static_root)
     staged_registry: Path | None = None
     staged_routes: Path | None = None
+    staged_process_yaml: Path | None = None
     try:
         staged_snapshot.mkdir(parents=True)
         publishable_widgets, snapshot_failures = _build_static_snapshot(
@@ -165,14 +450,23 @@ def _reconcile_widgets_unlocked(paths: WidgetRuntimePaths, target_slug: str | No
                 key=lambda failure: failure.slug,
             )
         )
-        registry_payload = widgets_core.build_registry_payload(
-            widgets=publishable_widgets
+        process_document = webapps_lib.load_process_compose_yaml(
+            project=paths.process_project
         )
+        reconciled_process_document, backend_ports = reconcile_widget_processes(
+            document=process_document,
+            widgets=publishable_widgets,
+            widgets_root=paths.widgets_root,
+            logs_root=paths.logs_root,
+        )
+        registry_payload = widgets_core.build_registry_payload(widgets=publishable_widgets)
         registry_document = _render_registry_json(payload=registry_payload)
         routes_document = build_widgets_caddy_fragment(
             widgets=publishable_widgets,
             static_root=paths.static_root,
             registry_path=paths.registry_path,
+            backend_ports=backend_ports,
+            unavailable_path=paths.unavailable_path,
         )
         staged_registry = _stage_text(
             destination_path=paths.registry_path, document=registry_document
@@ -180,6 +474,22 @@ def _reconcile_widgets_unlocked(paths: WidgetRuntimePaths, target_slug: str | No
         staged_routes = _stage_text(
             destination_path=paths.routes_path, document=routes_document
         )
+        staged_process_yaml = _stage_text(
+            destination_path=paths.process_project.yaml_path,
+            document=webapps_lib.render_process_compose_yaml(
+                doc=reconciled_process_document
+            ),
+        )
+        publish_hook: Callable[[], None] | None = None
+        rollback_hook: Callable[[], None] | None = None
+        if update_processes:
+            def reload_process_project() -> None:
+                webapps_lib.process_compose_project_update(
+                    project=paths.process_project
+                )
+
+            publish_hook = reload_process_project
+            rollback_hook = reload_process_project
         _publish_artifacts(
             artifacts=(
                 _PublicationArtifact(
@@ -194,10 +504,21 @@ def _reconcile_widgets_unlocked(paths: WidgetRuntimePaths, target_slug: str | No
                     staged_path=staged_routes,
                     destination_path=paths.routes_path,
                 ),
-            )
+                _PublicationArtifact(
+                    staged_path=staged_process_yaml,
+                    destination_path=paths.process_project.yaml_path,
+                ),
+            ),
+            publish_hook=publish_hook,
+            rollback_hook=rollback_hook,
         )
     finally:
-        for staged_path in (staged_snapshot, staged_registry, staged_routes):
+        for staged_path in (
+            staged_snapshot,
+            staged_registry,
+            staged_routes,
+            staged_process_yaml,
+        ):
             if staged_path is not None:
                 _remove_path_best_effort(path=staged_path)
 
@@ -448,6 +769,65 @@ def _copy_regular_file(source_fd: int, destination_path: Path) -> None:
         os.fsync(destination_handle.fileno())
 
 
+def _move_delete_artifacts_to_tombstone(
+    widget_path: Path,
+    log_path: Path,
+    source_tombstone: Path,
+    log_tombstone: Path,
+) -> None:
+    os.replace(src=widget_path, dst=source_tombstone)
+    if _path_exists(path=log_path):
+        os.replace(src=log_path, dst=log_tombstone)
+
+
+def _restore_delete_artifacts(
+    widget_path: Path,
+    log_path: Path,
+    source_tombstone: Path,
+    log_tombstone: Path,
+    slug: str,
+) -> None:
+    restore_errors: list[OSError] = []
+    for tombstone, destination in (
+        (source_tombstone, widget_path),
+        (log_tombstone, log_path),
+    ):
+        if not _path_exists(path=tombstone):
+            continue
+        try:
+            if _path_exists(path=destination):
+                raise OSError(f"restore destination already exists: {destination}")
+            os.replace(src=tombstone, dst=destination)
+        except OSError as exc:
+            restore_errors.append(exc)
+    tombstone_path = source_tombstone.parent
+    try:
+        tombstone_path.rmdir()
+    except OSError as exc:
+        if _path_exists(path=tombstone_path):
+            restore_errors.append(exc)
+    if restore_errors:
+        details = "; ".join(str(error) for error in restore_errors)
+        raise WidgetReconciliationError(
+            f"failed to restore Widget {slug!r} deletion artifacts: {details}"
+        ) from restore_errors[0]
+
+
+def _finish_committed_delete_cleanup(tombstone_path: Path, slug: str) -> None:
+    if tombstone_path.is_symlink() or not tombstone_path.is_dir():
+        raise WidgetDeletionCommittedError(
+            f"Widget {slug!r} deletion is committed, but its cleanup path "
+            f"{tombstone_path} is not a safe directory"
+        )
+    try:
+        shutil.rmtree(tombstone_path)
+    except OSError as exc:
+        raise WidgetDeletionCommittedError(
+            f"Widget {slug!r} deletion is committed with residual cleanup at "
+            f"{tombstone_path}; repeat `widgets delete {slug} --yes` to finish"
+        ) from exc
+
+
 def _validated_delete_path(widgets_root: Path, slug: str) -> Path:
     widget_path = widgets_root / slug
     if widget_path.is_symlink():
@@ -515,9 +895,14 @@ def _new_staging_path(destination_path: Path) -> Path:
     )
 
 
-def _publish_artifacts(artifacts: tuple[_PublicationArtifact, ...]) -> None:
+def _publish_artifacts(
+    artifacts: tuple[_PublicationArtifact, ...],
+    publish_hook: Callable[[], None] | None,
+    rollback_hook: Callable[[], None] | None,
+) -> None:
     transaction_token = secrets.token_hex(8)
     states: list[_PublicationState] = []
+    publish_hook_started = False
     try:
         for artifact in artifacts:
             artifact.destination_path.parent.mkdir(parents=True, exist_ok=True)
@@ -535,6 +920,9 @@ def _publish_artifacts(artifacts: tuple[_PublicationArtifact, ...]) -> None:
                 state.backup_moved = True
             os.replace(src=artifact.staged_path, dst=artifact.destination_path)
             state.staged_moved = True
+        if publish_hook is not None:
+            publish_hook_started = True
+            publish_hook()
     except BaseException as publication_error:
         rollback_errors: list[OSError] = []
         for state in reversed(states):
@@ -549,11 +937,21 @@ def _publish_artifacts(artifacts: tuple[_PublicationArtifact, ...]) -> None:
             except OSError as rollback_error:
                 rollback_errors.append(rollback_error)
         for artifact in artifacts:
-            _remove_path(path=artifact.staged_path)
+            _remove_path_best_effort(path=artifact.staged_path)
+        rollback_hook_error: BaseException | None = None
+        if publish_hook_started and rollback_hook is not None and not rollback_errors:
+            try:
+                rollback_hook()
+            except BaseException as exc:
+                rollback_hook_error = exc
         if rollback_errors:
             details = "; ".join(str(error) for error in rollback_errors)
             raise WidgetReconciliationError(
                 f"publication failed and rollback was incomplete: {details}"
+            ) from publication_error
+        if rollback_hook_error is not None:
+            raise WidgetReconciliationError(
+                f"process-compose reload failed and restoring the prior project also failed: {rollback_hook_error}"
             ) from publication_error
         raise
     else:
@@ -599,6 +997,18 @@ def _registry_route_block(registry_path: Path) -> str:
     )
 
 
+def _widget_root_redirect_block(slug: str) -> str:
+    matcher = f"widget_{slug.replace('-', '_')}"
+    base_path = f"/widgets/{slug}"
+    return (
+        f"@{matcher}_root {{\n"
+        "\theader X-Forwarded-Host {$HUMR_PUBLIC_HOSTNAME}\n"
+        f"\tpath {base_path}\n"
+        "}\n"
+        f"redir @{matcher}_root {base_path}/ 308\n"
+    )
+
+
 def _static_widget_route_block(widget: widgets_core.WidgetManifest, static_root: Path) -> str:
     entry = widget.frontend.entry
     if entry is None:
@@ -616,11 +1026,6 @@ def _static_widget_route_block(widget: widgets_core.WidgetManifest, static_root:
     base_path = f"/widgets/{widget.slug}"
     safe_assets_pattern = f"^{base_path}/assets/(?:[^./][^/]*/)*[^./][^/]*$"
     return (
-        f"@{matcher}_root {{\n"
-        "\theader X-Forwarded-Host {$HUMR_PUBLIC_HOSTNAME}\n"
-        f"\tpath {base_path}\n"
-        "}\n"
-        f"redir @{matcher}_root {base_path}/ 308\n"
         f"@{matcher}_assets {{\n"
         "\theader X-Forwarded-Host {$HUMR_PUBLIC_HOSTNAME}\n"
         f"\tpath_regexp {matcher}_assets_path {safe_assets_pattern}\n"
@@ -638,6 +1043,88 @@ def _static_widget_route_block(widget: widgets_core.WidgetManifest, static_root:
         f"\troot * {widget_static_root}\n"
         f"\trewrite * {entry_target}\n"
         "\tfile_server\n"
+        "}\n"
+    )
+
+
+def _widget_api_route_block(
+    widget: widgets_core.WidgetManifest,
+    port: int,
+) -> str:
+    matcher = f"widget_{widget.slug.replace('-', '_')}"
+    route_matcher = f"{matcher}_api"
+    base_path = f"/widgets/{widget.slug}"
+    return (
+        f"@{route_matcher} {{\n"
+        "\theader X-Forwarded-Host {$HUMR_PUBLIC_HOSTNAME}\n"
+        f"\tpath {base_path}/api {base_path}/api/*\n"
+        "}\n"
+        f"handle @{route_matcher} {{\n"
+        "\tvars humr_widget_route api\n"
+        f"\turi strip_prefix {base_path}\n"
+        f"\treverse_proxy 127.0.0.1:{port} {{\n"
+        "\t\theader_up X-Forwarded-Host {header.X-Forwarded-Host}\n"
+        f"\t\theader_up X-Forwarded-Prefix {base_path}\n"
+        "\t}\n"
+        "}\n"
+    )
+
+
+def _widget_backend_frontend_route_block(
+    widget: widgets_core.WidgetManifest,
+    port: int,
+    unavailable_path: Path,
+) -> str:
+    matcher = f"widget_{widget.slug.replace('-', '_')}"
+    route_matcher = f"{matcher}_frontend"
+    base_path = f"/widgets/{widget.slug}"
+    unavailable_root = _caddy_quote(value=str(unavailable_path.parent))
+    unavailable_name = _caddy_quote(value=f"/{unavailable_path.name}")
+    return (
+        f"@{route_matcher} {{\n"
+        "\theader X-Forwarded-Host {$HUMR_PUBLIC_HOSTNAME}\n"
+        f"\tpath {base_path}/*\n"
+        "}\n"
+        f"handle @{route_matcher} {{\n"
+        "\tvars humr_widget_route frontend\n"
+        f"\turi strip_prefix {base_path}\n"
+        f"\treverse_proxy 127.0.0.1:{port} {{\n"
+        "\t\theader_up X-Forwarded-Host {header.X-Forwarded-Host}\n"
+        f"\t\theader_up X-Forwarded-Prefix {base_path}\n"
+        f"\t\t@{route_matcher}_upstream_error status 5xx\n"
+        f"\t\thandle_response @{route_matcher}_upstream_error {{\n"
+        f"\t\t\troot * {unavailable_root}\n"
+        f"\t\t\trewrite * {unavailable_name}\n"
+        '\t\t\theader Cache-Control "no-store"\n'
+        "\t\t\tfile_server {\n"
+        "\t\t\t\tstatus 503\n"
+        "\t\t\t}\n"
+        "\t\t}\n"
+        "\t}\n"
+        "}\n"
+    )
+
+
+def _widget_backend_error_routes(unavailable_path: Path) -> str:
+    unavailable_root = _caddy_quote(value=str(unavailable_path.parent))
+    unavailable_name = _caddy_quote(value=f"/{unavailable_path.name}")
+    return (
+        "handle_errors 5xx {\n"
+        "\t@widget_api_dial_error vars humr_widget_route api\n"
+        "\thandle @widget_api_dial_error {\n"
+        '\t\theader Cache-Control "no-store"\n'
+        "\t\theader Content-Type application/json\n"
+        '\t\trespond "{\\"error\\":\\"Widget backend unavailable\\"}" 503\n'
+        "\t}\n"
+        "\t@widget_frontend_dial_error vars humr_widget_route frontend\n"
+        "\thandle @widget_frontend_dial_error {\n"
+        f"\t\troot * {unavailable_root}\n"
+        f"\t\trewrite * {unavailable_name}\n"
+        '\t\theader Cache-Control "no-store"\n'
+        "\t\tfile_server {\n"
+        "\t\t\tstatus 503\n"
+        "\t\t}\n"
+        "\t}\n"
         "}\n"
     )
 
