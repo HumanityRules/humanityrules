@@ -22,16 +22,16 @@ from . import tenant_consistency
 logger = logging.getLogger(__name__)
 
 
-def _get_aws_session(deployment: models.Deployment):
+def _get_aws_session(environment: models.Environment):
     """Get an AWS session with assumed role credentials for the target account."""
-    aws_account = deployment.environment.aws_account
+    aws_account = environment.aws_account
 
     return infra_customer.iam_utils.get_assumed_role_session(
         access_key=settings.HUMR_AWS_ACCESS_KEY,
         secret_key=settings.HUMR_AWS_SECRET_KEY,
         account_id=aws_account.aws_account_id,
         external_id=str(aws_account.external_id),
-        region=deployment.environment.aws_region,
+        region=environment.aws_region,
     )
 
 
@@ -56,17 +56,12 @@ def run_deployment(deployment_id: str) -> bool:
     """
     try:
         deployment = models.Deployment.objects.select_related(
-            "blueprint",
-            "blueprint__app",
-            "blueprint__app__repository",
-            "blueprint__environment",
-            "blueprint__environment__aws_account",
             "app",
             "app__workspace",
             "app__repository",
             "app__source_template",
-            "environment",
-            "environment__aws_account",
+            "app__environment",
+            "app__environment__aws_account",
         ).get(id=deployment_id)
     except models.Deployment.DoesNotExist:
         logger.error("Deployment %(deployment_id)s not found", {"deployment_id": deployment_id})
@@ -82,9 +77,8 @@ def run_deployment(deployment_id: str) -> bool:
         deployment.save()
         return False
 
-    blueprint = deployment.blueprint
-    environment = deployment.environment
     app = deployment.app
+    environment = app.environment
 
     with job_logging.DeploymentLogContext(
         deployment=deployment,
@@ -106,7 +100,7 @@ def run_deployment(deployment_id: str) -> bool:
             return False
 
         if settings.HUMR_DEBUG_DEPLOYMENTS:
-            return app_deployment_debug_simulator.run_debug_deployment(deployment=deployment, blueprint=blueprint)
+            return app_deployment_debug_simulator.run_debug_deployment(deployment=deployment)
 
         # Update status to BUILDING
         deployment.status = models.Deployment.Status.BUILDING
@@ -128,10 +122,10 @@ def run_deployment(deployment_id: str) -> bool:
                 target_dir=cloned_repo_path,
             )
 
-            session = _get_aws_session(deployment)
+            session = _get_aws_session(environment=environment)
 
-            app_config = app_config_builder.build_app_config_from_blueprint(
-                blueprint=blueprint,
+            app_config = app_config_builder.build_app_config_from_app(
+                app=app,
                 repo_path=cloned_repo_path,
             )
 
@@ -147,7 +141,7 @@ def run_deployment(deployment_id: str) -> bool:
                 image_tag=deployment.image_tag,
                 env_slug=environment.slug,
                 environment=environment,
-                subdomain=deployment.subdomain or app.slug,
+                subdomain=app.slug,
                 synth_only=False,
                 shared_alb_hosted_zone=environment.shared_alb_hosted_zone or None,
             )
@@ -161,11 +155,6 @@ def run_deployment(deployment_id: str) -> bool:
 
                 deployment.save()
 
-                if blueprint:
-                    blueprint.status = models.DeploymentBlueprint.Status.ACTIVE
-                    blueprint.status_message = "Deployment succeeded"
-                    blueprint.save(update_fields=["status", "status_message", "updated_at"])
-
                 logger.info("Deployment %(deployment_id)s completed successfully", {"deployment_id": str(deployment_id)})
                 return True
             else:
@@ -173,11 +162,6 @@ def run_deployment(deployment_id: str) -> bool:
                 deployment.status_message = result.error or "Deployment failed"
                 deployment.completed_at = timezone.now()
                 deployment.save()
-
-                if blueprint:
-                    blueprint.status = models.DeploymentBlueprint.Status.FAILED
-                    blueprint.status_message = result.error or "Deployment failed"
-                    blueprint.save(update_fields=["status", "status_message", "updated_at"])
 
                 logger.error("Deployment %(deployment_id)s failed, error: %(error)s", {"deployment_id": str(deployment_id), "error": result.error})
                 return False
@@ -189,11 +173,6 @@ def run_deployment(deployment_id: str) -> bool:
             deployment.status_message = f"Deployment error: {e}"
             deployment.completed_at = timezone.now()
             deployment.save()
-
-            if blueprint:
-                blueprint.status = models.DeploymentBlueprint.Status.FAILED
-                blueprint.status_message = f"Deployment error: {e}"
-                blueprint.save(update_fields=["status", "status_message", "updated_at"])
 
             return False
 

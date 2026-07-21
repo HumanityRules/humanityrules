@@ -22,7 +22,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 
-from ..models import App, Deployment, DeploymentBlueprint, Environment, User, WebappPublicGrant
+from ..models import App, User, WebappPublicGrant
 from ..services import abac_service
 from . import abac_view_checks, base
 
@@ -64,32 +64,19 @@ def _webapp_hosts_enabled(app: App) -> bool:
     return bool(app.source_template and app.source_template.enable_webapp_hosts)
 
 
-def _app_hostname(app: App, environment: Environment) -> str | None:
-    """The app's public hostname on *environment*, or None if not derivable."""
-    zone = environment.shared_alb_hosted_zone
+def _app_hostname(app: App) -> str | None:
+    """The app's public hostname, or None if its environment has no hosted zone."""
+    zone = app.environment.shared_alb_hosted_zone
     if not zone:
         return None
-    latest = Deployment.objects.filter(app=app, environment=environment).order_by("-created_at").first()
-    subdomain = (latest.subdomain if latest else "") or app.slug
-    return f"{subdomain}.{zone}"
+    return f"{app.slug}.{zone}"
 
 
 def _public_url(grant: WebappPublicGrant) -> str | None:
-    host = _app_hostname(app=grant.app, environment=grant.environment)
+    host = _app_hostname(app=grant.app)
     if host is None:
         return None
     return f"https://{grant.slug}-{host}/"
-
-
-def _deployed_environments(app: App) -> list[Environment]:
-    """Environments this app has a blueprint in — the grantable targets."""
-    environment_ids = (
-        DeploymentBlueprint.objects.filter(app=app)
-        .exclude(status=DeploymentBlueprint.Status.DISCARDED)
-        .values_list("environment_id", flat=True)
-        .distinct()
-    )
-    return list(Environment.objects.filter(id__in=environment_ids).select_related("aws_account").order_by("slug"))
 
 
 def build_public_access_context(request: HttpRequest, app: App) -> dict[str, object]:
@@ -97,7 +84,7 @@ def build_public_access_context(request: HttpRequest, app: App) -> dict[str, obj
     grants = []
     if _webapp_hosts_enabled(app=app):
         grants = list(
-            WebappPublicGrant.live().filter(app=app).select_related("environment", "granted_by").order_by("environment__slug", "slug"),
+            WebappPublicGrant.live().filter(app=app).select_related("granted_by").order_by("slug"),
         )
     return {
         "public_access_enabled": _webapp_hosts_enabled(app=app),
@@ -123,24 +110,16 @@ def webapp_public_access_new(request: HttpRequest, app_slug: str) -> HttpRespons
     if not _webapp_hosts_enabled(app=app):
         return HttpResponse("This app's template does not serve webapps.", status=422)
 
-    environments = _deployed_environments(app=app)
     prefill_slug = request.GET.get("slug", "")
-    prefill_env = request.GET.get("env", "")
-    selected_environment = next((e for e in environments if e.slug == prefill_env), None)
-    if selected_environment is None and len(environments) == 1:
-        selected_environment = environments[0]
 
     context = base.get_app_shell_context(request=request, current_page="workspaces")
     context["app"] = app
-    context["environments"] = [
-        {"environment": e, "app_hostname": _app_hostname(app=app, environment=e), "selected": e == selected_environment}
-        for e in environments
-    ]
+    context["app_hostname"] = _app_hostname(app=app)
     context["prefill_slug"] = prefill_slug if _SLUG_RE.match(prefill_slug) else ""
     return render(request, "humanityrules_app/apps/app_public_access_new.html", context=context)
 
 
-def _create_or_extend_grant(app: App, environment: Environment, slug: str, granted_by: User, expires_at: datetime | None) -> WebappPublicGrant:
+def _create_or_extend_grant(app: App, slug: str, granted_by: User, expires_at: datetime | None) -> WebappPublicGrant:
     """One exposure window per row: a previous window that has lapsed gets its
     revoked_at stamped (satisfying the partial unique constraint) and a fresh
     row records the new window. A still-live grant is just extended.
@@ -148,7 +127,7 @@ def _create_or_extend_grant(app: App, environment: Environment, slug: str, grant
     with transaction.atomic():
         existing = (
             WebappPublicGrant.objects.select_for_update()
-            .filter(app=app, environment=environment, slug=slug, revoked_at__isnull=True)
+            .filter(app=app, slug=slug, revoked_at__isnull=True)
             .first()
         )
         if existing is not None and existing.is_live:
@@ -160,7 +139,6 @@ def _create_or_extend_grant(app: App, environment: Environment, slug: str, grant
             existing.save(update_fields=["revoked_at"])
         return WebappPublicGrant.objects.create(
             app=app,
-            environment=environment,
             slug=slug,
             granted_by=granted_by,
             expires_at=expires_at,
@@ -182,24 +160,6 @@ def webapp_public_access_create(request: HttpRequest, app_slug: str) -> HttpResp
     if not _SLUG_RE.match(slug):
         return HttpResponse("Invalid webapp name.", status=422)
 
-    # Looked up by id, not slug: environment slugs are only unique per AWS
-    # account, so an org with two accounts can hold same-slugged environments.
-    try:
-        environment_id = UUID(request.POST.get("environment", ""))
-    except ValueError:
-        return HttpResponse("Invalid environment.", status=422)
-    environment = get_object_or_404(
-        Environment.objects.filter(aws_account__organization=request.user.current_organization),
-        id=environment_id,
-    )
-    blueprint_exists = (
-        DeploymentBlueprint.objects.filter(app=app, environment=environment)
-        .exclude(status=DeploymentBlueprint.Status.DISCARDED)
-        .exists()
-    )
-    if not blueprint_exists:
-        return HttpResponse("This app is not deployed to that environment.", status=422)
-
     expiry_key = request.POST.get("expiry", "")
     if expiry_key not in _EXPIRY_CHOICES:
         return HttpResponse("Invalid expiry.", status=422)
@@ -207,16 +167,16 @@ def webapp_public_access_create(request: HttpRequest, app_slug: str) -> HttpResp
     expires_at = timezone.now() + lifetime if lifetime is not None else None
 
     try:
-        grant = _create_or_extend_grant(app=app, environment=environment, slug=slug, granted_by=request.user, expires_at=expires_at)
+        grant = _create_or_extend_grant(app=app, slug=slug, granted_by=request.user, expires_at=expires_at)
     except IntegrityError:
         # Lost a concurrent first-publish race on unique_unrevoked_webapp_grant:
         # select_for_update can't lock a row that doesn't exist yet. The winner's
         # row does exist now, so the retry locks it and takes the extend path.
-        grant = _create_or_extend_grant(app=app, environment=environment, slug=slug, granted_by=request.user, expires_at=expires_at)
+        grant = _create_or_extend_grant(app=app, slug=slug, granted_by=request.user, expires_at=expires_at)
 
     logger.info(
         "webapp public grant created app=%s env=%s slug=%s by=%s expires=%s",
-        app.slug, environment.slug, slug, request.user.username, expires_at,
+        app.slug, app.environment.slug, slug, request.user.username, expires_at,
     )
     return redirect(f"/apps/{app.slug}/public-access/{grant.id}/")
 
@@ -234,7 +194,7 @@ def webapp_public_access_status(request: HttpRequest, app_slug: str, grant_id: U
     denied = abac_view_checks.check_abac(request=request, resource=app.workspace, resource_type="workspace", action="workspace:view")
     if denied:
         return denied
-    grant = get_object_or_404(WebappPublicGrant.objects.select_related("environment"), id=grant_id, app=app)
+    grant = get_object_or_404(WebappPublicGrant, id=grant_id, app=app)
 
     context = base.get_app_shell_context(request=request, current_page="workspaces")
     context["app"] = app
@@ -277,7 +237,7 @@ def webapp_public_access_check(request: HttpRequest, app_slug: str, grant_id: UU
     denied = abac_view_checks.check_abac(request=request, resource=app.workspace, resource_type="workspace", action="workspace:view")
     if denied:
         return denied
-    grant = get_object_or_404(WebappPublicGrant.objects.select_related("environment"), id=grant_id, app=app)
+    grant = get_object_or_404(WebappPublicGrant, id=grant_id, app=app)
 
     public_url = _public_url(grant=grant)
     poll_count = int(request.GET.get("n", "0") or "0")
@@ -315,7 +275,7 @@ def webapp_public_access_revoke_confirm(request: HttpRequest, app_slug: str, gra
         return denied
 
     grant = get_object_or_404(
-        WebappPublicGrant.objects.select_related("environment"),
+        WebappPublicGrant,
         id=grant_id,
         app=app,
         revoked_at__isnull=True,
@@ -326,7 +286,7 @@ def webapp_public_access_revoke_confirm(request: HttpRequest, app_slug: str, gra
         context={
             "modal_title": "Revoke Public Access",
             "modal_message": (
-                f"Close public access to {grant.slug} on {grant.environment.name}? "
+                f"Close public access to {grant.slug} on {app.environment.name}? "
                 "Anonymous visitors will get a 403 within seconds."
             ),
             "confirm_url": f"/apps/{app.slug}/public-access/{grant.id}/revoke/",
@@ -353,7 +313,7 @@ def webapp_public_access_revoke(request: HttpRequest, app_slug: str, grant_id: U
     grant.save(update_fields=["revoked_at", "revoked_by"])
     logger.info(
         "webapp public grant revoked app=%s env=%s slug=%s by=%s",
-        app.slug, grant.environment.slug, grant.slug, request.user.username,
+        app.slug, app.environment.slug, grant.slug, request.user.username,
     )
 
     context = {"app": app}

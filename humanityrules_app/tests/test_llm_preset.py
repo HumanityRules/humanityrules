@@ -122,7 +122,7 @@ class LlmPresetResolutionTests(SimpleTestCase):
 
 
 class LlmPresetDeployApplicationTests(SimpleTestCase):
-    """The preset must reach the materialized hermes blueprint container env."""
+    """The preset must reach the materialized hermes App container env."""
 
     def _hermes_env(self, preset: str, extra_overrides: dict[str, str]) -> dict[str, str]:
         org = models.Organization(llm_preset=preset)
@@ -132,11 +132,11 @@ class LlmPresetDeployApplicationTests(SimpleTestCase):
             llm_preset_service.llm_overrides_for(organization=org),
         )
         containers = template_deploy_service._apply_variable_overrides(containers, extra_overrides)
-        materialized = template_deploy_service._materialize_blueprint_containers(containers)
+        materialized = template_deploy_service._materialize_app_containers(containers)
         hermes = next(c for c in materialized if c["name"] == "hermes")
         return {e["name"]: e["value"] for e in hermes["environment_variables"]}
 
-    def test_codex_preset_reaches_blueprint_env(self) -> None:
+    def test_codex_preset_reaches_app_container_env(self) -> None:
         env = self._hermes_env(preset="codex", extra_overrides={})
         self.assertEqual(env["HUMR_LLM_PRESET"], "codex")
         self.assertTrue(LEGACY_LLM_ENV_VARS.isdisjoint(env))
@@ -145,7 +145,7 @@ class LlmPresetDeployApplicationTests(SimpleTestCase):
         env = self._hermes_env(preset="", extra_overrides={})
         self.assertEqual(env["HUMR_LLM_PRESET"], "codex")
 
-    def test_bedrock_preset_reaches_blueprint_env(self) -> None:
+    def test_bedrock_preset_reaches_app_container_env(self) -> None:
         env = self._hermes_env(preset="bedrock", extra_overrides={})
         self.assertEqual(env["HUMR_LLM_PRESET"], "bedrock")
         self.assertTrue(LEGACY_LLM_ENV_VARS.isdisjoint(env))

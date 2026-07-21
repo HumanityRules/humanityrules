@@ -2,7 +2,7 @@
 
 import hashlib
 import json
-from datetime import timedelta
+from datetime import datetime, timedelta
 from unittest import mock
 
 from django.db import IntegrityError, transaction
@@ -15,7 +15,6 @@ from humanityrules_app.models import (
     AppTemplate,
     AWSAccount,
     Deployment,
-    DeploymentBlueprint,
     Environment,
     EnvironmentBearerToken,
     Organization,
@@ -61,17 +60,12 @@ class PublicAccessTestBase(TestCase):
 
         self.app = App.objects.create(
             organization=self.org, workspace=self.workspace, repository=self.repo,
-            source_template=self.template,
+            source_template=self.template, environment=self.environment,
             name="Wolfie", slug="wolfie", app_type="web", build_strategy="dockerfile",
-            branch="main", container_port=8000, health_check_path="/health",
-        )
-        self.blueprint = DeploymentBlueprint.objects.create(
-            app=self.app, environment=self.environment, status=DeploymentBlueprint.Status.ACTIVE,
-            cpu=256, memory=512, subdomain="wolfie",
+            container_port=8000, health_check_path="/health", cpu=256, memory=512,
         )
         Deployment.objects.create(
-            blueprint=self.blueprint, app=self.app, environment=self.environment,
-            subdomain="wolfie", git_ref="main", image_tag="wolfie-main-1",
+            app=self.app, git_ref="main", image_tag="wolfie-main-1",
             status=Deployment.Status.SUCCEEDED, status_message="Running",
         )
         self.raw_token = "t" * 64
@@ -80,10 +74,9 @@ class PublicAccessTestBase(TestCase):
         )
         self.client = Client()
 
-    def _grant(self, slug: str, expires_at=None) -> WebappPublicGrant:
+    def _grant(self, slug: str, expires_at: datetime | None) -> WebappPublicGrant:
         return WebappPublicGrant.objects.create(
-            app=self.app, environment=self.environment, slug=slug,
-            granted_by=self.admin, expires_at=expires_at,
+            app=self.app, slug=slug, granted_by=self.admin, expires_at=expires_at,
         )
 
     def _pdp_public(self, body: dict, token: str | None) -> tuple[int, dict]:
@@ -102,7 +95,7 @@ class PublicAccessTestBase(TestCase):
 class TestPdpEvaluatePublic(PublicAccessTestBase):
 
     def test_live_grant_allows(self) -> None:
-        self._grant(slug="dashboard")
+        self._grant(slug="dashboard", expires_at=None)
         status, body = self._pdp_public(body={"app_id": "wolfie", "webapp_slug": "dashboard", "path": "/"}, token=self.raw_token)
         self.assertEqual(status, 200)
         self.assertEqual(body, {"decision": "allow", "reason": "public-webapp"})
@@ -113,7 +106,7 @@ class TestPdpEvaluatePublic(PublicAccessTestBase):
         self.assertEqual(body, {"decision": "deny", "reason": "not-public"})
 
     def test_revoked_grant_denies(self) -> None:
-        grant = self._grant(slug="dashboard")
+        grant = self._grant(slug="dashboard", expires_at=None)
         grant.revoked_at = timezone.now()
         grant.save(update_fields=["revoked_at"])
         status, body = self._pdp_public(body={"app_id": "wolfie", "webapp_slug": "dashboard", "path": "/"}, token=self.raw_token)
@@ -124,16 +117,20 @@ class TestPdpEvaluatePublic(PublicAccessTestBase):
         status, body = self._pdp_public(body={"app_id": "wolfie", "webapp_slug": "dashboard", "path": "/"}, token=self.raw_token)
         self.assertEqual(body["decision"], "deny")
 
-    def test_grant_on_other_environment_denies(self) -> None:
+    def test_bearer_from_other_environment_denies(self) -> None:
+        # A live grant exists, but the caller's env bearer belongs to a
+        # different environment than the app's — deny before the grant lookup.
         other_env = Environment.objects.create(
             aws_account=self.aws_account, name="prod", slug="prod",
             aws_region="us-east-1", shared_alb_hosted_zone="prod.example.com",
         )
-        WebappPublicGrant.objects.create(
-            app=self.app, environment=other_env, slug="dashboard", granted_by=self.admin,
+        other_token_raw = "u" * 64
+        EnvironmentBearerToken.objects.create(
+            environment=other_env, token_hash=_hash(other_token_raw),
         )
-        status, body = self._pdp_public(body={"app_id": "wolfie", "webapp_slug": "dashboard", "path": "/"}, token=self.raw_token)
-        self.assertEqual(body["decision"], "deny")
+        self._grant(slug="dashboard", expires_at=None)
+        status, body = self._pdp_public(body={"app_id": "wolfie", "webapp_slug": "dashboard", "path": "/"}, token=other_token_raw)
+        self.assertEqual(body, {"decision": "deny", "reason": "app-not-in-env"})
 
     def test_unknown_app_denies(self) -> None:
         status, body = self._pdp_public(body={"app_id": "ghost", "webapp_slug": "dashboard", "path": "/"}, token=self.raw_token)
@@ -151,22 +148,22 @@ class TestPdpEvaluatePublic(PublicAccessTestBase):
 class TestGrantLifecycle(PublicAccessTestBase):
 
     def test_second_unrevoked_grant_violates_constraint(self) -> None:
-        self._grant(slug="dashboard")
+        self._grant(slug="dashboard", expires_at=None)
         with self.assertRaises(IntegrityError), transaction.atomic():
-            self._grant(slug="dashboard")
+            self._grant(slug="dashboard", expires_at=None)
 
     def test_revoked_grant_frees_the_slug(self) -> None:
-        grant = self._grant(slug="dashboard")
+        grant = self._grant(slug="dashboard", expires_at=None)
         grant.revoked_at = timezone.now()
         grant.save(update_fields=["revoked_at"])
-        fresh = self._grant(slug="dashboard")
+        fresh = self._grant(slug="dashboard", expires_at=None)
         self.assertTrue(fresh.is_live)
         self.assertEqual(WebappPublicGrant.objects.filter(slug="dashboard").count(), 2)
 
     def test_live_excludes_expired_and_revoked(self) -> None:
-        live = self._grant(slug="live-app")
+        live = self._grant(slug="live-app", expires_at=None)
         self._grant(slug="expired-app", expires_at=timezone.now() - timedelta(minutes=1))
-        revoked = self._grant(slug="revoked-app")
+        revoked = self._grant(slug="revoked-app", expires_at=None)
         revoked.revoked_at = timezone.now()
         revoked.save(update_fields=["revoked_at"])
         self.assertEqual(list(WebappPublicGrant.live().filter(app=self.app)), [live])
@@ -174,16 +171,16 @@ class TestGrantLifecycle(PublicAccessTestBase):
 
 class TestPublicAccessViews(PublicAccessTestBase):
 
-    def _create(self, user: User, slug: str, expiry: str, environment: str | None) -> HttpResponse:
-        """POST the publish form; environment=None targets self.environment."""
+    def _create(self, user: User, slug: str, expiry: str) -> HttpResponse:
+        """POST the publish form for self.app."""
         self.client.force_login(user)
         return self.client.post(
             f"/apps/{self.app.slug}/public-access/",
-            data={"slug": slug, "environment": environment if environment is not None else str(self.environment.id), "expiry": expiry},
+            data={"slug": slug, "expiry": expiry},
         )
 
     def test_org_admin_creates_grant(self) -> None:
-        response = self._create(user=self.admin, slug="dashboard", expiry="24h", environment=None)
+        response = self._create(user=self.admin, slug="dashboard", expiry="24h")
         self.assertEqual(response.status_code, 302)
         grant = WebappPublicGrant.objects.get(app=self.app, slug="dashboard")
         self.assertTrue(grant.is_live)
@@ -192,58 +189,35 @@ class TestPublicAccessViews(PublicAccessTestBase):
         self.assertIn(f"/apps/{self.app.slug}/public-access/{grant.id}/", response["Location"])
 
     def test_never_expiry_creates_open_ended_grant(self) -> None:
-        self._create(user=self.admin, slug="dashboard", expiry="never", environment=None)
+        self._create(user=self.admin, slug="dashboard", expiry="never")
         grant = WebappPublicGrant.objects.get(app=self.app, slug="dashboard")
         self.assertIsNone(grant.expires_at)
 
     def test_member_cannot_create_grant(self) -> None:
-        response = self._create(user=self.member, slug="dashboard", expiry="24h", environment=None)
+        response = self._create(user=self.member, slug="dashboard", expiry="24h")
         self.assertEqual(response.status_code, 403)
         self.assertFalse(WebappPublicGrant.objects.filter(slug="dashboard").exists())
 
     def test_invalid_slug_rejected(self) -> None:
         for bad in ("__admin", "a", "has.dot", "-lead"):
-            response = self._create(user=self.admin, slug=bad, expiry="24h", environment=None)
+            response = self._create(user=self.admin, slug=bad, expiry="24h")
             self.assertEqual(response.status_code, 422, bad)
         self.assertFalse(WebappPublicGrant.objects.exists())
 
     def test_slug_input_is_lowercased(self) -> None:
-        response = self._create(user=self.admin, slug="Dashboard", expiry="24h", environment=None)
+        response = self._create(user=self.admin, slug="Dashboard", expiry="24h")
         self.assertEqual(response.status_code, 302)
         self.assertTrue(WebappPublicGrant.objects.filter(slug="dashboard").exists())
-
-    def test_undeployed_environment_rejected(self) -> None:
-        prod = Environment.objects.create(
-            aws_account=self.aws_account, name="prod", slug="prod",
-            aws_region="us-east-1", shared_alb_hosted_zone="prod.example.com",
-        )
-        response = self._create(user=self.admin, slug="dashboard", expiry="24h", environment=str(prod.id))
-        self.assertEqual(response.status_code, 422)
-
-    def test_non_uuid_environment_rejected(self) -> None:
-        response = self._create(user=self.admin, slug="dashboard", expiry="24h", environment="staging")
-        self.assertEqual(response.status_code, 422)
-
-    def test_same_slug_environment_in_other_account_is_unambiguous(self) -> None:
-        other_account = AWSAccount.objects.create(organization=self.org, name="Second Account")
-        Environment.objects.create(
-            aws_account=other_account, name="staging", slug="staging",
-            aws_region="us-east-1", shared_alb_hosted_zone="staging2.example.com",
-        )
-        response = self._create(user=self.admin, slug="dashboard", expiry="24h", environment=None)
-        self.assertEqual(response.status_code, 302)
-        grant = WebappPublicGrant.objects.get(app=self.app, slug="dashboard")
-        self.assertEqual(grant.environment, self.environment)
 
     def test_template_without_webapp_hosts_rejected(self) -> None:
         self.template.enable_webapp_hosts = False
         self.template.save(update_fields=["enable_webapp_hosts"])
-        response = self._create(user=self.admin, slug="dashboard", expiry="24h", environment=None)
+        response = self._create(user=self.admin, slug="dashboard", expiry="24h")
         self.assertEqual(response.status_code, 422)
 
     def test_recreate_extends_live_grant(self) -> None:
-        self._create(user=self.admin, slug="dashboard", expiry="1h", environment=None)
-        self._create(user=self.admin, slug="dashboard", expiry="never", environment=None)
+        self._create(user=self.admin, slug="dashboard", expiry="1h")
+        self._create(user=self.admin, slug="dashboard", expiry="never")
         grants = WebappPublicGrant.objects.filter(app=self.app, slug="dashboard")
         self.assertEqual(grants.count(), 1)
         self.assertIsNone(grants.get().expires_at)
@@ -260,7 +234,7 @@ class TestPublicAccessViews(PublicAccessTestBase):
             return real(**kwargs)
 
         with mock.patch.object(webapp_public_access, "_create_or_extend_grant", side_effect=lose_race_once):
-            response = self._create(user=self.admin, slug="dashboard", expiry="never", environment=None)
+            response = self._create(user=self.admin, slug="dashboard", expiry="never")
         self.assertEqual(response.status_code, 302)
         self.assertEqual(call_count["n"], 2)
         grant = WebappPublicGrant.objects.get(app=self.app, slug="dashboard")
@@ -268,7 +242,7 @@ class TestPublicAccessViews(PublicAccessTestBase):
 
     def test_recreate_after_expiry_revokes_old_and_inserts_new(self) -> None:
         expired = self._grant(slug="dashboard", expires_at=timezone.now() - timedelta(minutes=1))
-        response = self._create(user=self.admin, slug="dashboard", expiry="24h", environment=None)
+        response = self._create(user=self.admin, slug="dashboard", expiry="24h")
         self.assertEqual(response.status_code, 302)
         expired.refresh_from_db()
         self.assertIsNotNone(expired.revoked_at)
@@ -277,7 +251,7 @@ class TestPublicAccessViews(PublicAccessTestBase):
         self.assertEqual(WebappPublicGrant.live().filter(app=self.app, slug="dashboard").count(), 1)
 
     def test_revoke_stamps_and_keeps_row(self) -> None:
-        grant = self._grant(slug="dashboard")
+        grant = self._grant(slug="dashboard", expires_at=None)
         self.client.force_login(self.admin)
         response = self.client.post(f"/apps/{self.app.slug}/public-access/{grant.id}/revoke/")
         self.assertEqual(response.status_code, 200)
@@ -286,7 +260,7 @@ class TestPublicAccessViews(PublicAccessTestBase):
         self.assertEqual(grant.revoked_by, self.admin)
 
     def test_revoke_confirm_uses_standard_modal_and_refreshes_panel(self) -> None:
-        grant = self._grant(slug="dashboard")
+        grant = self._grant(slug="dashboard", expires_at=None)
         self.client.force_login(self.admin)
         response = self.client.get(f"/apps/{self.app.slug}/public-access/{grant.id}/revoke-confirm/")
         self.assertEqual(response.status_code, 200)
@@ -298,14 +272,14 @@ class TestPublicAccessViews(PublicAccessTestBase):
         self.assertContains(response, 'hx-push-url="false"')
 
     def test_panel_revoke_button_opens_modal_without_browser_confirm(self) -> None:
-        grant = self._grant(slug="dashboard")
+        grant = self._grant(slug="dashboard", expires_at=None)
         self.client.force_login(self.admin)
         response = self.client.get(f"/apps/{self.app.slug}/", HTTP_HX_REQUEST="true")
         self.assertContains(response, f"/public-access/{grant.id}/revoke-confirm/")
         self.assertNotContains(response, "hx-confirm")
 
     def test_member_cannot_revoke(self) -> None:
-        grant = self._grant(slug="dashboard")
+        grant = self._grant(slug="dashboard", expires_at=None)
         self.client.force_login(self.member)
         response = self.client.post(f"/apps/{self.app.slug}/public-access/{grant.id}/revoke/")
         self.assertEqual(response.status_code, 403)
@@ -313,7 +287,7 @@ class TestPublicAccessViews(PublicAccessTestBase):
         self.assertIsNone(grant.revoked_at)
 
     def test_member_cannot_open_revoke_confirm(self) -> None:
-        grant = self._grant(slug="dashboard")
+        grant = self._grant(slug="dashboard", expires_at=None)
         self.client.force_login(self.member)
         response = self.client.get(f"/apps/{self.app.slug}/public-access/{grant.id}/revoke-confirm/")
         self.assertEqual(response.status_code, 403)
@@ -321,7 +295,7 @@ class TestPublicAccessViews(PublicAccessTestBase):
     def test_confirm_page_renders_hostname_for_admin(self) -> None:
         self.client.force_login(self.admin)
         response = self.client.get(
-            f"/apps/{self.app.slug}/public-access/new?slug=dashboard&env=staging",
+            f"/apps/{self.app.slug}/public-access/new?slug=dashboard",
             HTTP_HX_REQUEST="true",
         )
         self.assertEqual(response.status_code, 200)
@@ -331,7 +305,7 @@ class TestPublicAccessViews(PublicAccessTestBase):
     def test_confirm_page_ignores_invalid_prefill_slug(self) -> None:
         self.client.force_login(self.admin)
         response = self.client.get(
-            f"/apps/{self.app.slug}/public-access/new?slug=__admin&env=staging",
+            f"/apps/{self.app.slug}/public-access/new?slug=__admin",
             HTTP_HX_REQUEST="true",
         )
         self.assertEqual(response.status_code, 200)
@@ -344,32 +318,32 @@ class TestPublicAccessViews(PublicAccessTestBase):
         return user
 
     def test_status_page_requires_workspace_view(self) -> None:
-        grant = self._grant(slug="dashboard")
+        grant = self._grant(slug="dashboard", expires_at=None)
         self.client.force_login(self._member_without_workspace_view())
         response = self.client.get(f"/apps/{self.app.slug}/public-access/{grant.id}/", HTTP_HX_REQUEST="true")
         self.assertEqual(response.status_code, 403)
 
     def test_check_requires_workspace_view(self) -> None:
-        grant = self._grant(slug="dashboard")
+        grant = self._grant(slug="dashboard", expires_at=None)
         self.client.force_login(self._member_without_workspace_view())
         response = self.client.get(f"/apps/{self.app.slug}/public-access/{grant.id}/check/", HTTP_HX_REQUEST="true")
         self.assertEqual(response.status_code, 403)
 
     def test_member_with_workspace_view_sees_status_page(self) -> None:
-        grant = self._grant(slug="dashboard")
+        grant = self._grant(slug="dashboard", expires_at=None)
         self.client.force_login(self.member)
         response = self.client.get(f"/apps/{self.app.slug}/public-access/{grant.id}/", HTTP_HX_REQUEST="true")
         self.assertEqual(response.status_code, 200)
 
     def test_panel_shows_live_grant_url(self) -> None:
-        self._grant(slug="dashboard")
+        self._grant(slug="dashboard", expires_at=None)
         self.client.force_login(self.admin)
         response = self.client.get(f"/apps/{self.app.slug}/", HTTP_HX_REQUEST="true")
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "https://dashboard-wolfie.staging.example.com/")
 
     def test_public_url_preserves_dashed_webapp_slug(self) -> None:
-        grant = self._grant(slug="my-dash-board")
+        grant = self._grant(slug="my-dash-board", expires_at=None)
 
         self.assertEqual(
             webapp_public_access._public_url(grant=grant),

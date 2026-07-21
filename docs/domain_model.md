@@ -8,11 +8,10 @@
 - **Organization** — Top-level tenant. All resources, users, policies, and integrations are scoped to an organization.
 - **Workspace** — Governance container for Apps. Used for access-control grouping. A "Default" workspace is auto-created with every new Organization.
 - **Repository** — A Git repository connected to an organization via GitHub App integration.
-- **App** — Stable identity and build configuration for a deployable application. Belongs to a Workspace and sources code from a Repository.
-- **DeploymentBlueprint** — Desired deployable state for one (App, Environment) pair. Owns runtime configuration: cpu, memory, env vars, secrets, subdomain.
-- **Deployment** — An execution record for one attempt to apply a Blueprint. Tracks build, deploy, and teardown lifecycle.
-- **Environment** — Deployment target with its own VPC, ECS cluster, and shared ALB. Scoped to an AWS Account. Multiple Workspaces can deploy Apps to the same Environment.
-- **AppPermissions** — The last-applied IAM policy baseline for an (App, Environment) pair.
+- **App** — Identity, build, and runtime configuration for a deployable application. Belongs to a Workspace, deploys to exactly one Environment, and sources code from a Repository. Owns runtime configuration: cpu, memory, compute mode, per-container env vars and secrets.
+- **Deployment** — An execution record for one attempt to deploy an App. Tracks build, deploy, and teardown lifecycle.
+- **Environment** — Deployment target with its own VPC, ECS cluster, and shared ALB. Scoped to an AWS Account. Multiple Workspaces can deploy Apps to the same Environment. Apps live and die with their Environment: tearing down an Environment deletes its Apps.
+- **AppPermissions** — The last-applied IAM policy baseline for an App.
 - **AppPermissionRequest** — A request to modify IAM task-role policies for a deployed App, with approval workflow.
 - **ABAC (Attribute-Based Access Control)** — Authorization system based on identity attributes, resource tags, and policies. Access is derived, not directly assigned.
 
@@ -22,10 +21,9 @@
 - Organization owns AWS Accounts, Git integrations, Workspaces, and ABAC configuration.
 - AWS Account has Environments (shared infrastructure: VPC, ECS cluster, shared ALB).
 - Workspace contains definitions (Apps) — the "what" to deploy.
-- App sources code from a Repository and defines identity + build config.
-- DeploymentBlueprint pairs an App with an Environment and configures runtime settings — the "desired state."
+- App sources code from a Repository, defines identity + build + runtime config, and points at the one Environment it deploys to.
 - Environment is where things run (AWS account + region + VPC + ECS cluster + shared ALB) — the "where."
-- Deployment is an execution record for one attempt to apply a Blueprint.
+- Deployment is an execution record for one attempt to deploy an App.
 - Multiple Workspaces can deploy to the same Environment, sharing VPC and cluster while having isolated app resources (ECR, ECS service, secrets).
 - ABAC controls who can do what: identity attributes on users are matched against resource tags on Workspaces/Environments/Apps via Policies.
 - AppPermissionRequests manage the IAM policies attached to an App's ECS task role, with a draft → approve → apply workflow.
@@ -41,11 +39,10 @@ Organization
 ├── Git Integrations
 │   └── Repositories
 ├── Workspaces
-│   └── Apps → Repository (source)
-│       ├── DeploymentBlueprints → Environment (target)
-│       │   └── Deployments
-│       ├── AppPermissions → Environment
-│       └── AppPermissionRequests → Environment
+│   └── Apps → Repository (source), Environment (target)
+│       ├── Deployments
+│       ├── AppPermissions
+│       └── AppPermissionRequests
 └── ABAC
     ├── IdentityAttributes → User
     ├── Groups
@@ -127,45 +124,32 @@ Governance and policy container.
 A "Default" workspace is auto-created via signal when an Organization is created.
 
 ### App
-Stable identity and build configuration.
+Identity, build, and runtime configuration. Deploys to exactly one Environment, set at creation.
 - **organization** — FK to Organization (denormalized for unique constraint)
 - **workspace** — FK to Workspace
-- **repository** — FK to Repository (required)
-- **name, slug** — Display name and URL-safe identifier
+- **environment** — FK to Environment (PROTECT; the app is deleted when its environment is torn down)
+- **repository** — FK to Repository (required; the build branch is the repository's default_branch)
+- **name, slug** — Display name and URL-safe identifier; the slug is also the app's hostname label
 - **app_type** — web / worker / scheduled
 - **build_strategy** — dockerfile / nixpacks / buildpack
 - **repo_subpath** — Subdirectory within repository (for monorepos)
-- **branch** — Default git branch
 - **dockerfile_path** — Path to Dockerfile (if using dockerfile strategy)
 - **container_port** — Port the container listens on
 - **health_check_path** — HTTP path for health checks
 - **health_check_command** — Command for non-HTTP health checks
+- **cpu** — ECS task CPU units (256, 512, 1024, etc.)
+- **memory** — ECS task memory in MiB
+- **compute_mode** — fargate / ec2
+- **containers** — Per-container materialized runtime values (env vars + secrets), one entry per template container
 - Unique constraint: (organization, slug)
 
-### DeploymentBlueprint
-Desired deployable state for one (App, Environment) pair.
-- **app** — FK to App
-- **environment** — FK to Environment
-- **status** — draft / deploying / failed / active / discarded
-- **branch** — Branch override (blank = use repository's default_branch)
-- **cpu** — Fargate CPU units (256, 512, 1024, etc.)
-- **memory** — Fargate memory in MiB
-- **environment_variables** — List of {name, value} objects
-- **app_secrets** — Dict mapping secret field names to values (null value = auto-generate a random value)
-- **subdomain** — Hostname label for the deployment (blank = use app slug; conflicts require an explicit dashless value)
-
-Status lifecycle: draft → deploying → active (on success) / failed. Discarded after teardown.
-
 ### Deployment
-An execution record for one attempt to apply a Blueprint.
-- **blueprint** — FK to DeploymentBlueprint
+An execution record for one attempt to deploy an App.
 - **app** — FK to App
-- **environment** — FK to Environment
 - **git_ref** — Branch, tag, or commit SHA
 - **git_commit_sha** — Resolved commit SHA
 - **image_tag** — Docker image tag (generated: `{app_slug}-{short_ref}-{timestamp}`)
 - **image_uri** — Full ECR image URI (set after push)
-- **subdomain** — Effective subdomain for this deployment (resolved from blueprint at deployment time)
 - **status** — pending / building / pushing / deploying / starting / succeeded / failed / rolled_back / torn_down / teardown_pending / tearing_down
 - **service_url** — URL where the deployed service is accessible
 - **alb_dns** — ALB DNS name
@@ -234,15 +218,13 @@ New members receive the organization's `default_org_role` as an identity attribu
 Manages IAM policies on an App's ECS task role — separate from ABAC platform access.
 
 ### AppPermissions
-The last-applied IAM policy baseline for an (App, Environment) pair.
+The last-applied IAM policy baseline for an App (one-to-one).
 - **statements** — List of policy statement dicts (each has service, effect, access_levels, resources)
-- Unique constraint: (app, environment)
 - Seeded from AWS on first access (reads existing IAM policy)
 
 ### AppPermissionRequest
 A request to modify task-role permissions.
 - **app** — FK to App
-- **environment** — FK to Environment
 - **statements** — Proposed policy statements
 - **description** — Human-authored rationale
 - **status** — draft / approved_pending_apply / applying / applied / failed
@@ -260,22 +242,21 @@ Workflow: The user builds a draft in the permissions editor → user approves �
 5. On failure: status → error
 
 ### Deployment Flow
-1. Deploying from a template creates the App, DeploymentBlueprint, and a Deployment record (status: pending), and sets the blueprint to deploying
-2. Job worker claims pending deployments, transitions to building
-3. Executor clones repository, builds AppConfig from blueprint, deploys via CDK
+1. Deploying from a template creates the App (with its environment and materialized runtime config) and a Deployment record (status: pending)
+2. Job worker claims pending deployments once the app's environment is READY, transitions to building
+3. Executor clones repository, builds AppConfig from the App + template, deploys via CDK
 4. CDK creates/updates: ECR repository, ECS task definition, ECS service, ALB target group, and listener rules
-5. On success: deployment status → succeeded, blueprint → active, service_url populated
-6. On failure: both deployment and blueprint → failed
+5. On success: deployment status → succeeded, service_url populated
+6. On failure: deployment → failed
 
-### Effective Values Resolution
-When deploying, several values are resolved from the blueprint + app + environment:
-- **Branch** — Blueprint's branch override, falling back to repository's default_branch
-- **Subdomain** — Blueprint's explicit subdomain, or the app slug when blank; conflicts with active deployments on the same hosted zone are rejected and require an explicit dashless value
-- **URL** — `https://{subdomain}.{hosted_zone}` when the environment has a hosted zone
+### Hostname Resolution
+- The app serves at `https://{app_slug}.{hosted_zone}` when its environment has a hosted zone
+- At app creation, a slug whose label an existing app already holds on the same hosted zone is rejected
 
 ### Teardown Flows
-- **App teardown:** Deployment → teardown_pending → tearing_down → torn_down. CDK deletes app stacks. Blueprint → discarded.
-- **Environment teardown:** All deployments torn down first (sequentially, stop on failure), then cluster/VPC CloudFormation stacks deleted, then environment record deleted from database.
+- **App teardown:** Deployment → teardown_pending → tearing_down → torn_down. CDK deletes app stacks. The App row survives, still pointing at its environment, and can redeploy.
+- **App removal:** An AppRemovalJob tears down the live deployment (when teardown_first), optionally cleans persistent data and secrets, releases the sandbox slug claim, and deletes the App row (cascading deployments, permissions, logs, tags).
+- **Environment teardown:** All deployments torn down first (sequentially, stop on failure), then cluster/VPC CloudFormation stacks deleted, then the environment's App rows deleted (releasing sandbox slug claims), then the environment record deleted from database.
 
 ### Permissions Apply Flow
 1. User approves AppPermissionRequest → status: approved_pending_apply
@@ -315,8 +296,7 @@ App slugs are unique per organization (not globally or per workspace) because:
 Apps use shared ALB with host-based routing:
 - Environment has `shared_alb_hosted_zone` (e.g., `dev.example.com`)
 - Environment's `*.{shared_alb_hosted_zone}` A alias sends every hostname in the zone to the shared ALB
-- App gets domain `{subdomain}.{shared_alb_hosted_zone}` (e.g., `myapp.dev.example.com`)
-- Subdomain defaults to the app slug; conflicts require an explicit dashless subdomain
+- App gets domain `{app_slug}.{shared_alb_hosted_zone}` (e.g., `myapp.dev.example.com`)
 
 ### AWS Resource Naming
 - **Base infrastructure** — `humr-{env_slug}-*` (VPC, cluster, execution role)

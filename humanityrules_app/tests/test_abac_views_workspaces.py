@@ -6,7 +6,9 @@ Workspace list, detail, create, and tag management access control.
 from django.test import TestCase
 
 from humanityrules_app.models import (
+    AWSAccount,
     App,
+    Environment,
     IdentityAttribute,
     Organization,
     OrganizationMembership,
@@ -26,6 +28,10 @@ class TestWorkspaceEndpoints(TestCase):
 
     def setUp(self) -> None:
         self.org = Organization.objects.create(name="WS Test Org", slug="ws-test-org")
+        self.aws_account = AWSAccount.objects.create(organization=self.org, name="Test AWS")
+        self.env = Environment.objects.create(
+            aws_account=self.aws_account, name="Staging", slug="staging", aws_region="us-east-1",
+        )
 
         self.ws_eng = Workspace.objects.create(organization=self.org, name="Engineering", slug="engineering")
         ResourceTag.objects.create(
@@ -164,8 +170,9 @@ class TestWorkspaceEndpoints(TestCase):
         )
         App.objects.create(
             organization=self.org, workspace=self.ws_eng, repository=repo,
-            name="MyApp", slug="myapp", app_type="web", build_strategy="dockerfile",
-            branch="main", container_port=8000, health_check_path="/health",
+            environment=self.env, name="MyApp", slug="myapp", app_type="web",
+            build_strategy="dockerfile", container_port=8000, health_check_path="/health",
+            cpu=256, memory=512,
         )
         response = self.client.post("/workspaces/engineering/remove/")
         self.assertEqual(response.status_code, 422)
@@ -179,8 +186,9 @@ class TestWorkspaceEndpoints(TestCase):
         )
         App.objects.create(
             organization=self.org, workspace=self.ws_fin, repository=repo,
-            name="FinApp", slug="finapp", app_type="web", build_strategy="dockerfile",
-            branch="main", container_port=8000, health_check_path="/health",
+            environment=self.env, name="FinApp", slug="finapp", app_type="web",
+            build_strategy="dockerfile", container_port=8000, health_check_path="/health",
+            cpu=256, memory=512,
         )
         response = self.client.get("/workspaces/finance/remove-confirm/", **HTMX)
         self.assertEqual(response.status_code, 200)

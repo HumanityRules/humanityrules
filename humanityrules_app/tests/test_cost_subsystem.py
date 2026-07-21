@@ -135,9 +135,9 @@ class _CostFixtureMixin:
         )
         self.workspace = Workspace.objects.create(organization=self.org, name="Eng", slug="eng")
         self.app = App.objects.create(
-            organization=self.org, workspace=self.workspace, repository=self.repository, name="Hermes",
-            slug="hermes", app_type=App.AppType.WEB, build_strategy=App.BuildStrategy.DOCKERFILE,
-            branch="main", container_port=8000, health_check_path="/health",
+            organization=self.org, workspace=self.workspace, environment=self.env, repository=self.repository,
+            name="Hermes", slug="hermes", app_type=App.AppType.WEB, build_strategy=App.BuildStrategy.DOCKERFILE,
+            container_port=8000, health_check_path="/health", cpu=256, memory=512,
         )
 
     def _row(self, day, cost: str, estimate: bool) -> DailyCostRow:
@@ -322,14 +322,16 @@ class TestCostRefreshCoordination(_CostFixtureMixin, TestCase):
         other_app = App.objects.create(
             organization=self.org,
             workspace=self.workspace,
+            environment=self.env,
             repository=self.repository,
             name="Other Hermes",
             slug="other-hermes",
             app_type=App.AppType.WEB,
             build_strategy=App.BuildStrategy.DOCKERFILE,
-            branch="main",
             container_port=8000,
             health_check_path="/health",
+            cpu=256,
+            memory=512,
         )
         pending = self._create_job(app=other_app, status=CostRefreshJob.Status.PENDING)
 

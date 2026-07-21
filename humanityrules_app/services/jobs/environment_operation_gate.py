@@ -86,31 +86,20 @@ async def atransition_environment_status(
     return updated == 1
 
 
-def lock_app_environments_for_removal(app_id: UUID) -> list[models.Environment]:
-    """Lock every environment whose blueprint metadata is needed for app cleanup."""
-    environment_ids = models.DeploymentBlueprint.objects.filter(app_id=app_id).values("environment_id")
-    return list(
-        models.Environment.objects
-        .select_for_update()
-        .filter(id__in=environment_ids)
-        .order_by("id")
-    )
-
-
-def has_tearing_down_environment(environments: list[models.Environment]) -> bool:
-    """Return whether app cleanup is too late to start in any related environment."""
-    return any(environment.status == models.Environment.Status.TEARING_DOWN for environment in environments)
+def lock_app_environment_for_removal(app_id: UUID) -> models.Environment:
+    """Lock the app's environment so a concurrent teardown claim cannot interleave with app cleanup."""
+    return models.Environment.objects.select_for_update().get(apps__id=app_id)
 
 
 def _has_executing_deployment_or_permission(environment_id: UUID) -> bool:
     """Return whether ordinary teardown must wait for executing environment work."""
     if models.Deployment.objects.filter(
-        environment_id=environment_id,
+        app__environment_id=environment_id,
         status__in=EXECUTING_DEPLOYMENT_STATUSES,
     ).exists():
         return True
     return models.AppPermissionRequest.objects.filter(
-        environment_id=environment_id,
+        app__environment_id=environment_id,
         status__in=EXECUTING_PERMISSION_STATUSES,
     ).exists()
 
@@ -120,9 +109,9 @@ def _has_running_app_removal(environment_id: UUID) -> bool:
     running_removal_app_ids = models.AppRemovalJob.objects.filter(
         status=models.AppRemovalJob.Status.RUNNING,
     ).values("app_id_snapshot")
-    return models.DeploymentBlueprint.objects.filter(
+    return models.App.objects.filter(
         environment_id=environment_id,
-        app_id__in=running_removal_app_ids,
+        id__in=running_removal_app_ids,
     ).exists()
 
 
@@ -130,7 +119,7 @@ def _fail_executing_deployments_and_permissions(environment_id: UUID) -> None:
     """Conclude force-abandoned work before queuing environment teardown."""
     now = timezone.now()
     models.Deployment.objects.filter(
-        environment_id=environment_id,
+        app__environment_id=environment_id,
         status__in=EXECUTING_DEPLOYMENT_STATUSES,
     ).update(
         status=models.Deployment.Status.FAILED,
@@ -139,7 +128,7 @@ def _fail_executing_deployments_and_permissions(environment_id: UUID) -> None:
         updated_at=now,
     )
     models.AppPermissionRequest.objects.filter(
-        environment_id=environment_id,
+        app__environment_id=environment_id,
         status__in=EXECUTING_PERMISSION_STATUSES,
     ).update(
         status=models.AppPermissionRequest.Status.FAILED,

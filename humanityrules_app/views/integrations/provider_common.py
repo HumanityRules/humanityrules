@@ -72,7 +72,7 @@ def resolve_env_by_rd(rd: str, user: User) -> Environment | None:
 
 
 def resolve_owned_app_slug(app_slug: str, env: Environment, owner_username: str) -> str | None:
-    """Return app_slug when it identifies an app owned by *owner_username* in env's org.
+    """Return app_slug when it identifies an app owned by *owner_username* in *env*.
 
     Redirect-flow form: returns None so the caller can render an
     HttpResponseBadRequest. The vault API surface uses its own variant that
@@ -82,6 +82,7 @@ def resolve_owned_app_slug(app_slug: str, env: Environment, owner_username: str)
         return None
     app = App.objects.filter(
         organization=env.aws_account.organization,
+        environment=env,
         slug=app_slug,
     ).first()
     if app is None:

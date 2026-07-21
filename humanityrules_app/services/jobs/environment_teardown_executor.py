@@ -15,6 +15,7 @@ from django.conf import settings
 
 from humanityrules_app import models
 from humanityrules_app.services import infra_customer
+from humanityrules_app.services import sandbox_service
 
 from . import app_deployment_teardown_executor
 from . import job_logging
@@ -46,8 +47,8 @@ def _teardown_all_deployments(environment: models.Environment) -> bool:
     """
     deployments = list(
         models.Deployment.objects
-        .filter(environment=environment)
-        .select_related("app", "app__workspace", "environment", "environment__aws_account")
+        .filter(app__environment=environment)
+        .select_related("app", "app__workspace", "app__environment", "app__environment__aws_account")
         .order_by("created_at")
     )
 
@@ -89,6 +90,18 @@ def _teardown_all_deployments(environment: models.Environment) -> bool:
 
     logger.info("All deployments torn down successfully")
     return True
+
+
+def _delete_environment_apps(environment: models.Environment) -> None:
+    """Delete the environment's apps (cascading their deployments, permissions, activity, and logs).
+
+    Apps live and die with their environment; releasing each sandbox slug claim
+    here frees the name for reuse, and removing the App rows satisfies the
+    PROTECT FK so the environment row itself can be deleted.
+    """
+    for app in models.App.objects.filter(environment=environment):
+        sandbox_service.release_sandbox_app_slug(app_slug=app.slug, organization_id=app.organization_id)
+        app.delete()
 
 
 def run_environment_teardown(environment_id: str) -> bool:
@@ -140,8 +153,7 @@ def run_environment_teardown(environment_id: str) -> bool:
                     "Sandbox environment '%(env_name)s': skipping shared base infra teardown",
                     {"env_name": environment.name},
                 )
-                models.Deployment.objects.filter(environment=environment).delete()
-                models.DeploymentBlueprint.objects.filter(environment=environment).delete()
+                _delete_environment_apps(environment=environment)
                 environment.delete()
                 return True
 
@@ -164,9 +176,7 @@ def run_environment_teardown(environment_id: str) -> bool:
                     "Environment '%(env_name)s' torn down and deleted successfully",
                     {"env_name": env_name},
                 )
-                # Delete torn-down deployment/blueprint records so the PROTECT FKs allow environment deletion
-                models.Deployment.objects.filter(environment=environment).delete()
-                models.DeploymentBlueprint.objects.filter(environment=environment).delete()
+                _delete_environment_apps(environment=environment)
                 environment.delete()
                 return True
 

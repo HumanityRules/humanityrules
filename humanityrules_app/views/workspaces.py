@@ -30,16 +30,10 @@ def workspaces(request: HttpRequest) -> HttpResponse:
         .order_by("-created_at")
         .values("status")[:1]
     )
-    latest_deployment_environment = (
-        Deployment.objects.filter(app=OuterRef("pk"))
-        .order_by("-created_at")
-        .values("environment__name")[:1]
-    )
     apps_prefetch = Prefetch(
         "apps",
-        queryset=App.objects.annotate(
+        queryset=App.objects.select_related("environment").annotate(
             latest_status=Coalesce(Subquery(latest_deployment_status), Value("never_deployed")),
-            latest_environment=Subquery(latest_deployment_environment),
         ).order_by("name"),
         to_attr="annotated_apps",
     )
@@ -73,12 +67,12 @@ def workspace_detail(request: HttpRequest, workspace_slug: str) -> HttpResponse:
     if denied:
         return denied
 
-    # Prefetch active deployments (deployed, not being torn down) with their environments
+    # Prefetch active deployments (deployed, not being torn down)
     active_deployments_prefetch = Prefetch(
         "deployments",
         queryset=Deployment.objects.filter(
             status=Deployment.Status.SUCCEEDED,
-        ).select_related("environment", "environment__aws_account").order_by("environment__name"),
+        ).select_related("app__environment", "app__environment__aws_account").order_by("-created_at"),
         to_attr="active_deployments",
     )
     latest_deployment_status = (
@@ -91,7 +85,7 @@ def workspace_detail(request: HttpRequest, workspace_slug: str) -> HttpResponse:
         .order_by("-created_at")
         .values("service_url")[:1]
     )
-    apps = workspace.apps.select_related("repository").prefetch_related(
+    apps = workspace.apps.select_related("repository", "environment").prefetch_related(
         active_deployments_prefetch,
     ).annotate(
         last_deployed_at=Max("deployments__created_at"),
@@ -106,7 +100,7 @@ def workspace_detail(request: HttpRequest, workspace_slug: str) -> HttpResponse:
 
     deployments = Deployment.objects.filter(
         app__workspace=workspace,
-    ).select_related("app", "environment", "environment__aws_account").order_by("-created_at")[:20]
+    ).select_related("app", "app__environment", "app__environment__aws_account").order_by("-created_at")[:20]
 
     context = base.get_app_shell_context(request=request, current_page="workspaces")
     context["workspace"] = workspace

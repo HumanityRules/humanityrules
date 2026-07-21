@@ -13,7 +13,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import UUID
 
-from humanityrules_app.models import App, Deployment, Environment
+from humanityrules_app.models import App, Environment
 from humanityrules_app.services.cost import bedrock_pricing
 from humanityrules_app.services.cost.cost_source import DailyCostRow
 from humanityrules_app.services.infra_customer import bedrock_logging_utils
@@ -156,9 +156,8 @@ class BedrockCostSource:
 
 
 def _deployed_environments(app: App) -> list[Environment]:
-    """Distinct environments the app has ever been deployed to (logs persist through teardown)."""
-    environment_ids = Deployment.objects.filter(app=app).values_list("environment_id", flat=True).distinct()
-    return list(Environment.objects.filter(id__in=list(environment_ids)).select_related("aws_account"))
+    """The app's environment (logs persist through teardown)."""
+    return list(Environment.objects.filter(apps=app).select_related("aws_account"))
 
 
 def _task_role_name(environment: Environment, app: App) -> str:

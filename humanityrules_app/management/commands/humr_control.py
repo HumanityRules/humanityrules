@@ -10,10 +10,8 @@ Usage:
     uv run manage.py humr_control deploy-app-template --template hermes-agent --org acme-corp --workspace default --env default --app-name "Hermes Vmendi"
     uv run manage.py humr_control redeploy-env --slug default --aws-account "Name"
     uv run manage.py humr_control redeploy-app --app simpledashboard
-    uv run manage.py humr_control redeploy-app --app simpledashboard --env default
     uv run manage.py humr_control redeploy-app --app simpledashboard --deployment <uuid>
     uv run manage.py humr_control restart-task --app hermesvmendi01
-    uv run manage.py humr_control restart-task --app hermesvmendi01 --env default
 
 For production, use ./prod_manage.sh humr_control <operation> instead.
 
@@ -96,16 +94,8 @@ class Command(BaseCommand):
         )
         redeploy_app.add_argument("--app", required=True, help="App slug")
         redeploy_app.add_argument(
-            "--env",
-            help="Environment slug to pick the source deployment from. Required if the app has been deployed to more than one environment.",
-        )
-        redeploy_app.add_argument(
-            "--aws-account",
-            help="AWS account name (only required to disambiguate when --env exists across multiple accounts)",
-        )
-        redeploy_app.add_argument(
             "--deployment",
-            help="Source deployment UUID. Overrides --env/--aws-account selection and clones from this exact row.",
+            help="Source deployment UUID. Clones from this exact row instead of the app's latest concluded deployment.",
         )
         redeploy_app.add_argument(
             "--created-by",
@@ -121,14 +111,6 @@ class Command(BaseCommand):
             ),
         )
         restart_task.add_argument("--app", required=True, help="App slug")
-        restart_task.add_argument(
-            "--env",
-            help="Environment slug. Required if the app is deployed to more than one environment.",
-        )
-        restart_task.add_argument(
-            "--aws-account",
-            help="AWS account name (only required to disambiguate when --env exists across multiple accounts)",
-        )
 
         # deploy-app-template
         deploy_tpl = subparsers.add_parser(
@@ -394,7 +376,7 @@ class Command(BaseCommand):
             )
             return
 
-        deployment = models.Deployment.objects.filter(app=app).select_related("environment").order_by("-created_at").first()
+        deployment = models.Deployment.objects.filter(app=app).order_by("-created_at").first()
         if not deployment:
             self.stderr.write(self.style.ERROR(f"No deployments found for app '{app_slug}'"))
             return
@@ -432,7 +414,7 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.SUCCESS(f"\nDeployment for '{app_slug}' set to TEARDOWN_PENDING"))
         self.stdout.write(f"  App: {app.name}")
-        self.stdout.write(f"  Environment: {deployment.environment.name}")
+        self.stdout.write(f"  Environment: {app.environment.name}")
         self.stdout.write(f"  Deployment: {deployment.id}")
         self.stdout.write(f"  Previous status: {old_status}")
         if old_label:
@@ -454,10 +436,10 @@ class Command(BaseCommand):
                 return
 
             old_label = locked_app.label
-            environments = environment_operation_gate.lock_app_environments_for_removal(app_id=locked_app.id)
-            if environment_operation_gate.has_tearing_down_environment(environments=environments):
+            environment = environment_operation_gate.lock_app_environment_for_removal(app_id=locked_app.id)
+            if environment.status == models.Environment.Status.TEARING_DOWN:
                 self.stderr.write(self.style.ERROR(
-                    f"App '{locked_app.slug}' cannot be removed after a related environment teardown has started."
+                    f"App '{locked_app.slug}' cannot be removed after its environment teardown has started."
                 ))
                 return
 
@@ -502,19 +484,19 @@ class Command(BaseCommand):
     def _handle_redeploy_app(self, options: dict[str, Any]) -> None:
         """Redeploy an app: clone a concluded source Deployment into a new PENDING row.
 
-        Mirrors the UI's 'Redeploy' button (`app_deployment_redeploy`): same blueprint,
-        environment, subdomain, and git_ref; fresh image_tag so the build is rebuilt.
-        Allowed source statuses: SUCCEEDED, FAILED, TORN_DOWN. Refuses if any deployment
-        for the app is in progress, or if the app is PENDING_REMOVAL.
+        Mirrors the UI's 'Redeploy' button (`app_deployment_redeploy`): same git_ref,
+        fresh image_tag so the build is rebuilt. Allowed source statuses: SUCCEEDED,
+        FAILED, TORN_DOWN. Refuses if any deployment for the app is in progress, or
+        if the app is PENDING_REMOVAL.
         """
         app_slug = options["app"]
-        env_slug = options.get("env")
-        aws_account_name = options.get("aws_account")
         deployment_id_str = options.get("deployment")
         created_by_username = options.get("created_by")
 
         try:
-            app = models.App.objects.select_related("workspace", "organization").get(slug=app_slug)
+            app = models.App.objects.select_related(
+                "workspace", "organization", "environment", "environment__aws_account",
+            ).get(slug=app_slug)
         except models.App.DoesNotExist:
             self.stderr.write(self.style.ERROR(f"App '{app_slug}' not found"))
             return
@@ -529,12 +511,7 @@ class Command(BaseCommand):
             ))
             return
 
-        source = self._resolve_redeploy_source(
-            app=app,
-            deployment_id_str=deployment_id_str,
-            env_slug=env_slug,
-            aws_account_name=aws_account_name,
-        )
+        source = self._resolve_redeploy_source(app=app, deployment_id_str=deployment_id_str)
         if source is None:
             return
 
@@ -550,26 +527,17 @@ class Command(BaseCommand):
             ))
             return
 
-        try:
-            app_slugs.require_valid_app_hostname_label(value=source.subdomain or app.slug)
-        except ValueError as exc:
-            self.stderr.write(self.style.ERROR(str(exc)))
-            return
-
         created_by = self._resolve_created_by(org=app.organization, username=created_by_username)
         if created_by is None:
             return
 
-        git_ref = source.git_ref or app.branch
+        git_ref = source.git_ref
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
         short_ref = git_ref[:8] if len(git_ref) > 8 else git_ref
         image_tag = f"{app.slug}-{short_ref}-{timestamp}"
 
         new_deployment = models.Deployment.objects.create(
-            blueprint=source.blueprint,
             app=app,
-            environment=source.environment,
-            subdomain=source.subdomain,
             git_ref=git_ref,
             image_tag=image_tag,
             status=models.Deployment.Status.PENDING,
@@ -579,7 +547,7 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.SUCCESS(f"\nRedeploy queued for app '{app.slug}'"))
         self.stdout.write(f"  App: {app.name}")
-        self.stdout.write(f"  Environment: {source.environment.name} ({source.environment.aws_account.name})")
+        self.stdout.write(f"  Environment: {app.environment.name} ({app.environment.aws_account.name})")
         self.stdout.write(f"  Source deployment: {source.id} (status: {source.status})")
         self.stdout.write(f"  New deployment: {new_deployment.id}")
         self.stdout.write(f"  git_ref: {git_ref}")
@@ -588,17 +556,8 @@ class Command(BaseCommand):
         self.stdout.write(self.style.WARNING("Build/push/deploy will start automatically (job worker picks up pending deployments)"))
         self.stdout.write("")
 
-    def _resolve_redeploy_source(self, app, deployment_id_str, env_slug, aws_account_name):
-        """Pick the source Deployment to clone for a redeploy.
-
-        Resolution order:
-        1. --deployment <uuid> wins; must belong to `app`.
-        2. Else filter by --env (and optional --aws-account) and pick the latest concluded deployment.
-        3. Else if the app has been deployed to exactly one environment, use that one.
-        4. Else error: ambiguous.
-
-        Returns the Deployment, or None and writes an error to stderr.
-        """
+    def _resolve_redeploy_source(self, app: models.App, deployment_id_str: str | None) -> models.Deployment | None:
+        """Pick the source Deployment to clone: --deployment <uuid> wins, else the latest concluded one."""
         if deployment_id_str:
             try:
                 deployment_id = UUID(deployment_id_str)
@@ -606,59 +565,22 @@ class Command(BaseCommand):
                 self.stderr.write(self.style.ERROR(f"--deployment '{deployment_id_str}' is not a valid UUID"))
                 return None
             try:
-                return models.Deployment.objects.select_related(
-                    "blueprint", "environment", "environment__aws_account",
-                ).get(id=deployment_id, app=app)
+                return models.Deployment.objects.get(id=deployment_id, app=app)
             except models.Deployment.DoesNotExist:
                 self.stderr.write(self.style.ERROR(
                     f"Deployment '{deployment_id_str}' not found for app '{app.slug}'"
                 ))
                 return None
 
-        candidates = models.Deployment.objects.select_related(
-            "blueprint", "environment", "environment__aws_account",
-        ).filter(app=app)
-
-        if env_slug:
-            candidates = candidates.filter(environment__slug=env_slug)
-            if aws_account_name:
-                candidates = candidates.filter(environment__aws_account__name=aws_account_name)
-
-        distinct_env_ids = set(candidates.values_list("environment_id", flat=True).distinct())
-        if not distinct_env_ids:
-            scope = ""
-            if env_slug:
-                scope = f" in env '{env_slug}'"
-                if aws_account_name:
-                    scope += f" / account '{aws_account_name}'"
-            self.stderr.write(self.style.ERROR(f"No deployments found for app '{app.slug}'{scope}"))
-            return None
-
-        if len(distinct_env_ids) > 1:
-            envs = list(models.Environment.objects.filter(id__in=distinct_env_ids).select_related("aws_account"))
-            if env_slug:
-                account_names = sorted({e.aws_account.name for e in envs})
-                self.stderr.write(self.style.ERROR(
-                    f"Environment slug '{env_slug}' is ambiguous across accounts ({', '.join(account_names)}); "
-                    f"pass --aws-account to disambiguate"
-                ))
-            else:
-                env_slugs = sorted({e.slug for e in envs})
-                self.stderr.write(self.style.ERROR(
-                    f"App '{app.slug}' has been deployed to multiple environments ({', '.join(env_slugs)}); "
-                    f"pass --env to pick one"
-                ))
-            return None
-
         source = (
-            candidates.filter(status__in=models.Deployment.CONCLUDED_STATUSES)
+            models.Deployment.objects
+            .filter(app=app, status__in=models.Deployment.CONCLUDED_STATUSES)
             .order_by("-created_at")
             .first()
         )
         if source is None:
-            scope = f" in env '{env_slug}'" if env_slug else ""
             self.stderr.write(self.style.ERROR(
-                f"No concluded deployments found for app '{app.slug}'{scope} - nothing to redeploy from"
+                f"No concluded deployments found for app '{app.slug}' - nothing to redeploy from"
             ))
             return None
         return source
@@ -672,23 +594,16 @@ class Command(BaseCommand):
         this does. Cycles all containers in the task.
         """
         app_slug = options["app"]
-        env_slug = options.get("env")
-        aws_account_name = options.get("aws_account")
 
         try:
-            app = models.App.objects.select_related("organization").get(slug=app_slug)
+            app = models.App.objects.select_related(
+                "organization", "environment", "environment__aws_account",
+            ).get(slug=app_slug)
         except models.App.DoesNotExist:
             self.stderr.write(self.style.ERROR(f"App '{app_slug}' not found"))
             return
 
-        environment = self._resolve_restart_environment(
-            app=app,
-            env_slug=env_slug,
-            aws_account_name=aws_account_name,
-        )
-        if environment is None:
-            return
-
+        environment = app.environment
         aws_account = environment.aws_account
         cluster_name = f"humr-{environment.slug}-cluster"
         service_name = f"humr-{environment.slug}-{app.slug}"
@@ -739,64 +654,13 @@ class Command(BaseCommand):
         ))
         self.stdout.write("")
 
-    def _resolve_restart_environment(
-        self,
-        app: models.App,
-        env_slug: str | None,
-        aws_account_name: str | None,
-    ) -> models.Environment | None:
-        """Pick the Environment whose running task should be restarted.
-
-        Resolves from the app's concluded deployments (SUCCEEDED / FAILED). Filters by --env
-        and optional --aws-account when provided; otherwise uses the sole target environment.
-        Writes an error and returns None if the selection is ambiguous or empty.
-        """
-        deployments = models.Deployment.objects.select_related(
-            "environment", "environment__aws_account",
-        ).filter(app=app, status__in=models.Deployment.CONCLUDED_STATUSES)
-
-        if env_slug:
-            deployments = deployments.filter(environment__slug=env_slug)
-            if aws_account_name:
-                deployments = deployments.filter(environment__aws_account__name=aws_account_name)
-
-        env_ids = set(deployments.values_list("environment_id", flat=True).distinct())
-        if not env_ids:
-            scope = ""
-            if env_slug:
-                scope = f" in env '{env_slug}'"
-                if aws_account_name:
-                    scope += f" / account '{aws_account_name}'"
-            self.stderr.write(self.style.ERROR(
-                f"No concluded deployments found for app '{app.slug}'{scope} - nothing to restart"
-            ))
-            return None
-
-        if len(env_ids) > 1:
-            envs = list(models.Environment.objects.filter(id__in=env_ids).select_related("aws_account"))
-            if env_slug:
-                account_names = sorted({e.aws_account.name for e in envs})
-                self.stderr.write(self.style.ERROR(
-                    f"Environment slug '{env_slug}' is ambiguous across accounts ({', '.join(account_names)}); "
-                    f"pass --aws-account to disambiguate"
-                ))
-            else:
-                env_slugs = sorted({e.slug for e in envs})
-                self.stderr.write(self.style.ERROR(
-                    f"App '{app.slug}' has been deployed to multiple environments ({', '.join(env_slugs)}); "
-                    f"pass --env to pick one"
-                ))
-            return None
-
-        return models.Environment.objects.select_related("aws_account").get(id=env_ids.pop())
-
     def _handle_deploy_app_template(self, options: dict[str, Any]) -> None:
         """Deploy a new app from an AppTemplate.
 
         Mirrors the UI's 'Deploy from template' flow: resolves template, workspace, env,
         owner, created_by, and configurable variable overrides; then calls
-        template_deploy_service.deploy_from_template to create the App + Blueprint +
-        Deployment chain and queue it for the job worker.
+        template_deploy_service.deploy_from_template to create the App + Deployment
+        chain and queue it for the job worker.
         """
         template_slug = options["template"]
         org_identifier = options.get("org")

@@ -55,17 +55,15 @@ def _resolve_deployment(request: HttpRequest) -> tuple[_Deployment | None, JsonR
     )
     if app_error is not None:
         return None, app_error
-    app = App.objects.get(organization=environment.aws_account.organization, slug=app_slug)
+    app = App.objects.get(organization=environment.aws_account.organization, environment=environment, slug=app_slug)
     return _Deployment(environment=environment, owner_user=owner_user, app=app, payload=payload), None
 
 
 def _get_scoped_request(deployment: _Deployment, request_id: object) -> AppPermissionRequest | None:
-    """Fetch the AppPermissionRequest by id, scoped to this deployment's app + environment."""
+    """Fetch the AppPermissionRequest by id, scoped to this deployment's app."""
     if not isinstance(request_id, str) or not request_id:
         return None
-    return AppPermissionRequest.objects.filter(
-        id=request_id, app=deployment.app, environment=deployment.environment,
-    ).first()
+    return AppPermissionRequest.objects.filter(id=request_id, app=deployment.app).first()
 
 
 def _serialize_service_groups(app_permission_request: AppPermissionRequest) -> list[dict]:
@@ -105,9 +103,7 @@ def permissions_draft(request: HttpRequest) -> JsonResponse:
     deployment, error = _resolve_deployment(request=request)
     if error is not None:
         return error
-    app_permissions = permissions_service.get_or_create_app_permissions(
-        app=deployment.app, environment=deployment.environment,
-    )
+    app_permissions = permissions_service.get_or_create_app_permissions(app=deployment.app)
 
     request_id = deployment.payload.get("request_id")
     if isinstance(request_id, str) and request_id:
@@ -116,7 +112,7 @@ def permissions_draft(request: HttpRequest) -> JsonResponse:
             return JsonResponse({"error": "permission request not found"}, status=404)
     else:
         app_permission_request = permissions_service.get_or_create_draft(
-            app=deployment.app, environment=deployment.environment,
+            app=deployment.app,
             user=deployment.owner_user, app_permissions=app_permissions,
         )
 
@@ -150,9 +146,7 @@ def permissions_statement(request: HttpRequest) -> JsonResponse:
         arn=str(deployment.payload.get("arn", "")).strip(),
         s3_prefix=str(deployment.payload.get("s3_prefix", "")).strip(),
     )
-    app_permissions = permissions_service.get_or_create_app_permissions(
-        app=deployment.app, environment=deployment.environment,
-    )
+    app_permissions = permissions_service.get_or_create_app_permissions(app=deployment.app)
     return JsonResponse({
         "service_groups": _serialize_service_groups(app_permission_request),
         "has_changes": not permissions_service.statements_equal(app_permission_request.statements, app_permissions.statements),
@@ -188,9 +182,7 @@ def permissions_cancel(request: HttpRequest) -> JsonResponse:
     app_permission_request = _get_scoped_request(deployment=deployment, request_id=deployment.payload.get("request_id"))
     if app_permission_request is None:
         return JsonResponse({"error": "permission request not found"}, status=404)
-    app_permissions = permissions_service.get_or_create_app_permissions(
-        app=deployment.app, environment=deployment.environment,
-    )
+    app_permissions = permissions_service.get_or_create_app_permissions(app=deployment.app)
     permissions_service.cancel(app_permission_request, app_permissions)
     return JsonResponse({
         "service_groups": _serialize_service_groups(app_permission_request),

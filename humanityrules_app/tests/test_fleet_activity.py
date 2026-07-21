@@ -34,26 +34,19 @@ class TestFleetActivity(TestCase):
         self.app = models.App.objects.create(
             organization=self.organization,
             workspace=workspace,
+            environment=self.environment,
             repository=repository,
             name="Fleet Agent",
             slug="fleet-agent",
             app_type=models.App.AppType.WEB,
             build_strategy=models.App.BuildStrategy.DOCKERFILE,
-            branch="main",
             container_port=8787,
             health_check_path="/health",
-        )
-        blueprint = models.DeploymentBlueprint.objects.create(
-            app=self.app,
-            environment=self.environment,
-            status=models.DeploymentBlueprint.Status.ACTIVE,
             cpu=256,
             memory=512,
         )
         models.Deployment.objects.create(
-            blueprint=blueprint,
             app=self.app,
-            environment=self.environment,
             git_ref="main",
             image_tag="fleet-agent-main",
             status=models.Deployment.Status.SUCCEEDED,
@@ -66,12 +59,11 @@ class TestFleetActivity(TestCase):
         )
         self.client.force_login(self.staff)
 
-    def test_snapshot_annotates_activity_for_same_app_and_environment(self) -> None:
+    def test_snapshot_annotates_activity_for_app(self) -> None:
         observed_at = timezone.now() - datetime.timedelta(minutes=20)
         models.AppEnvironmentActivity.objects.create(
             organization=self.organization,
             app=self.app,
-            environment=self.environment,
             last_policy_proxy_activity_at=observed_at,
         )
 
@@ -90,7 +82,6 @@ class TestFleetActivity(TestCase):
         models.AppEnvironmentActivity.objects.create(
             organization=self.organization,
             app=self.app,
-            environment=self.environment,
             last_policy_proxy_activity_at=timezone.now() - datetime.timedelta(minutes=20),
         )
         response = self.client.get("/platform/fleet/")

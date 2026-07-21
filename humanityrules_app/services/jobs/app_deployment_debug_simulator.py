@@ -14,28 +14,24 @@ DEBUG_DEPLOYMENT_STEP_DELAY_SECONDS = 5
 
 def _build_debug_service_url(deployment: models.Deployment) -> str:
     """Build a deterministic URL for simulated deployments."""
-    subdomain = deployment.subdomain or deployment.app.slug
-    hosted_zone = deployment.environment.shared_alb_hosted_zone
+    app = deployment.app
+    hosted_zone = app.environment.shared_alb_hosted_zone
     if hosted_zone:
-        return f"https://{subdomain}.{hosted_zone}"
-    return f"http://{subdomain}.localhost"
+        return f"https://{app.slug}.{hosted_zone}"
+    return f"http://{app.slug}.localhost"
 
 
 def _build_debug_alb_dns(deployment: models.Deployment) -> str:
     """Build a deterministic ALB hostname for simulated deployments."""
-    return f"{deployment.app.slug}-{deployment.environment.slug}.debug-alb.local"
+    return f"{deployment.app.slug}-{deployment.app.environment.slug}.debug-alb.local"
 
 
-def run_debug_deployment(deployment: models.Deployment, blueprint: models.DeploymentBlueprint | None) -> bool:
+def run_debug_deployment(deployment: models.Deployment) -> bool:
     """Simulate a successful deployment without cloning or touching AWS."""
     deployment.status = models.Deployment.Status.BUILDING
     deployment.status_message = "Debug deployment: simulating build"
     deployment.started_at = timezone.now()
     deployment.save(update_fields=["status", "status_message", "started_at", "updated_at"])
-
-    if blueprint is not None:
-        blueprint.status_message = "Debug deployment: simulating build"
-        blueprint.save(update_fields=["status_message", "updated_at"])
 
     logger.info(
         "Debug deployment mode enabled for %(deployment_id)s; skipping repository clone and AWS calls",
@@ -46,10 +42,6 @@ def run_debug_deployment(deployment: models.Deployment, blueprint: models.Deploy
     deployment.status = models.Deployment.Status.DEPLOYING
     deployment.status_message = "Debug deployment: simulating rollout"
     deployment.save(update_fields=["status", "status_message", "updated_at"])
-
-    if blueprint is not None:
-        blueprint.status_message = "Debug deployment: simulating rollout"
-        blueprint.save(update_fields=["status_message", "updated_at"])
 
     logger.info(
         "Debug deployment %(deployment_id)s entered simulated rollout",
@@ -72,11 +64,6 @@ def run_debug_deployment(deployment: models.Deployment, blueprint: models.Deploy
             "updated_at",
         ],
     )
-
-    if blueprint is not None:
-        blueprint.status = models.DeploymentBlueprint.Status.ACTIVE
-        blueprint.status_message = "Debug deployment succeeded"
-        blueprint.save(update_fields=["status", "status_message", "updated_at"])
 
     logger.info(
         "Debug deployment %(deployment_id)s completed successfully at %(service_url)s",

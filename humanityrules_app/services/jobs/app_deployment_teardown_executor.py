@@ -20,16 +20,16 @@ from . import tenant_consistency
 logger = logging.getLogger(__name__)
 
 
-def _get_aws_session(deployment: models.Deployment):
+def _get_aws_session(environment: models.Environment):
     """Get an AWS session with assumed role credentials for the target account."""
-    aws_account = deployment.environment.aws_account
+    aws_account = environment.aws_account
 
     return infra_customer.iam_utils.get_assumed_role_session(
         access_key=settings.HUMR_AWS_ACCESS_KEY,
         secret_key=settings.HUMR_AWS_SECRET_KEY,
         account_id=aws_account.aws_account_id,
         external_id=str(aws_account.external_id),
-        region=deployment.environment.aws_region,
+        region=environment.aws_region,
     )
 
 
@@ -42,7 +42,7 @@ def _dockerfile_ecr_repo_names(deployment: models.Deployment) -> list[str]:
     empty the right one.
     """
     app = deployment.app
-    env_slug = deployment.environment.slug
+    env_slug = app.environment.slug
     template = app.source_template
 
     if template and template.containers:
@@ -74,12 +74,11 @@ def run_teardown(deployment_id: str) -> bool:
     """
     try:
         deployment = models.Deployment.objects.select_related(
-            "blueprint",
             "app",
             "app__workspace",
             "app__source_template",
-            "environment",
-            "environment__aws_account",
+            "app__environment",
+            "app__environment__aws_account",
         ).get(id=deployment_id)
     except models.Deployment.DoesNotExist:
         logger.error("Deployment %(deployment_id)s not found", {"deployment_id": deployment_id})
@@ -95,8 +94,8 @@ def run_teardown(deployment_id: str) -> bool:
         deployment.save()
         return False
 
-    environment = deployment.environment
     app = deployment.app
+    environment = app.environment
 
     with job_logging.DeploymentLogContext(
         deployment=deployment,
@@ -113,7 +112,7 @@ def run_teardown(deployment_id: str) -> bool:
         deployment.save(update_fields=["status", "status_message", "updated_at"])
 
         try:
-            session = _get_aws_session(deployment)
+            session = _get_aws_session(environment=environment)
 
             logger.info(
                 "Tearing down app '%(app_name)s' stacks",

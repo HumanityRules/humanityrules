@@ -39,19 +39,14 @@ class PolicyProxyActivityTestBase(TestCase):
         self.app = models.App.objects.create(
             organization=self.organization,
             workspace=workspace,
+            environment=self.environment,
             repository=repository,
             name="Activity Agent",
             slug="activity-agent",
             app_type=models.App.AppType.WEB,
             build_strategy=models.App.BuildStrategy.DOCKERFILE,
-            branch="main",
             container_port=8787,
             health_check_path="/health",
-        )
-        models.DeploymentBlueprint.objects.create(
-            app=self.app,
-            environment=self.environment,
-            status=models.DeploymentBlueprint.Status.ACTIVE,
             cpu=256,
             memory=512,
         )
@@ -112,7 +107,6 @@ class TestPolicyProxyActivityIngestion(PolicyProxyActivityTestBase):
         activity = models.AppEnvironmentActivity.objects.get(
             organization=self.organization,
             app=self.app,
-            environment=self.environment,
         )
         self.assertEqual(activity.last_policy_proxy_activity_at, observed_at)
 
@@ -123,7 +117,6 @@ class TestPolicyProxyActivityIngestion(PolicyProxyActivityTestBase):
         models.AppEnvironmentActivity.objects.create(
             organization=self.organization,
             app=self.app,
-            environment=self.environment,
             last_policy_proxy_activity_at=newest,
         )
 
@@ -134,7 +127,7 @@ class TestPolicyProxyActivityIngestion(PolicyProxyActivityTestBase):
         )
 
         self.assertEqual(status, 200)
-        activity = models.AppEnvironmentActivity.objects.get(app=self.app, environment=self.environment)
+        activity = models.AppEnvironmentActivity.objects.get(app=self.app)
         self.assertEqual(activity.last_policy_proxy_activity_at, newest)
 
         status, _body = self.post_activity(
@@ -147,7 +140,7 @@ class TestPolicyProxyActivityIngestion(PolicyProxyActivityTestBase):
         activity.refresh_from_db()
         self.assertEqual(activity.last_policy_proxy_activity_at, later)
 
-    def test_app_must_be_deployed_in_bearer_environment(self) -> None:
+    def test_app_must_belong_to_bearer_environment(self) -> None:
         other_environment = models.Environment.objects.create(
             aws_account=self.aws_account,
             name="Production",

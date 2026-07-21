@@ -58,11 +58,12 @@ def resolve_owner_user(owner_username: object, environment: Environment) -> tupl
 
 
 def resolve_owned_app_slug(app_slug: object, environment: Environment, owner_user: User) -> tuple[str | None, JsonResponse | None]:
-    """Resolve app_slug and verify it belongs to owner_user in the env's organization."""
+    """Resolve app_slug and verify it belongs to owner_user in the bearer's environment."""
     if not isinstance(app_slug, str) or not app_slug:
         return None, JsonResponse({"error": "app_slug is required"}, status=400)
     app = App.objects.filter(
         organization=environment.aws_account.organization,
+        environment=environment,
         slug=app_slug,
     ).first()
     if app is None:

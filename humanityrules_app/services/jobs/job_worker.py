@@ -17,7 +17,7 @@ from django.db import IntegrityError, connections, transaction
 from django.db.models import Exists, OuterRef
 from django.utils import timezone
 
-from humanityrules_app.models import App, AppPermissionRequest, AppRemovalJob, CostRefreshJob, Deployment, DeploymentBlueprint, Environment, JobWorkerRun
+from humanityrules_app.models import App, AppPermissionRequest, AppRemovalJob, CostRefreshJob, Deployment, Environment, JobWorkerRun
 
 from . import app_deployment_executor
 from . import app_deployment_teardown_executor
@@ -83,13 +83,13 @@ def _claim_pending_app_deployment(label: str) -> Deployment | None:
                 status=Deployment.Status.PENDING,
                 app__label=label,
                 app__status=App.Status.ACTIVE,
-                environment__status=Environment.Status.READY,
+                app__environment__status=Environment.Status.READY,
             )
             .exclude(app_id__in=apps_with_executing_deployments)
             .select_related(
                 "app",
                 "app__workspace",
-                "environment",
+                "app__environment",
             )
             .first()
         )
@@ -137,12 +137,12 @@ def _claim_pending_app_deployment_teardown(label: str) -> Deployment | None:
                 status=Deployment.Status.TEARDOWN_PENDING,
                 app__label=label,
                 app__status=App.Status.ACTIVE,
-                environment__status=Environment.Status.READY,
+                app__environment__status=Environment.Status.READY,
             )
             .select_related(
                 "app",
                 "app__workspace",
-                "environment",
+                "app__environment",
             )
             .first()
         )
@@ -255,26 +255,25 @@ def _run_app_deployment_teardown_thread(deployment_id: str) -> None:
 
 
 def _claim_pending_permissions_apply(label: str) -> AppPermissionRequest | None:
-    """Claim one permission apply per app/environment target."""
+    """Claim one permission apply per app."""
     try:
         with transaction.atomic():
-            applying_for_same_target = AppPermissionRequest.objects.filter(
+            applying_for_same_app = AppPermissionRequest.objects.filter(
                 status=AppPermissionRequest.Status.APPLYING,
                 app_id=OuterRef("app_id"),
-                environment_id=OuterRef("environment_id"),
             )
             apr = (
                 AppPermissionRequest.objects
-                .select_for_update(skip_locked=True, of=("self", "app", "environment"))
+                .select_for_update(skip_locked=True, of=("self", "app"))
                 .filter(
                     status=AppPermissionRequest.Status.APPROVED_PENDING_APPLY,
                     app__label=label,
                     app__status=App.Status.ACTIVE,
-                    environment__status=Environment.Status.READY,
+                    app__environment__status=Environment.Status.READY,
                 )
-                .annotate(has_applying_for_target=Exists(applying_for_same_target))
-                .filter(has_applying_for_target=False)
-                .select_related("app", "environment")
+                .annotate(has_applying_for_app=Exists(applying_for_same_app))
+                .filter(has_applying_for_app=False)
+                .select_related("app", "app__environment")
                 .first()
             )
 
@@ -295,18 +294,18 @@ def _claim_pending_environment_teardown() -> Environment | None:
     """Atomically claim a pending environment teardown. Unscoped only."""
     with transaction.atomic():
         executing_deployments = Deployment.objects.filter(
-            environment_id=OuterRef("pk"),
+            app__environment_id=OuterRef("pk"),
             status__in=environment_operation_gate.EXECUTING_DEPLOYMENT_STATUSES,
         )
         executing_permission_applies = AppPermissionRequest.objects.filter(
-            environment_id=OuterRef("pk"),
+            app__environment_id=OuterRef("pk"),
             status__in=environment_operation_gate.EXECUTING_PERMISSION_STATUSES,
         )
         active_removal_app_ids = AppRemovalJob.objects.filter(
             status__in=environment_operation_gate.ACTIVE_APP_REMOVAL_STATUSES,
         ).values("app_id_snapshot")
-        environments_with_active_app_removals = DeploymentBlueprint.objects.filter(
-            app_id__in=active_removal_app_ids,
+        environments_with_active_app_removals = App.objects.filter(
+            id__in=active_removal_app_ids,
         ).values("environment_id")
         environment = (
             Environment.objects
@@ -358,9 +357,9 @@ def _claim_pending_app_removal(label: str) -> AppRemovalJob | None:
             apps_with_running_removals = AppRemovalJob.objects.filter(
                 status=AppRemovalJob.Status.RUNNING,
             ).values("app_id_snapshot")
-            apps_in_tearing_down_environments = DeploymentBlueprint.objects.filter(
+            apps_in_tearing_down_environments = App.objects.filter(
                 environment__status=Environment.Status.TEARING_DOWN,
-            ).values("app_id")
+            ).values("id")
             matching_app = App.objects.filter(
                 id=OuterRef("app_id_snapshot"),
                 organization_id=OuterRef("organization_id"),
@@ -391,10 +390,10 @@ def _claim_pending_app_removal(label: str) -> AppRemovalJob | None:
                 ).exclude(id=job.id).exists():
                     return None
 
-                environments = environment_operation_gate.lock_app_environments_for_removal(
+                environment = environment_operation_gate.lock_app_environment_for_removal(
                     app_id=job.app_id_snapshot,
                 )
-                if environment_operation_gate.has_tearing_down_environment(environments=environments):
+                if environment.status == Environment.Status.TEARING_DOWN:
                     return None
 
                 job.status = AppRemovalJob.Status.RUNNING

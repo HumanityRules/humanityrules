@@ -60,25 +60,11 @@ class AgentSlugTests(SimpleTestCase):
         self.assertEqual(result, "hermesvmendi00")
         filter_mock.assert_called_once_with(organization=organization, slug="hermesvmendi00")
 
-    def test_model_fields_reject_invalid_hostname_labels(self) -> None:
-        fields = [
-            models.App._meta.get_field("slug"),
-            models.DeploymentBlueprint._meta.get_field("subdomain"),
-            models.Deployment._meta.get_field("subdomain"),
-        ]
-        for field in fields:
-            with self.subTest(model=field.model.__name__):
-                with self.assertRaisesMessage(ValidationError, app_slugs.APP_HOSTNAME_LABEL_ERROR):
-                    field.clean(value="invalid-label", model_instance=None)
+    def test_app_slug_field_rejects_invalid_hostname_labels(self) -> None:
+        field = models.App._meta.get_field("slug")
 
-    def test_subdomain_fields_allow_blank(self) -> None:
-        fields = [
-            models.DeploymentBlueprint._meta.get_field("subdomain"),
-            models.Deployment._meta.get_field("subdomain"),
-        ]
-        for field in fields:
-            with self.subTest(model=field.model.__name__):
-                self.assertEqual(field.clean(value="", model_instance=None), "")
+        with self.assertRaisesMessage(ValidationError, app_slugs.APP_HOSTNAME_LABEL_ERROR):
+            field.clean(value="invalid-label", model_instance=None)
 
     def test_template_deploy_service_rejects_invalid_explicit_slug(self) -> None:
         placeholder = MagicMock()
@@ -177,38 +163,20 @@ class TemplateDeployConflictTests(TestCase):
         self.other_app = models.App.objects.create(
             organization=self.organization,
             workspace=self.workspace,
+            environment=self.environment,
             repository=self.other_repository,
             name="Other App",
-            slug="otherapp",
+            slug="takenlabel",
             app_type=models.App.AppType.WEB,
             build_strategy=models.App.BuildStrategy.DOCKERFILE,
-            branch="main",
             container_port=8000,
             health_check_path="/health",
-        )
-        blueprint = models.DeploymentBlueprint.objects.create(
-            app=self.other_app,
-            environment=self.environment,
-            status=models.DeploymentBlueprint.Status.ACTIVE,
-            branch="",
             cpu=256,
             memory=512,
-            subdomain="takenlabel",
-            created_by=self.user,
-        )
-        models.Deployment.objects.create(
-            blueprint=blueprint,
-            app=self.other_app,
-            environment=self.environment,
-            subdomain="takenlabel",
-            git_ref="main",
-            image_tag="otherapp-main-20260717",
-            status=models.Deployment.Status.SUCCEEDED,
-            created_by=self.user,
         )
 
     def test_template_deploy_aborts_before_persisting_on_label_conflict(self) -> None:
-        with self.assertRaisesMessage(ValueError, "'takenlabel.apps.example.com' is already in use"):
+        with self.assertRaisesMessage(ValueError, "'takenlabel.apps.example.com' is already in use. Please choose a different name."):
             async_to_sync(template_deploy_service.deploy_from_template)(
                 template=self.template,
                 organization=self.organization,
@@ -223,12 +191,13 @@ class TemplateDeployConflictTests(TestCase):
                 label="",
             )
 
-        self.assertFalse(models.App.objects.filter(organization=self.organization, slug="takenlabel").exists())
+        self.assertEqual(
+            models.App.objects.filter(organization=self.organization, slug="takenlabel").count(), 1,
+        )  # only the pre-existing app holds the label
         self.assertFalse(models.SandboxSlugClaim.objects.filter(slug="takenlabel").exists())
         self.assertFalse(
             models.Repository.objects.filter(organization=self.organization, full_name="template/conflict-template").exists()
         )
-        self.assertFalse(models.DeploymentBlueprint.objects.exclude(subdomain="takenlabel").exists())
 
 
 class SaveAppSlugTests(TestCase):
@@ -245,6 +214,14 @@ class SaveAppSlugTests(TestCase):
             organization=self.organization,
             slug="default",
         )
+        self.aws_account = models.AWSAccount.objects.create(organization=self.organization, name="App Slug AWS")
+        self.environment = models.Environment.objects.create(
+            aws_account=self.aws_account,
+            name="Default",
+            slug="default",
+            aws_region="us-east-1",
+            status=models.Environment.Status.READY,
+        )
         self.repository = models.Repository.objects.create(
             organization=self.organization,
             provider=models.Repository.Provider.GITHUB,
@@ -259,14 +236,16 @@ class SaveAppSlugTests(TestCase):
         app = models.App.objects.create(
             organization=self.organization,
             workspace=self.workspace,
+            environment=self.environment,
             repository=self.repository,
             name="Café Agent-007",
             slug=slug,
             app_type=models.App.AppType.WEB,
             build_strategy=models.App.BuildStrategy.DOCKERFILE,
-            branch=self.repository.default_branch,
             container_port=8000,
             health_check_path="/health",
+            cpu=256,
+            memory=512,
             created_by=self.user,
         )
 
@@ -310,7 +289,7 @@ class AgentSlugErrorSurfaceTests(TestCase):
             is_active=True,
         )
 
-    def _create_redeploy_source(self, subdomain: str) -> tuple[models.App, models.Deployment]:
+    def _create_redeploy_source(self) -> tuple[models.App, models.Deployment]:
         """Create a concluded deployment for CLI redeploy tests."""
         repository = models.Repository.objects.create(
             organization=self.organization,
@@ -323,28 +302,19 @@ class AgentSlugErrorSurfaceTests(TestCase):
         app = models.App.objects.create(
             organization=self.organization,
             workspace=self.workspace,
+            environment=self.environment,
             repository=repository,
             name="Slug Agent",
             slug="slugagent",
             app_type=models.App.AppType.WEB,
             build_strategy=models.App.BuildStrategy.DOCKERFILE,
-            branch="main",
             container_port=8000,
             health_check_path="/health",
-        )
-        blueprint = models.DeploymentBlueprint.objects.create(
-            app=app,
-            environment=self.environment,
-            status=models.DeploymentBlueprint.Status.ACTIVE,
             cpu=256,
             memory=512,
-            subdomain="slugagent",
         )
         source = models.Deployment.objects.create(
-            blueprint=blueprint,
             app=app,
-            environment=self.environment,
-            subdomain=subdomain,
             git_ref="main",
             image_tag="slugagent-main-source",
             status=models.Deployment.Status.SUCCEEDED,
@@ -353,7 +323,7 @@ class AgentSlugErrorSurfaceTests(TestCase):
 
     def test_template_deploy_form_surfaces_service_value_error(self) -> None:
         self.client.force_login(self.user)
-        deploy_mock = AsyncMock(side_effect=ValueError("Please specify an explicit subdomain."))
+        deploy_mock = AsyncMock(side_effect=ValueError("Simulated deploy failure."))
 
         with patch(
             "humanityrules_app.views.template_deploy.template_deploy_service.deploy_from_template",
@@ -370,13 +340,13 @@ class AgentSlugErrorSurfaceTests(TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Please specify an explicit subdomain.")
+        self.assertContains(response, "Simulated deploy failure.")
         self.assertFalse(models.App.objects.filter(organization=self.organization, slug="myagent").exists())
         self.assertEqual(deploy_mock.await_args.kwargs["app_slug"], "myagent")
 
     def test_humr_control_deploy_template_writes_service_value_error_to_stderr(self) -> None:
         stderr = StringIO()
-        deploy_mock = AsyncMock(side_effect=ValueError("Please specify an explicit subdomain."))
+        deploy_mock = AsyncMock(side_effect=ValueError("Simulated deploy failure."))
 
         with patch(
             "humanityrules_app.management.commands.humr_control.template_deploy_service.deploy_from_template",
@@ -393,26 +363,11 @@ class AgentSlugErrorSurfaceTests(TestCase):
                 stderr=stderr,
             )
 
-        self.assertIn("Please specify an explicit subdomain.", stderr.getvalue())
+        self.assertIn("Simulated deploy failure.", stderr.getvalue())
         self.assertEqual(deploy_mock.await_args.kwargs["app_slug"], "myagent")
 
-    def test_humr_control_redeploy_rejects_invalid_source_subdomain(self) -> None:
-        app, source = self._create_redeploy_source(subdomain="legacy-subdomain")
-        stderr = StringIO()
-
-        call_command(
-            "humr_control",
-            "redeploy-app",
-            app=app.slug,
-            deployment=str(source.id),
-            stderr=stderr,
-        )
-
-        self.assertIn("Agent hostname labels must contain lowercase letters and digits only.", stderr.getvalue())
-        self.assertEqual(models.Deployment.objects.filter(app=app).count(), 1)
-
-    def test_humr_control_redeploy_allows_blank_source_subdomain_with_valid_app_slug(self) -> None:
-        app, source = self._create_redeploy_source(subdomain="")
+    def test_humr_control_redeploy_queues_a_pending_clone_of_the_source(self) -> None:
+        app, source = self._create_redeploy_source()
         stdout = StringIO()
         stderr = StringIO()
 
@@ -421,10 +376,12 @@ class AgentSlugErrorSurfaceTests(TestCase):
             "redeploy-app",
             app=app.slug,
             deployment=str(source.id),
+            created_by=self.user.username,
             stdout=stdout,
             stderr=stderr,
         )
 
-        self.assertNotIn("Agent hostname labels must contain lowercase letters and digits only.", stderr.getvalue())
+        self.assertEqual(stderr.getvalue(), "")
         pending = models.Deployment.objects.get(app=app, status=models.Deployment.Status.PENDING)
-        self.assertEqual(pending.subdomain, "")
+        self.assertEqual(pending.git_ref, source.git_ref)
+        self.assertNotEqual(pending.image_tag, source.image_tag)

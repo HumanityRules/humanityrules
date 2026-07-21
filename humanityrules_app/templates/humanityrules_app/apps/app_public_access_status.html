@@ -10,7 +10,7 @@ Context: app, grant, public_url.
            class="text-sm text-indigo-600 dark:text-indigo-400 hover:underline">&larr; {{ app.name }}</a>
         <h1 class="mt-2 text-2xl font-bold text-gray-900 dark:text-white">Webapp published</h1>
         <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">
-            <span class="font-mono">{{ grant.slug }}</span> on {{ grant.environment.name }} is public
+            <span class="font-mono">{{ grant.slug }}</span> on {{ app.environment.name }} is public
             {% if grant.expires_at %}until {{ grant.expires_at }}{% else %}until revoked{% endif %}.
         </p>
     </div>

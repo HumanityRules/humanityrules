@@ -21,7 +21,7 @@ SANDBOX_SETTINGS = {
 }
 
 
-def _make_app(organization: models.Organization, slug: str) -> models.App:
+def _make_app(organization: models.Organization, slug: str, environment: models.Environment) -> models.App:
     workspace = models.Workspace.objects.get(organization=organization, slug="default")
     repository = models.Repository.objects.create(
         organization=organization,
@@ -34,30 +34,23 @@ def _make_app(organization: models.Organization, slug: str) -> models.App:
     return models.App.objects.create(
         organization=organization,
         workspace=workspace,
+        environment=environment,
         repository=repository,
         name=slug,
         slug=slug,
         app_type="web",
         build_strategy="dockerfile",
-        branch="main",
         container_port=8000,
         health_check_path="/health",
-    )
-
-
-def _make_deployment(app: models.App, environment: models.Environment) -> models.Deployment:
-    blueprint = models.DeploymentBlueprint.objects.create(
-        app=app,
-        environment=environment,
-        branch="main",
         cpu=256,
         memory=512,
-        subdomain=app.slug,
     )
+
+
+def _make_deployment(app: models.App) -> models.Deployment:
     return models.Deployment.objects.create(
-        blueprint=blueprint,
         app=app,
-        environment=environment,
+        git_ref="main",
         image_tag=f"{app.slug}-x",
         status=models.Deployment.Status.SUCCEEDED,
     )
@@ -134,35 +127,31 @@ class TestSandboxAppNameCollision(TestCase):
     def test_conflicting_slug_from_other_org_is_rejected(self) -> None:
         org_a = models.Organization.objects.create(name="Org A", slug="org-a")
         org_b = models.Organization.objects.create(name="Org B", slug="org-b")
-        app_a = _make_app(org_a, "demo")
+        app_a = _make_app(org_a, "demo", self._sandbox_env(org_a))
         # Org A claims "demo" by having a committed deployment in its sandbox env.
-        _make_deployment(app_a, self._sandbox_env(org_a))
+        _make_deployment(app_a)
         with self.assertRaises(ValueError):
             self._claim(org_b, "demo")
 
     def test_same_org_redeploy_is_allowed(self) -> None:
         org_a = models.Organization.objects.create(name="Org A", slug="org-a")
-        app_a = _make_app(org_a, "demo")
-        _make_deployment(app_a, self._sandbox_env(org_a))
+        app_a = _make_app(org_a, "demo", self._sandbox_env(org_a))
+        _make_deployment(app_a)
         # No raise: the only conflicting deployment belongs to the same org.
         self._claim(org_a, "demo")
 
     def test_non_sandbox_env_skips_check(self) -> None:
         org_a = models.Organization.objects.create(name="Org A", slug="org-a")
         org_b = models.Organization.objects.create(name="Org B", slug="org-b")
-        app_a = _make_app(org_a, "demo")
-        _make_deployment(app_a, self._sandbox_env(org_a))
+        app_a = _make_app(org_a, "demo", self._sandbox_env(org_a))
+        _make_deployment(app_a)
         regular_account = models.AWSAccount.objects.create(organization=org_b, name="Own AWS")
-        regular_env = (
-            models.Environment.objects
-            .select_related("aws_account")
-            .get(id=models.Environment.objects.create(
-                aws_account=regular_account,
-                name="Prod",
-                slug="prod",
-                aws_region="us-east-1",
-                status=models.Environment.Status.READY,
-            ).id)
+        regular_env = models.Environment.objects.create(
+            aws_account=regular_account,
+            name="Prod",
+            slug="prod",
+            aws_region="us-east-1",
+            status=models.Environment.Status.READY,
         )
         # Conflicting slug exists in the sandbox, but this deploy targets a non-sandbox env:
         # no raise and no claim row is written.
@@ -216,6 +205,25 @@ class TestSandboxTeardownGuard(TestCase):
         ok = environment_teardown_executor.run_environment_teardown(environment_id=str(env.id))
         self.assertTrue(ok)
         mock_teardown.assert_not_called()
+        self.assertFalse(models.Environment.objects.filter(id=env.id).exists())
+
+    @patch.object(environment_teardown_executor.infra_customer.deploy_base, "teardown")
+    def test_sandbox_env_teardown_deletes_apps_and_releases_slug_claims(self, mock_teardown) -> None:
+        org = models.Organization.objects.create(name="Acme", slug="acme")
+        env = models.Environment.objects.get(aws_account__organization=org, slug="sandbox")
+        app = _make_app(org, "demo", env)
+        async_to_sync(sandbox_service.aclaim_sandbox_app_slug)(
+            app_slug="demo",
+            organization_id=org.id,
+            environment=env,
+        )
+        self.assertTrue(models.SandboxSlugClaim.objects.filter(slug="demo").exists())
+
+        ok = environment_teardown_executor.run_environment_teardown(environment_id=str(env.id))
+
+        self.assertTrue(ok)
+        self.assertFalse(models.App.objects.filter(id=app.id).exists())
+        self.assertFalse(models.SandboxSlugClaim.objects.filter(slug="demo").exists())
         self.assertFalse(models.Environment.objects.filter(id=env.id).exists())
 
 

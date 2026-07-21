@@ -23,7 +23,7 @@
         </div>
         <div class="flex items-center justify-between">
             <span class="text-gray-500 dark:text-gray-400">Branch</span>
-            <span class="text-gray-700 dark:text-gray-300">{{ app.branch }}</span>
+            <span class="text-gray-700 dark:text-gray-300">{{ app.repository.default_branch }}</span>
         </div>
         {% if show_workspace %}
         <div class="flex items-center justify-between">
