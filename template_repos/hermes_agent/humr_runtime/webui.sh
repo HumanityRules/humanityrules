@@ -70,6 +70,21 @@ sandbox_seed() {
         || die "failed to seed sandbox runtime state"
 }
 
+ensure_caddy_fragments() {
+    mkdir -p /workspace/.config/caddy
+    if [ ! -e /workspace/.config/caddy/webapps.caddy ]; then
+        echo "# no Web App routes" > /workspace/.config/caddy/webapps.caddy
+    fi
+    if [ ! -e /workspace/.config/caddy/widgets.caddy ]; then
+        echo "# no Widget routes" > /workspace/.config/caddy/widgets.caddy
+    fi
+}
+
+reconcile_widgets() {
+    widgets apply --all \
+        || echo "[webui] Widget reconciliation failed (non-fatal); continuing with last-good routes."
+}
+
 reconcile_platform_skills() {
     "$HERMES_WEBUI_PYTHON" "${HUMR_RUNTIME_DIR}/reconcile_platform_skills.py" \
         || die "failed to reconcile platform skills"
@@ -192,6 +207,8 @@ wait_for_webui() {
 main() {
     reconcile_platform_skills
     sandbox_seed
+    ensure_caddy_fragments
+    reconcile_widgets
     bootstrap_admin_webapp
     seed_example_webapps
     bootstrap_gateway_process

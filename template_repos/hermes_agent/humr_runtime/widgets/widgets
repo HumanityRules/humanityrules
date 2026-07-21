@@ -1,0 +1,106 @@
+#!/opt/hermes/webui/venv/bin/python3
+"""HUMR Widgets CLI for manifest-driven static Widget lifecycle."""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from collections.abc import Sequence
+
+sys.path.insert(0, "/opt/humr/runtime/widgets")
+
+import widgets_core
+import widgets_runtime
+
+
+def cmd_apply(args: argparse.Namespace, paths: widgets_runtime.WidgetRuntimePaths) -> int:
+    """Apply one Widget or reconcile every valid Widget."""
+    target_slug = None if args.apply_all else args.slug
+    if args.apply_all == (args.slug is not None):
+        print("widgets: apply requires exactly one of <slug> or --all", file=sys.stderr)
+        return 2
+
+    try:
+        result = widgets_runtime.reconcile_widgets(paths=paths, target_slug=target_slug)
+    except (OSError, RuntimeError, ValueError) as exc:
+        print(f"widgets: {exc}", file=sys.stderr)
+        return 1
+    _report_failures(failures=result.failures)
+    if args.apply_all:
+        print(f"widgets: reconciled {len(result.widgets)} Widget(s).")
+    else:
+        print(f"widgets: applied {args.slug!r}.")
+    return 0
+
+
+def cmd_list(args: argparse.Namespace, paths: widgets_runtime.WidgetRuntimePaths) -> int:
+    """List Widgets directly from their manifests."""
+    del args
+    try:
+        discovery = widgets_runtime.list_widgets(paths=paths)
+    except (OSError, RuntimeError, ValueError) as exc:
+        print(f"widgets: {exc}", file=sys.stderr)
+        return 1
+    _report_failures(failures=discovery.failures)
+    if not discovery.widgets:
+        print("No Widgets yet.")
+        return 0
+    print(f"{'SLUG':<32} {'TITLE':<40} URL")
+    for widget in sorted(discovery.widgets, key=lambda item: (item.title.casefold(), item.slug)):
+        print(f"{widget.slug:<32} {widget.title:<40} /widgets/{widget.slug}/")
+    return 0
+
+
+def cmd_delete(args: argparse.Namespace, paths: widgets_runtime.WidgetRuntimePaths) -> int:
+    """Permanently delete one exact Widget directory and reconcile."""
+    try:
+        result = widgets_runtime.delete_widget(
+            paths=paths,
+            slug=args.slug,
+            confirmed=args.yes,
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        print(f"widgets: {exc}", file=sys.stderr)
+        return 1
+    _report_failures(failures=result.failures)
+    print(f"widgets: permanently deleted {args.slug!r}.")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build the CLI parser."""
+    parser = argparse.ArgumentParser(prog="widgets")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    apply_parser = subparsers.add_parser("apply", help="validate and reconcile Widgets")
+    apply_parser.add_argument("slug", nargs="?")
+    apply_parser.add_argument("--all", action="store_true", dest="apply_all")
+    apply_parser.set_defaults(handler=cmd_apply)
+
+    list_parser = subparsers.add_parser("list", help="list manifest-defined Widgets")
+    list_parser.set_defaults(handler=cmd_list)
+
+    delete_parser = subparsers.add_parser("delete", help="permanently delete a Widget")
+    delete_parser.add_argument("slug")
+    delete_parser.add_argument("--yes", action="store_true")
+    delete_parser.set_defaults(handler=cmd_delete)
+    return parser
+
+
+def main(argv: Sequence[str], paths: widgets_runtime.WidgetRuntimePaths) -> int:
+    """Run the Widgets CLI with explicit arguments and runtime paths."""
+    args = build_parser().parse_args(argv)
+    handler = args.handler
+    return int(handler(args=args, paths=paths))
+
+
+def _report_failures(failures: tuple[widgets_core.WidgetValidationFailure, ...]) -> None:
+    for failure in failures:
+        print(
+            f"widgets: skipping {failure.slug!r}: {failure.message}",
+            file=sys.stderr,
+        )
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(argv=sys.argv[1:], paths=widgets_runtime.DEFAULT_PATHS))
