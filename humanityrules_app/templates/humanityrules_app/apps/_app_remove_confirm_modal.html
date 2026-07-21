@@ -49,6 +49,11 @@
 
                 {# Options #}
                 <form id="remove-app-form" class="mt-4 ml-14 text-sm">
+                    {% if is_sandbox %}
+                    <p class="text-gray-700 dark:text-gray-300">
+                        This is a sandbox app. Removing it permanently deletes all associated data in the app's environment:
+                    </p>
+                    {% else %}
                     <label class="flex items-start gap-2">
                         <input type="checkbox" name="delete_all_data"
                                class="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
@@ -56,6 +61,7 @@
                             Delete all associated data in the app's environment:
                         </span>
                     </label>
+                    {% endif %}
                     <ul class="mt-2 ml-6 list-disc pl-4 space-y-1 text-gray-500 dark:text-gray-400">
                         <li>
                             AWS Secrets Manager secrets
