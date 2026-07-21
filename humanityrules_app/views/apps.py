@@ -6,7 +6,7 @@ from uuid import UUID
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
-from django.db.models import Case, IntegerField, OuterRef, Subquery, Value, When
+from django.db.models import Case, IntegerField, OuterRef, Q, Subquery, Value, When
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
@@ -65,14 +65,14 @@ def _get_deployment_for_app(app: App, deployment_id: UUID) -> Deployment:
 def get_current_deployment(app: App) -> Deployment | None:
     """Return the app's most relevant deployment.
 
-    Chosen by priority: transient operations first (deploys and teardowns in
-    flight), then terminal authoritative conclusions (succeeded or torn down)
+    Chosen by priority: unsettled operations first (deploys and teardowns in
+    flight), then authoritative settled states (succeeded or torn down)
     picked by recency, then everything else. This means a failed redeploy
     attempt won't hide the last successful deployment, while a completed
     teardown correctly supersedes a prior success.
     """
     status_priority = Case(
-        When(status__in=Deployment.TRANSIENT_STATUSES, then=Value(0)),
+        When(~Q(status__in=Deployment.SETTLED_STATUSES), then=Value(0)),
         When(
             status__in=(Deployment.Status.SUCCEEDED, Deployment.Status.TORN_DOWN),
             then=Value(1),
@@ -105,10 +105,10 @@ def build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
     context["deployments"] = deployments
     context["current_deployment"] = current_deployment
     # Deployment Log tab: enabled once there's something to show (any logged deployment, or one
-    # currently in flight). When a deployment is in progress we open that tab by default, so a
+    # currently in flight). When an operation is unsettled we open that tab by default, so a
     # freshly started deploy lands straight on its live log instead of the Overview.
     latest_deployment = deployments[0] if deployments else None
-    deploy_in_progress = latest_deployment is not None and latest_deployment.is_transient
+    deploy_in_progress = latest_deployment is not None and not latest_deployment.is_settled
     has_logs = DeploymentLog.objects.filter(deployment__app=app).exists()
     context["latest_deployment"] = latest_deployment
     context["log_tab_enabled"] = has_logs or deploy_in_progress
@@ -162,7 +162,7 @@ def app_detail(request: HttpRequest, app_slug: str) -> HttpResponse:
     latest_deployment = context["latest_deployment"]
     welcome_preview = settings.DEBUG and welcome_param == "preview"
     welcome = welcome_param == "1"
-    context["show_welcome"] = latest_deployment is not None and (welcome_preview or (welcome and latest_deployment.is_transient))
+    context["show_welcome"] = latest_deployment is not None and (welcome_preview or (welcome and not latest_deployment.is_settled))
     context["welcome_preview"] = welcome_preview
     # ?live=preview (DEBUG only): render the deploy-success dialog visible for iteration.
     context["live_preview"] = live_preview
@@ -355,7 +355,7 @@ def app_deployment_redeploy(request: HttpRequest, app_slug: str, deployment_id: 
     if deployment.status not in (Deployment.Status.SUCCEEDED, Deployment.Status.FAILED, Deployment.Status.TORN_DOWN):
         return HttpResponse(status=422)
 
-    if Deployment.objects.filter(app=app, status__in=Deployment.IN_PROGRESS_STATUSES).exists():
+    if Deployment.objects.filter(app=app).exclude(status__in=Deployment.SETTLED_STATUSES).exists():
         return HttpResponse(status=422)
 
     git_ref = deployment.git_ref

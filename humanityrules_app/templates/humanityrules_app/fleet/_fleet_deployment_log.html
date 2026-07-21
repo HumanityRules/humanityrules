@@ -5,7 +5,7 @@ while the deployment is transient; polling attributes are omitted once it conclu
 See docs/ui_live_update_contract.md.
 {% endcomment %}
 <div id="fleet-log-inner-{{ deployment.id }}"
-     {% if deployment.is_transient %}
+     {% if not deployment.is_settled %}
      hx-get="{% url 'fleet_deployment_log' deployment_id=deployment.id %}"
      hx-trigger="load delay:1s"
      hx-target="#fleet-log-inner-{{ deployment.id }}"
@@ -15,7 +15,7 @@ See docs/ui_live_update_contract.md.
     <div class="flex items-center justify-between mb-1">
         <span class="text-xs text-gray-500 dark:text-gray-400">
             {{ deployment.app.slug }} · {{ deployment.get_status_display }} · started {{ deployment.created_at|timesince }} ago
-            {% if deployment.is_transient %}<span class="ml-1 text-green-600 dark:text-green-400">live</span>{% endif %}
+            {% if not deployment.is_settled %}<span class="ml-1 text-green-600 dark:text-green-400">live</span>{% endif %}
         </span>
         <button onclick="document.getElementById('fleet-log-{{ deployment.id }}').innerHTML = ''"
                 class="text-xs text-gray-500 dark:text-gray-400 hover:underline">close</button>

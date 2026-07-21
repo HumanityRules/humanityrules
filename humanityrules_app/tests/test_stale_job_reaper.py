@@ -84,12 +84,12 @@ class TestStaleJobReaper(TestCase):
         self.assertIsNotNone(deployment.completed_at)
 
     def test_fresh_executing_deployment_is_untouched(self) -> None:
-        deployment = self._create_deployment(status=models.Deployment.Status.BUILDING)
+        deployment = self._create_deployment(status=models.Deployment.Status.DEPLOYING)
 
         stale_job_reaper.reap_stale_jobs(no_progress_timeout=TIMEOUT, dead_worker_timeout=DEAD_WORKER_TIMEOUT)
 
         deployment.refresh_from_db()
-        self.assertEqual(deployment.status, models.Deployment.Status.BUILDING)
+        self.assertEqual(deployment.status, models.Deployment.Status.DEPLOYING)
 
     def test_old_claimable_and_terminal_deployments_are_untouched(self) -> None:
         pending = self._create_deployment(status=models.Deployment.Status.PENDING)
@@ -198,7 +198,7 @@ class TestStaleJobReaper(TestCase):
 
         self.assertIsNotNone(claimed)
         deployment.refresh_from_db()
-        self.assertEqual(deployment.status, models.Deployment.Status.BUILDING)
+        self.assertEqual(deployment.status, models.Deployment.Status.DEPLOYING)
         self.assertEqual(deployment.claimed_by_run_id, run.id)
 
     def test_stale_provisioning_and_tearing_down_environments_error(self) -> None:

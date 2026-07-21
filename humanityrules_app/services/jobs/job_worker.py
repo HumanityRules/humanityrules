@@ -95,7 +95,7 @@ def _claim_pending_app_deployment(label: str) -> Deployment | None:
         )
 
         if deployment:
-            deployment.status = Deployment.Status.BUILDING
+            deployment.status = Deployment.Status.DEPLOYING
             deployment.status_message = "Claimed by worker"
             deployment.claimed_by_run_id = _worker_run_id
             deployment.save(update_fields=["status", "status_message", "claimed_by_run", "updated_at"])

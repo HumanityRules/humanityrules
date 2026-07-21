@@ -44,7 +44,7 @@
                 </form>
 
                 <div class="mt-4 ml-14 text-sm text-gray-500 dark:text-gray-400 space-y-2">
-                    <p>Torn-down services stay off. Apps won't enter the queue while a deployment is in progress or removal is pending. It also skips environments that aren't ready.</p>
+                    <p>Torn-down services stay off. Apps won't enter the queue while a deployment or teardown is in progress or removal is pending. It also skips environments that aren't ready.</p>
                     {% if preview.skipped_count %}
                     <div>
                         <p>The queue will skip {{ preview.skipped_count }} other entr{{ preview.skipped_count|pluralize:"y,ies" }}:</p>

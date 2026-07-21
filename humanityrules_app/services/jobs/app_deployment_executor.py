@@ -43,7 +43,7 @@ def run_deployment(deployment_id: str) -> bool:
     It orchestrates the full deployment flow:
     1. Load deployment and related models
     2. Verify environment is READY (agent must create it first)
-    3. Update status to BUILDING
+    3. Update status to DEPLOYING
     4. Build AppConfig from Django models
     5. Execute CDK deployment
     6. Update deployment status and outputs
@@ -102,8 +102,7 @@ def run_deployment(deployment_id: str) -> bool:
         if settings.HUMR_DEBUG_DEPLOYMENTS:
             return app_deployment_debug_simulator.run_debug_deployment(deployment=deployment)
 
-        # Update status to BUILDING
-        deployment.status = models.Deployment.Status.BUILDING
+        deployment.status = models.Deployment.Status.DEPLOYING
         deployment.status_message = "Deployment started"
         deployment.started_at = timezone.now()
         deployment.save()
@@ -129,9 +128,8 @@ def run_deployment(deployment_id: str) -> bool:
                 repo_path=cloned_repo_path,
             )
 
-            # Execute deployment
-            deployment.status = models.Deployment.Status.DEPLOYING
-            deployment.save()
+            deployment.status_message = "Deploying infrastructure"
+            deployment.save(update_fields=["status_message", "updated_at"])
 
             result = infra_customer.deploy_app.deploy(
                 session=session,

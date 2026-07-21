@@ -291,7 +291,7 @@ class AgentSlugErrorSurfaceTests(TestCase):
         )
 
     def _create_redeploy_source(self) -> tuple[models.App, models.Deployment]:
-        """Create a concluded deployment for CLI redeploy tests."""
+        """Create a settled deployment for CLI redeploy tests."""
         repository = models.Repository.objects.create(
             organization=self.organization,
             provider=models.Repository.Provider.GITHUB,
@@ -386,6 +386,29 @@ class AgentSlugErrorSurfaceTests(TestCase):
         pending = models.Deployment.objects.get(app=app, status=models.Deployment.Status.PENDING)
         self.assertEqual(pending.git_ref, source.git_ref)
         self.assertNotEqual(pending.image_tag, source.image_tag)
+
+    def test_humr_control_redeploy_is_blocked_while_teardown_is_unsettled(self) -> None:
+        app, _source = self._create_redeploy_source()
+        models.Deployment.objects.create(
+            app=app,
+            git_ref="main",
+            image_tag="slugagent-main-teardown",
+            status=models.Deployment.Status.TEARDOWN_PENDING,
+        )
+        stdout = StringIO()
+        stderr = StringIO()
+
+        call_command(
+            "humr_control",
+            "redeploy-app",
+            app=app.slug,
+            created_by=self.user.username,
+            stdout=stdout,
+            stderr=stderr,
+        )
+
+        self.assertIn("has a deployment or teardown in progress", stderr.getvalue())
+        self.assertFalse(models.Deployment.objects.filter(app=app, status=models.Deployment.Status.PENDING).exists())
 
 
 class SeedLocalAppEnvMismatchTests(TestCase):

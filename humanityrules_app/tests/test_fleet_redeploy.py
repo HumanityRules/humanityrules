@@ -113,31 +113,37 @@ class TestFleetRedeployAll(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Fail stuck deployments")
-        self.assertContains(response, "/platform/fleet/fail-transient/confirm/")
+        self.assertContains(response, "/platform/fleet/fail-unsettled/confirm/")
 
-    def test_fail_transient_confirmation_shows_current_count(self) -> None:
+    def test_fail_unsettled_confirmation_shows_current_count(self) -> None:
         self._create_deployment(
             app=self.app,
             status=models.Deployment.Status.PENDING,
             suffix="pending",
         )
 
-        response = self.client.get("/platform/fleet/fail-transient/confirm/")
+        response = self.client.get("/platform/fleet/fail-unsettled/confirm/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "mark 1 deployment in a transient state as failed", html=False)
-        self.assertContains(response, "/platform/fleet/fail-transient/")
+        self.assertContains(response, "mark 1 unfinished deployment as failed", html=False)
+        self.assertContains(response, "/platform/fleet/fail-unsettled/")
 
-    def test_fail_transient_marks_every_transient_status_failed(self) -> None:
-        transient_deployments = [
+    def test_fail_unsettled_marks_every_unsettled_status_failed(self) -> None:
+        unsettled_statuses = (
+            models.Deployment.Status.PENDING,
+            models.Deployment.Status.DEPLOYING,
+            models.Deployment.Status.TEARDOWN_PENDING,
+            models.Deployment.Status.TEARING_DOWN,
+        )
+        unsettled_deployments = [
             self._create_deployment(
                 app=self.app,
                 status=status,
-                suffix=f"transient-{index}",
+                suffix=f"unsettled-{index}",
             )
-            for index, status in enumerate(models.Deployment.TRANSIENT_STATUSES)
+            for index, status in enumerate(unsettled_statuses)
         ]
-        terminal_deployments = [
+        settled_deployments = [
             self.succeeded_source,
             self._create_deployment(
                 app=self.app,
@@ -150,36 +156,36 @@ class TestFleetRedeployAll(TestCase):
                 suffix="torn-down",
             ),
         ]
-        original_terminal_statuses = {deployment.id: deployment.status for deployment in terminal_deployments}
+        original_settled_statuses = {deployment.id: deployment.status for deployment in settled_deployments}
 
-        response = self.client.post("/platform/fleet/fail-transient/")
+        response = self.client.post("/platform/fleet/fail-unsettled/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, f"Marked {len(transient_deployments)} transient deployments as failed")
-        for deployment in transient_deployments:
+        self.assertContains(response, f"Marked {len(unsettled_deployments)} unsettled deployments as failed")
+        for deployment in unsettled_deployments:
             deployment.refresh_from_db()
             self.assertEqual(deployment.status, models.Deployment.Status.FAILED)
             self.assertEqual(deployment.status_message, fleet_service.RECOVERY_STATUS_MESSAGE)
             self.assertIsNotNone(deployment.completed_at)
-        for deployment in terminal_deployments:
+        for deployment in settled_deployments:
             deployment.refresh_from_db()
-            self.assertEqual(deployment.status, original_terminal_statuses[deployment.id])
+            self.assertEqual(deployment.status, original_settled_statuses[deployment.id])
 
-    def test_fail_transient_is_safe_to_repeat(self) -> None:
+    def test_fail_unsettled_is_safe_to_repeat(self) -> None:
         pending = self._create_deployment(
             app=self.app,
             status=models.Deployment.Status.PENDING,
             suffix="pending-repeat",
         )
 
-        first_response = self.client.post("/platform/fleet/fail-transient/")
+        first_response = self.client.post("/platform/fleet/fail-unsettled/")
         pending.refresh_from_db()
         first_completed_at = pending.completed_at
-        second_response = self.client.post("/platform/fleet/fail-transient/")
+        second_response = self.client.post("/platform/fleet/fail-unsettled/")
         pending.refresh_from_db()
 
-        self.assertContains(first_response, "Marked 1 transient deployment as failed")
-        self.assertContains(second_response, "Marked 0 transient deployments as failed")
+        self.assertContains(first_response, "Marked 1 unsettled deployment as failed")
+        self.assertContains(second_response, "Marked 0 unsettled deployments as failed")
         self.assertEqual(pending.completed_at, first_completed_at)
 
     def test_per_ha_redeploy_queues_only_the_selected_app(self) -> None:
@@ -320,7 +326,7 @@ class TestFleetRedeployAll(TestCase):
         self.assertEqual(second_response.status_code, 200)
         self.assertEqual(models.Deployment.objects.filter(status=models.Deployment.Status.PENDING).count(), 1)
         self.assertContains(second_response, "Queued 0 redeployments")
-        self.assertContains(second_response, "Deployment already in progress")
+        self.assertContains(second_response, "Deployment or teardown already in progress")
 
     def test_fleet_redeploy_endpoints_hide_from_nonstaff(self) -> None:
         self.client.force_login(self.nonstaff)
@@ -328,8 +334,8 @@ class TestFleetRedeployAll(TestCase):
         confirm_response = self.client.get("/platform/fleet/redeploy-all/confirm/")
         post_response = self.client.post("/platform/fleet/redeploy-all/")
         per_ha_response = self.client.post(f"/platform/fleet/deployment/{self.succeeded_source.id}/redeploy/")
-        recovery_confirm_response = self.client.get("/platform/fleet/fail-transient/confirm/")
-        recovery_response = self.client.post("/platform/fleet/fail-transient/")
+        recovery_confirm_response = self.client.get("/platform/fleet/fail-unsettled/confirm/")
+        recovery_response = self.client.post("/platform/fleet/fail-unsettled/")
 
         self.assertEqual(confirm_response.status_code, 404)
         self.assertEqual(post_response.status_code, 404)
@@ -340,7 +346,7 @@ class TestFleetRedeployAll(TestCase):
     def test_redeploy_all_requires_post(self) -> None:
         all_response = self.client.get("/platform/fleet/redeploy-all/")
         per_ha_response = self.client.get(f"/platform/fleet/deployment/{self.succeeded_source.id}/redeploy/")
-        recovery_response = self.client.get("/platform/fleet/fail-transient/")
+        recovery_response = self.client.get("/platform/fleet/fail-unsettled/")
 
         self.assertEqual(all_response.status_code, 405)
         self.assertEqual(per_ha_response.status_code, 405)

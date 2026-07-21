@@ -873,36 +873,17 @@ class Deployment(models.Model):
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
-        BUILDING = "building", "Building Image"
-        PUSHING = "pushing", "Pushing to ECR"
         DEPLOYING = "deploying", "Deploying"
-        STARTING = "starting", "Starting"
         SUCCEEDED = "succeeded", "Succeeded"
         FAILED = "failed", "Failed"
         TORN_DOWN = "torn_down", "Torn Down"
         TEARDOWN_PENDING = "teardown_pending", "Teardown Pending"
         TEARING_DOWN = "tearing_down", "Tearing Down"
 
-    IN_PROGRESS_STATUSES = (
-        Status.PENDING,
-        Status.BUILDING,
-        Status.PUSHING,
-        Status.DEPLOYING,
-        Status.STARTING,
-    )
-
-    CONCLUDED_STATUSES = (
+    SETTLED_STATUSES = (
         Status.SUCCEEDED,
         Status.FAILED,
-        Status.TEARDOWN_PENDING,
-        Status.TEARING_DOWN,
         Status.TORN_DOWN,
-    )
-
-    TRANSIENT_STATUSES = (
-        *IN_PROGRESS_STATUSES,
-        Status.TEARDOWN_PENDING,
-        Status.TEARING_DOWN,
     )
 
     id = models.UUIDField(
@@ -985,19 +966,9 @@ class Deployment(models.Model):
         return f"{self.app.name} - {self.git_ref} ({self.status})"
 
     @property
-    def is_in_progress(self) -> bool:
-        """Actively going through the build/deploy pipeline."""
-        return self.status in self.IN_PROGRESS_STATUSES
-
-    @property
-    def is_concluded(self) -> bool:
-        """Reached a result from the pipeline's perspective."""
-        return self.status in self.CONCLUDED_STATUSES
-
-    @property
-    def is_transient(self) -> bool:
-        """Status may change via background processing."""
-        return self.status in self.TRANSIENT_STATUSES
+    def is_settled(self) -> bool:
+        """Return whether no deployment or teardown work is queued or running."""
+        return self.status in self.SETTLED_STATUSES
 
 
 class AppEnvironmentActivity(models.Model):

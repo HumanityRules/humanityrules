@@ -1,5 +1,5 @@
 <tr id="deployment-{{ deployment.id }}"
-    {% if deployment.is_transient %}
+    {% if not deployment.is_settled %}
         hx-get="{% url 'app_deployment_status' app_slug=deployment.app.slug deployment_id=deployment.id %}{% if mode %}?mode={{ mode }}{% endif %}"
         hx-trigger="load delay:10s"
         hx-target="#deployment-{{ deployment.id }}"

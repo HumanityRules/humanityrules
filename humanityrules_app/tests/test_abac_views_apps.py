@@ -155,7 +155,7 @@ class TestAppEndpoints(TestCase):
         self.assertNotEqual(current.id, failed_attempt.id)
         self.assertEqual(current.status, Deployment.Status.SUCCEEDED)
 
-    def test_app_detail_environment_row_prefers_in_progress_redeploy(self) -> None:
+    def test_app_detail_environment_row_prefers_unsettled_redeploy(self) -> None:
         redeploy_attempt = Deployment.objects.create(
             app=self.app,
             git_ref="main",
@@ -259,6 +259,20 @@ class TestAppEndpoints(TestCase):
         self.client.force_login(self.ws_editor)
         response = self.client.post(f"/apps/myapp/deployments/{self.deployment.id}/redeploy/")
         self.assertEqual(response.status_code, 200)
+
+    def test_redeploy_is_blocked_while_teardown_is_unsettled(self) -> None:
+        Deployment.objects.create(
+            app=self.app,
+            git_ref="main",
+            image_tag="myapp-main-teardown",
+            status=Deployment.Status.TEARDOWN_PENDING,
+        )
+        self.client.force_login(self.ws_editor)
+
+        response = self.client.post(f"/apps/myapp/deployments/{self.deployment.id}/redeploy/")
+
+        self.assertEqual(response.status_code, 422)
+        self.assertFalse(Deployment.objects.filter(app=self.app, status=Deployment.Status.PENDING).exists())
 
     def test_ws_viewer_gets_403_on_redeploy(self) -> None:
         self.client.force_login(self.ws_viewer)
