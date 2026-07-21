@@ -72,7 +72,7 @@ class TestDeploymentLogTab(TestCase):
 
     def test_in_progress_deploy_opens_log_tab_even_without_logs_yet(self) -> None:
         # A just-started deploy has no log lines yet, but the tab must be enabled and active.
-        self._make_deployment(Deployment.Status.BUILDING)
+        self._make_deployment(Deployment.Status.DEPLOYING)
         response = self.client.get("/apps/myapp/", **HTMX)
         body = response.content.decode()
         self.assertNotIn("cursor-not-allowed", body)
@@ -80,7 +80,7 @@ class TestDeploymentLogTab(TestCase):
         # The region self-loads the fragment on page load (no tab click happens).
         self.assertIn('hx-trigger="load"', body)
 
-    def test_fragment_shows_latest_deployment_logs_colorized_and_polls_while_transient(self) -> None:
+    def test_fragment_shows_latest_deployment_logs_colorized_and_polls_while_unsettled(self) -> None:
         old = self._make_deployment(Deployment.Status.SUCCEEDED)
         DeploymentLog.objects.create(deployment=old, source="app", level="info", message="OLD LINE")
         new = self._make_deployment(Deployment.Status.DEPLOYING)
@@ -96,7 +96,7 @@ class TestDeploymentLogTab(TestCase):
         self.assertNotIn("OLD LINE", body)
         # Colorized: error level gets the red class.
         self.assertIn("text-red-400", body)
-        # Transient deployment -> self-polls every second.
+        # Unsettled deployment -> self-polls every second.
         self.assertIn('hx-trigger="load delay:1s"', body)
         self.assertIn("Live", body)
 

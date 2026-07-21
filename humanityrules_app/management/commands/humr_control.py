@@ -494,7 +494,7 @@ class Command(BaseCommand):
 
         Mirrors the UI's 'Redeploy' button (`app_deployment_redeploy`): same git_ref,
         fresh image_tag so the build is rebuilt. Allowed source statuses: SUCCEEDED,
-        FAILED, TORN_DOWN. Refuses if any deployment for the app is in progress, or
+        FAILED, TORN_DOWN. Refuses if any deployment or teardown for the app is unsettled, or
         if the app is PENDING_REMOVAL.
         """
         app_slug = options["app"]
@@ -513,9 +513,9 @@ class Command(BaseCommand):
             self.stderr.write(self.style.ERROR(f"App '{app_slug}' is pending removal - cannot redeploy"))
             return
 
-        if models.Deployment.objects.filter(app=app, status__in=models.Deployment.IN_PROGRESS_STATUSES).exists():
+        if models.Deployment.objects.filter(app=app).exclude(status__in=models.Deployment.SETTLED_STATUSES).exists():
             self.stderr.write(self.style.ERROR(
-                f"App '{app_slug}' has a deployment in progress - wait for it to complete before redeploying"
+                f"App '{app_slug}' has a deployment or teardown in progress - wait for it to complete before redeploying"
             ))
             return
 
@@ -561,11 +561,11 @@ class Command(BaseCommand):
         self.stdout.write(f"  git_ref: {git_ref}")
         self.stdout.write(f"  image_tag: {image_tag}")
         self.stdout.write(f"  Created by: {created_by.username}")
-        self.stdout.write(self.style.WARNING("Build/push/deploy will start automatically (job worker picks up pending deployments)"))
+        self.stdout.write(self.style.WARNING("Deployment will start automatically (job worker picks up pending deployments)"))
         self.stdout.write("")
 
     def _resolve_redeploy_source(self, app: models.App, deployment_id_str: str | None) -> models.Deployment | None:
-        """Pick the source Deployment to clone: --deployment <uuid> wins, else the latest concluded one."""
+        """Pick the source Deployment to clone: --deployment <uuid> wins, else the latest settled one."""
         if deployment_id_str:
             try:
                 deployment_id = UUID(deployment_id_str)
@@ -582,13 +582,13 @@ class Command(BaseCommand):
 
         source = (
             models.Deployment.objects
-            .filter(app=app, status__in=models.Deployment.CONCLUDED_STATUSES)
+            .filter(app=app, status__in=models.Deployment.SETTLED_STATUSES)
             .order_by("-created_at")
             .first()
         )
         if source is None:
             self.stderr.write(self.style.ERROR(
-                f"No concluded deployments found for app '{app.slug}' - nothing to redeploy from"
+                f"No settled deployments found for app '{app.slug}' - nothing to redeploy from"
             ))
             return None
         return source

@@ -10,7 +10,7 @@
             <div class="flex items-center gap-4">
                 <span class="text-sm text-gray-500 dark:text-gray-400">Platform admin · DB state is intent; use “Query live state” for ground truth</span>
                 <button type="button"
-                        hx-get="{% url 'fleet_fail_transient_deployments_confirm' %}"
+                        hx-get="{% url 'fleet_fail_unsettled_deployments_confirm' %}"
                         hx-target="#modal-container"
                         hx-swap="innerHTML"
                         class="shrink-0 rounded-md bg-white px-3 py-2 text-sm font-semibold text-red-700 shadow-xs ring-1 ring-inset ring-red-300 hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 dark:bg-gray-900 dark:text-red-400 dark:ring-red-500/40 dark:hover:bg-red-500/10">
@@ -48,7 +48,7 @@
                     {% else %}border-yellow-200 bg-yellow-50 text-yellow-800 dark:border-yellow-500/30 dark:bg-yellow-500/10 dark:text-yellow-300{% endif %}"
              role="status">
             <p class="font-medium">
-                Marked {{ recovery_result.failed_count }} transient deployment{{ recovery_result.failed_count|pluralize }} as failed.
+                Marked {{ recovery_result.failed_count }} unsettled deployment{{ recovery_result.failed_count|pluralize }} as failed.
             </p>
         </div>
         {% endif %}
@@ -94,7 +94,7 @@
                     <span class="text-sm px-2 py-0.5 rounded-full
                         {% if deployment.status == 'succeeded' %}bg-green-100 text-green-800 dark:bg-green-500/10 dark:text-green-400
                         {% elif deployment.status == 'failed' %}bg-red-100 text-red-800 dark:bg-red-500/10 dark:text-red-400
-                        {% elif deployment.is_transient %}bg-yellow-100 text-yellow-800 dark:bg-yellow-500/10 dark:text-yellow-400
+                        {% elif not deployment.is_settled %}bg-yellow-100 text-yellow-800 dark:bg-yellow-500/10 dark:text-yellow-400
                         {% else %}bg-gray-100 text-gray-600 dark:bg-white/5 dark:text-gray-400{% endif %}">
                         {{ deployment.get_status_display }}
                     </span>

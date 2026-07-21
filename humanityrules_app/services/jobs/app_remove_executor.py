@@ -26,18 +26,6 @@ from . import tenant_consistency
 logger = logging.getLogger(__name__)
 
 
-# Deployment statuses that mean a deploy is mid-flight; we refuse to tear down
-# from underneath an active deploy worker.
-_IN_FLIGHT_DEPLOYMENT_STATUSES = frozenset({
-    models.Deployment.Status.PENDING,
-    models.Deployment.Status.BUILDING,
-    models.Deployment.Status.PUSHING,
-    models.Deployment.Status.DEPLOYING,
-    models.Deployment.Status.STARTING,
-    models.Deployment.Status.TEARING_DOWN,
-})
-
-
 def _find_live_deployment(app: "models.App") -> tuple[str, str] | None:
     """Return (deployment_id, status) for the app's latest deployment when it isn't torn down."""
     latest = models.Deployment.objects.filter(app=app).order_by("-created_at").values_list("id", "status").first()
@@ -57,7 +45,7 @@ def _teardown_live_deployment(live: tuple[str, str]) -> tuple[bool, str]:
     suitable for the AppRemovalJob status_message.
     """
     deployment_id, status = live
-    if status in _IN_FLIGHT_DEPLOYMENT_STATUSES:
+    if status not in models.Deployment.SETTLED_STATUSES:
         return False, f"Cannot tear down: deployment in progress ({status}). Wait for it to finish."
 
     logger.info("Tearing down deployment %s as part of app removal", deployment_id)
