@@ -11,6 +11,7 @@ from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 
 import humanityrules_app.management.commands.seed_app_templates as seed_app_templates
+import humanityrules_app.management.commands.seed_local_app as seed_local_app
 from humanityrules_app import app_slugs
 from humanityrules_app import models
 from humanityrules_app.services import template_deploy_service
@@ -385,3 +386,79 @@ class AgentSlugErrorSurfaceTests(TestCase):
         pending = models.Deployment.objects.get(app=app, status=models.Deployment.Status.PENDING)
         self.assertEqual(pending.git_ref, source.git_ref)
         self.assertNotEqual(pending.image_tag, source.image_tag)
+
+
+class SeedLocalAppEnvMismatchTests(TestCase):
+    """seed_local_app must refuse an existing app whose env differs from the requested one."""
+
+    def setUp(self) -> None:
+        self.organization = models.Organization.objects.create(name="Seed Org", slug="seed-org")
+        self.workspace = models.Workspace.objects.get(organization=self.organization, slug="default")
+        self.user = models.User.objects.create_user(
+            username="seed@example.com",
+            password="x",
+            current_organization=self.organization,
+        )
+        models.OrganizationMembership.objects.create(
+            organization=self.organization,
+            user=self.user,
+            role=models.OrganizationMembership.Role.ADMIN,
+        )
+        self.aws_account = models.AWSAccount.objects.create(organization=self.organization, name="Seed AWS")
+        self.env_default = models.Environment.objects.create(
+            aws_account=self.aws_account, name="Default", slug="default",
+            aws_region="us-east-1", status=models.Environment.Status.READY,
+        )
+        self.env_sandbox = models.Environment.objects.create(
+            aws_account=self.aws_account, name="Sandbox", slug="sandbox",
+            aws_region="us-east-1", status=models.Environment.Status.READY,
+        )
+        self.repository = models.Repository.objects.create(
+            organization=self.organization,
+            provider=models.Repository.Provider.GITHUB,
+            name="seedapp",
+            full_name="org/seedapp",
+            clone_url="https://github.com/org/seedapp.git",
+            default_branch="main",
+        )
+        self.app = models.App.objects.create(
+            organization=self.organization,
+            workspace=self.workspace,
+            environment=self.env_default,
+            repository=self.repository,
+            name="seedapp",
+            slug="seedapp",
+            app_type=models.App.AppType.WEB,
+            build_strategy=models.App.BuildStrategy.DOCKERFILE,
+            container_port=8000,
+            health_check_path="/health",
+            cpu=256,
+            memory=512,
+        )
+
+    def test_existing_app_in_other_env_raises(self) -> None:
+        command = seed_local_app.Command()
+        with self.assertRaisesMessage(CommandError, "exists in env 'default', not 'sandbox'"):
+            command._ensure_local_app_stub(
+                org=self.organization,
+                environment=self.env_sandbox,
+                app_slug="seedapp",
+                owner_username=self.user.username,
+                template_slug="unused",
+                workspace_slug="default",
+            )
+
+    def test_existing_app_in_same_env_is_accepted(self) -> None:
+        command = seed_local_app.Command()
+        command.stdout = StringIO()
+        command._ensure_local_app_stub(
+            org=self.organization,
+            environment=self.env_default,
+            app_slug="seedapp",
+            owner_username=self.user.username,
+            template_slug="unused",
+            workspace_slug="default",
+        )
+        self.assertTrue(
+            models.ResourceTag.objects.filter(app=self.app, key="owner", value=self.user.username).exists()
+        )
