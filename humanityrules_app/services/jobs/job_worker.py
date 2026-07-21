@@ -264,7 +264,7 @@ def _claim_pending_permissions_apply(label: str) -> AppPermissionRequest | None:
             )
             apr = (
                 AppPermissionRequest.objects
-                .select_for_update(skip_locked=True, of=("self", "app"))
+                .select_for_update(skip_locked=True, of=("self", "app", "app__environment"))
                 .filter(
                     status=AppPermissionRequest.Status.APPROVED_PENDING_APPLY,
                     app__label=label,
