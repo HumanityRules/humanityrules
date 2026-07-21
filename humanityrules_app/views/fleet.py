@@ -98,7 +98,7 @@ def fleet_deployment_redeploy(request: HttpRequest, deployment_id: UUID) -> Http
 
 @_staff_or_404
 def fleet_deployment_log(request: HttpRequest, deployment_id: str) -> HttpResponse:
-    deployment = get_object_or_404(models.Deployment.objects.select_related("app", "environment"), id=deployment_id)
+    deployment = get_object_or_404(models.Deployment.objects.select_related("app", "app__environment"), id=deployment_id)
     # Fetch newest-first so the cap keeps the tail, then reverse to chronological for display.
     recent = list(models.DeploymentLog.objects.filter(deployment=deployment).order_by("-created_at")[: FLEET_LOG_MAX_LINES + 1])
     context = {

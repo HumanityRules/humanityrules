@@ -6,7 +6,6 @@ from humanityrules_app.models import (
     AWSAccount,
     App,
     Deployment,
-    DeploymentBlueprint,
     DeploymentLog,
     Environment,
     Organization,
@@ -31,17 +30,14 @@ class TestDeploymentLogTab(TestCase):
             full_name="org/repo", clone_url="https://github.com/org/repo.git",
         )
         self.workspace = Workspace.objects.create(organization=self.org, name="Engineering", slug="engineering")
-        self.app = App.objects.create(
-            organization=self.org, workspace=self.workspace, repository=self.repo,
-            name="MyApp", slug="myapp", app_type="web", build_strategy="dockerfile",
-            branch="main", container_port=8000, health_check_path="/health",
-        )
         self.env = Environment.objects.create(
             aws_account=self.aws_account, name="Staging", slug="staging", aws_region="us-east-1",
         )
-        self.blueprint = DeploymentBlueprint.objects.create(
-            app=self.app, environment=self.env, status=DeploymentBlueprint.Status.ACTIVE,
-            cpu=256, memory=512, subdomain="myappstaging", created_by=None,
+        self.app = App.objects.create(
+            organization=self.org, workspace=self.workspace, repository=self.repo,
+            environment=self.env, name="MyApp", slug="myapp", app_type="web",
+            build_strategy="dockerfile", container_port=8000, health_check_path="/health",
+            cpu=256, memory=512,
         )
 
         self.admin_user = User.objects.create_user(username="log_admin", password="x", current_organization=self.org)
@@ -51,8 +47,7 @@ class TestDeploymentLogTab(TestCase):
 
     def _make_deployment(self, status: str) -> Deployment:
         return Deployment.objects.create(
-            blueprint=self.blueprint, app=self.app, environment=self.env,
-            subdomain="myappstaging", git_ref="main", image_tag="myapp-main-1", status=status,
+            app=self.app, git_ref="main", image_tag="myapp-main-1", status=status,
         )
 
     def test_tab_disabled_when_no_logs(self) -> None:

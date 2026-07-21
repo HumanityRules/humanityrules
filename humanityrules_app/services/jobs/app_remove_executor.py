@@ -2,9 +2,8 @@
 App removal executor.
 
 Runs an AppRemovalJob: optionally cleans persistent data (EFS app data + EC2 host
-bind-mount data) and Secrets Manager secrets in every environment the app has a
-blueprint in, then deletes the App row (FK cascades handle blueprints, deployments,
-logs, permissions, tags).
+bind-mount data) and Secrets Manager secrets in the app's environment, then deletes
+the App row (FK cascades handle deployments, logs, permissions, tags).
 """
 
 import json
@@ -39,39 +38,32 @@ _IN_FLIGHT_DEPLOYMENT_STATUSES = frozenset({
 })
 
 
-def _find_live_deployments(app: "models.App") -> list[tuple[str, str, str]]:
-    """Return (deployment_id, env_slug, status) for every env whose latest deployment isn't torn down."""
-    latest_by_env: dict = {}
-    for deployment_id, env_id, env_slug, status, created_at in models.Deployment.objects.filter(app=app).values_list(
-        "id", "environment_id", "environment__slug", "status", "created_at",
-    ):
-        existing = latest_by_env.get(env_id)
-        if existing is None or created_at > existing[3]:
-            latest_by_env[env_id] = (deployment_id, env_slug, status, created_at)
-    return [
-        (str(deployment_id), env_slug, status)
-        for deployment_id, env_slug, status, _ in latest_by_env.values()
-        if status != models.Deployment.Status.TORN_DOWN
-    ]
+def _find_live_deployment(app: "models.App") -> tuple[str, str] | None:
+    """Return (deployment_id, status) for the app's latest deployment when it isn't torn down."""
+    latest = models.Deployment.objects.filter(app=app).order_by("-created_at").values_list("id", "status").first()
+    if latest is None:
+        return None
+    deployment_id, status = latest
+    if status == models.Deployment.Status.TORN_DOWN:
+        return None
+    return str(deployment_id), status
 
 
-def _teardown_live_deployments(live: list[tuple[str, str, str]]) -> tuple[bool, str]:
-    """Tear down each live deployment serially by calling run_teardown inline.
+def _teardown_live_deployment(live: tuple[str, str]) -> tuple[bool, str]:
+    """Tear down the live deployment by calling run_teardown inline.
 
     Returns (ok, message). On failure, the deployment row already reflects
     the FAILED status (run_teardown writes it); we just propagate a message
     suitable for the AppRemovalJob status_message.
     """
-    in_flight = [(env_slug, status) for _, env_slug, status in live if status in _IN_FLIGHT_DEPLOYMENT_STATUSES]
-    if in_flight:
-        detail = ", ".join(f"{env}={status}" for env, status in in_flight)
-        return False, f"Cannot tear down: deployment in progress ({detail}). Wait for it to finish."
+    deployment_id, status = live
+    if status in _IN_FLIGHT_DEPLOYMENT_STATUSES:
+        return False, f"Cannot tear down: deployment in progress ({status}). Wait for it to finish."
 
-    for deployment_id, env_slug, _status in live:
-        logger.info("Tearing down deployment %s in env '%s' as part of app removal", deployment_id, env_slug)
-        ok = app_deployment_teardown_executor.run_teardown(deployment_id=deployment_id)
-        if not ok:
-            return False, f"Teardown failed for deployment in env '{env_slug}'"
+    logger.info("Tearing down deployment %s as part of app removal", deployment_id)
+    ok = app_deployment_teardown_executor.run_teardown(deployment_id=deployment_id)
+    if not ok:
+        return False, "Teardown failed for the app's deployment"
     return True, "ok"
 
 
@@ -105,7 +97,7 @@ def run_removal(job_id: str) -> bool:
 
     app = (
         models.App.objects
-        .select_related("workspace", "source_template")
+        .select_related("workspace", "source_template", "environment", "environment__aws_account")
         .filter(id=job.app_id_snapshot)
         .first()
     )
@@ -117,28 +109,21 @@ def run_removal(job_id: str) -> bool:
         )
         return True
 
-    live = _find_live_deployments(app)
-    if live:
+    live = _find_live_deployment(app)
+    if live is not None:
         if not job.teardown_first:
-            detail = ", ".join(f"{env}={status}" for _, env, status in live)
-            _fail(job, app, f"App became live again ({detail}); cannot remove.")
+            _fail(job, app, f"App became live again ({live[1]}); cannot remove.")
             return False
-        logger.info("teardown_first=True: tearing down %d live deployment(s) before removal", len(live))
-        ok, message = _teardown_live_deployments(live=live)
+        logger.info("teardown_first=True: tearing down the live deployment before removal")
+        ok, message = _teardown_live_deployment(live=live)
         if not ok:
             _fail(job, app, message)
             return False
 
-    environments = list(
-        models.Environment.objects
-        .filter(blueprints__app=app)
-        .select_related("aws_account")
-        .distinct()
-    )
+    env = app.environment
 
     try:
-        for env in environments:
-            tenant_consistency.assert_app_owns_environment(app=app, environment=env)
+        tenant_consistency.assert_app_owns_environment(app=app, environment=env)
     except tenant_consistency.TenantConsistencyError as exc:
         _fail(job, app, f"Refused: {exc}")
         return False
@@ -151,34 +136,32 @@ def run_removal(job_id: str) -> bool:
             if not has_efs and not host_path_templates:
                 logger.info("Skipping persistent-data cleanup: template has no EFS or host_mounts")
             else:
-                for env in environments:
-                    if has_efs:
-                        ok, message = _run_efs_cleanup_task(env=env, app_slug=app.slug)
-                        if not ok:
-                            _fail(job, app, f"EFS cleanup failed in '{env.slug}': {message}")
-                            return False
-                    if host_path_templates:
-                        host_paths = _resolve_host_paths(
-                            path_templates=host_path_templates,
-                            app_slug=app.slug,
-                            env_slug=env.slug,
-                        )
-                        ok, message = _run_host_path_cleanup_ssm(
-                            env=env, app_slug=app.slug, host_paths=host_paths,
-                        )
-                        if not ok:
-                            _fail(job, app, f"Host-path cleanup failed in '{env.slug}': {message}")
-                            return False
+                if has_efs:
+                    ok, message = _run_efs_cleanup_task(env=env, app_slug=app.slug)
+                    if not ok:
+                        _fail(job, app, f"EFS cleanup failed in '{env.slug}': {message}")
+                        return False
+                if host_path_templates:
+                    host_paths = _resolve_host_paths(
+                        path_templates=host_path_templates,
+                        app_slug=app.slug,
+                        env_slug=env.slug,
+                    )
+                    ok, message = _run_host_path_cleanup_ssm(
+                        env=env, app_slug=app.slug, host_paths=host_paths,
+                    )
+                    if not ok:
+                        _fail(job, app, f"Host-path cleanup failed in '{env.slug}': {message}")
+                        return False
 
         if job.delete_secrets:
-            for env in environments:
-                session = _get_env_session(env)
-                secrets_utils.delete_secrets_matching_prefix(
-                    session=session,
-                    subprefix=f"humr/{env.slug}/{app.slug}/",
-                    dry_run=False,
-                    force_immediate=True,
-                )
+            session = _get_env_session(env)
+            secrets_utils.delete_secrets_matching_prefix(
+                session=session,
+                subprefix=f"humr/{env.slug}/{app.slug}/",
+                dry_run=False,
+                force_immediate=True,
+            )
     except ClientError as e:
         logger.exception("AWS cleanup failed: %s", e)
         _fail(job, app, f"AWS cleanup failed: {e}")
@@ -191,9 +174,9 @@ def run_removal(job_id: str) -> bool:
         # keyed by (slug, org) with no FK to App, so app.delete() does not cascade it. Removal,
         # not teardown, frees the slug — a torn-down app keeps its App row and can redeploy.
         sandbox_service.release_sandbox_app_slug(app_slug=app.slug, organization_id=app.organization_id)
-        # Cascade deletes DeploymentBlueprint, Deployment, DeploymentLog, AppPermissions,
-        # AppPermissionRequest, and ResourceTag rows that point at this app. Policy has no
-        # FK to App; matching rows are handled above when delete_policies is set.
+        # Cascade deletes Deployment, DeploymentLog, AppPermissions, AppPermissionRequest,
+        # and ResourceTag rows that point at this app. Policy has no FK to App; matching
+        # rows are handled above when delete_policies is set.
         app.delete()
 
     _mark(job, models.AppRemovalJob.Status.SUCCEEDED, f"App removed: '{job.app_name_snapshot}' ({job.app_slug_snapshot}).")

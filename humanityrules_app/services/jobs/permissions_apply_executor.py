@@ -25,8 +25,8 @@ def run_apply(app_permission_request_id: str) -> bool:
     try:
         apr = models.AppPermissionRequest.objects.select_related(
             "app",
-            "environment",
-            "environment__aws_account",
+            "app__environment",
+            "app__environment__aws_account",
         ).get(id=app_permission_request_id)
     except models.AppPermissionRequest.DoesNotExist:
         logger.error("AppPermissionRequest %s not found", app_permission_request_id)
@@ -43,12 +43,12 @@ def run_apply(app_permission_request_id: str) -> bool:
 
     logger.info(
         "Applying permissions for app '%s' in environment '%s' (request %s)",
-        apr.app.name, apr.environment.name, app_permission_request_id,
+        apr.app.name, apr.app.environment.name, app_permission_request_id,
     )
 
     try:
         iam_utils.write_app_permissions_policy(
-            environment=apr.environment,
+            environment=apr.app.environment,
             app=apr.app,
             policy_name=permissions_service.HUMR_APP_PERMISSIONS_POLICY_NAME,
             statements=apr.statements,
@@ -61,9 +61,7 @@ def run_apply(app_permission_request_id: str) -> bool:
         return False
 
     # IAM update succeeded — advance the baseline and mark applied
-    app_permissions = permissions_service.get_or_create_app_permissions(
-        app=apr.app, environment=apr.environment,
-    )
+    app_permissions = permissions_service.get_or_create_app_permissions(app=apr.app)
     app_permissions.statements = apr.statements
     app_permissions.save(update_fields=["statements", "updated_at"])
 

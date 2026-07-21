@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 @login_required
 def security_permissions_editor(request: HttpRequest) -> HttpResponse:
-    """Permissions editor: full-width IAM policy editor for one (app, environment) draft."""
+    """Permissions editor: full-width IAM policy editor for one app's draft."""
     if not request.htmx:
         context = base.get_app_shell_context(request=request, current_page="security")
         context["content_url"] = request.get_full_path()
@@ -27,19 +27,17 @@ def security_permissions_editor(request: HttpRequest) -> HttpResponse:
 
     organization = request.user.current_organization
     app_slug = request.GET.get("context_app", "").strip()
-    environment_slug = request.GET.get("context_environment", "").strip()
 
-    if not app_slug or not environment_slug:
+    if not app_slug:
         return render(request=request, template_name="humanityrules_app/security/security_permissions_editor.html", context={
             **base.get_app_shell_context(request=request, current_page="security"),
-            "error_message": "Missing app or environment. Navigate here from the App Detail page.",
+            "error_message": "Missing app. Navigate here from the App Detail page.",
         })
 
-    app = get_object_or_404(models.App, organization=organization, slug=app_slug)
-    environment = get_object_or_404(models.Environment, aws_account__organization=organization, slug=environment_slug)
+    app = get_object_or_404(models.App.objects.select_related("environment"), organization=organization, slug=app_slug)
 
-    app_permissions = permissions_service.get_or_create_app_permissions(app=app, environment=environment)
-    app_permission_request = permissions_service.get_or_create_draft(app=app, environment=environment, user=request.user, app_permissions=app_permissions)
+    app_permissions = permissions_service.get_or_create_app_permissions(app=app)
+    app_permission_request = permissions_service.get_or_create_draft(app=app, user=request.user, app_permissions=app_permissions)
     permissions_service.ensure_statement_sids(app_permission_request)
 
     available_resources = permissions_service.fetch_available_resources(app_permission_request)
@@ -50,10 +48,10 @@ def security_permissions_editor(request: HttpRequest) -> HttpResponse:
     context.update({
         "app_permission_request": app_permission_request,
         "app": app,
-        "environment": environment,
+        "environment": app.environment,
         "service_groups": service_groups,
         "service_options_json": json.dumps(service_options),
-        "security_querystring": urlencode(query={"context_app": app_slug, "context_environment": environment_slug}),
+        "security_querystring": urlencode(query={"context_app": app_slug}),
         "has_changes": not permissions_service.statements_equal(app_permission_request.statements, app_permissions.statements),
     })
 
@@ -66,15 +64,16 @@ def security_permissions_editor_apply(request: HttpRequest, app_permission_reque
     """Set AppPermissionRequest status to APPROVED_PENDING_APPLY. Statements are already in DB."""
     organization = request.user.current_organization
     app_permission_request = get_object_or_404(
-        models.AppPermissionRequest.objects.select_related("environment", "environment__aws_account"),
+        models.AppPermissionRequest.objects.select_related("app__environment", "app__environment__aws_account"),
         id=app_permission_request_id,
         app__organization=organization,
     )
 
-    denied = abac_view_checks.check_abac(request, app_permission_request.environment, "environment", "environment:approve")
+    environment = app_permission_request.app.environment
+    denied = abac_view_checks.check_abac(request, environment, "environment", "environment:approve")
     if denied:
         return denied
-    if platform_owner.is_sandbox_approval_gated(environment=app_permission_request.environment):
+    if platform_owner.is_sandbox_approval_gated(environment=environment):
         return JsonResponse({"error": platform_owner.SANDBOX_APPROVAL_BLOCKED_MESSAGE}, status=403)
 
     if not permissions_service.approve(app_permission_request=app_permission_request):
@@ -96,9 +95,7 @@ def security_permissions_editor_cancel(request: HttpRequest, app_permission_requ
         app__organization=organization,
     )
 
-    app_permissions = permissions_service.get_or_create_app_permissions(
-        app=app_permission_request.app, environment=app_permission_request.environment,
-    )
+    app_permissions = permissions_service.get_or_create_app_permissions(app=app_permission_request.app)
     permissions_service.cancel(app_permission_request, app_permissions)
 
     available_resources = permissions_service.fetch_available_resources(app_permission_request)
@@ -178,7 +175,7 @@ def security_permissions_editor_service_group(request: HttpRequest, app_permissi
     if not service:
         return JsonResponse({"error": "Missing service parameter"}, status=400)
 
-    available = permissions_service.get_resources_for_services(app_permission_request.environment, [service])
+    available = permissions_service.get_resources_for_services(app_permission_request.app.environment, [service])
     group = permissions_service.build_service_group_data(
         sid=permissions_service.new_statement_sid(),
         service=service,
@@ -221,7 +218,7 @@ def security_permissions_editor_refresh_resources(request: HttpRequest, app_perm
     )
 
     services = [stmt.get("service") for stmt in (app_permission_request.statements or []) if stmt.get("service")]
-    available_resources = permissions_service.refresh_resources_cache(app_permission_request.environment, services)
+    available_resources = permissions_service.refresh_resources_cache(app_permission_request.app.environment, services)
     service_groups = permissions_service.build_statement_groups(app_permission_request.statements or [], available_resources)
 
     return render(

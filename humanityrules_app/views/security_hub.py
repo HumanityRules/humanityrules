@@ -22,7 +22,7 @@ def security_hub(request: HttpRequest) -> HttpResponse:
     organization = request.user.current_organization
     all_requests = (
         models.AppPermissionRequest.objects.filter(app__organization=organization)
-        .select_related("app", "environment", "created_by")
+        .select_related("app", "app__environment", "created_by")
         .order_by("-created_at")
     )
     visible_requests = abac_service.filter_visible_app_permission_requests(

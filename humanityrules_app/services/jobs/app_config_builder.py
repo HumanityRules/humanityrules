@@ -7,7 +7,7 @@ into an appconfig.AppConfig suitable for CDK deployment.
 
 from pathlib import Path
 
-from humanityrules_app.models import App, AppTemplate, DeploymentBlueprint, ResourceTag
+from humanityrules_app.models import App, AppTemplate, ResourceTag
 from humanityrules_app.services import infra_customer
 from humanityrules_app.services import template_deploy_service
 from humanityrules_app.services.infra_customer.appconfig import (
@@ -19,7 +19,7 @@ from humanityrules_app.services.infra_customer.appconfig import (
 
 
 def _merge_container_environment(
-    template_container: dict, blueprint_container: dict,
+    template_container: dict, app_container: dict,
 ) -> list[dict[str, str]]:
     """Merge sources of env vars for one container; later sources override earlier ones.
 
@@ -28,8 +28,8 @@ def _merge_container_environment(
          HUMR-managed, never shown in the deploy form.
       2. template.configurable_variables — per-deployment knobs materialized into
          {name, value} entries at deploy time (user values, defaults, or auto-generated).
-      3. blueprint.environment_variables — the snapshot of (2) taken when the blueprint
-         was created, which may already reflect operator overrides.
+      3. app.environment_variables — the snapshot of (2) taken when the app was
+         created, which may already reflect operator overrides.
     """
     merged: dict[str, str] = {}
     for name, value in (template_container.get("environment") or {}).items():
@@ -39,7 +39,7 @@ def _merge_container_environment(
     )
     for e in cfg_list:
         merged[e["name"]] = e["value"]
-    for e in blueprint_container.get("environment_variables") or []:
+    for e in app_container.get("environment_variables") or []:
         merged[e["name"]] = e["value"]
     return [{"name": name, "value": value} for name, value in merged.items()]
 
@@ -71,11 +71,11 @@ def _union_app_secrets(containers: list[ContainerConfig]) -> dict[str, str | Non
 
 def _build_container_config(
     template_container: dict,
-    blueprint_container: dict,
+    app_container: dict,
     app_name: str,
     env_slug: str,
 ) -> ContainerConfig:
-    """Project a (template, blueprint) container pair into a ContainerConfig."""
+    """Project a (template, app) container pair into a ContainerConfig."""
     name = template_container["name"]
     image_source = ImageSource(template_container["image_source"])
 
@@ -88,9 +88,9 @@ def _build_container_config(
         health_check_command=template_container.get("health_check_command") or None,
         health_check_grace_period=template_container.get("health_check_grace_period") or None,
         environment_variables=_merge_container_environment(
-            template_container=template_container, blueprint_container=blueprint_container,
+            template_container=template_container, app_container=app_container,
         ),
-        app_secrets=dict(blueprint_container.get("app_secrets") or {}),
+        app_secrets=dict(app_container.get("app_secrets") or {}),
         efs_mounts=list(template_container.get("efs_mounts") or []),
         host_mounts=[
             infra_customer.appconfig.HostMount(
@@ -151,19 +151,18 @@ def _build_container_config(
     raise ValueError(f"Unknown image_source='{image_source}' on container '{name}'")
 
 
-def _match_blueprint_containers_to_template(
+def _match_app_containers_to_template(
     template_containers: list[dict],
-    blueprint_containers: list[dict],
+    app_containers: list[dict],
 ) -> dict[str, dict]:
-    """Return a {name: blueprint_container_dict} lookup, falling back to empty for missing names."""
-    by_name = {c["name"]: c for c in blueprint_containers}
+    """Return a {name: app_container_dict} lookup, falling back to empty for missing names."""
+    by_name = {c["name"]: c for c in app_containers}
     return {c["name"]: by_name.get(c["name"], {"name": c["name"]}) for c in template_containers}
 
 
-def build_app_config_from_blueprint(blueprint: DeploymentBlueprint, repo_path: Path) -> AppConfig:
-    """Build an AppConfig sourcing identity/build from App + template and runtime from DeploymentBlueprint."""
-    app = blueprint.app
-    environment = blueprint.environment
+def build_app_config_from_app(app: App, repo_path: Path) -> AppConfig:
+    """Build an AppConfig sourcing identity/build from App + template and runtime from the App's materialized fields."""
+    environment = app.environment
     template: AppTemplate | None = app.source_template
 
     if template is None or not template.containers:
@@ -198,15 +197,15 @@ def build_app_config_from_blueprint(blueprint: DeploymentBlueprint, repo_path: P
         containers=template.containers, eni_trunking_enabled=environment.eni_trunking_enabled,
     )
 
-    blueprint_by_name = _match_blueprint_containers_to_template(
+    app_container_by_name = _match_app_containers_to_template(
         template_containers=template_containers,
-        blueprint_containers=blueprint.containers or [],
+        app_containers=app.containers or [],
     )
 
     containers = [
         _build_container_config(
             template_container=tc,
-            blueprint_container=blueprint_by_name[tc["name"]],
+            app_container=app_container_by_name[tc["name"]],
             app_name=app.slug,
             env_slug=environment.slug,
         )
@@ -219,10 +218,10 @@ def build_app_config_from_blueprint(blueprint: DeploymentBlueprint, repo_path: P
 
     return AppConfig(
         app_name=app.slug,
-        cpu=blueprint.cpu,
-        memory=blueprint.memory,
+        cpu=app.cpu,
+        memory=app.memory,
         containers=containers,
-        compute_mode=blueprint.compute_mode,
+        compute_mode=app.compute_mode,
         app_source_path=app_source_path,
         alb_target_container=template.alb_target_container,
         app_secrets=app_secrets_union or None,

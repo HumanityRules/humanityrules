@@ -61,32 +61,22 @@ def reap_stale_jobs(no_progress_timeout: timedelta, dead_worker_timeout: timedel
 
 
 def _reap_stale_deployments(stale_q: Q, message: str) -> None:
-    """Fail stale executing deployments and their still-deploying blueprints."""
+    """Fail stale executing deployments."""
     now = timezone.now()
     with transaction.atomic():
-        stale = list(
+        deployment_ids = list(
             models.Deployment.objects
             .select_for_update(skip_locked=True, of=("self",))
             .filter(stale_q, status__in=environment_operation_gate.EXECUTING_DEPLOYMENT_STATUSES)
-            .values_list("id", "blueprint_id")
+            .values_list("id", flat=True)
         )
-        if not stale:
+        if not deployment_ids:
             return
 
-        deployment_ids = [deployment_id for deployment_id, _ in stale]
-        blueprint_ids = [blueprint_id for _, blueprint_id in stale]
         models.Deployment.objects.filter(id__in=deployment_ids).update(
             status=models.Deployment.Status.FAILED,
             status_message=message,
             completed_at=now,
-            updated_at=now,
-        )
-        models.DeploymentBlueprint.objects.filter(
-            id__in=blueprint_ids,
-            status=models.DeploymentBlueprint.Status.DEPLOYING,
-        ).update(
-            status=models.DeploymentBlueprint.Status.FAILED,
-            status_message=message,
             updated_at=now,
         )
 

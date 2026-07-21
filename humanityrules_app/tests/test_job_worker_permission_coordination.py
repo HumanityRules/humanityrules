@@ -1,4 +1,4 @@
-"""Tests for serializing permission applies by app and environment."""
+"""Tests for serializing permission applies by app."""
 
 from django.db import IntegrityError, transaction
 from django.test import TestCase
@@ -16,8 +16,13 @@ class TestJobWorkerPermissionCoordination(TestCase):
             name="Permission AWS",
             status=models.AWSAccount.Status.CONNECTED,
         )
-        self.environment = self._create_environment(name="Production", slug="production")
-        self.other_environment = self._create_environment(name="Staging", slug="staging")
+        self.environment = models.Environment.objects.create(
+            aws_account=self.aws_account,
+            name="Production",
+            slug="production",
+            aws_region="us-east-1",
+            status=models.Environment.Status.READY,
+        )
         self.workspace = models.Workspace.objects.create(
             organization=self.organization,
             name="Operations",
@@ -33,48 +38,37 @@ class TestJobWorkerPermissionCoordination(TestCase):
         self.app = self._create_app(name="Permission Agent", slug="permission-agent")
         self.other_app = self._create_app(name="Other Agent", slug="other-agent")
 
-    def _create_environment(self, name: str, slug: str) -> models.Environment:
-        """Create a ready environment for worker claims."""
-        return models.Environment.objects.create(
-            aws_account=self.aws_account,
-            name=name,
-            slug=slug,
-            aws_region="us-east-1",
-            status=models.Environment.Status.READY,
-        )
-
     def _create_app(self, name: str, slug: str) -> models.App:
         """Create an active app on the unlabelled worker."""
         return models.App.objects.create(
             organization=self.organization,
             workspace=self.workspace,
+            environment=self.environment,
             repository=self.repository,
             name=name,
             slug=slug,
             app_type=models.App.AppType.WEB,
             build_strategy=models.App.BuildStrategy.DOCKERFILE,
-            branch="main",
             container_port=8787,
             health_check_path="/health",
+            cpu=256,
+            memory=512,
         )
 
-    def _create_request(self, app: models.App, environment: models.Environment, status: str) -> models.AppPermissionRequest:
+    def _create_request(self, app: models.App, status: str) -> models.AppPermissionRequest:
         """Create a permission request for a logical apply target."""
         return models.AppPermissionRequest.objects.create(
             app=app,
-            environment=environment,
             status=status,
         )
 
-    def test_claim_waits_for_applying_request_on_same_target(self) -> None:
+    def test_claim_waits_for_applying_request_on_same_app(self) -> None:
         self._create_request(
             app=self.app,
-            environment=self.environment,
             status=models.AppPermissionRequest.Status.APPLYING,
         )
         pending = self._create_request(
             app=self.app,
-            environment=self.environment,
             status=models.AppPermissionRequest.Status.APPROVED_PENDING_APPLY,
         )
 
@@ -84,15 +78,13 @@ class TestJobWorkerPermissionCoordination(TestCase):
         self.assertIsNone(claimed)
         self.assertEqual(pending.status, models.AppPermissionRequest.Status.APPROVED_PENDING_APPLY)
 
-    def test_claim_proceeds_after_same_target_apply_finishes(self) -> None:
+    def test_claim_proceeds_after_same_app_apply_finishes(self) -> None:
         applying = self._create_request(
             app=self.app,
-            environment=self.environment,
             status=models.AppPermissionRequest.Status.APPLYING,
         )
         pending = self._create_request(
             app=self.app,
-            environment=self.environment,
             status=models.AppPermissionRequest.Status.APPROVED_PENDING_APPLY,
         )
         applying.status = models.AppPermissionRequest.Status.APPLIED
@@ -104,32 +96,13 @@ class TestJobWorkerPermissionCoordination(TestCase):
         self.assertEqual(claimed.id, pending.id)
         self.assertEqual(claimed.status, models.AppPermissionRequest.Status.APPLYING)
 
-    def test_claim_allows_same_app_in_different_environment(self) -> None:
-        self._create_request(
-            app=self.app,
-            environment=self.environment,
-            status=models.AppPermissionRequest.Status.APPLYING,
-        )
-        pending = self._create_request(
-            app=self.app,
-            environment=self.other_environment,
-            status=models.AppPermissionRequest.Status.APPROVED_PENDING_APPLY,
-        )
-
-        claimed = job_worker._claim_pending_permissions_apply(label="")
-
-        self.assertIsNotNone(claimed)
-        self.assertEqual(claimed.id, pending.id)
-
     def test_claim_allows_different_app_in_same_environment(self) -> None:
         self._create_request(
             app=self.app,
-            environment=self.environment,
             status=models.AppPermissionRequest.Status.APPLYING,
         )
         pending = self._create_request(
             app=self.other_app,
-            environment=self.environment,
             status=models.AppPermissionRequest.Status.APPROVED_PENDING_APPLY,
         )
 
@@ -138,24 +111,21 @@ class TestJobWorkerPermissionCoordination(TestCase):
         self.assertIsNotNone(claimed)
         self.assertEqual(claimed.id, pending.id)
 
-    def test_database_rejects_two_applying_requests_for_same_target(self) -> None:
+    def test_database_rejects_two_applying_requests_for_same_app(self) -> None:
         self._create_request(
             app=self.app,
-            environment=self.environment,
             status=models.AppPermissionRequest.Status.APPLYING,
         )
 
         with self.assertRaises(IntegrityError), transaction.atomic():
             self._create_request(
                 app=self.app,
-                environment=self.environment,
                 status=models.AppPermissionRequest.Status.APPLYING,
             )
 
     def test_approve_does_not_move_applying_request_backward(self) -> None:
         applying = self._create_request(
             app=self.app,
-            environment=self.environment,
             status=models.AppPermissionRequest.Status.APPLYING,
         )
 
@@ -168,7 +138,6 @@ class TestJobWorkerPermissionCoordination(TestCase):
     def test_approve_is_idempotent_while_request_is_pending(self) -> None:
         pending = self._create_request(
             app=self.app,
-            environment=self.environment,
             status=models.AppPermissionRequest.Status.APPROVED_PENDING_APPLY,
         )
 

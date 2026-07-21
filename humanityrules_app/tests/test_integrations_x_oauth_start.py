@@ -68,9 +68,9 @@ class TestIntegrationsXStart(TestCase):
         )
         self.app = App.objects.create(
             organization=self.org, workspace=self.workspace, repository=self.repository,
-            name="Hermes", slug="hermes", app_type=App.AppType.WEB,
-            build_strategy=App.BuildStrategy.DOCKERFILE, branch="main",
-            container_port=8000, health_check_path="/health",
+            environment=self.env, name="Hermes", slug="hermes", app_type=App.AppType.WEB,
+            build_strategy=App.BuildStrategy.DOCKERFILE,
+            container_port=8000, health_check_path="/health", cpu=256, memory=512,
         )
         ResourceTag.objects.create(
             organization=self.org, resource_type=ResourceTag.ResourceType.APP,

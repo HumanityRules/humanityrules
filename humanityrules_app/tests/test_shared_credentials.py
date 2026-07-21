@@ -7,6 +7,8 @@ from django.test import TestCase
 
 from humanityrules_app.models import (
     App,
+    AWSAccount,
+    Environment,
     IntegrationSharedCredential,
     Organization,
     Policy,
@@ -39,6 +41,10 @@ class SharedCredentialTestBase(TestCase):
             organization=self.org, provider="github", name="hermes",
             full_name="org/hermes", clone_url="https://github.com/org/hermes.git",
         )
+        self.aws_account = AWSAccount.objects.create(organization=self.org, name="Shared Account")
+        self.env = Environment.objects.create(
+            aws_account=self.aws_account, name="staging", slug="staging", aws_region="us-east-1",
+        )
         self.ws_eng = Workspace.objects.create(organization=self.org, name="Engineering", slug="engineering")
         self.ws_sales = Workspace.objects.create(organization=self.org, name="Sales", slug="sales")
 
@@ -49,15 +55,15 @@ class SharedCredentialTestBase(TestCase):
 
         self.app_eng = App.objects.create(
             organization=self.org, workspace=self.ws_eng, repository=self.repo,
-            name="AliceHermes", slug="alice-hermes", app_type="web",
-            build_strategy="dockerfile", branch="main", container_port=8000,
-            health_check_path="/health",
+            environment=self.env, name="AliceHermes", slug="alice-hermes", app_type="web",
+            build_strategy="dockerfile", container_port=8000,
+            health_check_path="/health", cpu=256, memory=512,
         )
         self.app_sales = App.objects.create(
             organization=self.org, workspace=self.ws_sales, repository=self.repo,
-            name="SalesHermes", slug="sales-hermes", app_type="web",
-            build_strategy="dockerfile", branch="main", container_port=8000,
-            health_check_path="/health",
+            environment=self.env, name="SalesHermes", slug="sales-hermes", app_type="web",
+            build_strategy="dockerfile", container_port=8000,
+            health_check_path="/health", cpu=256, memory=512,
         )
 
     def _make_cred(self, scope: str, target_user: User | None, target_workspace: Workspace | None, api_key: str) -> IntegrationSharedCredential:

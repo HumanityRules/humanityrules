@@ -88,7 +88,7 @@
                 </div>
                 <div>
                     <dt class="text-gray-500 dark:text-gray-400">Branch</dt>
-                    <dd class="mt-1 font-medium text-gray-900 dark:text-white">{{ app.branch }}</dd>
+                    <dd class="mt-1 font-medium text-gray-900 dark:text-white">{{ app.repository.default_branch }}</dd>
                 </div>
                 <div>
                     <dt class="text-gray-500 dark:text-gray-400">Subpath</dt>
@@ -132,16 +132,14 @@
         </dl>
     </div>
 
-    {# Deployed to Environments section #}
+    {# Environment section #}
     <div class="mb-6">
-        <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Deployed to Environments</h2>
-        {% if environment_rows %}
+        <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Environment</h2>
+        {% if current_deployment %}
         <div class="overflow-x-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
             <table class="min-w-full">
                 <tbody class="[&_tr:not(:last-child)>td]:border-b [&_tr:not(:last-child)>td]:border-gray-200 dark:[&_tr:not(:last-child)>td]:border-gray-700">
-                    {% for row in environment_rows %}
-                        {% include "humanityrules_app/apps/_app_blueprint_row.html" with blueprint=row.blueprint current_deployment=row.current_deployment %}
-                    {% endfor %}
+                    {% include "humanityrules_app/apps/_app_environment_row.html" with app=app current_deployment=current_deployment %}
                 </tbody>
             </table>
         </div>

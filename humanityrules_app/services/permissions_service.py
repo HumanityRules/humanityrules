@@ -62,36 +62,34 @@ def statements_equal(left: list[dict[str, Any]] | None, right: list[dict[str, An
     return _strip(left) == _strip(right)
 
 
-def get_or_create_app_permissions(app, environment) -> models.AppPermissions:
-    """Get or create the AppPermissions baseline for an app+environment.
+def get_or_create_app_permissions(app) -> models.AppPermissions:
+    """Get or create the AppPermissions baseline for an app.
 
     If no AppPermissions exists yet, seeds from AWS (best-effort, empty list on failure).
     """
     try:
-        return models.AppPermissions.objects.get(app=app, environment=environment)
+        return models.AppPermissions.objects.get(app=app)
     except models.AppPermissions.DoesNotExist:
         pass
 
     try:
         statements = iam_utils.read_app_permissions_policy(
-            environment=environment, app=app, policy_name=HUMR_APP_PERMISSIONS_POLICY_NAME,
+            environment=app.environment, app=app, policy_name=HUMR_APP_PERMISSIONS_POLICY_NAME,
         )
     except Exception:
-        logger.exception("Failed to seed AppPermissions from AWS for %s/%s", app.slug, environment.slug)
+        logger.exception("Failed to seed AppPermissions from AWS for %s/%s", app.slug, app.environment.slug)
         statements = []
 
     return models.AppPermissions.objects.create(
         app=app,
-        environment=environment,
         statements=statements,
     )
 
 
-def get_or_create_draft(app, environment, user, app_permissions) -> models.AppPermissionRequest:
-    """Find an existing DRAFT AppPermissionRequest for this app+environment, or create a new one."""
+def get_or_create_draft(app, user, app_permissions) -> models.AppPermissionRequest:
+    """Find an existing DRAFT AppPermissionRequest for this app, or create a new one."""
     existing = models.AppPermissionRequest.objects.filter(
         app=app,
-        environment=environment,
         status=models.AppPermissionRequest.Status.DRAFT,
     ).order_by("-created_at").first()
 
@@ -102,7 +100,6 @@ def get_or_create_draft(app, environment, user, app_permissions) -> models.AppPe
     _ensure_sids(statements)
     return models.AppPermissionRequest.objects.create(
         app=app,
-        environment=environment,
         statements=statements,
         status=models.AppPermissionRequest.Status.DRAFT,
         created_by=user,
@@ -425,7 +422,7 @@ def fetch_available_resources(app_permission_request) -> dict[str, list[dict[str
     services = [stmt.get("service") for stmt in (app_permission_request.statements or []) if stmt.get("service")]
     if not services:
         return {}
-    return get_resources_for_services(app_permission_request.environment, services)
+    return get_resources_for_services(app_permission_request.app.environment, services)
 
 
 def get_all_service_options() -> list[dict[str, str | bool]]:

@@ -568,7 +568,7 @@ def filter_visible_app_permission_requests(
     )
 
     return queryset.filter(
-        models.Q(created_by=user) | models.Q(environment__in=approvable_envs)
+        models.Q(created_by=user) | models.Q(app__environment__in=approvable_envs)
     )
 
 

@@ -89,7 +89,7 @@ async def aclaim_sandbox_app_slug(app_slug: str, organization_id: uuid.UUID, env
         return
     conflict = await (
         Deployment.objects
-        .filter(environment__aws_account__is_humr_sandbox=True, app__slug=app_slug)
+        .filter(app__environment__aws_account__is_humr_sandbox=True, app__slug=app_slug)
         .exclude(app__organization_id=organization_id)
         .aexists()
     )

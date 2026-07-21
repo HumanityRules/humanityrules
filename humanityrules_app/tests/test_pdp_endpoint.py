@@ -8,7 +8,6 @@ from django.test import Client, TestCase
 from humanityrules_app.models import (
     App,
     AWSAccount,
-    DeploymentBlueprint,
     Environment,
     IdentityAttribute,
     Organization,
@@ -58,19 +57,14 @@ class PDPTestBase(TestCase):
         )
         self.app = App.objects.create(
             organization=self.org, workspace=self.workspace, repository=self.repo,
-            name="VmendiPA", slug="vmendihermes", app_type="web",
-            build_strategy="dockerfile", branch="main", container_port=8000,
-            health_check_path="/health",
+            environment=self.environment, name="VmendiPA", slug="vmendihermes",
+            app_type="web", build_strategy="dockerfile", container_port=8000,
+            health_check_path="/health", cpu=256, memory=512,
         )
         # Drop the auto-created open-access policy; the self-ref policy is what we test.
         Policy.objects.filter(
             organization=self.org, name=f"Default: {self.app.name} open access",
         ).delete()
-        DeploymentBlueprint.objects.create(
-            app=self.app, environment=self.environment,
-            status=DeploymentBlueprint.Status.ACTIVE,
-            cpu=256, memory=512,
-        )
         ResourceTag.objects.create(
             organization=self.org, resource_type="app", app=self.app,
             key="app-type", value="personal-assistant",
@@ -188,7 +182,7 @@ class TestPDPEvaluation(PDPTestBase):
         EnvironmentBearerToken.objects.create(
             environment=other_env, token_hash=_hash(other_token_raw),
         )
-        # The app exists in the org but has no blueprint for other_env.
+        # The app exists in the org but belongs to self.environment, not other_env.
         status, body = self._post(
             body={
                 "app_id": "vmendihermes",
@@ -245,16 +239,11 @@ class TestPDPEvaluation(PDPTestBase):
         OrganizationMembership.objects.create(
             user=outsider, organization=other_org, role=OrganizationMembership.Role.MEMBER,
         )
-        open_app = App.objects.create(
+        App.objects.create(
             organization=self.org, workspace=self.workspace, repository=self.repo,
-            name="Open App", slug="open-app", app_type="web",
-            build_strategy="dockerfile", branch="main", container_port=8000,
-            health_check_path="/health",
-        )
-        DeploymentBlueprint.objects.create(
-            app=open_app, environment=self.environment,
-            status=DeploymentBlueprint.Status.ACTIVE,
-            cpu=256, memory=512,
+            environment=self.environment, name="Open App", slug="open-app",
+            app_type="web", build_strategy="dockerfile", container_port=8000,
+            health_check_path="/health", cpu=256, memory=512,
         )
 
         status, body = self._post(

@@ -23,11 +23,15 @@ class TestFleetRedeployAll(TestCase):
             full_name="fleet/hermes",
             clone_url="https://github.com/fleet/hermes.git",
         )
-        self.app = self._create_app(name="Fleet Agent", slug="fleetagent", status=models.App.Status.ACTIVE)
         self.environment = self._create_environment(name="Staging", slug="staging", status=models.Environment.Status.READY)
+        self.app = self._create_app(
+            name="Fleet Agent",
+            slug="fleetagent",
+            status=models.App.Status.ACTIVE,
+            environment=self.environment,
+        )
         self.succeeded_source = self._create_deployment(
             app=self.app,
-            environment=self.environment,
             status=models.Deployment.Status.SUCCEEDED,
             suffix="staging",
         )
@@ -44,19 +48,21 @@ class TestFleetRedeployAll(TestCase):
         )
         self.client.force_login(self.staff)
 
-    def _create_app(self, name: str, slug: str, status: str) -> models.App:
+    def _create_app(self, name: str, slug: str, status: str, environment: models.Environment) -> models.App:
         """Create an app in the shared test workspace."""
         return models.App.objects.create(
             organization=self.organization,
             workspace=self.workspace,
+            environment=environment,
             repository=self.repository,
             name=name,
             slug=slug,
             app_type=models.App.AppType.WEB,
             build_strategy=models.App.BuildStrategy.DOCKERFILE,
-            branch="main",
             container_port=8787,
             health_check_path="/health",
+            cpu=256,
+            memory=512,
             status=status,
         )
 
@@ -70,32 +76,26 @@ class TestFleetRedeployAll(TestCase):
             status=status,
         )
 
-    def _create_deployment(self, app: models.App, environment: models.Environment, status: str, suffix: str) -> models.Deployment:
-        """Create one launched blueprint and deployment source."""
-        blueprint = models.DeploymentBlueprint.objects.create(
-            app=app,
-            environment=environment,
-            status=models.DeploymentBlueprint.Status.ACTIVE,
-            cpu=256,
-            memory=512,
-            subdomain=f"{app.slug}{environment.slug}",
-        )
+    def _create_deployment(self, app: models.App, status: str, suffix: str) -> models.Deployment:
+        """Create one deployment attempt for an app."""
         return models.Deployment.objects.create(
-            blueprint=blueprint,
             app=app,
-            environment=environment,
-            subdomain=blueprint.subdomain,
             git_ref="main",
             image_tag=f"{app.slug}-main-{suffix}",
             status=status,
         )
 
-    def _add_failed_environment(self) -> models.Deployment:
-        """Add a second, ready environment whose latest deployment failed."""
+    def _add_failed_app(self) -> models.Deployment:
+        """Add a second app, in its own ready environment, whose latest deployment failed."""
         environment = self._create_environment(name="Production", slug="production", status=models.Environment.Status.READY)
-        return self._create_deployment(
-            app=self.app,
+        app = self._create_app(
+            name="Failed Agent",
+            slug="failedagent",
+            status=models.App.Status.ACTIVE,
             environment=environment,
+        )
+        return self._create_deployment(
+            app=app,
             status=models.Deployment.Status.FAILED,
             suffix="production",
         )
@@ -118,7 +118,6 @@ class TestFleetRedeployAll(TestCase):
     def test_fail_transient_confirmation_shows_current_count(self) -> None:
         self._create_deployment(
             app=self.app,
-            environment=self.environment,
             status=models.Deployment.Status.PENDING,
             suffix="pending",
         )
@@ -133,7 +132,6 @@ class TestFleetRedeployAll(TestCase):
         transient_deployments = [
             self._create_deployment(
                 app=self.app,
-                environment=self.environment,
                 status=status,
                 suffix=f"transient-{index}",
             )
@@ -143,19 +141,16 @@ class TestFleetRedeployAll(TestCase):
             self.succeeded_source,
             self._create_deployment(
                 app=self.app,
-                environment=self.environment,
                 status=models.Deployment.Status.FAILED,
                 suffix="failed",
             ),
             self._create_deployment(
                 app=self.app,
-                environment=self.environment,
                 status=models.Deployment.Status.ROLLED_BACK,
                 suffix="rolled-back",
             ),
             self._create_deployment(
                 app=self.app,
-                environment=self.environment,
                 status=models.Deployment.Status.TORN_DOWN,
                 suffix="torn-down",
             ),
@@ -178,7 +173,6 @@ class TestFleetRedeployAll(TestCase):
     def test_fail_transient_is_safe_to_repeat(self) -> None:
         pending = self._create_deployment(
             app=self.app,
-            environment=self.environment,
             status=models.Deployment.Status.PENDING,
             suffix="pending-repeat",
         )
@@ -193,34 +187,31 @@ class TestFleetRedeployAll(TestCase):
         self.assertContains(second_response, "Marked 0 transient deployments as failed")
         self.assertEqual(pending.completed_at, first_completed_at)
 
-    def test_per_ha_redeploy_queues_only_the_selected_environment(self) -> None:
-        failed_source = self._add_failed_environment()
+    def test_per_ha_redeploy_queues_only_the_selected_app(self) -> None:
+        failed_source = self._add_failed_app()
 
         response = self.client.post(f"/platform/fleet/deployment/{self.succeeded_source.id}/redeploy/")
 
         self.assertEqual(response.status_code, 200)
         pending = models.Deployment.objects.get(status=models.Deployment.Status.PENDING)
-        self.assertEqual(pending.environment, self.environment)
+        self.assertEqual(pending.app, self.app)
         self.assertEqual(pending.created_by, self.staff)
         self.assertEqual(pending.status_message, "Fleet redeploy triggered via web UI")
-        self.assertEqual(models.Deployment.objects.filter(environment=failed_source.environment).count(), 1)
+        self.assertEqual(models.Deployment.objects.filter(app=failed_source.app).count(), 1)
         self.assertContains(response, "Queued 1 redeployment")
 
     def test_per_ha_redeploy_allows_a_failed_latest_deployment(self) -> None:
-        failed_source = self._add_failed_environment()
+        failed_source = self._add_failed_app()
 
         response = self.client.post(f"/platform/fleet/deployment/{failed_source.id}/redeploy/")
 
         self.assertEqual(response.status_code, 200)
         pending = models.Deployment.objects.get(status=models.Deployment.Status.PENDING)
-        self.assertEqual(pending.environment, failed_source.environment)
+        self.assertEqual(pending.app_id, failed_source.app_id)
 
     def test_per_ha_redeploy_rejects_a_superseded_deployment(self) -> None:
         newer_source = models.Deployment.objects.create(
-            blueprint=self.succeeded_source.blueprint,
             app=self.app,
-            environment=self.environment,
-            subdomain=self.succeeded_source.subdomain,
             git_ref="main",
             image_tag="fleetagent-main-newer",
             status=models.Deployment.Status.SUCCEEDED,
@@ -242,29 +233,8 @@ class TestFleetRedeployAll(TestCase):
 
         self.assertNotContains(response, f"/platform/fleet/deployment/{self.succeeded_source.id}/redeploy/")
 
-    def test_per_ha_redeploy_skips_invalid_source_subdomain(self) -> None:
-        self.succeeded_source.subdomain = "legacy-subdomain"
-        self.succeeded_source.save(update_fields=["subdomain", "updated_at"])
-
-        response = self.client.post(f"/platform/fleet/deployment/{self.succeeded_source.id}/redeploy/")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(models.Deployment.objects.filter(status=models.Deployment.Status.PENDING).count(), 0)
-        self.assertContains(response, "Agent hostname labels must contain lowercase letters and digits only.")
-
-    def test_per_ha_redeploy_allows_blank_source_subdomain_with_valid_app_slug(self) -> None:
-        self.succeeded_source.subdomain = ""
-        self.succeeded_source.save(update_fields=["subdomain", "updated_at"])
-
-        response = self.client.post(f"/platform/fleet/deployment/{self.succeeded_source.id}/redeploy/")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertNotContains(response, "Agent hostname labels must contain lowercase letters and digits only.")
-        pending = models.Deployment.objects.get(status=models.Deployment.Status.PENDING)
-        self.assertEqual(pending.subdomain, "")
-
     def test_confirmation_shows_failed_checkbox_and_current_counts(self) -> None:
-        self._add_failed_environment()
+        self._add_failed_app()
 
         response = self.client.get("/platform/fleet/redeploy-all/confirm/")
 
@@ -274,41 +244,41 @@ class TestFleetRedeployAll(TestCase):
         self.assertContains(response, 'name="include_failed"')
 
     def test_redeploy_all_skips_failed_by_default(self) -> None:
-        failed_source = self._add_failed_environment()
+        failed_source = self._add_failed_app()
 
         response = self.client.post("/platform/fleet/redeploy-all/")
 
         self.assertEqual(response.status_code, 200)
         pending = models.Deployment.objects.filter(status=models.Deployment.Status.PENDING)
         self.assertEqual(pending.count(), 1)
-        self.assertEqual(pending.get().environment, self.environment)
-        self.assertEqual(models.Deployment.objects.filter(environment=failed_source.environment).count(), 1)
+        self.assertEqual(pending.get().app, self.app)
+        self.assertEqual(models.Deployment.objects.filter(app=failed_source.app).count(), 1)
         self.assertContains(response, "Queued 1 redeployment")
         self.assertContains(response, "Failed not included")
 
-    def test_include_failed_queues_each_app_environment_with_unique_tags(self) -> None:
-        failed_source = self._add_failed_environment()
+    def test_include_failed_queues_each_app_with_unique_tags(self) -> None:
+        failed_source = self._add_failed_app()
 
         response = self.client.post("/platform/fleet/redeploy-all/", {"include_failed": "on"})
 
         self.assertEqual(response.status_code, 200)
-        pending = list(models.Deployment.objects.filter(status=models.Deployment.Status.PENDING).order_by("environment__slug"))
+        pending = list(models.Deployment.objects.filter(status=models.Deployment.Status.PENDING).order_by("app__slug"))
         self.assertEqual(len(pending), 2)
-        self.assertEqual({deployment.environment_id for deployment in pending}, {self.environment.id, failed_source.environment_id})
+        self.assertEqual({deployment.app_id for deployment in pending}, {self.app.id, failed_source.app_id})
         self.assertEqual({deployment.created_by_id for deployment in pending}, {self.staff.id})
         self.assertEqual({deployment.status_message for deployment in pending}, {"Fleet redeploy all triggered via web UI"})
         self.assertEqual(len({deployment.image_tag for deployment in pending}), 2)
         self.assertContains(response, "Queued 2 redeployments")
 
     def test_redeploy_all_reports_torn_down_and_non_ready_targets(self) -> None:
-        torn_down_environment = self._create_environment(
-            name="Retired",
-            slug="retired",
-            status=models.Environment.Status.READY,
+        torn_down_app = self._create_app(
+            name="Retired Agent",
+            slug="retiredagent",
+            status=models.App.Status.ACTIVE,
+            environment=self.environment,
         )
         self._create_deployment(
-            app=self.app,
-            environment=torn_down_environment,
+            app=torn_down_app,
             status=models.Deployment.Status.TORN_DOWN,
             suffix="retired",
         )
@@ -317,9 +287,14 @@ class TestFleetRedeployAll(TestCase):
             slug="draft",
             status=models.Environment.Status.PENDING,
         )
-        self._create_deployment(
-            app=self.app,
+        draft_app = self._create_app(
+            name="Draft Agent",
+            slug="draftagent",
+            status=models.App.Status.ACTIVE,
             environment=draft_environment,
+        )
+        self._create_deployment(
+            app=draft_app,
             status=models.Deployment.Status.SUCCEEDED,
             suffix="draft",
         )
@@ -327,10 +302,10 @@ class TestFleetRedeployAll(TestCase):
             name="Removing Agent",
             slug="removingagent",
             status=models.App.Status.PENDING_REMOVAL,
+            environment=self.environment,
         )
         self._create_deployment(
             app=pending_removal_app,
-            environment=self.environment,
             status=models.Deployment.Status.SUCCEEDED,
             suffix="removing",
         )
@@ -377,8 +352,16 @@ class TestFleetRedeployAll(TestCase):
         self.assertEqual(recovery_response.status_code, 405)
 
     def test_worker_serializes_pending_deployments_for_the_same_app(self) -> None:
-        self._add_failed_environment()
-        self.client.post("/platform/fleet/redeploy-all/", {"include_failed": "on"})
+        self._create_deployment(
+            app=self.app,
+            status=models.Deployment.Status.PENDING,
+            suffix="queued-1",
+        )
+        self._create_deployment(
+            app=self.app,
+            status=models.Deployment.Status.PENDING,
+            suffix="queued-2",
+        )
 
         first = job_worker._claim_pending_app_deployment(label="")
         second = job_worker._claim_pending_app_deployment(label="")

@@ -11,7 +11,6 @@ from humanityrules_app.models import (
     AppRemovalJob,
     AppTemplate,
     Deployment,
-    DeploymentBlueprint,
     DeploymentLog,
     Environment,
     EnvironmentLog,
@@ -182,37 +181,28 @@ class AppTemplateAdmin(admin.ModelAdmin):
 
 @admin.register(App)
 class AppAdmin(admin.ModelAdmin):
-    list_display = ["name", "slug", "organization", "workspace", "repository", "source_template", "app_type", "build_strategy", "branch", "container_port", "status", "updated_at"]
-    list_filter = ["status", "app_type", "build_strategy", "organization", "source_template"]
-    search_fields = ["name", "slug", "workspace__name", "organization__name", "repository__full_name", "branch"]
+    list_display = ["name", "slug", "organization", "workspace", "environment", "repository", "source_template", "app_type", "build_strategy", "cpu", "memory", "compute_mode", "container_port", "status", "updated_at"]
+    list_filter = ["status", "app_type", "build_strategy", "compute_mode", "organization", "source_template"]
+    search_fields = ["name", "slug", "workspace__name", "organization__name", "repository__full_name", "environment__name"]
     readonly_fields = ["id", "created_at", "updated_at"]
-    autocomplete_fields = ["organization", "workspace", "repository", "source_template", "created_by"]
-
-
-@admin.register(DeploymentBlueprint)
-class DeploymentBlueprintAdmin(admin.ModelAdmin):
-    list_display = ["app", "environment", "status", "branch", "cpu", "memory", "compute_mode", "subdomain", "updated_at"]
-    list_filter = ["status", "compute_mode"]
-    search_fields = ["app__name", "app__slug", "environment__name", "branch"]
-    readonly_fields = ["id", "created_at", "updated_at"]
-    autocomplete_fields = ["app", "environment", "created_by"]
+    autocomplete_fields = ["organization", "workspace", "environment", "repository", "source_template", "created_by"]
 
 
 @admin.register(Deployment)
 class DeploymentAdmin(admin.ModelAdmin):
-    list_display = ["app", "environment", "blueprint", "git_ref", "status", "created_at", "completed_at", "service_url"]
-    list_filter = ["status", "environment", "app__workspace__organization"]
+    list_display = ["app", "git_ref", "status", "created_at", "completed_at", "service_url"]
+    list_filter = ["status", "app__environment", "app__workspace__organization"]
     search_fields = [
         "app__name",
         "app__workspace__name",
         "app__workspace__organization__name",
-        "environment__name",
+        "app__environment__name",
         "git_ref",
         "git_commit_sha",
         "image_uri",
     ]
     readonly_fields = ["id", "created_at", "updated_at"]
-    autocomplete_fields = ["app", "environment", "blueprint", "created_by"]
+    autocomplete_fields = ["app", "created_by"]
 
 
 @admin.register(DeploymentLog)
@@ -247,24 +237,24 @@ class EnvironmentLogAdmin(admin.ModelAdmin):
 
 @admin.register(AppPermissions)
 class AppPermissionsAdmin(admin.ModelAdmin):
-    list_display = ["id", "app", "environment", "created_at", "updated_at"]
+    list_display = ["id", "app", "created_at", "updated_at"]
     list_filter = ["app__organization"]
-    search_fields = ["app__name", "environment__name"]
+    search_fields = ["app__name"]
     readonly_fields = ["id", "statements", "created_at", "updated_at"]
-    autocomplete_fields = ["app", "environment"]
+    autocomplete_fields = ["app"]
 
 
 @admin.register(AppPermissionRequest)
 class AppPermissionRequestAdmin(admin.ModelAdmin):
-    list_display = ["id", "app", "environment", "status", "created_by", "created_at", "updated_at"]
+    list_display = ["id", "app", "status", "created_by", "created_at", "updated_at"]
     list_filter = ["status", "app__organization"]
-    search_fields = ["app__name", "environment__name", "created_by__email", "description", "status_message"]
+    search_fields = ["app__name", "created_by__email", "description", "status_message"]
     readonly_fields = ["id", "statements", "created_at", "updated_at"]
-    autocomplete_fields = ["app", "environment", "created_by"]
+    autocomplete_fields = ["app", "created_by"]
 
     fieldsets = (
         (None, {
-            "fields": ("app", "environment", "status", "status_message"),
+            "fields": ("app", "status", "status_message"),
         }),
         ("Request", {
             "fields": ("description", "statements", "created_by"),
@@ -514,7 +504,7 @@ class PlatformSharedCredentialAdmin(admin.ModelAdmin):
 
 @admin.register(WebappPublicGrant)
 class WebappPublicGrantAdmin(admin.ModelAdmin):
-    list_display = ["slug", "app", "environment", "granted_by", "created_at", "expires_at", "revoked_at", "revoked_by"]
-    list_filter = ["environment"]
+    list_display = ["slug", "app", "granted_by", "created_at", "expires_at", "revoked_at", "revoked_by"]
+    list_filter = ["app__environment"]
     readonly_fields = ["id", "created_at"]
     autocomplete_fields = ["app", "granted_by", "revoked_by"]

@@ -43,19 +43,14 @@ class TestStaleJobReaper(TestCase):
         self.app = models.App.objects.create(
             organization=self.organization,
             workspace=self.workspace,
+            environment=self.environment,
             repository=self.repository,
             name="Stale Agent",
             slug="stale-agent",
             app_type=models.App.AppType.WEB,
             build_strategy=models.App.BuildStrategy.DOCKERFILE,
-            branch="main",
             container_port=8787,
             health_check_path="/health",
-        )
-        self.blueprint = models.DeploymentBlueprint.objects.create(
-            app=self.app,
-            environment=self.environment,
-            status=models.DeploymentBlueprint.Status.DEPLOYING,
             cpu=256,
             memory=512,
         )
@@ -69,28 +64,24 @@ class TestStaleJobReaper(TestCase):
         return models.JobWorkerRun.objects.create(label="", heartbeat_at=timezone.now() - heartbeat_age)
 
     def _create_deployment(self, status: str) -> models.Deployment:
-        """Create a deployment for the fixture blueprint."""
+        """Create a deployment for the fixture app."""
         return models.Deployment.objects.create(
-            blueprint=self.blueprint,
             app=self.app,
-            environment=self.environment,
             git_ref="main",
             image_tag="stale-test",
             status=status,
         )
 
-    def test_stale_executing_deployment_fails_with_blueprint(self) -> None:
+    def test_stale_executing_deployment_fails(self) -> None:
         deployment = self._create_deployment(status=models.Deployment.Status.DEPLOYING)
         self._make_stale(deployment)
 
         stale_job_reaper.reap_stale_jobs(no_progress_timeout=TIMEOUT, dead_worker_timeout=DEAD_WORKER_TIMEOUT)
 
         deployment.refresh_from_db()
-        self.blueprint.refresh_from_db()
         self.assertEqual(deployment.status, models.Deployment.Status.FAILED)
         self.assertIn("stale-job detection", deployment.status_message)
         self.assertIsNotNone(deployment.completed_at)
-        self.assertEqual(self.blueprint.status, models.DeploymentBlueprint.Status.FAILED)
 
     def test_fresh_executing_deployment_is_untouched(self) -> None:
         deployment = self._create_deployment(status=models.Deployment.Status.BUILDING)
@@ -116,18 +107,14 @@ class TestStaleJobReaper(TestCase):
         self.assertEqual(teardown_pending.status, models.Deployment.Status.TEARDOWN_PENDING)
         self.assertEqual(succeeded.status, models.Deployment.Status.SUCCEEDED)
 
-    def test_stale_tearing_down_deployment_fails_without_touching_active_blueprint(self) -> None:
-        self.blueprint.status = models.DeploymentBlueprint.Status.ACTIVE
-        self.blueprint.save(update_fields=["status", "updated_at"])
+    def test_stale_tearing_down_deployment_fails(self) -> None:
         deployment = self._create_deployment(status=models.Deployment.Status.TEARING_DOWN)
         self._make_stale(deployment)
 
         stale_job_reaper.reap_stale_jobs(no_progress_timeout=TIMEOUT, dead_worker_timeout=DEAD_WORKER_TIMEOUT)
 
         deployment.refresh_from_db()
-        self.blueprint.refresh_from_db()
         self.assertEqual(deployment.status, models.Deployment.Status.FAILED)
-        self.assertEqual(self.blueprint.status, models.DeploymentBlueprint.Status.ACTIVE)
 
     def test_deployment_claimed_by_dead_run_fails_fast(self) -> None:
         dead_run = self._create_worker_run(heartbeat_age=DEAD_WORKER_TIMEOUT + timedelta(minutes=1))
@@ -138,10 +125,8 @@ class TestStaleJobReaper(TestCase):
         stale_job_reaper.reap_stale_jobs(no_progress_timeout=TIMEOUT, dead_worker_timeout=DEAD_WORKER_TIMEOUT)
 
         deployment.refresh_from_db()
-        self.blueprint.refresh_from_db()
         self.assertEqual(deployment.status, models.Deployment.Status.FAILED)
         self.assertEqual(deployment.status_message, stale_job_reaper.DEAD_WORKER_MESSAGE)
-        self.assertEqual(self.blueprint.status, models.DeploymentBlueprint.Status.FAILED)
 
     def test_deployment_claimed_by_live_run_is_untouched(self) -> None:
         live_run = self._create_worker_run(heartbeat_age=timedelta(seconds=10))
@@ -253,12 +238,10 @@ class TestStaleJobReaper(TestCase):
     def test_stale_applying_permission_request_fails(self) -> None:
         applying = models.AppPermissionRequest.objects.create(
             app=self.app,
-            environment=self.environment,
             status=models.AppPermissionRequest.Status.APPLYING,
         )
         approved = models.AppPermissionRequest.objects.create(
             app=self.app,
-            environment=self.environment,
             status=models.AppPermissionRequest.Status.APPROVED_PENDING_APPLY,
         )
         for request in (applying, approved):

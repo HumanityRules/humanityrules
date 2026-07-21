@@ -171,7 +171,7 @@ def template_deploy_picker(request: HttpRequest) -> HttpResponse:
 
 @login_required
 def template_deploy_form(request: HttpRequest, template_slug: str) -> HttpResponse:
-    """GET: show deploy form. POST: create app + blueprint + deployment from template."""
+    """GET: show deploy form. POST: create app + deployment from template."""
     template = get_object_or_404(models.AppTemplate, slug=template_slug, is_active=True)
     org = request.user.current_organization
 

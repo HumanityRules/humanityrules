@@ -43,19 +43,14 @@ class TestAppRemovalCoordination(TestCase):
         self.app = models.App.objects.create(
             organization=self.organization,
             workspace=self.workspace,
+            environment=self.environment,
             repository=self.repository,
             name="Removal Agent",
             slug="removal-agent",
             app_type=models.App.AppType.WEB,
             build_strategy=models.App.BuildStrategy.DOCKERFILE,
-            branch="main",
             container_port=8787,
             health_check_path="/health",
-        )
-        models.DeploymentBlueprint.objects.create(
-            app=self.app,
-            environment=self.environment,
-            status=models.DeploymentBlueprint.Status.ACTIVE,
             cpu=256,
             memory=512,
         )

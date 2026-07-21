@@ -110,6 +110,9 @@ class TestGetEffectiveTags(TestCase):
         self.aws_account = AWSAccount.objects.create(
             organization=self.org, name="Test Account",
         )
+        self.env = Environment.objects.create(
+            aws_account=self.aws_account, name="TagEnv", slug="tagenv", aws_region="us-east-1",
+        )
         self.repo = Repository.objects.create(
             organization=self.org, provider="github", name="repo",
             full_name="org/repo", clone_url="https://github.com/org/repo.git",
@@ -118,8 +121,9 @@ class TestGetEffectiveTags(TestCase):
     def _make_app(self, name: str, slug: str) -> App:
         return App.objects.create(
             organization=self.org, workspace=self.workspace, repository=self.repo,
-            name=name, slug=slug, app_type="web", build_strategy="dockerfile",
-            branch="main", container_port=8000, health_check_path="/health",
+            environment=self.env, name=name, slug=slug, app_type="web",
+            build_strategy="dockerfile", container_port=8000, health_check_path="/health",
+            cpu=256, memory=512,
         )
 
     def test_app_direct_tags_source_is_direct(self) -> None:
@@ -1342,6 +1346,12 @@ class TestCreateDefaultAppPolicy(TestCase):
     def setUp(self) -> None:
         self.org = Organization.objects.create(name="AppDefault Org", slug="appdefault-org")
         self.workspace = Workspace.objects.get(organization=self.org, slug="default")
+        self.aws_account = AWSAccount.objects.create(
+            organization=self.org, name="Test Account",
+        )
+        self.env = Environment.objects.create(
+            aws_account=self.aws_account, name="Default", slug="default", aws_region="us-east-1",
+        )
         self.repo = Repository.objects.create(
             organization=self.org, provider="github", name="repo",
             full_name="org/repo", clone_url="https://github.com/org/repo.git",
@@ -1350,8 +1360,9 @@ class TestCreateDefaultAppPolicy(TestCase):
     def _make_app(self, name: str, slug: str) -> App:
         return App.objects.create(
             organization=self.org, workspace=self.workspace, repository=self.repo,
-            name=name, slug=slug, app_type="web", build_strategy="dockerfile",
-            branch="main", container_port=8000, health_check_path="/health",
+            environment=self.env, name=name, slug=slug, app_type="web",
+            build_strategy="dockerfile", container_port=8000, health_check_path="/health",
+            cpu=256, memory=512,
         )
 
     def test_creates_app_name_tag(self) -> None:
@@ -1422,9 +1433,10 @@ class TestCreateDefaultAppPolicy(TestCase):
         )
         app = App.objects.create(
             organization=self.org, workspace=self.workspace, repository=self.repo,
-            name="Vmendi PA", slug="vmendi-pa", app_type="web",
-            build_strategy="dockerfile", branch="main", container_port=8000,
+            environment=self.env, name="Vmendi PA", slug="vmendi-pa", app_type="web",
+            build_strategy="dockerfile", container_port=8000,
             health_check_path="/health", source_template=template,
+            cpu=256, memory=512,
         )
         # app-name tag still created (used elsewhere for visibility).
         self.assertTrue(
@@ -1734,11 +1746,17 @@ class TestTagInheritanceConsistency(TestCase):
             organization=self.org, provider="github", name="finrepo",
             full_name="org/finrepo", clone_url="https://github.com/org/finrepo.git",
         )
+        self.aws_account = AWSAccount.objects.create(
+            organization=self.org, name="Test Account",
+        )
+        self.env = Environment.objects.create(
+            aws_account=self.aws_account, name="Default", slug="default", aws_region="us-east-1",
+        )
         self.app = App.objects.create(
             organization=self.org, workspace=self.workspace, repository=self.repo,
-            name="FinReports", slug="finreports", app_type="web",
-            build_strategy="dockerfile", branch="main", container_port=8000,
-            health_check_path="/health",
+            environment=self.env, name="FinReports", slug="finreports", app_type="web",
+            build_strategy="dockerfile", container_port=8000,
+            health_check_path="/health", cpu=256, memory=512,
         )
 
         # Remove the auto-created open-access policy from post_save signal
@@ -2146,11 +2164,17 @@ class TestSelfReferentialEvaluation(TestCase):
         self.stranger = User.objects.create_user(
             username="alice", password="pw", current_organization=self.org,
         )
+        self.aws_account = AWSAccount.objects.create(
+            organization=self.org, name="Test Account",
+        )
+        self.env = Environment.objects.create(
+            aws_account=self.aws_account, name="Default", slug="default", aws_region="us-east-1",
+        )
         self.pa_app = App.objects.create(
             organization=self.org, workspace=self.workspace, repository=self.repo,
-            name="VmendiPA", slug="vmendihermes", app_type="web",
-            build_strategy="dockerfile", branch="main", container_port=8000,
-            health_check_path="/health",
+            environment=self.env, name="VmendiPA", slug="vmendihermes", app_type="web",
+            build_strategy="dockerfile", container_port=8000,
+            health_check_path="/health", cpu=256, memory=512,
         )
         # Drop the auto-created open-access policy so only the self-ref policy is in play.
         Policy.objects.filter(
@@ -2252,9 +2276,9 @@ class TestSelfReferentialEvaluation(TestCase):
         # Second PA owned by a different user.
         other_app = App.objects.create(
             organization=self.org, workspace=self.workspace, repository=self.repo,
-            name="AlicePA", slug="alice-hermes", app_type="web",
-            build_strategy="dockerfile", branch="main", container_port=8000,
-            health_check_path="/health",
+            environment=self.env, name="AlicePA", slug="alice-hermes", app_type="web",
+            build_strategy="dockerfile", container_port=8000,
+            health_check_path="/health", cpu=256, memory=512,
         )
         Policy.objects.filter(
             organization=self.org, name=f"Default: {other_app.name} open access",

@@ -386,13 +386,14 @@ class TestPermissionsEditorEndpoints(TestCase):
         )
 
         self.workspace = Workspace.objects.create(organization=self.org, name="WS", slug="ws")
-        self.app = App.objects.create(
-            organization=self.org, workspace=self.workspace, repository=self.repo,
-            name="PEApp", slug="peapp", app_type="web", build_strategy="dockerfile",
-            branch="main", container_port=8000, health_check_path="/health",
-        )
         self.env = Environment.objects.create(
             aws_account=self.aws_account, name="Production", slug="production", aws_region="us-east-1",
+        )
+        self.app = App.objects.create(
+            organization=self.org, workspace=self.workspace, repository=self.repo,
+            environment=self.env, name="PEApp", slug="peapp", app_type="web",
+            build_strategy="dockerfile", container_port=8000, health_check_path="/health",
+            cpu=256, memory=512,
         )
         ResourceTag.objects.create(
             organization=self.org, resource_type="environment", environment=self.env,
@@ -400,7 +401,7 @@ class TestPermissionsEditorEndpoints(TestCase):
         )
 
         self.apr = AppPermissionRequest.objects.create(
-            app=self.app, environment=self.env,
+            app=self.app,
             statements=[{"effect": "Allow", "action": ["s3:GetObject"], "resource": ["*"]}],
             status=AppPermissionRequest.Status.DRAFT,
         )
@@ -460,10 +461,7 @@ class TestPermissionsEditorEndpoints(TestCase):
         self.assertEqual(response.status_code, 200)
 
     def test_permissions_editor_renders_for_multiple_users(self) -> None:
-        editor_url = (
-            f"/security/permissions/editor/?context_app={self.app.slug}"
-            f"&context_environment={self.env.slug}"
-        )
+        editor_url = f"/security/permissions/editor/?context_app={self.app.slug}"
 
         # Mock AWS calls so the view doesn't try to assume roles during tests.
         with patch(
@@ -499,13 +497,14 @@ class TestPermissionsEditorStatementRendering(TestCase):
             full_name="org/repo", clone_url="https://github.com/org/repo.git",
         )
         self.workspace = Workspace.objects.create(organization=self.org, name="WS", slug="psr-ws")
-        self.app = App.objects.create(
-            organization=self.org, workspace=self.workspace, repository=self.repo,
-            name="PSRApp", slug="psrapp", app_type="web", build_strategy="dockerfile",
-            branch="main", container_port=8000, health_check_path="/health",
-        )
         self.env = Environment.objects.create(
             aws_account=self.aws_account, name="Production", slug="psr-prod", aws_region="us-east-1",
+        )
+        self.app = App.objects.create(
+            organization=self.org, workspace=self.workspace, repository=self.repo,
+            environment=self.env, name="PSRApp", slug="psrapp", app_type="web",
+            build_strategy="dockerfile", container_port=8000, health_check_path="/health",
+            cpu=256, memory=512,
         )
         self.user = User.objects.create_user(username="psr_user", password="x", current_organization=self.org)
         OrganizationMembership.objects.create(organization=self.org, user=self.user, role=OrganizationMembership.Role.MEMBER)
@@ -519,7 +518,7 @@ class TestPermissionsEditorStatementRendering(TestCase):
 
     def _make_draft(self, statements: list[dict]) -> AppPermissionRequest:
         return AppPermissionRequest.objects.create(
-            app=self.app, environment=self.env, statements=statements,
+            app=self.app, statements=statements,
             status=AppPermissionRequest.Status.DRAFT,
         )
 

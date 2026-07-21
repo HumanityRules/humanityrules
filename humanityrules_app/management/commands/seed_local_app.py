@@ -1,6 +1,6 @@
 """Seed DB rows so a local Hermes compose stack appears as an App in HUMR.
 
-The running docker-compose stack *is* the app — no AWS deployment or Blueprint
+The running docker-compose stack *is* the app — no AWS deployment
 is created. HUMR only needs identity rows: a DB-only App stub (App row + owner
 tag), a localhost Environment, and an EnvironmentBearerToken.
 
@@ -81,6 +81,7 @@ class Command(BaseCommand):
         )
         self._ensure_local_app_stub(
             org=aws_account.organization,
+            environment=env,
             app_slug=app_slug,
             owner_username=options["owner_username"],
             template_slug=options["template"],
@@ -118,6 +119,7 @@ class Command(BaseCommand):
     def _ensure_local_app_stub(
         self,
         org,
+        environment: Environment,
         app_slug: str,
         owner_username: str,
         template_slug: str,
@@ -132,6 +134,7 @@ class Command(BaseCommand):
         if app is None:
             app = self._create_local_app_stub(
                 org=org,
+                environment=environment,
                 app_slug=app_slug,
                 template_slug=template_slug,
                 workspace_slug=workspace_slug,
@@ -161,6 +164,7 @@ class Command(BaseCommand):
     def _create_local_app_stub(
         self,
         org,
+        environment: Environment,
         app_slug: str,
         template_slug: str,
         workspace_slug: str,
@@ -193,6 +197,7 @@ class Command(BaseCommand):
         app = App.objects.create(
             organization=org,
             workspace=workspace,
+            environment=environment,
             repository=repo,
             source_template=template,
             name=app_slug.replace("-", " ").title(),
@@ -204,7 +209,10 @@ class Command(BaseCommand):
             health_check_path=primary.get("health_check_path", ""),
             health_check_command=primary.get("health_check_command", ""),
             health_check_grace_period=primary.get("health_check_grace_period", 0),
-            branch="",
+            cpu=template.cpu,
+            memory=template.memory,
+            compute_mode=template.default_compute_mode,
+            containers=[],
             created_by=created_by,
         )
         for tag in template.default_tags or []:

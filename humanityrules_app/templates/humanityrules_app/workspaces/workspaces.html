@@ -26,8 +26,8 @@
                 <div class="flex items-center justify-between gap-2 px-3 py-2.5">
                     <span class="text-gray-500 dark:text-gray-400 truncate">{{ app.name }}</span>
                     <div class="flex items-center gap-2 shrink-0">
-                        {% if app.latest_environment %}
-                        <span class="text-xs text-gray-400 dark:text-gray-500">{{ app.latest_environment }}</span>
+                        {% if app.environment %}
+                        <span class="text-xs text-gray-400 dark:text-gray-500">{{ app.environment.name }}</span>
                         {% endif %}
                         {% if app.latest_status %}
                         {% include "humanityrules_app/partials/_status_pill.html" with status=app.latest_status label=app.latest_status|title only %}

@@ -5,7 +5,7 @@ must stay outside the sandbox. This started with ChatGPT-subscription Codex auth
 and now also covers Nous Portal. Covers TLS-intercept mechanics for
 device-flow LLM providers.
 
-Status: implemented (backend + WebUI device dialog). Deploy-time selection is wired through `HUMR_LLM_PRESET=codex|bedrock`: `Organization.llm_preset` (per-customer, defaults to `codex`; `bedrock` selectable in the Django admin) is persisted as that single blueprint env var, then expanded into concrete model configuration by the container supervisor. The `codex` preset uses `openai-codex/gpt-5.5` for the main model and every auxiliary slot.
+Status: implemented (backend + WebUI device dialog). Deploy-time selection is wired through `HUMR_LLM_PRESET=codex|bedrock`: `Organization.llm_preset` (per-customer, defaults to `codex`; `bedrock` selectable in the Django admin) is persisted as that single app-container env var, then expanded into concrete model configuration by the container supervisor. The `codex` preset uses `openai-codex/gpt-5.5` for the main model and every auxiliary slot.
 
 ## Decisions
 
