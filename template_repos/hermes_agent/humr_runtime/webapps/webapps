@@ -3,7 +3,7 @@
 
 Source of truth:
 /workspace/.config/process-compose/webapps/process-compose.yaml. Caddy routes
-in /workspace/.config/caddy/routes.caddy are regenerated from that file on
+in /workspace/.config/caddy/webapps.caddy are regenerated from that file on
 every change.
 
 See template_repos/hermes_agent/skills/development/webapps/SKILL.md for the agent contract.

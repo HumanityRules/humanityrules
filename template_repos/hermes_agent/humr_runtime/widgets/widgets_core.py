@@ -22,6 +22,7 @@ MANIFEST_FILENAME = "widget.json"
 MANIFEST_SCHEMA_VERSION = 1
 REGISTRY_SCHEMA_VERSION = 1
 SLUG_PATTERN = re.compile(r"^[a-z][a-z0-9-]{0,30}[a-z0-9]$")
+STATIC_ENTRY_COMPONENT_PATTERN = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]*$")
 RESERVED_SLUG_PREFIX = "__"
 
 
@@ -88,7 +89,7 @@ class _InvalidManifestKeyError(ValueError):
 
 
 class WidgetsLock:
-    """Serialize future Widget apply/reconcile mutations with an advisory lock."""
+    """Serialize Widget apply/reconcile mutations with an advisory lock."""
 
     def __init__(self, lock_path: Path) -> None:
         self.lock_path = lock_path
@@ -395,10 +396,17 @@ def _validate_static_entry(value: object, slug: str, widget_dir: Path) -> str:
     raw_parts = entry.split("/")
     relative_path = PurePosixPath(entry)
     if relative_path.is_absolute() or any(
-        part in {"", ".", ".."} for part in raw_parts
+        part in {"", ".", ".."}
+        or STATIC_ENTRY_COMPONENT_PATTERN.fullmatch(part) is None
+        for part in raw_parts
     ):
         raise WidgetValidationError(
-            slug=slug, message="frontend.entry must be a canonical relative path"
+            slug=slug,
+            message=(
+                "frontend.entry must be a canonical relative path whose components "
+                "start with an ASCII letter, digit, or underscore and contain only "
+                "ASCII letters, digits, dots, underscores, or hyphens"
+            ),
         )
 
     entry_path = widget_dir.joinpath(*relative_path.parts)

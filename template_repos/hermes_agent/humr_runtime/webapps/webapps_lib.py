@@ -2,7 +2,7 @@
 
 Imported by both the `webapps` CLI and the `__admin` webapp. Webapp source of
 truth is /workspace/.config/process-compose/webapps/process-compose.yaml;
-routes.caddy is regenerated from it on every mutation. See
+webapps.caddy is regenerated from it on every mutation. See
 docs/webapps_design.md.
 
 User webapps live at <slug>-<agent-host> (Host-based Caddy routing). The
@@ -67,7 +67,7 @@ WEBAPPS_PROJECT = ProcessComposeProject(
         Path("/workspace/.config/caddy"),
         LOGS_DIR,
     ),
-    route_file=Path("/workspace/.config/caddy/routes.caddy"),
+    route_file=Path("/workspace/.config/caddy/webapps.caddy"),
 )
 SYSTEM_PROJECT = ProcessComposeProject(
     config_dir=Path("/workspace/.config/process-compose/system"),

@@ -326,10 +326,12 @@ COPY ENVIRONMENT.md /opt/hermes/ENVIRONMENT.md
 COPY config.yaml.template /opt/hermes/config.yaml.template
 COPY humr_runtime /opt/humr/runtime
 
-# Expose the webapps CLI on PATH. Source-of-truth lives in humr_runtime/ so the
-# whole runtime tree COPYs together; the symlink lets the agent type `webapps`.
+# Expose the Web Apps and Widgets CLIs on PATH. Source-of-truth lives in
+# humr_runtime/ so the whole runtime tree COPYs together.
 RUN chmod +x /opt/humr/runtime/webapps/webapps \
-    && ln -sf /opt/humr/runtime/webapps/webapps /opt/humr/bin/webapps
+        /opt/humr/runtime/widgets/widgets \
+    && ln -sf /opt/humr/runtime/webapps/webapps /opt/humr/bin/webapps \
+    && ln -sf /opt/humr/runtime/widgets/widgets /opt/humr/bin/widgets
 
 # Bundled example webapps (the catalog). Image-owned under /opt/humr, so it's
 # re-synced from the image every boot and excluded from the EFS checkpoint —
