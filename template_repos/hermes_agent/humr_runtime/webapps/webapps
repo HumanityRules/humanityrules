@@ -37,6 +37,7 @@ from webapps_lib import (
     url_for,
     validate_slug,
     wait_for_ready,
+    webapp_processes,
 )
 
 
@@ -94,7 +95,7 @@ def cmd_create(args: argparse.Namespace) -> None:
 
 def cmd_list(_args: argparse.Namespace) -> None:
     doc = load_process_compose_yaml(project=WEBAPPS_PROJECT)
-    procs = doc.get("processes", {})
+    procs = webapp_processes(doc=doc)
     if not procs:
         print("No webapps yet.")
         print("")
@@ -116,6 +117,7 @@ def cmd_list(_args: argparse.Namespace) -> None:
 
 
 def cmd_logs(args: argparse.Namespace) -> None:
+    validate_slug(args.slug)
     log_path = LOGS_DIR / f"{args.slug}.log"
     if not log_path.exists():
         die(f"no log file at {log_path} (app may not have started yet)")
@@ -127,6 +129,7 @@ def cmd_logs(args: argparse.Namespace) -> None:
 
 
 def cmd_start(args: argparse.Namespace) -> None:
+    validate_slug(args.slug)
     with ProcessComposeLock(project=WEBAPPS_PROJECT):
         doc = load_process_compose_yaml(project=WEBAPPS_PROJECT)
         entry = doc["processes"].get(args.slug)
@@ -152,6 +155,7 @@ def cmd_start(args: argparse.Namespace) -> None:
 
 
 def cmd_stop(args: argparse.Namespace) -> None:
+    validate_slug(args.slug)
     with ProcessComposeLock(project=WEBAPPS_PROJECT):
         doc = load_process_compose_yaml(project=WEBAPPS_PROJECT)
         entry = doc["processes"].get(args.slug)
@@ -165,6 +169,7 @@ def cmd_stop(args: argparse.Namespace) -> None:
 
 
 def cmd_restart(args: argparse.Namespace) -> None:
+    validate_slug(args.slug)
     with ProcessComposeLock(project=WEBAPPS_PROJECT):
         doc = load_process_compose_yaml(project=WEBAPPS_PROJECT)
         entry = doc["processes"].get(args.slug)
@@ -188,6 +193,7 @@ def cmd_reload(_args: argparse.Namespace) -> None:
 
 
 def cmd_set_env(args: argparse.Namespace) -> None:
+    validate_slug(args.slug)
     with ProcessComposeLock(project=WEBAPPS_PROJECT):
         doc = load_process_compose_yaml(project=WEBAPPS_PROJECT)
         entry = doc["processes"].get(args.slug)
@@ -202,6 +208,7 @@ def cmd_set_env(args: argparse.Namespace) -> None:
 
 
 def cmd_unregister(args: argparse.Namespace) -> None:
+    validate_slug(args.slug)
     with ProcessComposeLock(project=WEBAPPS_PROJECT):
         doc = load_process_compose_yaml(project=WEBAPPS_PROJECT)
         if doc["processes"].pop(args.slug, None) is None:
@@ -214,6 +221,7 @@ def cmd_unregister(args: argparse.Namespace) -> None:
 
 
 def cmd_delete(args: argparse.Namespace) -> None:
+    validate_slug(args.slug)
     if not args.yes:
         die("delete requires --yes (this WILL also remove projects/<slug>/ and logs)")
 
