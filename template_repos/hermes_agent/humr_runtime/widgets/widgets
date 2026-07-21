@@ -1,13 +1,15 @@
 #!/opt/hermes/webui/venv/bin/python3
-"""HUMR Widgets CLI for manifest-driven static Widget lifecycle."""
+"""HUMR Widgets CLI for manifest-driven Widget lifecycle."""
 
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from collections.abc import Sequence
 
 sys.path.insert(0, "/opt/humr/runtime/widgets")
+sys.path.insert(0, "/opt/humr/runtime/webapps")
 
 import widgets_core
 import widgets_runtime
@@ -19,13 +21,46 @@ def cmd_apply(args: argparse.Namespace, paths: widgets_runtime.WidgetRuntimePath
     if args.apply_all == (args.slug is not None):
         print("widgets: apply requires exactly one of <slug> or --all", file=sys.stderr)
         return 2
+    if args.timeout < 1:
+        print("widgets: apply --timeout must be at least 1 second", file=sys.stderr)
+        return 2
 
     try:
-        result = widgets_runtime.reconcile_widgets(paths=paths, target_slug=target_slug)
+        result = widgets_runtime.reconcile_widgets(
+            paths=paths,
+            target_slug=target_slug,
+            update_processes=not args.bootstrap,
+        )
     except (OSError, RuntimeError, ValueError) as exc:
         print(f"widgets: {exc}", file=sys.stderr)
         return 1
     _report_failures(failures=result.failures)
+    if target_slug is not None and not args.bootstrap:
+        target_widget = next(
+            (widget for widget in result.widgets if widget.slug == target_slug),
+            None,
+        )
+        if target_widget is not None and target_widget.backend is not None:
+            try:
+                state = widgets_runtime.wait_for_widget_ready(
+                    paths=paths,
+                    slug=target_slug,
+                    timeout=args.timeout,
+                )
+            except (OSError, RuntimeError, ValueError) as exc:
+                print(f"widgets: cannot read backend readiness: {exc}", file=sys.stderr)
+                return 1
+            if state.get("is_ready") != "Ready":
+                print(
+                    f"widgets: backend {target_slug!r} did not become ready within "
+                    f"{args.timeout}s (status={state.get('status', 'Unknown')}, "
+                    f"is_ready={state.get('is_ready', 'Unknown')}, "
+                    f"exit_code={state.get('exit_code')}, "
+                    f"restarts={state.get('restarts', 0)}). "
+                    f"Check `widgets logs {target_slug}`.",
+                    file=sys.stderr,
+                )
+                return 1
     if args.apply_all:
         print(f"widgets: reconciled {len(result.widgets)} Widget(s).")
     else:
@@ -58,6 +93,7 @@ def cmd_delete(args: argparse.Namespace, paths: widgets_runtime.WidgetRuntimePat
             paths=paths,
             slug=args.slug,
             confirmed=args.yes,
+            update_processes=True,
         )
     except (OSError, RuntimeError, ValueError) as exc:
         print(f"widgets: {exc}", file=sys.stderr)
@@ -65,6 +101,30 @@ def cmd_delete(args: argparse.Namespace, paths: widgets_runtime.WidgetRuntimePat
     _report_failures(failures=result.failures)
     print(f"widgets: permanently deleted {args.slug!r}.")
     return 0
+
+
+def cmd_logs(args: argparse.Namespace, paths: widgets_runtime.WidgetRuntimePaths) -> int:
+    """Tail one Widget's persistent backend log."""
+    try:
+        widgets_core.validate_slug(slug=args.slug)
+    except widgets_core.WidgetValidationError as exc:
+        print(f"widgets: {exc}", file=sys.stderr)
+        return 1
+    if args.lines < 1:
+        print("widgets: logs -n must be at least 1", file=sys.stderr)
+        return 2
+    log_path = paths.logs_root / f"{args.slug}.log"
+    if not log_path.is_file():
+        print(
+            f"widgets: no log file at {log_path} (backend may not have started yet)",
+            file=sys.stderr,
+        )
+        return 1
+    command = ["tail"]
+    if args.follow:
+        command.append("-f")
+    command.extend(["-n", str(args.lines), str(log_path)])
+    os.execvp(command[0], command)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -75,6 +135,13 @@ def build_parser() -> argparse.ArgumentParser:
     apply_parser = subparsers.add_parser("apply", help="validate and reconcile Widgets")
     apply_parser.add_argument("slug", nargs="?")
     apply_parser.add_argument("--all", action="store_true", dest="apply_all")
+    apply_parser.add_argument(
+        "--timeout",
+        type=int,
+        default=widgets_runtime.DEFAULT_APPLY_TIMEOUT_SECONDS,
+        help="seconds to wait for a targeted backend Widget to become ready",
+    )
+    apply_parser.add_argument("--bootstrap", action="store_true", help=argparse.SUPPRESS)
     apply_parser.set_defaults(handler=cmd_apply)
 
     list_parser = subparsers.add_parser("list", help="list manifest-defined Widgets")
@@ -84,6 +151,12 @@ def build_parser() -> argparse.ArgumentParser:
     delete_parser.add_argument("slug")
     delete_parser.add_argument("--yes", action="store_true")
     delete_parser.set_defaults(handler=cmd_delete)
+
+    logs_parser = subparsers.add_parser("logs", help="tail a Widget backend log")
+    logs_parser.add_argument("slug")
+    logs_parser.add_argument("-f", "--follow", action="store_true")
+    logs_parser.add_argument("-n", "--lines", type=int, default=200)
+    logs_parser.set_defaults(handler=cmd_logs)
     return parser
 
 

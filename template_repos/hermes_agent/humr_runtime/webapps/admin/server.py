@@ -17,12 +17,14 @@ from webapps_lib import (
     LOGS_DIR,
     SYSTEM_SLUG_PREFIX,
     WEBAPPS_PROJECT,
+    is_widget_process_name,
     is_routed,
     load_process_compose_yaml,
     port_from_entry,
     url_for,
     process_compose_states,
     process_compose_state_for,
+    webapp_processes,
 )
 
 app = FastAPI(title="HUMR Admin API")
@@ -33,7 +35,7 @@ def list_webapps() -> dict:
     doc = load_process_compose_yaml(project=WEBAPPS_PROJECT)
     states = {s["name"]: s for s in process_compose_states(project=WEBAPPS_PROJECT)}
     items = []
-    for slug, entry in sorted(doc.get("processes", {}).items()):
+    for slug, entry in sorted(webapp_processes(doc=doc).items()):
         st = states.get(slug, {})
         items.append({
             "slug": slug,
@@ -50,6 +52,8 @@ def list_webapps() -> dict:
 
 @app.get("/api/webapps/{slug}")
 def detail(slug: str) -> dict:
+    if is_widget_process_name(name=slug):
+        raise HTTPException(status_code=404)
     doc = load_process_compose_yaml(project=WEBAPPS_PROJECT)
     entry = doc.get("processes", {}).get(slug)
     if entry is None:
@@ -71,6 +75,8 @@ def detail(slug: str) -> dict:
 
 @app.get("/api/webapps/{slug}/logs")
 def logs(slug: str, tail: int = 200, format: str | None = None):
+    if is_widget_process_name(name=slug):
+        raise HTTPException(status_code=404)
     log_path = LOGS_DIR / f"{slug}.log"
     if not log_path.exists():
         if format == "text":
