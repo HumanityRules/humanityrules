@@ -55,11 +55,6 @@
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Where the agent will run. Only ready environments are shown.</p>
         </div>
 
-        <div>
-            <label for="compute_mode" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Compute</label>
-            {% include "humanityrules_app/partials/_dropdown_select.html#dropdown_select" with dropdown_id="compute_mode" dropdown_name="compute_mode" dropdown_value=selected_compute_mode dropdown_selected_label=selected_compute_mode_label dropdown_options=compute_mode_options %}
-            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Fargate is serverless ECS. EC2 capacity uses customer-owned ECS container instances.</p>
-        </div>
 
         {% if requires_owner %}
         <div>
