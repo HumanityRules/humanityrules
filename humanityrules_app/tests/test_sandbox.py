@@ -1,8 +1,10 @@
 """Tests for the shared Humanity Rules sandbox: auto-provisioning, name collisions, teardown guard."""
 
+from io import StringIO
 from unittest.mock import patch
 
 from asgiref.sync import async_to_sync
+from django.core.management import call_command
 from django.db import IntegrityError, transaction
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -208,7 +210,7 @@ class TestSandboxTeardownGuard(TestCase):
         self.assertFalse(models.Environment.objects.filter(id=env.id).exists())
 
     @patch.object(environment_teardown_executor.infra_customer.deploy_base, "teardown")
-    def test_sandbox_env_teardown_deletes_apps_and_releases_slug_claims(self, mock_teardown) -> None:
+    def test_sandbox_env_teardown_purges_app_data_before_releasing_slug_claims(self, mock_teardown) -> None:
         org = models.Organization.objects.create(name="Acme", slug="acme")
         env = models.Environment.objects.get(aws_account__organization=org, slug="sandbox")
         app = _make_app(org, "demo", env)
@@ -219,12 +221,71 @@ class TestSandboxTeardownGuard(TestCase):
         )
         self.assertTrue(models.SandboxSlugClaim.objects.filter(slug="demo").exists())
 
-        ok = environment_teardown_executor.run_environment_teardown(environment_id=str(env.id))
+        # The purge helper hits AWS; stub it while recording that it runs before the slug release.
+        call_order: list[tuple[str, str]] = []
+
+        def fake_purge(app, env):
+            call_order.append(("purge", app.slug))
+            return True, "ok"
+
+        real_release = sandbox_service.release_sandbox_app_slug
+
+        def tracking_release(app_slug, organization_id):
+            call_order.append(("release", app_slug))
+            return real_release(app_slug=app_slug, organization_id=organization_id)
+
+        with patch.object(environment_teardown_executor.app_remove_executor, "purge_app_namespace_data", side_effect=fake_purge), \
+             patch.object(environment_teardown_executor.sandbox_service, "release_sandbox_app_slug", side_effect=tracking_release):
+            ok = environment_teardown_executor.run_environment_teardown(environment_id=str(env.id))
 
         self.assertTrue(ok)
+        self.assertEqual(call_order, [("purge", "demo"), ("release", "demo")])
         self.assertFalse(models.App.objects.filter(id=app.id).exists())
         self.assertFalse(models.SandboxSlugClaim.objects.filter(slug="demo").exists())
         self.assertFalse(models.Environment.objects.filter(id=env.id).exists())
+
+    @patch.object(environment_teardown_executor.infra_customer.deploy_base, "teardown")
+    def test_sandbox_env_teardown_aborts_on_purge_failure_and_keeps_slug_claim(self, mock_teardown) -> None:
+        org = models.Organization.objects.create(name="Acme", slug="acme")
+        env = models.Environment.objects.get(aws_account__organization=org, slug="sandbox")
+        app = _make_app(org, "demo", env)
+        async_to_sync(sandbox_service.aclaim_sandbox_app_slug)(
+            app_slug="demo",
+            organization_id=org.id,
+            environment=env,
+        )
+
+        with patch.object(
+            environment_teardown_executor.app_remove_executor,
+            "purge_app_namespace_data",
+            return_value=(False, "EFS cleanup failed in 'sandbox': boom"),
+        ):
+            ok = environment_teardown_executor.run_environment_teardown(environment_id=str(env.id))
+
+        self.assertFalse(ok)
+        # A failed purge must never release the slug or delete the app/env.
+        self.assertTrue(models.App.objects.filter(id=app.id).exists())
+        self.assertTrue(models.SandboxSlugClaim.objects.filter(slug="demo").exists())
+        env.refresh_from_db()
+        self.assertEqual(env.status, models.Environment.Status.ERROR)
+
+
+@override_settings(**SANDBOX_SETTINGS)
+class TestSandboxRemovalForcesDataPurge(TestCase):
+    def test_humr_control_removal_forces_all_delete_flags_for_sandbox_app(self) -> None:
+        org = models.Organization.objects.create(name="Acme", slug="acme")
+        env = models.Environment.objects.get(aws_account__organization=org, slug="sandbox")
+        _make_app(org, "demo", env)
+
+        call_command(
+            "humr_control", "teardown-app", "--app", "demo", "--remove-app",
+            stdout=StringIO(), stderr=StringIO(),
+        )
+
+        job = models.AppRemovalJob.objects.get(app_slug_snapshot="demo")
+        self.assertTrue(job.delete_secrets)
+        self.assertTrue(job.delete_persistent_data)
+        self.assertTrue(job.delete_policies)
 
 
 @override_settings(**SANDBOX_SETTINGS)
@@ -291,3 +352,20 @@ class TestSandboxEnvironmentTeardownUI(TestCase):
         self.assertEqual(response.status_code, 403)
         self.sandbox_env.refresh_from_db()
         self.assertEqual(self.sandbox_env.status, models.Environment.Status.READY)
+
+    def test_sandbox_app_remove_confirm_modal_shows_mandatory_purge_copy(self) -> None:
+        _make_app(self.org, "demo", self.sandbox_env)
+        self.client.force_login(self.admin_user)
+        response = self.client.get(reverse("app_remove_confirm", kwargs={"app_slug": "demo"}), **HTMX)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "This is a sandbox app")
+        self.assertNotContains(response, 'name="delete_all_data"')
+
+    def test_sandbox_app_remove_forces_full_purge_without_checkbox(self) -> None:
+        _make_app(self.org, "demo", self.sandbox_env)
+        self.client.force_login(self.admin_user)
+        response = self.client.post(reverse("app_remove", kwargs={"app_slug": "demo"}), **HTMX)
+        self.assertEqual(response.status_code, 200)
+        job = models.AppRemovalJob.objects.get(app_slug_snapshot="demo")
+        self.assertTrue(job.delete_secrets)
+        self.assertTrue(job.delete_policies)

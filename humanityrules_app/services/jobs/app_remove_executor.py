@@ -87,6 +87,58 @@ def _get_env_session(environment: models.Environment):
     )
 
 
+def _run_persistent_data_purge(app: models.App, env: models.Environment) -> tuple[bool, str]:
+    """Delete the app's EFS subtree and host bind-mount dirs. No-op if the template declares neither."""
+    template = app.source_template
+    has_efs = bool(template and template.efs_config)
+    host_path_templates = _template_host_path_templates(template) if template else []
+    if not has_efs and not host_path_templates:
+        logger.info("Skipping persistent-data cleanup: template has no EFS or host_mounts")
+        return True, "no persistent data"
+
+    if has_efs:
+        ok, message = _run_efs_cleanup_task(env=env, app_slug=app.slug)
+        if not ok:
+            return False, f"EFS cleanup failed in '{env.slug}': {message}"
+    if host_path_templates:
+        host_paths = _resolve_host_paths(
+            path_templates=host_path_templates,
+            app_slug=app.slug,
+            env_slug=env.slug,
+        )
+        ok, message = _run_host_path_cleanup_ssm(env=env, app_slug=app.slug, host_paths=host_paths)
+        if not ok:
+            return False, f"Host-path cleanup failed in '{env.slug}': {message}"
+    return True, "ok"
+
+
+def _run_secrets_purge(env: models.Environment, app_slug: str) -> None:
+    """Delete every humr/{env}/{app}/* Secrets Manager entry for the app."""
+    session = _get_env_session(env)
+    secrets_utils.delete_secrets_matching_prefix(
+        session=session,
+        subprefix=f"humr/{env.slug}/{app_slug}/",
+        dry_run=False,
+        force_immediate=True,
+    )
+
+
+def purge_app_namespace_data(app: models.App, env: models.Environment) -> tuple[bool, str]:
+    """Purge an app's persistent data and Secrets Manager entries so its slug namespace is clean.
+
+    Reused by sandbox environment teardown, where the slug claim is released and must never
+    leave inheritable data behind. Returns (ok, message); stops at the first failing step.
+    """
+    ok, message = _run_persistent_data_purge(app=app, env=env)
+    if not ok:
+        return False, message
+    try:
+        _run_secrets_purge(env=env, app_slug=app.slug)
+    except ClientError as e:
+        return False, f"Secrets cleanup failed in '{env.slug}': {e}"
+    return True, "ok"
+
+
 def run_removal(job_id: str) -> bool:
     """Main entry point called by the job worker."""
     try:
@@ -130,38 +182,13 @@ def run_removal(job_id: str) -> bool:
 
     try:
         if job.delete_persistent_data:
-            template = app.source_template
-            has_efs = bool(template and template.efs_config)
-            host_path_templates = _template_host_path_templates(template) if template else []
-            if not has_efs and not host_path_templates:
-                logger.info("Skipping persistent-data cleanup: template has no EFS or host_mounts")
-            else:
-                if has_efs:
-                    ok, message = _run_efs_cleanup_task(env=env, app_slug=app.slug)
-                    if not ok:
-                        _fail(job, app, f"EFS cleanup failed in '{env.slug}': {message}")
-                        return False
-                if host_path_templates:
-                    host_paths = _resolve_host_paths(
-                        path_templates=host_path_templates,
-                        app_slug=app.slug,
-                        env_slug=env.slug,
-                    )
-                    ok, message = _run_host_path_cleanup_ssm(
-                        env=env, app_slug=app.slug, host_paths=host_paths,
-                    )
-                    if not ok:
-                        _fail(job, app, f"Host-path cleanup failed in '{env.slug}': {message}")
-                        return False
+            ok, message = _run_persistent_data_purge(app=app, env=env)
+            if not ok:
+                _fail(job, app, message)
+                return False
 
         if job.delete_secrets:
-            session = _get_env_session(env)
-            secrets_utils.delete_secrets_matching_prefix(
-                session=session,
-                subprefix=f"humr/{env.slug}/{app.slug}/",
-                dry_run=False,
-                force_immediate=True,
-            )
+            _run_secrets_purge(env=env, app_slug=app.slug)
     except ClientError as e:
         logger.exception("AWS cleanup failed: %s", e)
         _fail(job, app, f"AWS cleanup failed: {e}")
