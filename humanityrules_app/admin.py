@@ -187,6 +187,14 @@ class AppAdmin(admin.ModelAdmin):
     readonly_fields = ["id", "created_at", "updated_at"]
     autocomplete_fields = ["organization", "workspace", "environment", "repository", "source_template", "created_by"]
 
+    def get_readonly_fields(self, request: HttpRequest, obj: App | None) -> list[str]:
+        # environment is immutable: every historical deployment resolves its env via
+        # deployment.app.environment, so editing it would silently rewire the app's whole
+        # history. Settable on add, frozen on change.
+        if obj is None:
+            return self.readonly_fields
+        return [*self.readonly_fields, "environment"]
+
 
 @admin.register(Deployment)
 class DeploymentAdmin(admin.ModelAdmin):

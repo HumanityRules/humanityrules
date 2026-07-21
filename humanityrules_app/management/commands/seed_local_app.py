@@ -142,6 +142,13 @@ class Command(BaseCommand):
             )
             self.stdout.write(self.style.SUCCESS(f"created local App stub slug={app_slug!r} (no deployment)"))
         else:
+            # Broker ownership resolution is env-scoped, so an existing app in a different env than
+            # the bearer we mint yields a green setup whose every broker request 404s. Fail loudly.
+            if app.environment_id != environment.id:
+                raise CommandError(
+                    f"App {app_slug!r} exists in env {app.environment.slug!r}, not {environment.slug!r}; "
+                    "pick a different --app-slug or --env-slug.",
+                )
             self.stdout.write(self.style.SUCCESS(f"found existing App slug={app_slug!r}"))
 
         owner_tag, created = ResourceTag.objects.get_or_create(
