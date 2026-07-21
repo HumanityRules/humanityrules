@@ -68,7 +68,7 @@ class TestIntegrationsXStart(TestCase):
         )
         self.app = App.objects.create(
             organization=self.org, workspace=self.workspace, repository=self.repository,
-            environment=self.env, name="Hermes", slug="hermes", app_type=App.AppType.WEB,
+            environment=self.env, name="Hermes", slug="hermes",
             build_strategy=App.BuildStrategy.DOCKERFILE,
             container_port=8000, health_check_path="/health", cpu=256, memory=512,
         )

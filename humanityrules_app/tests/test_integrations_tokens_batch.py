@@ -82,7 +82,7 @@ class _BatchTokensEndpointTestBase(TransactionTestCase):
         )
         self.app = App.objects.create(
             organization=self.org, workspace=self.workspace, repository=self.repo,
-            environment=self.env, name="Hermes", slug="hermes", app_type="web",
+            environment=self.env, name="Hermes", slug="hermes",
             build_strategy="dockerfile", container_port=8000,
             health_check_path="/health", cpu=256, memory=512,
         )
@@ -605,7 +605,7 @@ class TestAppOwnership(_BatchTokensEndpointTestBase):
         )
         app = App.objects.create(
             organization=self.org, workspace=self.workspace, repository=repo,
-            environment=self.env, name=slug, slug=slug, app_type="web",
+            environment=self.env, name=slug, slug=slug,
             build_strategy="dockerfile", container_port=8000,
             health_check_path="/health", cpu=256, memory=512,
         )

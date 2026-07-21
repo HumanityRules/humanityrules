@@ -704,11 +704,6 @@ class AppTemplate(models.Model):
 class App(models.Model):
     """An application within a workspace."""
 
-    class AppType(models.TextChoices):
-        WEB = "web", "Web Service"
-        WORKER = "worker", "Background Worker"
-        SCHEDULED = "scheduled", "Scheduled Job"
-
     class BuildStrategy(models.TextChoices):
         DOCKERFILE = "dockerfile", "Dockerfile"
         NIXPACKS = "nixpacks", "Nixpacks (auto-detect)"
@@ -757,10 +752,6 @@ class App(models.Model):
         max_length=255,
         validators=[app_slugs.validate_app_hostname_label],
         help_text="Hostname label containing lowercase letters and digits only.",
-    )
-    app_type = models.CharField(
-        max_length=20,
-        choices=AppType.choices,
     )
     build_strategy = models.CharField(
         max_length=20,

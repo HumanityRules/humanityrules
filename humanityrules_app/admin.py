@@ -181,8 +181,8 @@ class AppTemplateAdmin(admin.ModelAdmin):
 
 @admin.register(App)
 class AppAdmin(admin.ModelAdmin):
-    list_display = ["name", "slug", "organization", "workspace", "environment", "repository", "source_template", "app_type", "build_strategy", "cpu", "memory", "compute_mode", "container_port", "status", "updated_at"]
-    list_filter = ["status", "app_type", "build_strategy", "compute_mode", "organization", "source_template"]
+    list_display = ["name", "slug", "organization", "workspace", "environment", "repository", "source_template", "build_strategy", "cpu", "memory", "compute_mode", "container_port", "status", "updated_at"]
+    list_filter = ["status", "build_strategy", "compute_mode", "organization", "source_template"]
     search_fields = ["name", "slug", "workspace__name", "organization__name", "repository__full_name", "environment__name"]
     readonly_fields = ["id", "created_at", "updated_at"]
     autocomplete_fields = ["organization", "workspace", "environment", "repository", "source_template", "created_by"]

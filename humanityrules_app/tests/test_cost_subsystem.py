@@ -136,7 +136,7 @@ class _CostFixtureMixin:
         self.workspace = Workspace.objects.create(organization=self.org, name="Eng", slug="eng")
         self.app = App.objects.create(
             organization=self.org, workspace=self.workspace, environment=self.env, repository=self.repository,
-            name="Hermes", slug="hermes", app_type=App.AppType.WEB, build_strategy=App.BuildStrategy.DOCKERFILE,
+            name="Hermes", slug="hermes", build_strategy=App.BuildStrategy.DOCKERFILE,
             container_port=8000, health_check_path="/health", cpu=256, memory=512,
         )
 
@@ -326,7 +326,6 @@ class TestCostRefreshCoordination(_CostFixtureMixin, TestCase):
             repository=self.repository,
             name="Other Hermes",
             slug="other-hermes",
-            app_type=App.AppType.WEB,
             build_strategy=App.BuildStrategy.DOCKERFILE,
             container_port=8000,
             health_check_path="/health",

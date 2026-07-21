@@ -58,7 +58,7 @@ class PDPTestBase(TestCase):
         self.app = App.objects.create(
             organization=self.org, workspace=self.workspace, repository=self.repo,
             environment=self.environment, name="VmendiPA", slug="vmendihermes",
-            app_type="web", build_strategy="dockerfile", container_port=8000,
+            build_strategy="dockerfile", container_port=8000,
             health_check_path="/health", cpu=256, memory=512,
         )
         # Drop the auto-created open-access policy; the self-ref policy is what we test.
@@ -242,7 +242,7 @@ class TestPDPEvaluation(PDPTestBase):
         App.objects.create(
             organization=self.org, workspace=self.workspace, repository=self.repo,
             environment=self.environment, name="Open App", slug="open-app",
-            app_type="web", build_strategy="dockerfile", container_port=8000,
+            build_strategy="dockerfile", container_port=8000,
             health_check_path="/health", cpu=256, memory=512,
         )
 

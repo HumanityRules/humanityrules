@@ -121,7 +121,7 @@ class TestGetEffectiveTags(TestCase):
     def _make_app(self, name: str, slug: str) -> App:
         return App.objects.create(
             organization=self.org, workspace=self.workspace, repository=self.repo,
-            environment=self.env, name=name, slug=slug, app_type="web",
+            environment=self.env, name=name, slug=slug,
             build_strategy="dockerfile", container_port=8000, health_check_path="/health",
             cpu=256, memory=512,
         )
@@ -1360,7 +1360,7 @@ class TestCreateDefaultAppPolicy(TestCase):
     def _make_app(self, name: str, slug: str) -> App:
         return App.objects.create(
             organization=self.org, workspace=self.workspace, repository=self.repo,
-            environment=self.env, name=name, slug=slug, app_type="web",
+            environment=self.env, name=name, slug=slug,
             build_strategy="dockerfile", container_port=8000, health_check_path="/health",
             cpu=256, memory=512,
         )
@@ -1433,7 +1433,7 @@ class TestCreateDefaultAppPolicy(TestCase):
         )
         app = App.objects.create(
             organization=self.org, workspace=self.workspace, repository=self.repo,
-            environment=self.env, name="Vmendi PA", slug="vmendi-pa", app_type="web",
+            environment=self.env, name="Vmendi PA", slug="vmendi-pa",
             build_strategy="dockerfile", container_port=8000,
             health_check_path="/health", source_template=template,
             cpu=256, memory=512,
@@ -1754,7 +1754,7 @@ class TestTagInheritanceConsistency(TestCase):
         )
         self.app = App.objects.create(
             organization=self.org, workspace=self.workspace, repository=self.repo,
-            environment=self.env, name="FinReports", slug="finreports", app_type="web",
+            environment=self.env, name="FinReports", slug="finreports",
             build_strategy="dockerfile", container_port=8000,
             health_check_path="/health", cpu=256, memory=512,
         )
@@ -2172,7 +2172,7 @@ class TestSelfReferentialEvaluation(TestCase):
         )
         self.pa_app = App.objects.create(
             organization=self.org, workspace=self.workspace, repository=self.repo,
-            environment=self.env, name="VmendiPA", slug="vmendihermes", app_type="web",
+            environment=self.env, name="VmendiPA", slug="vmendihermes",
             build_strategy="dockerfile", container_port=8000,
             health_check_path="/health", cpu=256, memory=512,
         )
@@ -2276,7 +2276,7 @@ class TestSelfReferentialEvaluation(TestCase):
         # Second PA owned by a different user.
         other_app = App.objects.create(
             organization=self.org, workspace=self.workspace, repository=self.repo,
-            environment=self.env, name="AlicePA", slug="alice-hermes", app_type="web",
+            environment=self.env, name="AlicePA", slug="alice-hermes",
             build_strategy="dockerfile", container_port=8000,
             health_check_path="/health", cpu=256, memory=512,
         )
