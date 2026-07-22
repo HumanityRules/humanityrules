@@ -998,6 +998,8 @@ class DeploymentRecord(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        verbose_name = "Deployment Record"
+        verbose_name_plural = "Deployment Records"
 
     def __str__(self) -> str:
         return f"{self.app.slug} {self.event_type}"
