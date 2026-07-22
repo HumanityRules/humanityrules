@@ -2,18 +2,18 @@
 App deployment teardown executor.
 
 Orchestrates the teardown of deployed applications by calling CDK infrastructure code.
-Sets the deployment status to TORN_DOWN after successful teardown.
-This is the entry point called by the job worker for teardown jobs.
+This is the entry point called by the job worker (which has already moved the app to
+TEARING_DOWN) and by flows that run teardown inline (app removal, environment teardown).
 """
 
 import logging
 
 from django.conf import settings
-from django.utils import timezone
 
 from humanityrules_app import models
 from humanityrules_app.services import infra_customer
 
+from . import app_job_service
 from . import job_logging
 from . import tenant_consistency
 
@@ -33,7 +33,7 @@ def _get_aws_session(environment: models.Environment):
     )
 
 
-def _dockerfile_ecr_repo_names(deployment: models.Deployment) -> list[str]:
+def _dockerfile_ecr_repo_names(app: models.App) -> list[str]:
     """ECR repo names for the app's dockerfile-built containers, for teardown cleanup.
 
     Prebuilt-container repos are per-env shared resources and are not torn
@@ -41,7 +41,6 @@ def _dockerfile_ecr_repo_names(deployment: models.Deployment) -> list[str]:
     the deploy), fall back to the legacy app-level repo name so we still
     empty the right one.
     """
-    app = deployment.app
     env_slug = app.environment.slug
     template = app.source_template
 
@@ -54,62 +53,52 @@ def _dockerfile_ecr_repo_names(deployment: models.Deployment) -> list[str]:
     return [f"humr/{env_slug}/{app.slug}"]
 
 
-def run_teardown(deployment_id: str) -> bool:
+def teardown_infra(app: models.App) -> bool:
+    """Delete the app's stacks and ECR repos without touching App job state.
+
+    For flows that tear down inline as part of a larger attempt (app removal,
+    environment teardown) and manage App transitions themselves.
     """
-    Execute a teardown.
+    session = _get_aws_session(environment=app.environment)
+    return infra_customer.deploy_app.teardown(
+        session=session,
+        env_slug=app.environment.slug,
+        app_name=app.slug,
+        dockerfile_ecr_repo_names=_dockerfile_ecr_repo_names(app),
+    )
 
-    This is the main entry point called by the job worker.
-    It orchestrates the teardown flow:
-    1. Load deployment and related models
-    2. Update status to TEARING_DOWN
-    3. Build minimal AppConfig for stack identification
-    4. Execute CDK teardown
-    5. Update deployment status
 
-    Args:
-        deployment_id: UUID of the Deployment to tear down.
-
-    Returns:
-        True if teardown succeeded, False otherwise.
-    """
+def run_teardown(app_id: str) -> bool:
+    """Execute the teardown attempt for an app in TEARING_DOWN. Returns success."""
     try:
-        deployment = models.Deployment.objects.select_related(
-            "app",
-            "app__workspace",
-            "app__source_template",
-            "app__environment",
-            "app__environment__aws_account",
-        ).get(id=deployment_id)
-    except models.Deployment.DoesNotExist:
-        logger.error("Deployment %(deployment_id)s not found", {"deployment_id": deployment_id})
+        app = models.App.objects.select_related(
+            "workspace",
+            "source_template",
+            "environment",
+            "environment__aws_account",
+        ).get(id=app_id)
+    except models.App.DoesNotExist:
+        logger.error("App %(app_id)s not found", {"app_id": app_id})
         return False
 
-    try:
-        tenant_consistency.assert_deployment_consistent(deployment)
-    except tenant_consistency.TenantConsistencyError as exc:
-        logger.error("Refusing to tear down deployment: %(msg)s", {"msg": str(exc)})
-        deployment.status = models.Deployment.Status.FAILED
-        deployment.status_message = f"Refused: {exc}"
-        deployment.completed_at = timezone.now()
-        deployment.save()
-        return False
-
-    app = deployment.app
     environment = app.environment
 
+    try:
+        tenant_consistency.assert_app_owns_environment(app=app, environment=environment)
+    except tenant_consistency.TenantConsistencyError as exc:
+        logger.error("Refusing to tear down app: %(msg)s", {"msg": str(exc)})
+        app_job_service.settle_failure(app=app, error=f"Refused: {exc}")
+        return False
+
     with job_logging.DeploymentLogContext(
-        deployment=deployment,
+        app=app,
+        attempt_id=app.last_attempt_id,
         source_default=models.DeploymentLog.Source.APP,
     ):
         logger.info(
-            "Starting teardown %(deployment_id)s for app '%(app_name)s' in environment '%(environment_name)s'",
-            {"deployment_id": str(deployment_id), "app_name": app.name, "environment_name": environment.name},
+            "Starting teardown for app '%(app_name)s' in environment '%(environment_name)s'",
+            {"app_name": app.name, "environment_name": environment.name},
         )
-
-        # Update status to TEARING_DOWN
-        deployment.status = models.Deployment.Status.TEARING_DOWN
-        deployment.status_message = "Teardown started"
-        deployment.save(update_fields=["status", "status_message", "updated_at"])
 
         try:
             session = _get_aws_session(environment=environment)
@@ -123,33 +112,19 @@ def run_teardown(deployment_id: str) -> bool:
                 session=session,
                 env_slug=environment.slug,
                 app_name=app.slug,
-                dockerfile_ecr_repo_names=_dockerfile_ecr_repo_names(deployment),
+                dockerfile_ecr_repo_names=_dockerfile_ecr_repo_names(app),
             )
 
             if success:
-                deployment.status = models.Deployment.Status.TORN_DOWN
-                deployment.status_message = "Teardown completed successfully"
-                deployment.service_url = ""
-                deployment.completed_at = timezone.now()
-                deployment.save()
-
-                logger.info("Teardown %(deployment_id)s completed successfully", {"deployment_id": str(deployment_id)})
+                app_job_service.settle_teardown_success(app=app)
+                logger.info("Teardown of '%(app_slug)s' completed successfully", {"app_slug": app.slug})
                 return True
 
-            deployment.status = models.Deployment.Status.FAILED
-            deployment.status_message = "Teardown failed - some stacks may not have been deleted"
-            deployment.completed_at = timezone.now()
-            deployment.save()
-
-            logger.error("Teardown failed")
-            logger.error("Teardown %(deployment_id)s failed", {"deployment_id": str(deployment_id)})
+            app_job_service.settle_failure(app=app, error="Teardown failed - some stacks may not have been deleted")
+            logger.error("Teardown of '%(app_slug)s' failed", {"app_slug": app.slug})
             return False
 
         except Exception as e:
             logger.exception("Teardown error: %(error)s", {"error": str(e)})
-
-            deployment.status = models.Deployment.Status.FAILED
-            deployment.status_message = f"Teardown error: {e}"
-            deployment.completed_at = timezone.now()
-            deployment.save()
+            app_job_service.settle_failure(app=app, error=f"Teardown error: {e}")
             return False

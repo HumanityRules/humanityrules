@@ -76,20 +76,20 @@ class _JobLogFilter(logging.Filter):
 
 
 class DeploymentLogHandler(logging.Handler):
-    """Persist log records to DeploymentLog."""
+    """Persist log records to DeploymentLog, stamped with the app's current attempt id."""
 
-    def __init__(self, deployment: models.Deployment, source_default: str) -> None:
+    def __init__(self, app: models.App, attempt_id: uuid.UUID, source_default: str) -> None:
         super().__init__(level=logging.NOTSET)
-        self._deployment = deployment
-        self._deployment_id = deployment.id
+        self._app = app
+        self._attempt_id = attempt_id
         self._source_default = source_default
         self.addFilter(_JobLogFilter())
 
     def emit(self, record: logging.LogRecord) -> None:
         # Only emit if this log comes from our job context (prevents cross-talk
         # between concurrent jobs that share the same root logger)
-        current_deployment_id = getattr(_job_context, "deployment_id", None)
-        if current_deployment_id != self._deployment_id:
+        current_attempt_id = getattr(_job_context, "attempt_id", None)
+        if current_attempt_id != self._attempt_id:
             return
 
         try:
@@ -119,7 +119,8 @@ class DeploymentLogHandler(logging.Handler):
                 details["traceback"] = "".join(traceback.format_exception(*record.exc_info))
 
             models.DeploymentLog.objects.create(
-                deployment=self._deployment,
+                app=self._app,
+                attempt_id=self._attempt_id,
                 source=source,
                 level=_map_deployment_level(record.levelno),
                 message=rendered_message,
@@ -184,18 +185,19 @@ class EnvironmentLogHandler(logging.Handler):
 
 
 class DeploymentLogContext:
-    """Attach a DeploymentLogHandler for the duration of a deployment."""
+    """Attach a DeploymentLogHandler for the duration of one app job attempt."""
 
-    def __init__(self, deployment: models.Deployment, source_default: str) -> None:
-        self._deployment = deployment
+    def __init__(self, app: models.App, attempt_id: uuid.UUID, source_default: str) -> None:
+        self._app = app
+        self._attempt_id = attempt_id
         self._source_default = source_default
-        self._handler = DeploymentLogHandler(deployment=self._deployment, source_default=self._source_default)
+        self._handler = DeploymentLogHandler(app=self._app, attempt_id=self._attempt_id, source_default=self._source_default)
         self._logger = logging.getLogger("humanityrules_app")
         self._previous_level: int | None = None
 
     def __enter__(self):
         # Set thread-local context so handler knows which logs belong to this job
-        _job_context.deployment_id = self._deployment.id
+        _job_context.attempt_id = self._attempt_id
         self._previous_level = self._logger.level
         if self._logger.level == logging.NOTSET or self._logger.level > logging.INFO:
             self._logger.setLevel(logging.INFO)
@@ -205,7 +207,7 @@ class DeploymentLogContext:
     def __exit__(self, exc_type, exc, traceback):
         self._logger.removeHandler(self._handler)
         # Clear thread-local context
-        _job_context.deployment_id = None
+        _job_context.attempt_id = None
         if self._previous_level is not None:
             self._logger.setLevel(self._previous_level)
         return False

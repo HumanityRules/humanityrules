@@ -1,23 +1,23 @@
 {% comment %}
 Inline deployment-log fragment for a fleet row. Same colorizing as the app-detail log,
 sized for an inline panel. Self-terminating HTMX poll: re-renders itself every second
-while the deployment is transient; polling attributes are omitted once it concludes.
+while a job is in flight; polling attributes are omitted once it concludes.
 See docs/ui_live_update_contract.md.
 {% endcomment %}
-<div id="fleet-log-inner-{{ deployment.id }}"
-     {% if not deployment.is_settled %}
-     hx-get="{% url 'fleet_deployment_log' deployment_id=deployment.id %}"
+<div id="fleet-log-inner-{{ app.id }}"
+     {% if app.job_in_flight %}
+     hx-get="{% url 'fleet_deployment_log' app_id=app.id %}"
      hx-trigger="load delay:1s"
-     hx-target="#fleet-log-inner-{{ deployment.id }}"
+     hx-target="#fleet-log-inner-{{ app.id }}"
      hx-swap="outerHTML"
      {% endif %}
      class="my-2">
     <div class="flex items-center justify-between mb-1">
         <span class="text-xs text-gray-500 dark:text-gray-400">
-            {{ deployment.app.slug }} · {{ deployment.get_status_display }} · started {{ deployment.created_at|timesince }} ago
-            {% if not deployment.is_settled %}<span class="ml-1 text-green-600 dark:text-green-400">live</span>{% endif %}
+            {{ app.slug }} · {{ app.display_status_label }} · updated {{ app.updated_at|timesince }} ago
+            {% if app.job_in_flight %}<span class="ml-1 text-green-600 dark:text-green-400">live</span>{% endif %}
         </span>
-        <button onclick="document.getElementById('fleet-log-{{ deployment.id }}').innerHTML = ''"
+        <button onclick="document.getElementById('fleet-log-{{ app.id }}').innerHTML = ''"
                 class="text-xs text-gray-500 dark:text-gray-400 hover:underline">close</button>
     </div>
     <div class="fleet-log-console dark-scrollbar max-h-80 overflow-auto rounded-lg bg-gray-900 p-3 font-mono text-xs leading-relaxed ring-1 ring-gray-800 dark:bg-gray-950">

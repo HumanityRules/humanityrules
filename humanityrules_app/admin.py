@@ -8,10 +8,9 @@ from humanityrules_app.models import (
     AWSAccount,
     App,
     AppPermissions,
-    AppRemovalJob,
     AppTemplate,
-    Deployment,
     DeploymentLog,
+    DeploymentRecord,
     Environment,
     EnvironmentLog,
     Group,
@@ -181,8 +180,8 @@ class AppTemplateAdmin(admin.ModelAdmin):
 
 @admin.register(App)
 class AppAdmin(admin.ModelAdmin):
-    list_display = ["name", "slug", "organization", "workspace", "environment", "repository", "source_template", "build_strategy", "cpu", "memory", "compute_mode", "container_port", "status", "updated_at"]
-    list_filter = ["status", "build_strategy", "compute_mode", "organization", "source_template"]
+    list_display = ["name", "slug", "organization", "workspace", "environment", "repository", "source_template", "build_strategy", "cpu", "memory", "compute_mode", "container_port", "job_status", "live_state", "updated_at"]
+    list_filter = ["job_status", "live_state", "build_strategy", "compute_mode", "organization", "source_template"]
     search_fields = ["name", "slug", "workspace__name", "organization__name", "repository__full_name", "environment__name"]
     readonly_fields = ["id", "created_at", "updated_at"]
     autocomplete_fields = ["organization", "workspace", "environment", "repository", "source_template", "created_by"]
@@ -196,30 +195,28 @@ class AppAdmin(admin.ModelAdmin):
         return [*self.readonly_fields, "environment"]
 
 
-@admin.register(Deployment)
-class DeploymentAdmin(admin.ModelAdmin):
-    list_display = ["app", "git_ref", "status", "created_at", "completed_at", "service_url"]
-    list_filter = ["status", "app__environment", "app__workspace__organization"]
+@admin.register(DeploymentRecord)
+class DeploymentRecordAdmin(admin.ModelAdmin):
+    list_display = ["created_at", "app", "event_type", "attempt_id", "git_ref", "created_by"]
+    list_filter = ["event_type", "app__environment", "app__workspace__organization"]
     search_fields = [
         "app__name",
         "app__workspace__name",
         "app__workspace__organization__name",
         "app__environment__name",
         "git_ref",
-        "git_commit_sha",
-        "image_uri",
     ]
-    readonly_fields = ["id", "created_at", "updated_at"]
+    readonly_fields = ["id", "created_at"]
     autocomplete_fields = ["app", "created_by"]
 
 
 @admin.register(DeploymentLog)
 class DeploymentLogAdmin(admin.ModelAdmin):
-    list_display = ["created_at", "deployment", "source", "level", "short_message"]
+    list_display = ["created_at", "app", "attempt_id", "source", "level", "short_message"]
     list_filter = ["source", "level"]
-    search_fields = ["deployment__app__name", "message"]
+    search_fields = ["app__name", "message"]
     readonly_fields = ["id", "created_at"]
-    autocomplete_fields = ["deployment"]
+    autocomplete_fields = ["app"]
 
     @admin.display(description="Message")
     def short_message(self, obj: DeploymentLog) -> str:
@@ -352,23 +349,6 @@ class PolicyAdmin(admin.ModelAdmin):
 # =============================================================================
 # Async Jobs
 # =============================================================================
-
-
-@admin.register(AppRemovalJob)
-class AppRemovalJobAdmin(admin.ModelAdmin):
-    list_display = [
-        "app_slug_snapshot", "app_name_snapshot", "workspace_slug_snapshot",
-        "organization", "status", "teardown_first", "delete_secrets",
-        "delete_persistent_data", "delete_policies", "created_at", "updated_at",
-    ]
-    list_filter = ["status", "teardown_first", "delete_secrets", "delete_persistent_data", "delete_policies", "organization"]
-    search_fields = ["app_slug_snapshot", "app_name_snapshot", "workspace_slug_snapshot", "organization__name", "status_message"]
-    readonly_fields = [
-        "id", "organization", "app_id_snapshot", "app_slug_snapshot",
-        "app_name_snapshot", "workspace_slug_snapshot", "created_by",
-        "created_at", "updated_at",
-    ]
-    autocomplete_fields = []
 
 
 # =============================================================================
