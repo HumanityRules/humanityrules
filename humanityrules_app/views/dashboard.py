@@ -1,4 +1,5 @@
 from django.contrib.auth.decorators import login_required
+from django.db.models import Prefetch
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
 
@@ -16,19 +17,25 @@ def dashboard(request: HttpRequest) -> HttpResponse:
 
     org = request.user.current_organization
 
-    visible_workspaces = Workspace.objects.filter(organization=org)
+    apps_prefetch = Prefetch(
+        "apps",
+        queryset=App.objects.select_related("environment", "repository").order_by("name"),
+        to_attr="dashboard_apps",
+    )
+    visible_workspaces = Workspace.objects.filter(organization=org).prefetch_related(apps_prefetch)
     visible_workspaces = abac_service.filter_permitted_resources(
         org, request.user, visible_workspaces, "workspace", "workspace:view",
     )
-
-    apps = (
-        App.objects.filter(workspace__in=visible_workspaces)
-        .select_related("workspace")
-        .order_by("-created_at")
+    workspaces = sorted(
+        visible_workspaces,
+        key=lambda workspace: (workspace.slug != "default", workspace.name.casefold()),
     )
-    apps = list(apps)
+    for workspace in workspaces:
+        workspace.can_admin = abac_service.check_action(
+            org, request.user, workspace, "workspace", "workspace:admin",
+        )
 
     context = base.get_app_shell_context(request=request, current_page="dashboard")
-    context["apps"] = apps
+    context["workspaces"] = workspaces
 
     return render(request, "humanityrules_app/dashboard.html", context=context)

@@ -60,7 +60,7 @@ def _get_app_for_user(request: HttpRequest, app_slug: str) -> App:
 
 def build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
     """Build the shared context dict for app detail rendering."""
-    context = base.get_app_shell_context(request=request, current_page="workspaces")
+    context = base.get_app_shell_context(request=request, current_page="dashboard")
 
     deployment_records = (
         DeploymentRecord.objects.filter(app=app).select_related("created_by")[:MAX_DEPLOYMENT_RECORDS]
@@ -109,7 +109,7 @@ def app_detail(request: HttpRequest, app_slug: str) -> HttpResponse:
         welcome_param = ""
     live_preview = settings.DEBUG and request.GET.get("live") == "preview"
     if not request.htmx:
-        context = base.get_app_shell_context(request=request, current_page="workspaces")
+        context = base.get_app_shell_context(request=request, current_page="dashboard")
         params = [p for p in (f"welcome={welcome_param}" if welcome_param else "", "live=preview" if live_preview else "") if p]
         context["content_url"] = f"/apps/{app_slug}/" + (f"?{'&'.join(params)}" if params else "")
         return render(request, "humanityrules_app/app_shell.html", context=context)

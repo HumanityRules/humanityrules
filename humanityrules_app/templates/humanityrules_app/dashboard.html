@@ -1,19 +1,58 @@
 <div class="max-w-5xl">
-    <h1 class="text-2xl font-bold text-gray-900 dark:text-white mb-6">Dashboard</h1>
-
-    {# Apps section #}
-    <div class="mb-8">
-        <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Your Agents</h2>
-        {% if apps %}
-        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {% for app in apps %}
-            {% include "humanityrules_app/partials/_app_card.html" with show_workspace=True %}
-            {% endfor %}
-        </div>
-        {% else %}
-        <div class="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 border-dashed rounded-lg p-6 text-center">
-            <p class="text-sm text-gray-500 dark:text-gray-400">No agents yet. Go to a workspace and click "New Agent" to get started.</p>
-        </div>
-        {% endif %}
+    <div class="mb-8 flex items-center justify-between gap-4">
+        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
+        <button type="button"
+                onclick="document.getElementById('workspace-create-modal').classList.remove('hidden')"
+                class="shrink-0 rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-xs hover:bg-indigo-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 dark:bg-indigo-500 dark:hover:bg-indigo-400 dark:focus-visible:outline-indigo-500">
+            Create Workspace
+        </button>
     </div>
+
+    {% if workspaces %}
+    <div class="space-y-10">
+        {% for workspace in workspaces %}
+        <section aria-label="{{ workspace.name }} workspace" data-workspace-section="{{ workspace.slug }}">
+            <div class="mb-4 flex items-center gap-1 {% if workspace.slug == 'default' %}justify-end{% endif %}">
+                {% if workspace.slug != "default" %}
+                <h2 class="min-w-0 truncate text-lg font-semibold">
+                    <a href="{% url 'workspace_detail' workspace_slug=workspace.slug %}"
+                       hx-get="{% url 'workspace_detail' workspace_slug=workspace.slug %}"
+                       hx-target="#main-content"
+                       hx-swap="innerHTML"
+                       hx-push-url="true"
+                       data-workspace-title="{{ workspace.slug }}"
+                       class="text-gray-900 hover:text-indigo-600 dark:text-white dark:hover:text-indigo-400">
+                        {{ workspace.name }}
+                    </a>
+                </h2>
+                {% endif %}
+                {% include "humanityrules_app/workspaces/_workspace_actions_menu.html#workspace_actions_menu" with can_admin=workspace.can_admin %}
+            </div>
+
+            <div class="grid gap-4 sm:grid-cols-2">
+                {% for app in workspace.dashboard_apps %}
+                {% include "humanityrules_app/partials/_app_card.html" %}
+                {% endfor %}
+                <a href="{% url 'template_deploy_form' template_slug='hermes-personal' %}?workspace_id={{ workspace.id }}"
+                   hx-get="{% url 'template_deploy_form' template_slug='hermes-personal' %}?workspace_id={{ workspace.id }}"
+                   hx-target="#main-content"
+                   hx-swap="innerHTML"
+                   hx-push-url="true"
+                   class="group flex min-h-[104px] flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 p-4 transition-colors hover:border-indigo-500 hover:bg-gray-50 dark:border-gray-600 dark:hover:border-indigo-400 dark:hover:bg-gray-800/50">
+                    <svg class="h-8 w-8 text-gray-400 transition-colors group-hover:text-indigo-500 dark:group-hover:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                    </svg>
+                    <span class="mt-2 text-sm font-medium text-gray-500 transition-colors group-hover:text-indigo-600 dark:text-gray-400 dark:group-hover:text-indigo-400">New Agent</span>
+                </a>
+            </div>
+        </section>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="rounded-lg border border-dashed border-gray-200 bg-gray-50 p-6 text-center dark:border-gray-700 dark:bg-gray-800/50">
+        <p class="text-sm text-gray-500 dark:text-gray-400">No workspaces available.</p>
+    </div>
+    {% endif %}
 </div>
+
+{% include "humanityrules_app/workspaces/_workspace_create_modal.html" %}

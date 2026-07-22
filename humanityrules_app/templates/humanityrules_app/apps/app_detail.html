@@ -2,9 +2,9 @@
      class="max-w-5xl">
     <div class="flex items-center justify-between mb-6">
         <div class="flex-1">
-            {% url 'workspaces' as workspaces_url %}
+            {% url 'dashboard' as dashboard_url %}
             {% url 'workspace_detail' workspace_slug=app.workspace.slug as workspace_url %}
-            {% include "humanityrules_app/partials/_breadcrumb.html" with p1_label="Workspaces" p1_url=workspaces_url p2_label=app.workspace.name p2_url=workspace_url current=app.name %}
+            {% include "humanityrules_app/partials/_breadcrumb.html" with p1_label="Dashboard" p1_url=dashboard_url p2_label=app.workspace.name p2_url=workspace_url current=app.name %}
         </div>
         {% if can_edit and not is_pending_removal %}
         <div class="shrink-0 flex items-center gap-2">
