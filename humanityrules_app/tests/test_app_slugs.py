@@ -15,6 +15,7 @@ import humanityrules_app.management.commands.seed_local_app as seed_local_app
 from humanityrules_app import app_slugs
 from humanityrules_app import models
 from humanityrules_app.services import template_deploy_service
+from humanityrules_app.tests import app_test_factories
 from humanityrules_app.views import template_deploy
 
 
@@ -147,28 +148,19 @@ class TemplateDeployConflictTests(TestCase):
             containers=[
                 {
                     "name": "app",
-                    "image_source": "dockerfile",
-                    "source_repo_path": "hermes_agent",
+                    "image_source": "template",
+                    "template_path": "hermes_agent",
                     "container_port": 8000,
                 }
             ],
-        )
-        self.other_repository = models.Repository.objects.create(
-            organization=self.organization,
-            provider=models.Repository.Provider.GITHUB,
-            name="other",
-            full_name="org/other",
-            clone_url="https://github.com/org/other.git",
-            default_branch="main",
         )
         self.other_app = models.App.objects.create(
             organization=self.organization,
             workspace=self.workspace,
             environment=self.environment,
-            repository=self.other_repository,
+            source_template=self.template,
             name="Other App",
             slug="takenlabel",
-            build_strategy=models.App.BuildStrategy.DOCKERFILE,
             container_port=8000,
             health_check_path="/health",
             cpu=256,
@@ -195,9 +187,6 @@ class TemplateDeployConflictTests(TestCase):
             models.App.objects.filter(organization=self.organization, slug="takenlabel").count(), 1,
         )  # only the pre-existing app holds the label
         self.assertFalse(models.SandboxSlugClaim.objects.filter(slug="takenlabel").exists())
-        self.assertFalse(
-            models.Repository.objects.filter(organization=self.organization, full_name="template/conflict-template").exists()
-        )
 
 
 class SaveAppSlugTests(TestCase):
@@ -222,14 +211,7 @@ class SaveAppSlugTests(TestCase):
             aws_region="us-east-1",
             status=models.Environment.Status.READY,
         )
-        self.repository = models.Repository.objects.create(
-            organization=self.organization,
-            provider=models.Repository.Provider.GITHUB,
-            name="repo",
-            full_name="org/repo",
-            clone_url="https://github.com/org/repo.git",
-            default_branch="main",
-        )
+        self.source_template = app_test_factories.make_source_template()
 
     def test_app_creation_derives_dashless_slug(self) -> None:
         slug = app_slugs.derive_app_slug(value="Café Agent-007")
@@ -237,10 +219,9 @@ class SaveAppSlugTests(TestCase):
             organization=self.organization,
             workspace=self.workspace,
             environment=self.environment,
-            repository=self.repository,
+            source_template=self.source_template,
             name="Café Agent-007",
             slug=slug,
-            build_strategy=models.App.BuildStrategy.DOCKERFILE,
             container_port=8000,
             health_check_path="/health",
             cpu=256,
@@ -290,22 +271,13 @@ class AgentSlugErrorSurfaceTests(TestCase):
 
     def _create_redeploy_source(self) -> models.App:
         """Create a deployed, idle app for CLI redeploy tests."""
-        repository = models.Repository.objects.create(
-            organization=self.organization,
-            provider=models.Repository.Provider.GITHUB,
-            name="slug-repo",
-            full_name="slug/repo",
-            clone_url="https://github.com/slug/repo.git",
-            default_branch="main",
-        )
         return models.App.objects.create(
             organization=self.organization,
             workspace=self.workspace,
             environment=self.environment,
-            repository=repository,
+            source_template=self.template,
             name="Slug Agent",
             slug="slugagent",
-            build_strategy=models.App.BuildStrategy.DOCKERFILE,
             container_port=8000,
             health_check_path="/health",
             cpu=256,
@@ -376,12 +348,13 @@ class AgentSlugErrorSurfaceTests(TestCase):
         self.assertEqual(stderr.getvalue(), "")
         app.refresh_from_db()
         self.assertEqual(app.job_status, models.App.JobStatus.DEPLOY_PENDING)
-        started = models.DeploymentRecord.objects.get(
-            app=app,
-            attempt_id=app.last_attempt_id,
-            event_type=models.DeploymentRecord.EventType.DEPLOY_STARTED,
+        self.assertTrue(
+            models.DeploymentRecord.objects.filter(
+                app=app,
+                attempt_id=app.last_attempt_id,
+                event_type=models.DeploymentRecord.EventType.DEPLOY_STARTED,
+            ).exists()
         )
-        self.assertEqual(started.git_ref, app.repository.default_branch)
 
     def test_humr_control_redeploy_is_blocked_while_teardown_is_unsettled(self) -> None:
         app = self._create_redeploy_source()
@@ -434,22 +407,13 @@ class SeedLocalAppEnvMismatchTests(TestCase):
             aws_account=self.aws_account, name="Sandbox", slug="sandbox",
             aws_region="us-east-1", status=models.Environment.Status.READY,
         )
-        self.repository = models.Repository.objects.create(
-            organization=self.organization,
-            provider=models.Repository.Provider.GITHUB,
-            name="seedapp",
-            full_name="org/seedapp",
-            clone_url="https://github.com/org/seedapp.git",
-            default_branch="main",
-        )
         self.app = models.App.objects.create(
             organization=self.organization,
             workspace=self.workspace,
             environment=self.env_default,
-            repository=self.repository,
+            source_template=app_test_factories.make_source_template(),
             name="seedapp",
             slug="seedapp",
-            build_strategy=models.App.BuildStrategy.DOCKERFILE,
             container_port=8000,
             health_check_path="/health",
             cpu=256,

@@ -13,12 +13,12 @@ from humanityrules_app.models import (
     Organization,
     OrganizationMembership,
     Policy,
-    Repository,
     ResourceTag,
     EnvironmentBearerToken,
     User,
     Workspace,
 )
+from humanityrules_app.tests.app_test_factories import make_source_template
 
 
 def _hash(raw: str) -> str:
@@ -37,10 +37,6 @@ class PDPTestBase(TestCase):
         self.workspace = Workspace.objects.create(
             organization=self.org, name="PAs", slug="pas",
         )
-        self.repo = Repository.objects.create(
-            organization=self.org, provider="github", name="hermes",
-            full_name="org/hermes", clone_url="https://github.com/org/hermes.git",
-        )
         self.owner = User.objects.create_user(
             username="vmendi", password="pw", current_organization=self.org,
             oidc_sub="okta|vmendi",
@@ -56,9 +52,9 @@ class PDPTestBase(TestCase):
             user=self.stranger, organization=self.org, role=OrganizationMembership.Role.MEMBER,
         )
         self.app = App.objects.create(
-            organization=self.org, workspace=self.workspace, repository=self.repo,
+            organization=self.org, workspace=self.workspace, source_template=make_source_template(),
             environment=self.environment, name="VmendiPA", slug="vmendihermes",
-            build_strategy="dockerfile", container_port=8000,
+            container_port=8000,
             health_check_path="/health", cpu=256, memory=512,
         )
         # Drop the auto-created open-access policy; the self-ref policy is what we test.
@@ -240,9 +236,9 @@ class TestPDPEvaluation(PDPTestBase):
             user=outsider, organization=other_org, role=OrganizationMembership.Role.MEMBER,
         )
         App.objects.create(
-            organization=self.org, workspace=self.workspace, repository=self.repo,
+            organization=self.org, workspace=self.workspace, source_template=make_source_template(),
             environment=self.environment, name="Open App", slug="open-app",
-            build_strategy="dockerfile", container_port=8000,
+            container_port=8000,
             health_check_path="/health", cpu=256, memory=512,
         )
 

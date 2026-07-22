@@ -15,11 +15,11 @@ from humanityrules_app.models import (
     IntegrationUserCredential,
     Organization,
     OrganizationMembership,
-    Repository,
     ResourceTag,
     User,
     Workspace,
 )
+from humanityrules_app.tests.app_test_factories import make_source_template
 
 
 VALID_WEB_CONFIG = {
@@ -67,14 +67,6 @@ class _GoogleStartTestBase(TestCase):
             user=self.user, organization=self.org, role=OrganizationMembership.Role.MEMBER,
         )
         self.client.force_login(self.user)
-        self.repository = Repository.objects.create(
-            organization=self.org,
-            provider="github",
-            name="hermes",
-            full_name="org/hermes",
-            default_branch="main",
-            clone_url="https://github.com/org/hermes.git",
-        )
         self.workspace = Workspace.objects.create(
             organization=self.org,
             name="Engineering",
@@ -83,10 +75,9 @@ class _GoogleStartTestBase(TestCase):
         self.app = App.objects.create(
             organization=self.org,
             workspace=self.workspace,
-            repository=self.repository,
+            source_template=make_source_template(),
             name="Hermes",
             slug="hermes",
-            build_strategy=App.BuildStrategy.DOCKERFILE,
             environment=self.env,
             container_port=8000,
             health_check_path="/health",

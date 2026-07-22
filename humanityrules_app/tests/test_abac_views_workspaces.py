@@ -13,12 +13,12 @@ from humanityrules_app.models import (
     Organization,
     OrganizationMembership,
     Policy,
-    Repository,
     ResourceTag,
     User,
     Workspace,
 )
 from humanityrules_app.services import abac_service
+from humanityrules_app.tests.app_test_factories import make_source_template
 
 HTMX = {"HTTP_HX_REQUEST": "true"}
 
@@ -159,14 +159,10 @@ class TestWorkspaceEndpoints(TestCase):
 
     def test_admin_cannot_delete_workspace_with_app(self) -> None:
         self.client.force_login(self.admin_user)
-        repo = Repository.objects.create(
-            organization=self.org, provider="github", name="repo",
-            full_name="org/repo", clone_url="https://github.com/org/repo.git",
-        )
         App.objects.create(
-            organization=self.org, workspace=self.ws_eng, repository=repo,
+            organization=self.org, workspace=self.ws_eng, source_template=make_source_template(),
             environment=self.env, name="MyApp", slug="myapp",
-            build_strategy="dockerfile", container_port=8000, health_check_path="/health",
+            container_port=8000, health_check_path="/health",
             cpu=256, memory=512,
         )
         response = self.client.post("/workspaces/engineering/remove/")
@@ -175,14 +171,10 @@ class TestWorkspaceEndpoints(TestCase):
 
     def test_remove_confirm_reports_non_empty(self) -> None:
         self.client.force_login(self.admin_user)
-        repo = Repository.objects.create(
-            organization=self.org, provider="github", name="fin-repo",
-            full_name="org/fin-repo", clone_url="https://github.com/org/fin-repo.git",
-        )
         App.objects.create(
-            organization=self.org, workspace=self.ws_fin, repository=repo,
+            organization=self.org, workspace=self.ws_fin, source_template=make_source_template(),
             environment=self.env, name="FinApp", slug="finapp",
-            build_strategy="dockerfile", container_port=8000, health_check_path="/health",
+            container_port=8000, health_check_path="/health",
             cpu=256, memory=512,
         )
         response = self.client.get("/workspaces/finance/remove-confirm/", **HTMX)

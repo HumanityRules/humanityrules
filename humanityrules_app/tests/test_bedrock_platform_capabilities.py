@@ -6,7 +6,7 @@ from django.test import SimpleTestCase
 
 from humanityrules_app.management.commands import seed_app_templates
 from humanityrules_app.services.infra_customer import deploy_app
-from humanityrules_app.services.infra_customer.appconfig import AppConfig, ContainerConfig
+from humanityrules_app.services.infra_customer.appconfig import AppConfig, ContainerConfig, ImageSource
 
 
 def _app_config(preset: str, platform_capabilities: list[str]) -> AppConfig:
@@ -18,8 +18,8 @@ def _app_config(preset: str, platform_capabilities: list[str]) -> AppConfig:
         containers=[
             ContainerConfig(
                 name="hermes",
-                image_source="dockerfile",
-                ecr_repo_name="humr/staging/my-hermes-hermes",
+                image_source=ImageSource.TEMPLATE,
+                template_path="hermes_agent",
                 container_port=8787,
                 environment_variables=[
                     {"name": "HUMR_LLM_PRESET", "value": preset},
@@ -36,7 +36,7 @@ def _bedrock_actions_from_stack(app_config: AppConfig) -> list[str]:
         scope=cdk_app,
         construct_id="TestAppStack",
         app_config=app_config,
-        image_tag="test",
+        image_tags={"hermes_agent": "test"},
         env_slug="staging",
         resource_prefix="humr-staging-my-hermes",
         subdomain="myhermes",
@@ -120,9 +120,8 @@ class BedrockPlatformCapabilityTests(SimpleTestCase):
         self.assertEqual(len(template["containers"]), 2)
 
         hermes = next(c for c in template["containers"] if c["name"] == "hermes")
-        self.assertEqual(hermes["image_source"], "dockerfile")
-        self.assertEqual(hermes["source_repo_path"], "hermes_agent")
-        self.assertEqual(hermes["dockerfile_path"], "Dockerfile")
+        self.assertEqual(hermes["image_source"], "template")
+        self.assertEqual(hermes["template_path"], "hermes_agent")
         self.assertEqual(hermes["efs_mounts"], ["checkpoint"])
         self.assertNotIn("depends_on", hermes)
         self.assertEqual(hermes["stop_timeout"], 600)
@@ -144,7 +143,9 @@ class BedrockPlatformCapabilityTests(SimpleTestCase):
         self.assertNotIn("AWS_BEDROCK_REGION", variable_names)
 
         proxy = next(c for c in template["containers"] if c["name"] == "policy-proxy")
-        self.assertEqual(proxy["image_source"], "policy_proxy")
+        self.assertEqual(proxy["image_source"], "template")
+        self.assertEqual(proxy["template_path"], "policy_proxy")
+        self.assertEqual(proxy["role"], "policy_proxy")
         self.assertEqual(proxy["upstream_container"], "hermes")
         self.assertEqual(proxy["cpu_reservation"], 32)
         self.assertEqual(proxy["memory_limit_mib"], 128)

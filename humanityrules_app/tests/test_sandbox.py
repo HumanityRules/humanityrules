@@ -11,6 +11,7 @@ from django.urls import reverse
 import humanityrules_app.models as models
 import humanityrules_app.services.jobs.environment_teardown_executor as environment_teardown_executor
 from humanityrules_app.services import abac_service, sandbox_service
+from humanityrules_app.tests.app_test_factories import make_source_template
 
 HTMX = {"HTTP_HX_REQUEST": "true"}
 
@@ -24,22 +25,13 @@ SANDBOX_SETTINGS = {
 
 def _make_app(organization: models.Organization, slug: str, environment: models.Environment) -> models.App:
     workspace = models.Workspace.objects.get(organization=organization, slug="default")
-    repository = models.Repository.objects.create(
-        organization=organization,
-        provider="github",
-        name=slug,
-        full_name=f"org/{slug}",
-        default_branch="main",
-        clone_url=f"https://github.com/org/{slug}.git",
-    )
     return models.App.objects.create(
         organization=organization,
         workspace=workspace,
         environment=environment,
-        repository=repository,
+        source_template=make_source_template(),
         name=slug,
         slug=slug,
-        build_strategy="dockerfile",
         container_port=8000,
         health_check_path="/health",
         cpu=256,
