@@ -1,32 +1,43 @@
 # App Removal: Data Cleanup Audit
 
 Snapshot: 2026-05-24. Captured during a `tls_intercept` refactor conversation.
+Model references updated for the Deployment-collapse refactor (removal state now
+lives on the App row, and the three cleanup flags collapsed into one).
 
-When a user removes an App through the UI or CLI, an `AppRemovalJob` is queued
-and the executor runs an opt-in cleanup. The current set of flags doesn't
-fully describe everything tied to an app's lifetime, and one critical class
-of data is **never cleaned up at all**.
+When a user removes an App through the UI or CLI, a removal attempt is queued on
+the App (`app_job_service.queue_removal` sets `job_status` → removal_pending and
+records the removal inputs), and the executor runs the cleanup. The single
+`delete_all_data` flag doesn't fully describe everything tied to an app's
+lifetime, and one critical class of data is **never cleaned up at all**.
 
-## Today's flags on `AppRemovalJob`
+## Today's removal inputs (fields on `App`)
 
-Three independent booleans (UI shows them as separate checkboxes in
-`_app_remove_confirm_modal.html`):
+`AppRemovalJob` is gone; removal is driven by two App fields set at enqueue:
 
-1. **`delete_persistent_data`** — wipes EFS `/deployments/{app_slug}/` *and*
-   EC2 host bind-mount paths from `template.containers[*].host_mounts`.
-   Despite the name, covers two physical surfaces (was renamed from
-   `delete_efs_data` in migration 0054). Implemented in
-   `app_remove_executor._run_efs_cleanup_task` and
-   `_run_host_path_cleanup_ssm`.
+- **`removal_teardown_first`** — when set, the executor tears down the app's
+  live infra inline before cleanup; removal is otherwise refused while
+  `may_have_infra` is set. The UI's "Remove App" and the CLI's
+  `teardown-app --remove-app` set this.
+- **`removal_delete_all_data`** — a single user-facing flag (one checkbox
+  `name="delete_all_data"` in `_app_remove_confirm_modal.html`) that, when set,
+  drives all three cleanup surfaces at once (recommendation #2 below landed):
 
-2. **`delete_secrets`** — calls
-   `secrets_utils.delete_secrets_matching_prefix` against the customer
-   account's AWS Secrets Manager, scoped to
-   `humr/{env_slug}/{app_slug}/`. These are per-app secrets injected
-   at deploy time (DB passwords from the AppTemplate `secrets` block, etc.).
+  1. **Persistent data** — wipes EFS `/deployments/{app_slug}/` *and* EC2 host
+     bind-mount paths from `template.containers[*].host_mounts`. Implemented in
+     `app_remove_executor._run_persistent_data_purge` (→ `_run_efs_cleanup_task`
+     and `_run_host_path_cleanup_ssm`).
 
-3. **`delete_policies`** — wipes ABAC `Policy` rows referencing the app slug
-   in the HUMR control-plane DB.
+  2. **Customer-account secrets** — `_run_secrets_purge` calls
+     `secrets_utils.delete_secrets_matching_prefix` against the customer
+     account's AWS Secrets Manager, scoped to `humr/{env_slug}/{app_slug}/`.
+     These are per-app secrets injected at deploy time (DB passwords from the
+     AppTemplate `secrets` block, etc.).
+
+  3. **ABAC policies** — `_delete_matching_policies` wipes `Policy` rows
+     referencing the app slug in the HUMR control-plane DB.
+
+  Sandbox apps force `removal_delete_all_data` on regardless of the checkbox,
+  because the released sandbox slug must never leave inheritable data behind.
 
 ## What is NOT cleaned up: `IntegrationUserCredential`
 
@@ -58,10 +69,10 @@ Three categories, but only two are exposed:
 
 | Surface | Where | Exposed? | Flag |
 |---|---|---|---|
-| App data | EFS + host mounts (customer account) | Yes | `delete_persistent_data` |
-| Customer-account secrets | AWS Secrets Manager (customer account) | Yes | `delete_secrets` |
+| App data | EFS + host mounts (customer account) | Yes | `removal_delete_all_data` |
+| Customer-account secrets | AWS Secrets Manager (customer account) | Yes | `removal_delete_all_data` |
 | Control-plane integration credentials | HUMR DB (`IntegrationUserCredential`) | **No** | — |
-| ABAC policies | HUMR DB (`Policy`) | Yes | `delete_policies` |
+| ABAC policies | HUMR DB (`Policy`) | Yes | `removal_delete_all_data` |
 
 ## Recommendations
 
@@ -73,36 +84,29 @@ Three categories, but only two are exposed:
    ```python
    IntegrationUserCredential.objects.filter(
        app_slug=app.slug,
-       environment__in=environments,
+       environment=app.environment,
    ).delete()
    ```
 
    If we ever need a "keep credentials" escape hatch, it would be the rare
    path, not the default.
 
-2. **Consider collapsing `delete_persistent_data` and `delete_secrets`**
-   into a single user-facing flag (e.g. `wipe_all_data`). The user's mental
-   model is "delete everything related to this app" — there's little reason
-   they'd want to keep customer-account secrets but drop EFS data, or vice
-   versa. Internally the executor still walks both surfaces.
-
-3. **Rename `delete_persistent_data` if it stays separate.** "Persistent
-   data" reads as "EFS volumes" in conversation, but the flag also covers
-   host bind-mounts. A name like `delete_app_storage` or
-   `wipe_filesystem_state` would be more honest.
+2. **Collapse the cleanup flags into one — LANDED.** The three checkboxes are
+   now the single `removal_delete_all_data` flag, which drives persistent data,
+   customer-account secrets, and ABAC policies together. This also subsumed the
+   old recommendation to rename `delete_persistent_data` (that field is gone).
 
 ## Out of scope (related but not this audit)
 
-- `delete_policies` — ABAC behavior is its own thing, not part of the
-  data-cleanup category.
+- ABAC policy deletion (the third surface of `removal_delete_all_data`) — ABAC
+  behavior is its own thing, not part of the data-cleanup category.
 - Organization / workspace teardown — different lifecycle entirely.
 
 ## Action items
 
 - [ ] Add unconditional `IntegrationUserCredential` cleanup to
-  `app_remove_executor.run_app_removal`.
-- [ ] Decide on flag consolidation vs. rename.
-- [ ] Update `_app_remove_confirm_modal.html` accordingly.
+  `app_remove_executor.run_removal`.
+- [x] Flag consolidation — done (single `removal_delete_all_data`).
 - [ ] Add a regression test in
   `humanityrules_app/tests/` that creates an `IntegrationUserCredential` then
   removes the app and asserts the row is gone.

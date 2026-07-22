@@ -20,7 +20,8 @@ class CdkJobConcurrencyTests(SimpleTestCase):
 
     def _job(self) -> SimpleNamespace:
         """Create the minimal shape needed by the worker's thread launcher."""
-        return SimpleNamespace(id=uuid4())
+        app_id = uuid4()
+        return SimpleNamespace(id=app_id, slug=f"app-{app_id.hex[:8]}")
 
     def _run_started_thread(self, thread_class: MagicMock, call_index: int) -> None:
         """Invoke a captured thread target synchronously."""
@@ -47,7 +48,7 @@ class CdkJobConcurrencyTests(SimpleTestCase):
 
         self.assertEqual(claim.call_count, 3)
         self.assertEqual(thread_class.call_count, 3)
-        run_deployment.assert_called_once_with(deployment_id=str(jobs[0].id))
+        run_deployment.assert_called_once_with(app_id=str(jobs[0].id))
 
     def test_empty_app_queue_returns_slot(self) -> None:
         job = self._job()

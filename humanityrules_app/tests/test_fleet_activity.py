@@ -1,6 +1,7 @@
 """Tests for policy-proxy activity on the platform fleet view."""
 
 import datetime
+import uuid
 
 from django.test import TestCase
 from django.utils import timezone
@@ -43,12 +44,8 @@ class TestFleetActivity(TestCase):
             health_check_path="/health",
             cpu=256,
             memory=512,
-        )
-        models.Deployment.objects.create(
-            app=self.app,
-            git_ref="main",
-            image_tag="fleet-agent-main",
-            status=models.Deployment.Status.SUCCEEDED,
+            live_state=models.App.LiveState.DEPLOYED,
+            last_attempt_id=uuid.uuid7(),
         )
         self.staff = models.User.objects.create_user(
             username="fleet-staff",
@@ -69,7 +66,7 @@ class TestFleetActivity(TestCase):
         groups = fleet_service.build_fleet_snapshot()
 
         group = next(group for group in groups if group.environment == self.environment)
-        self.assertEqual(group.deployments[0].last_policy_proxy_activity_at, observed_at)
+        self.assertEqual(group.apps[0].last_policy_proxy_activity_at, observed_at)
 
     def test_fleet_renders_activity_and_empty_state(self) -> None:
         response = self.client.get("/platform/fleet/")

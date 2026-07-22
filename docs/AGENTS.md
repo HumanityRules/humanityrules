@@ -10,7 +10,7 @@ The main developer documentation lives in the docs/ subdirectory. **When creatin
 
 - **`docs/permissions_broker_design.md`** — How the IAM task-role permissions editor moves from the HUMR UI into the Hermes WebUI as a self-referential editor (this deployment requests permissions for its own task role), the `/permissions/*` JSON contract over the renamed `humr_broker`, and the phase split (phase 1 = editor pane only; phase 2 = agent tools + skill + sidebar/chat layout). Open when working on the Hermes permissions editor, the broker rename, or the permissions API.
 
-- **`docs/domain_model.md`** — Core domain concepts and entity relationships. Defines Workspace, App, Environment, Deployment, etc entities with their attributes and how they relate. Read this when implementing features that touch the domain model or when clarifying entity boundaries.
+- **`docs/domain_model.md`** — Core domain concepts and entity relationships. Defines Workspace, App (which carries its own runtime deployment state), Environment, DeploymentRecord/DeploymentLog, etc entities with their attributes and how they relate. Read this when implementing features that touch the domain model or when clarifying entity boundaries.
 
 - **`docs/okta_oidc_setup.md`** — Step-by-step guide for onboarding customers who use Okta for SSO (OIDC login instead of WorkOS). Open when setting up a new Okta/OIDC customer org or debugging OIDC login/redirect/issuer issues.
 
@@ -20,7 +20,7 @@ The main developer documentation lives in the docs/ subdirectory. **When creatin
 
 - **`docs/app_cost_tracking_design.md`** — Design for per-day, per-app cost tracking on the app-detail page, starting with Bedrock invocation cost and built as a generic, pluggable cost subsystem (`services/cost/`). Records the locked decisions plus the non-obvious facts from AWS docs and a real log record (cache-token fields, inference-profile-ARN modelId, geo ×1.1 premium, ARN→app forward mapping). Open before implementing cost tracking or adding a new cost source.
 
-- **`docs/app_removal_data_cleanup_audit.md`** — Audit of what `AppRemovalJob`'s flags cover, and the gap: `IntegrationUserCredential` rows have no FK to `App` and are never cleaned up. Open when reworking app removal, debugging phantom reconnects after recreating an app, or auditing GDPR. Snapshot 2026-05-24.
+- **`docs/app_removal_data_cleanup_audit.md`** — Audit of what app removal's `removal_delete_all_data` flag covers, and the gap: `IntegrationUserCredential` rows have no FK to `App` and are never cleaned up. Open when reworking app removal, debugging phantom reconnects after recreating an app, or auditing GDPR. Snapshot 2026-05-24.
 
 - **`docs/webapps_design.md`** — How a Hermes agent serves user-built webapps at their own hostname (`<slug>-<agent-host>`) via a Caddy sidecar, including port topology, the `webapps` CLI, and `routes.caddy` regeneration. Open when working on the webapps mechanism, debugging cross-origin or routing issues, or adding a new framework.
 

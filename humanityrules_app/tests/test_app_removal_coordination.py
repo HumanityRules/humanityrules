@@ -1,15 +1,16 @@
-"""Tests for serializing app-removal enqueue and worker state."""
+"""Tests for app-removal enqueue idempotency, worker claim, and executor guards."""
 
 from io import StringIO
 from unittest.mock import patch
 
-from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.urls import reverse
 
 from humanityrules_app import models
 from humanityrules_app.management.commands import humr_control
 from humanityrules_app.services import abac_service
+from humanityrules_app.services.jobs import app_job_service
+from humanityrules_app.services.jobs import app_remove_executor
 from humanityrules_app.services.jobs import job_worker
 
 
@@ -46,7 +47,7 @@ class TestAppRemovalCoordination(TestCase):
             environment=self.environment,
             repository=self.repository,
             name="Removal Agent",
-            slug="removal-agent",
+            slug="removalagent",
             build_strategy=models.App.BuildStrategy.DOCKERFILE,
             container_port=8787,
             health_check_path="/health",
@@ -65,76 +66,92 @@ class TestAppRemovalCoordination(TestCase):
         )
         abac_service.bootstrap_organization(organization=self.organization, admin_user=self.user)
 
-    def _create_removal_job(self, status: str) -> models.AppRemovalJob:
-        """Create a removal job for the fixture App."""
-        return models.AppRemovalJob.objects.create(
-            organization=self.organization,
-            app_id_snapshot=self.app.id,
-            app_slug_snapshot=self.app.slug,
-            app_name_snapshot=self.app.name,
-            workspace_slug_snapshot=self.workspace.slug,
-            status=status,
-        )
+    def _removal_started_count(self) -> int:
+        return models.DeploymentRecord.objects.filter(
+            app=self.app,
+            event_type=models.DeploymentRecord.EventType.REMOVAL_STARTED,
+        ).count()
 
     def test_web_enqueue_rechecks_stale_app_after_lock(self) -> None:
         stale_app = self.app
         self.client.force_login(self.user)
         first_response = self.client.post(reverse("app_remove", kwargs={"app_slug": self.app.slug}))
 
+        # A second submit carrying the pre-removal snapshot must lose to the re-locked row.
         with patch("humanityrules_app.views.apps._get_app_for_user", return_value=stale_app):
             second_response = self.client.post(reverse("app_remove", kwargs={"app_slug": self.app.slug}))
 
         self.assertEqual(first_response.status_code, 200)
         self.assertEqual(second_response.status_code, 422)
-        self.assertEqual(models.AppRemovalJob.objects.filter(app_id_snapshot=self.app.id).count(), 1)
+        self.app.refresh_from_db()
+        self.assertEqual(self.app.job_status, models.App.JobStatus.REMOVAL_PENDING)
+        self.assertEqual(self._removal_started_count(), 1)
 
-    def test_cli_enqueue_rechecks_stale_app_after_lock(self) -> None:
+    def test_cli_enqueue_is_idempotent_for_pending_removal(self) -> None:
         stdout = StringIO()
         stderr = StringIO()
         command = humr_control.Command(stdout=stdout, stderr=stderr)
 
-        command._queue_app_removal(
-            app=self.app,
-            delete_secrets=False,
-            delete_persistent_data=False,
-            delete_policies=False,
-        )
-        command._queue_app_removal(
-            app=self.app,
-            delete_secrets=False,
-            delete_persistent_data=False,
-            delete_policies=False,
-        )
+        command._queue_app_removal(app=self.app, delete_all_data=False)
+        command._queue_app_removal(app=self.app, delete_all_data=False)
 
-        self.assertEqual(models.AppRemovalJob.objects.filter(app_id_snapshot=self.app.id).count(), 1)
+        self.app.refresh_from_db()
+        self.assertEqual(self.app.job_status, models.App.JobStatus.REMOVAL_PENDING)
+        self.assertEqual(self._removal_started_count(), 1)
         self.assertIn("already pending removal", stdout.getvalue())
         self.assertEqual(stderr.getvalue(), "")
 
-    def test_database_rejects_two_active_removals_for_same_app(self) -> None:
-        self._create_removal_job(status=models.AppRemovalJob.Status.PENDING)
-
-        with self.assertRaises(IntegrityError), transaction.atomic():
-            self._create_removal_job(status=models.AppRemovalJob.Status.RUNNING)
-
-    def test_database_allows_new_removal_after_terminal_job(self) -> None:
-        self._create_removal_job(status=models.AppRemovalJob.Status.SUCCEEDED)
-
-        pending = self._create_removal_job(status=models.AppRemovalJob.Status.PENDING)
-
-        self.assertEqual(pending.status, models.AppRemovalJob.Status.PENDING)
-
-    def test_worker_rejects_job_with_mismatched_organization(self) -> None:
-        other_organization = models.Organization.objects.create(name="Other Removal Org", slug="other-removal-org")
-        job = models.AppRemovalJob.objects.create(
-            organization=other_organization,
-            app_id_snapshot=self.app.id,
-            app_slug_snapshot=self.app.slug,
-            app_name_snapshot=self.app.name,
-            workspace_slug_snapshot=self.workspace.slug,
-        )
+    def test_worker_claims_pending_removal_into_removing(self) -> None:
+        app_job_service.queue_removal(app=self.app, created_by=self.user, delete_all_data=False, teardown_first=False)
 
         claimed = job_worker._claim_pending_app_removal(label="")
 
-        job.refresh_from_db()
-        self.assertIsNone(claimed)
-        self.assertEqual(job.status, models.AppRemovalJob.Status.PENDING)
+        self.assertIsNotNone(claimed)
+        self.assertEqual(claimed.id, self.app.id)
+        self.app.refresh_from_db()
+        self.assertEqual(self.app.job_status, models.App.JobStatus.REMOVING)
+
+    def test_removal_refused_while_infra_may_exist_and_stays_retryable(self) -> None:
+        self.app.may_have_infra = True
+        self.app.save(update_fields=["may_have_infra", "updated_at"])
+        app_job_service.queue_removal(app=self.app, created_by=self.user, delete_all_data=False, teardown_first=False)
+        self.app.job_status = models.App.JobStatus.REMOVING
+        self.app.save(update_fields=["job_status", "updated_at"])
+
+        success = app_remove_executor.run_removal(app_id=str(self.app.id))
+
+        self.assertFalse(success)
+        self.app.refresh_from_db()
+        # The app is not deleted and returns to idle, so the removal can be retried after teardown.
+        self.assertEqual(self.app.job_status, models.App.JobStatus.IDLE)
+        self.assertIn("tear it down first", self.app.last_attempt_error)
+        self.assertTrue(
+            models.DeploymentRecord.objects.filter(
+                app=self.app,
+                attempt_id=self.app.last_attempt_id,
+                event_type=models.DeploymentRecord.EventType.REMOVAL_FAILED,
+            ).exists()
+        )
+        # Retry: an idle app accepts a fresh removal attempt.
+        app_job_service.queue_removal(app=self.app, created_by=self.user, delete_all_data=False, teardown_first=True)
+        self.app.refresh_from_db()
+        self.assertEqual(self.app.job_status, models.App.JobStatus.REMOVAL_PENDING)
+
+    def test_removal_with_teardown_first_tears_down_then_deletes_the_app(self) -> None:
+        self.app.may_have_infra = True
+        self.app.live_state = models.App.LiveState.DEPLOYED
+        self.app.service_url = "https://removalagent.example.com"
+        self.app.save(update_fields=["may_have_infra", "live_state", "service_url", "updated_at"])
+        app_job_service.queue_removal(app=self.app, created_by=self.user, delete_all_data=False, teardown_first=True)
+        self.app.job_status = models.App.JobStatus.REMOVING
+        self.app.save(update_fields=["job_status", "updated_at"])
+
+        with patch(
+            "humanityrules_app.services.jobs.app_remove_executor.app_deployment_teardown_executor.teardown_infra",
+            return_value=True,
+        ) as teardown_mock:
+            success = app_remove_executor.run_removal(app_id=str(self.app.id))
+
+        self.assertTrue(success)
+        teardown_mock.assert_called_once()
+        self.assertFalse(models.App.objects.filter(id=self.app.id).exists())

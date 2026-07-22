@@ -4,12 +4,14 @@ App detail, deployment ops (status polling, teardown, redeploy),
 and tag management — access derived from parent workspace.
 """
 
+import uuid
+
 from django.test import TestCase
 
 from humanityrules_app.models import (
     AWSAccount,
     App,
-    Deployment,
+    DeploymentRecord,
     Environment,
     IdentityAttribute,
     Organization,
@@ -45,15 +47,14 @@ class TestAppEndpoints(TestCase):
         self.env = Environment.objects.create(
             aws_account=self.aws_account, name="Staging", slug="staging", aws_region="us-east-1",
         )
+        # A live, idle app: deployed with infra behind it, so teardown is offered.
         self.app = App.objects.create(
             organization=self.org, workspace=self.workspace, repository=self.repo,
             environment=self.env, name="MyApp", slug="myapp",
             build_strategy="dockerfile", container_port=8000, health_check_path="/health",
             cpu=256, memory=512,
-        )
-        self.deployment = Deployment.objects.create(
-            app=self.app, git_ref="main", image_tag="myapp-main-20260227",
-            status=Deployment.Status.SUCCEEDED, status_message="Running",
+            live_state=App.LiveState.DEPLOYED, may_have_infra=True,
+            service_url="https://myapp.staging.example.com", last_attempt_id=uuid.uuid7(),
         )
 
         self.admin_user = User.objects.create_user(username="app_admin", password="x", current_organization=self.org)
@@ -110,100 +111,52 @@ class TestAppEndpoints(TestCase):
         response = self.client.get("/apps/myapp/", **HTMX)
         self.assertEqual(response.status_code, 200)
 
-    def test_app_detail_deployment_section_uses_deployment_outside_recent_deployments_window(self) -> None:
-        # 25 newer failed attempts push the succeeded deployment out of the
-        # recent-20 window; the environment row must still show it.
-        for index in range(25):
-            Deployment.objects.create(
-                app=self.app,
-                git_ref="main",
-                image_tag=f"myapp-main-{index}",
-                status=Deployment.Status.FAILED,
-                status_message="Build failed",
-            )
-
+    def test_app_detail_shows_teardown_for_a_deployed_app(self) -> None:
         self.client.force_login(self.ws_editor)
         response = self.client.get("/apps/myapp/", **HTMX)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.context["current_deployment"].id, self.deployment.id)
-        self.assertEqual(len(response.context["deployments"]), 20)
-        self.assertNotIn(self.deployment.id, {d.id for d in response.context["deployments"]})
+        self.assertContains(response, "Tear Down")
+        self.assertContains(response, "/apps/myapp/teardown-confirm/")
 
-    def test_app_detail_deployment_section_prefers_succeeded_over_newer_failed_attempt(self) -> None:
-        succeeded = Deployment.objects.create(
-            app=self.app,
-            git_ref="release",
-            image_tag="myapp-release-1",
-            status=Deployment.Status.SUCCEEDED,
-            status_message="Running",
-        )
-        failed_attempt = Deployment.objects.create(
-            app=self.app,
-            git_ref="release",
-            image_tag="myapp-release-2",
-            status=Deployment.Status.FAILED,
-            status_message="Rollback required",
-        )
-
+    def test_app_detail_hides_teardown_without_infra(self) -> None:
+        self.app.may_have_infra = False
+        self.app.save(update_fields=["may_have_infra", "updated_at"])
         self.client.force_login(self.ws_editor)
+
         response = self.client.get("/apps/myapp/", **HTMX)
 
         self.assertEqual(response.status_code, 200)
-        current = response.context["current_deployment"]
-        self.assertEqual(current.id, succeeded.id)
-        self.assertNotEqual(current.id, failed_attempt.id)
-        self.assertEqual(current.status, Deployment.Status.SUCCEEDED)
+        self.assertNotContains(response, "Tear Down")
 
-    def test_app_detail_deployment_section_prefers_unsettled_redeploy(self) -> None:
-        redeploy_attempt = Deployment.objects.create(
-            app=self.app,
-            git_ref="main",
-            image_tag="myapp-main-20260311-redeploy",
-            status=Deployment.Status.PENDING,
-            status_message="Queued for redeploy",
-        )
-
+    def test_app_detail_polls_section_while_a_job_is_in_flight(self) -> None:
+        self.app.job_status = App.JobStatus.DEPLOY_PENDING
+        self.app.save(update_fields=["job_status", "updated_at"])
         self.client.force_login(self.ws_editor)
+
         response = self.client.get("/apps/myapp/", **HTMX)
 
         self.assertEqual(response.status_code, 200)
-        current = response.context["current_deployment"]
-        self.assertEqual(current.id, redeploy_attempt.id)
-        self.assertEqual(current.status, Deployment.Status.PENDING)
-        self.assertNotContains(response, "Redeploy")
         self.assertContains(response, "/apps/myapp/deployment-section-status/")
         self.assertContains(response, 'hx-trigger="load delay:10s"')
-
-    def test_app_detail_shows_teardown_in_deployed_environments_not_recent_deployments(self) -> None:
-        self.client.force_login(self.ws_editor)
-        response = self.client.get("/apps/myapp/", **HTMX)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Tear Down", count=1)
-        self.assertContains(response, "?render=app_detail")
-
-    def test_ws_viewer_does_not_see_deployment_button(self) -> None:
-        self.client.force_login(self.ws_viewer)
-        response = self.client.get("/apps/myapp/", **HTMX)
-        self.assertEqual(response.status_code, 200)
-        self.assertNotContains(response, "/deploy/myapp/")
+        # No redeploy control while a deploy is running.
+        self.assertNotContains(response, "/apps/myapp/redeploy/")
 
     def test_no_access_gets_403_on_app_detail(self) -> None:
         self.client.force_login(self.no_access_user)
         response = self.client.get("/apps/myapp/", **HTMX)
         self.assertEqual(response.status_code, 403)
 
-    # --- App Deployment Status Polling (requires workspace:view) ---
+    # --- App Status Row Polling (requires workspace:view) ---
 
-    def test_ws_viewer_can_poll_deployment_status(self) -> None:
+    def test_ws_viewer_can_poll_status_row(self) -> None:
         self.client.force_login(self.ws_viewer)
-        response = self.client.get(f"/apps/myapp/deployments/{self.deployment.id}/status/")
+        response = self.client.get("/apps/myapp/status-row/")
         self.assertEqual(response.status_code, 200)
 
-    def test_no_access_gets_403_on_deployment_status(self) -> None:
+    def test_no_access_gets_403_on_status_row(self) -> None:
         self.client.force_login(self.no_access_user)
-        response = self.client.get(f"/apps/myapp/deployments/{self.deployment.id}/status/")
+        response = self.client.get("/apps/myapp/status-row/")
         self.assertEqual(response.status_code, 403)
 
     # --- App Deployment Section Status Polling (requires workspace:view) ---
@@ -218,70 +171,70 @@ class TestAppEndpoints(TestCase):
         response = self.client.get("/apps/myapp/deployment-section-status/")
         self.assertEqual(response.status_code, 403)
 
-    def test_deployment_section_status_404_without_visible_deployment(self) -> None:
-        self.deployment.delete()
-        self.client.force_login(self.ws_viewer)
-        response = self.client.get("/apps/myapp/deployment-section-status/")
-        self.assertEqual(response.status_code, 404)
-
     # --- App Teardown Confirm Modal (requires workspace:view) ---
 
     def test_ws_viewer_can_fetch_teardown_confirm(self) -> None:
         self.client.force_login(self.ws_viewer)
-        response = self.client.get(f"/apps/myapp/deployments/{self.deployment.id}/teardown-confirm/")
+        response = self.client.get("/apps/myapp/teardown-confirm/")
         self.assertEqual(response.status_code, 200)
 
     def test_no_access_gets_403_on_teardown_confirm(self) -> None:
         self.client.force_login(self.no_access_user)
-        response = self.client.get(f"/apps/myapp/deployments/{self.deployment.id}/teardown-confirm/")
+        response = self.client.get("/apps/myapp/teardown-confirm/")
         self.assertEqual(response.status_code, 403)
 
     # --- App Deployment Teardown (requires workspace:edit) ---
 
     def test_ws_editor_can_trigger_teardown(self) -> None:
         self.client.force_login(self.ws_editor)
-        response = self.client.post(f"/apps/myapp/deployments/{self.deployment.id}/teardown/")
+        response = self.client.post("/apps/myapp/teardown/")
         self.assertEqual(response.status_code, 200)
+        self.app.refresh_from_db()
+        self.assertEqual(self.app.job_status, App.JobStatus.TEARDOWN_PENDING)
 
     def test_ws_viewer_gets_403_on_teardown(self) -> None:
         self.client.force_login(self.ws_viewer)
-        response = self.client.post(f"/apps/myapp/deployments/{self.deployment.id}/teardown/")
+        response = self.client.post("/apps/myapp/teardown/")
         self.assertEqual(response.status_code, 403)
 
     def test_no_access_gets_403_on_teardown(self) -> None:
         self.client.force_login(self.no_access_user)
-        response = self.client.post(f"/apps/myapp/deployments/{self.deployment.id}/teardown/")
+        response = self.client.post("/apps/myapp/teardown/")
         self.assertEqual(response.status_code, 403)
 
     # --- App Deployment Redeploy (requires workspace:edit) ---
 
     def test_ws_editor_can_trigger_redeploy(self) -> None:
         self.client.force_login(self.ws_editor)
-        response = self.client.post(f"/apps/myapp/deployments/{self.deployment.id}/redeploy/")
+        response = self.client.post("/apps/myapp/redeploy/")
         self.assertEqual(response.status_code, 200)
+        self.app.refresh_from_db()
+        self.assertEqual(self.app.job_status, App.JobStatus.DEPLOY_PENDING)
 
-    def test_redeploy_is_blocked_while_teardown_is_unsettled(self) -> None:
-        Deployment.objects.create(
-            app=self.app,
-            git_ref="main",
-            image_tag="myapp-main-teardown",
-            status=Deployment.Status.TEARDOWN_PENDING,
-        )
+    def test_redeploy_is_blocked_while_a_job_is_in_flight(self) -> None:
+        self.app.job_status = App.JobStatus.TEARDOWN_PENDING
+        self.app.save(update_fields=["job_status", "updated_at"])
         self.client.force_login(self.ws_editor)
 
-        response = self.client.post(f"/apps/myapp/deployments/{self.deployment.id}/redeploy/")
+        response = self.client.post("/apps/myapp/redeploy/")
 
         self.assertEqual(response.status_code, 422)
-        self.assertFalse(Deployment.objects.filter(app=self.app, status=Deployment.Status.PENDING).exists())
+        self.app.refresh_from_db()
+        self.assertEqual(self.app.job_status, App.JobStatus.TEARDOWN_PENDING)
+        self.assertFalse(
+            DeploymentRecord.objects.filter(
+                app=self.app, event_type=DeploymentRecord.EventType.DEPLOY_STARTED,
+            ).exists()
+        )
 
     def test_ws_viewer_gets_403_on_redeploy(self) -> None:
         self.client.force_login(self.ws_viewer)
-        response = self.client.post(f"/apps/myapp/deployments/{self.deployment.id}/redeploy/")
+        response = self.client.post("/apps/myapp/redeploy/")
         self.assertEqual(response.status_code, 403)
 
     def test_no_access_gets_403_on_redeploy(self) -> None:
         self.client.force_login(self.no_access_user)
-        response = self.client.post(f"/apps/myapp/deployments/{self.deployment.id}/redeploy/")
+        response = self.client.post("/apps/myapp/redeploy/")
         self.assertEqual(response.status_code, 403)
 
     # --- App Tag Management (requires workspace:admin on parent workspace) ---

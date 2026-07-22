@@ -285,8 +285,8 @@ class TestCostRefreshCoordination(_CostFixtureMixin, TestCase):
         self.assertEqual(CostRefreshJob.objects.filter(app=self.app).count(), 1)
 
     def test_enqueue_skips_app_pending_removal(self) -> None:
-        self.app.status = App.Status.PENDING_REMOVAL
-        self.app.save(update_fields=["status", "updated_at"])
+        self.app.job_status = App.JobStatus.REMOVAL_PENDING
+        self.app.save(update_fields=["job_status", "updated_at"])
 
         panel.enqueue_refresh(app=self.app)
 

@@ -93,9 +93,9 @@ class OnboardingFirstAgentTests(TestCase):
 
     def test_post_deploys_and_redirects_to_app_detail(self) -> None:
         user = self._onboard(email="founder@test.com", org_name="Founder Co")
-        fake_deployment = MagicMock()
-        fake_deployment.app.slug = "myagent007"
-        deploy_mock = AsyncMock(return_value=fake_deployment)
+        fake_app = MagicMock()
+        fake_app.slug = "myagent007"
+        deploy_mock = AsyncMock(return_value=fake_app)
         with patch("humanityrules_app.views.onboarding.template_deploy_service.deploy_from_template", new=deploy_mock):
             response = self.client.post(reverse("onboarding_agent"), {"agent_name": "Mý Agent-007"})
         self.assertRedirects(response, "/apps/myagent007/?welcome=1", fetch_redirect_response=False)

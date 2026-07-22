@@ -14,7 +14,6 @@ from humanityrules_app.models import (
     App,
     AppTemplate,
     AWSAccount,
-    Deployment,
     Environment,
     EnvironmentBearerToken,
     Organization,
@@ -63,10 +62,7 @@ class PublicAccessTestBase(TestCase):
             source_template=self.template, environment=self.environment,
             name="Wolfie", slug="wolfie", build_strategy="dockerfile",
             container_port=8000, health_check_path="/health", cpu=256, memory=512,
-        )
-        Deployment.objects.create(
-            app=self.app, git_ref="main", image_tag="wolfie-main-1",
-            status=Deployment.Status.SUCCEEDED, status_message="Running",
+            live_state=App.LiveState.DEPLOYED, service_url="https://wolfie.staging.example.com",
         )
         self.raw_token = "t" * 64
         EnvironmentBearerToken.objects.create(

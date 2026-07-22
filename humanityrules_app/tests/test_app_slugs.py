@@ -1,5 +1,6 @@
 """Tests for dashless agent hostname labels."""
 
+import uuid
 from io import StringIO
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -288,8 +289,8 @@ class AgentSlugErrorSurfaceTests(TestCase):
             is_active=True,
         )
 
-    def _create_redeploy_source(self) -> tuple[models.App, models.Deployment]:
-        """Create a settled deployment for CLI redeploy tests."""
+    def _create_redeploy_source(self) -> models.App:
+        """Create a deployed, idle app for CLI redeploy tests."""
         repository = models.Repository.objects.create(
             organization=self.organization,
             provider=models.Repository.Provider.GITHUB,
@@ -298,7 +299,7 @@ class AgentSlugErrorSurfaceTests(TestCase):
             clone_url="https://github.com/slug/repo.git",
             default_branch="main",
         )
-        app = models.App.objects.create(
+        return models.App.objects.create(
             organization=self.organization,
             workspace=self.workspace,
             environment=self.environment,
@@ -310,14 +311,9 @@ class AgentSlugErrorSurfaceTests(TestCase):
             health_check_path="/health",
             cpu=256,
             memory=512,
+            live_state=models.App.LiveState.DEPLOYED,
+            last_attempt_id=uuid.uuid7(),
         )
-        source = models.Deployment.objects.create(
-            app=app,
-            git_ref="main",
-            image_tag="slugagent-main-source",
-            status=models.Deployment.Status.SUCCEEDED,
-        )
-        return app, source
 
     def test_template_deploy_form_surfaces_service_value_error(self) -> None:
         self.client.force_login(self.user)
@@ -364,8 +360,8 @@ class AgentSlugErrorSurfaceTests(TestCase):
         self.assertIn("Simulated deploy failure.", stderr.getvalue())
         self.assertEqual(deploy_mock.await_args.kwargs["app_slug"], "myagent")
 
-    def test_humr_control_redeploy_queues_a_pending_clone_of_the_source(self) -> None:
-        app, source = self._create_redeploy_source()
+    def test_humr_control_redeploy_queues_a_fresh_deploy_attempt(self) -> None:
+        app = self._create_redeploy_source()
         stdout = StringIO()
         stderr = StringIO()
 
@@ -373,25 +369,25 @@ class AgentSlugErrorSurfaceTests(TestCase):
             "humr_control",
             "redeploy-app",
             app=app.slug,
-            deployment=str(source.id),
             created_by=self.user.username,
             stdout=stdout,
             stderr=stderr,
         )
 
         self.assertEqual(stderr.getvalue(), "")
-        pending = models.Deployment.objects.get(app=app, status=models.Deployment.Status.PENDING)
-        self.assertEqual(pending.git_ref, source.git_ref)
-        self.assertNotEqual(pending.image_tag, source.image_tag)
+        app.refresh_from_db()
+        self.assertEqual(app.job_status, models.App.JobStatus.DEPLOY_PENDING)
+        started = models.DeploymentRecord.objects.get(
+            app=app,
+            attempt_id=app.last_attempt_id,
+            event_type=models.DeploymentRecord.EventType.DEPLOY_STARTED,
+        )
+        self.assertEqual(started.git_ref, app.repository.default_branch)
 
     def test_humr_control_redeploy_is_blocked_while_teardown_is_unsettled(self) -> None:
-        app, _source = self._create_redeploy_source()
-        models.Deployment.objects.create(
-            app=app,
-            git_ref="main",
-            image_tag="slugagent-main-teardown",
-            status=models.Deployment.Status.TEARDOWN_PENDING,
-        )
+        app = self._create_redeploy_source()
+        app.job_status = models.App.JobStatus.TEARDOWN_PENDING
+        app.save(update_fields=["job_status", "updated_at"])
         stdout = StringIO()
         stderr = StringIO()
 
@@ -404,8 +400,14 @@ class AgentSlugErrorSurfaceTests(TestCase):
             stderr=stderr,
         )
 
-        self.assertIn("has a deployment or teardown in progress", stderr.getvalue())
-        self.assertFalse(models.Deployment.objects.filter(app=app, status=models.Deployment.Status.PENDING).exists())
+        self.assertIn("has a job in progress", stderr.getvalue())
+        app.refresh_from_db()
+        self.assertEqual(app.job_status, models.App.JobStatus.TEARDOWN_PENDING)
+        self.assertFalse(
+            models.DeploymentRecord.objects.filter(
+                app=app, event_type=models.DeploymentRecord.EventType.DEPLOY_STARTED,
+            ).exists()
+        )
 
 
 class SeedLocalAppEnvMismatchTests(TestCase):
