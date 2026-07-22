@@ -32,7 +32,7 @@ def workspace_detail(request: HttpRequest, workspace_slug: str) -> HttpResponse:
     if denied:
         return denied
 
-    apps = list(workspace.apps.select_related("environment").order_by("name"))
+    apps = list(workspace.apps.select_related("environment", "source_template", "created_by").order_by("name"))
 
     tags = ResourceTag.objects.filter(workspace=workspace).order_by("key", "value")
     can_edit = abac_service.check_action(request.user.current_organization, request.user, workspace, "workspace", "workspace:edit")
@@ -54,7 +54,7 @@ def workspace_detail(request: HttpRequest, workspace_slug: str) -> HttpResponse:
 @login_required
 @require_POST
 def workspace_create(request: HttpRequest) -> HttpResponse:
-    """Create a new workspace and redirect to it."""
+    """Create a new workspace and redirect to the dashboard."""
     denied = abac_view_checks.check_abac_create(request, "workspace", "workspace:edit")
     if denied:
         return denied
@@ -71,13 +71,13 @@ def workspace_create(request: HttpRequest) -> HttpResponse:
         slug = f"{base_slug}-{counter}"
         counter += 1
 
-    workspace = Workspace.objects.create(
+    Workspace.objects.create(
         organization=org,
         name=name,
         slug=slug,
         created_by=request.user,
     )
-    return redirect("workspace_detail", workspace_slug=workspace.slug)
+    return redirect("dashboard")
 
 
 @login_required
