@@ -1,6 +1,5 @@
 import json
 from typing import Any
-from uuid import UUID
 
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
@@ -264,59 +263,6 @@ def app_deployment_redeploy(request: HttpRequest, app_slug: str) -> HttpResponse
 
     context = build_app_detail_context(request, _get_app_for_user(request, app_slug))
     return render(request, "humanityrules_app/apps/app_detail.html", context=context)
-
-
-@login_required
-@require_POST
-def app_tag_add(request: HttpRequest, app_slug: str) -> HttpResponse:
-    """Add a tag to an app. Returns updated tag partial."""
-    app = _get_app_for_user(request, app_slug)
-
-    denied = abac_view_checks.check_abac(request, app.workspace, "workspace", "workspace:admin")
-    if denied:
-        return denied
-
-    key = request.POST.get("key", "").strip()
-    value = request.POST.get("value", "").strip()
-    if key and value:
-        ResourceTag.objects.get_or_create(
-            organization=request.user.current_organization,
-            resource_type="app",
-            app=app,
-            key=key,
-            value=value,
-        )
-
-    org = request.user.current_organization
-    direct_tags = ResourceTag.objects.filter(app=app).order_by("key", "value")
-    inherited_tags = ResourceTag.objects.filter(workspace=app.workspace).order_by("key", "value")
-    url_base = f"/apps/{app.slug}/tags/"
-    return render(request, "humanityrules_app/apps/_app_tags.html", {
-        "direct_tags": direct_tags, "inherited_tags": inherited_tags, "can_admin": True, "url_base": url_base,
-        **dict(zip(("suggested_keys", "suggested_values"), abac_service.get_resource_tag_suggestions(org, "app"))),
-    })
-
-
-@login_required
-@require_POST
-def app_tag_remove(request: HttpRequest, app_slug: str, tag_id: UUID) -> HttpResponse:
-    """Remove a tag from an app. Returns updated tag partial."""
-    app = _get_app_for_user(request, app_slug)
-
-    denied = abac_view_checks.check_abac(request, app.workspace, "workspace", "workspace:admin")
-    if denied:
-        return denied
-
-    ResourceTag.objects.filter(id=tag_id, app=app).delete()
-
-    org = request.user.current_organization
-    direct_tags = ResourceTag.objects.filter(app=app).order_by("key", "value")
-    inherited_tags = ResourceTag.objects.filter(workspace=app.workspace).order_by("key", "value")
-    url_base = f"/apps/{app.slug}/tags/"
-    return render(request, "humanityrules_app/apps/_app_tags.html", {
-        "direct_tags": direct_tags, "inherited_tags": inherited_tags, "can_admin": True, "url_base": url_base,
-        **dict(zip(("suggested_keys", "suggested_values"), abac_service.get_resource_tag_suggestions(org, "app"))),
-    })
 
 
 @login_required

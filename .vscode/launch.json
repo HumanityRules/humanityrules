@@ -19,28 +19,6 @@
             "django": true,
             "autoStartBrowser": false,
             "console": "integratedTerminal"
-        },
-        {
-            "name": "Test: Repo Analysis",
-            "type": "debugpy",
-            "request": "launch",
-            "module": "humanityrules_app.services.agent.repo_analysis.test_repo_analysis",
-            "args": ["--app", "fastapi_app"],
-            "env": {
-                "DJANGO_SETTINGS_MODULE": "humanityrules_site.settings"
-            },
-            "console": "integratedTerminal"
-        },
-        {
-            "name": "Test: Main Agent",
-            "type": "debugpy",
-            "request": "launch",
-            "module": "humanityrules_app.services.agent.test_main_agent",
-            "args": ["--repl", "--conversation-id", "019bc7e3-f78f-74bc-9490-003bd8264dab", "--db-run", "local/test_db/my_test.sqlite3", "--no-copy"],
-            "env": {
-                "DJANGO_SETTINGS_MODULE": "humanityrules_site.settings"
-            },
-            "console": "integratedTerminal"
-        },
+        }
     ]
 }

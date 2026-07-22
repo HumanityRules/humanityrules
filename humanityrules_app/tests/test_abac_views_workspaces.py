@@ -71,11 +71,6 @@ class TestWorkspaceEndpoints(TestCase):
         self.no_access_user = User.objects.create_user(username="ws_noaccess", password="x", current_organization=self.org)
         OrganizationMembership.objects.create(organization=self.org, user=self.no_access_user, role=OrganizationMembership.Role.MEMBER)
 
-        self.removable_tag = ResourceTag.objects.create(
-            organization=self.org, resource_type="workspace", workspace=self.ws_eng,
-            key="removable", value="yes",
-        )
-
     # --- Workspace List (filter_permitted_resources) ---
 
     def test_admin_workspace_list_shows_all(self) -> None:
@@ -201,32 +196,6 @@ class TestWorkspaceEndpoints(TestCase):
         self.assertEqual(response.status_code, 403)
 
     # --- Workspace Tag Management (requires workspace:admin) ---
-
-    def test_admin_can_add_workspace_tag(self) -> None:
-        self.client.force_login(self.admin_user)
-        response = self.client.post("/workspaces/engineering/tags/add/", {"key": "env", "value": "test"})
-        self.assertEqual(response.status_code, 200)
-
-    def test_viewer_gets_403_on_workspace_tag_add(self) -> None:
-        self.client.force_login(self.viewer_user)
-        response = self.client.post("/workspaces/engineering/tags/add/", {"key": "env", "value": "test"})
-        self.assertEqual(response.status_code, 403)
-
-    def test_editor_gets_403_on_workspace_tag_add(self) -> None:
-        """workspace:edit is not enough — workspace:admin required for tag management."""
-        self.client.force_login(self.editor_user)
-        response = self.client.post("/workspaces/engineering/tags/add/", {"key": "env", "value": "test"})
-        self.assertEqual(response.status_code, 403)
-
-    def test_admin_can_remove_workspace_tag(self) -> None:
-        self.client.force_login(self.admin_user)
-        response = self.client.post(f"/workspaces/engineering/tags/{self.removable_tag.id}/remove/")
-        self.assertEqual(response.status_code, 200)
-
-    def test_viewer_gets_403_on_workspace_tag_remove(self) -> None:
-        self.client.force_login(self.viewer_user)
-        response = self.client.post(f"/workspaces/engineering/tags/{self.removable_tag.id}/remove/")
-        self.assertEqual(response.status_code, 403)
 
     def test_admin_can_bulk_save_workspace_tags(self) -> None:
         import json

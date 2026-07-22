@@ -473,57 +473,6 @@ def environment_teardown(request: HttpRequest, environment_id: UUID) -> HttpResp
 
 @login_required
 @require_POST
-def environment_tag_add(request: HttpRequest, environment_id: UUID) -> HttpResponse:
-    """Add a tag to an environment. Returns updated tag partial."""
-    environment = _get_environment_for_user(request=request, environment_id=environment_id)
-
-    denied = abac_view_checks.check_abac(request, environment, "environment", "environment:admin")
-    if denied:
-        return denied
-
-    key = request.POST.get("key", "").strip()
-    value = request.POST.get("value", "").strip()
-    if key and value:
-        models.ResourceTag.objects.get_or_create(
-            organization=request.user.current_organization,
-            resource_type="environment",
-            environment=environment,
-            key=key,
-            value=value,
-        )
-
-    org = request.user.current_organization
-    tags = models.ResourceTag.objects.filter(environment=environment).order_by("key", "value")
-    url_base = f"/environments/{environment.id}/tags/"
-    return render(request, "humanityrules_app/partials/_kv_tag_editor.html", {
-        "items": tags, "can_edit": True, "url_base": url_base, "hx_target": "#environment-tags", "empty_text": "No tags",
-        **dict(zip(("suggested_keys", "suggested_values"), abac_service.get_resource_tag_suggestions(org, "environment"))),
-    })
-
-
-@login_required
-@require_POST
-def environment_tag_remove(request: HttpRequest, environment_id: UUID, tag_id: UUID) -> HttpResponse:
-    """Remove a tag from an environment. Returns updated tag partial."""
-    environment = _get_environment_for_user(request=request, environment_id=environment_id)
-
-    denied = abac_view_checks.check_abac(request, environment, "environment", "environment:admin")
-    if denied:
-        return denied
-
-    models.ResourceTag.objects.filter(id=tag_id, environment=environment).delete()
-
-    org = request.user.current_organization
-    tags = models.ResourceTag.objects.filter(environment=environment).order_by("key", "value")
-    url_base = f"/environments/{environment.id}/tags/"
-    return render(request, "humanityrules_app/partials/_kv_tag_editor.html", {
-        "items": tags, "can_edit": True, "url_base": url_base, "hx_target": "#environment-tags", "empty_text": "No tags",
-        **dict(zip(("suggested_keys", "suggested_values"), abac_service.get_resource_tag_suggestions(org, "environment"))),
-    })
-
-
-@login_required
-@require_POST
 def environment_tags_save(request: HttpRequest, environment_id: UUID) -> HttpResponse:
     """Bulk-save environment tags. Replaces all existing tags with the submitted array."""
     environment = _get_environment_for_user(request=request, environment_id=environment_id)

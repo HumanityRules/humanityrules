@@ -1,20 +1,18 @@
-"""Storage Stack for Humanity Rules - S3 buckets, ECR repository, and EFS."""
+"""Storage Stack for Humanity Rules - S3 buckets and ECR repository."""
 
 import os
 
 from aws_cdk import CfnOutput, RemovalPolicy, Stack
-from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_ecr as ecr
-from aws_cdk import aws_efs as efs
 from aws_cdk import aws_s3 as s3
 from aws_cdk import aws_s3_deployment as s3_deployment
 from constructs import Construct
 
 
 class StorageStack(Stack):
-    """S3 buckets, ECR repository, and EFS for Humanity Rules."""
+    """S3 buckets and ECR repository for Humanity Rules."""
 
-    def __init__(self, scope: Construct, construct_id: str, vpc: ec2.IVpc, **kwargs) -> None:
+    def __init__(self, scope: Construct, construct_id: str, **kwargs: object) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
         # Public bucket for CloudFormation templates and Lambda code that customers download
@@ -74,47 +72,6 @@ class StorageStack(Stack):
             lifecycle_rules=[ecr.LifecycleRule(description="Keep last 10 images", max_image_count=10, rule_priority=1)],
         )
 
-        # EFS for Claude session persistence across deployments
-        # Claude SDK stores conversation sessions locally; EFS makes them survive container replacements
-        self.efs_security_group = ec2.SecurityGroup(
-            self,
-            "EfsSecurityGroup",
-            vpc=vpc,
-            security_group_name="humr-prod-efs-sg",
-            description="Security group for EFS mount targets",
-            allow_all_outbound=False,
-        )
-        # Allow NFS access from anywhere in the VPC (ECS tasks run in private subnets)
-        self.efs_security_group.add_ingress_rule(
-            peer=ec2.Peer.ipv4(vpc.vpc_cidr_block),
-            connection=ec2.Port.tcp(2049),
-            description="Allow NFS from VPC",
-        )
-        self.claude_efs = efs.FileSystem(
-            self,
-            "ClaudeEfs",
-            file_system_name="humr-prod-claude-sessions",
-            vpc=vpc,
-            security_group=self.efs_security_group,
-            performance_mode=efs.PerformanceMode.GENERAL_PURPOSE,
-            throughput_mode=efs.ThroughputMode.BURSTING,
-            removal_policy=RemovalPolicy.RETAIN,
-            encrypted=True,
-        )
-        # EFS Access Point — a custom entry door with pre-configured user identity.
-        # Without this, EFS mounts are root-owned and non-root containers can't write.
-        # The Access Point enforces:
-        #   - posix_user: All file operations are performed as UID 1000, regardless of caller
-        #   - path: The container sees /appuser-claude as its root (chroot-like)
-        #   - create_acl: Auto-creates the directory with correct ownership if missing
-        self.claude_efs_access_point = self.claude_efs.add_access_point(
-            "AppUserAccessPoint",
-            path="/appuser-claude",
-            create_acl=efs.Acl(owner_uid="1000", owner_gid="1000", permissions="755"),
-            posix_user=efs.PosixUser(uid="1000", gid="1000"),
-        )
-
-        CfnOutput(self, "EfsFileSystemId", value=self.claude_efs.file_system_id, export_name="humr-prod-efs-id")
         CfnOutput(self, "PublicBucketName", value=self.public_bucket.bucket_name, export_name="humr-prod-public-bucket")
         CfnOutput(self, "PublicBucketUrl", value=f"https://{self.public_bucket.bucket_name}.s3.amazonaws.com", export_name="humr-prod-public-bucket-url")
         CfnOutput(self, "PrivateBucketName", value=self.private_bucket.bucket_name, export_name="humr-prod-private-bucket")

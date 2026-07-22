@@ -28,14 +28,10 @@ urlpatterns = [
     path("workspaces/<slug:workspace_slug>/", views.workspace_detail, name="workspace_detail"),
     path("workspaces/<slug:workspace_slug>/remove-confirm/", views.workspace_remove_confirm, name="workspace_remove_confirm"),
     path("workspaces/<slug:workspace_slug>/remove/", views.workspace_remove, name="workspace_remove"),
-    path("workspaces/<slug:workspace_slug>/tags/add/", views.workspace_tag_add, name="workspace_tag_add"),
-    path("workspaces/<slug:workspace_slug>/tags/<uuid:tag_id>/remove/", views.workspace_tag_remove, name="workspace_tag_remove"),
     path("workspaces/<slug:workspace_slug>/tags/save/", views.workspace_tags_save, name="workspace_tags_save"),
 
     # Apps
     path("apps/<slug:app_slug>/", views.app_detail, name="app_detail"),
-    path("apps/<slug:app_slug>/tags/add/", views.app_tag_add, name="app_tag_add"),
-    path("apps/<slug:app_slug>/tags/<uuid:tag_id>/remove/", views.app_tag_remove, name="app_tag_remove"),
     path("apps/<slug:app_slug>/tags/save/", views.app_tags_save, name="app_tags_save"),
 
     path("deploy/from-template/", views.template_deploy_picker, name="template_deploy_picker"),
@@ -71,8 +67,6 @@ urlpatterns = [
     path("environments/<uuid:environment_id>/retry/", views.environment_retry, name="environment_retry"),
     path("environments/<uuid:environment_id>/teardown-confirm/", views.environment_teardown_confirm, name="environment_teardown_confirm"),
     path("environments/<uuid:environment_id>/teardown/", views.environment_teardown, name="environment_teardown"),
-    path("environments/<uuid:environment_id>/tags/add/", views.environment_tag_add, name="environment_tag_add"),
-    path("environments/<uuid:environment_id>/tags/<uuid:tag_id>/remove/", views.environment_tag_remove, name="environment_tag_remove"),
     path("environments/<uuid:environment_id>/tags/save/", views.environment_tags_save, name="environment_tags_save"),
 
     # Security

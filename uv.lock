@@ -563,10 +563,8 @@ dependencies = [
     { name = "cryptography" },
     { name = "dj-database-url" },
     { name = "django" },
-    { name = "django-browser-reload" },
     { name = "django-htmx" },
     { name = "django-tailwind", extra = ["cookiecutter", "honcho"] },
-    { name = "django-watchfiles" },
     { name = "httpx" },
     { name = "jinja2" },
     { name = "opentelemetry-api" },
@@ -583,6 +581,12 @@ dependencies = [
     { name = "workos" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "django-browser-reload" },
+    { name = "django-watchfiles" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "aws-cdk-lib", specifier = ">=2.170.0" },
@@ -591,10 +595,8 @@ requires-dist = [
     { name = "cryptography", specifier = ">=44.0.0" },
     { name = "dj-database-url", specifier = ">=2.2.0" },
     { name = "django", specifier = "==6.0" },
-    { name = "django-browser-reload", specifier = ">=1.21.0" },
     { name = "django-htmx", specifier = ">=1.27.0" },
     { name = "django-tailwind", extras = ["honcho", "cookiecutter"], specifier = ">=4.4.2" },
-    { name = "django-watchfiles", specifier = ">=1.4.0" },
     { name = "httpx", specifier = ">=0.28.0" },
     { name = "jinja2", specifier = ">=3.1.0" },
     { name = "opentelemetry-api", specifier = ">=1.39.1" },
@@ -609,6 +611,12 @@ requires-dist = [
     { name = "servestatic", specifier = ">=3.0.0" },
     { name = "uvicorn", specifier = ">=0.32.0" },
     { name = "workos", specifier = ">=5.37.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "django-browser-reload", specifier = ">=1.21.0" },
+    { name = "django-watchfiles", specifier = ">=1.4.0" },
 ]
 
 [[package]]

@@ -58,11 +58,15 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     "tailwind",
     "tailwindtheme_app",
-    "django_browser_reload",
-    "django_watchfiles",
     "django_htmx",
     "humanityrules_app",
 ]
+
+if DEBUG:
+    INSTALLED_APPS.extend([
+        "django_browser_reload",
+        "django_watchfiles",
+    ])
 
 TAILWIND_APP_NAME = "tailwindtheme_app"
 
@@ -80,9 +84,11 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    "django_browser_reload.middleware.BrowserReloadMiddleware",
     "django_htmx.middleware.HtmxMiddleware",
 ]
+
+if DEBUG:
+    MIDDLEWARE.append("django_browser_reload.middleware.BrowserReloadMiddleware")
 
 if POSTHOG_API_KEY and not DEBUG:
     MIDDLEWARE.append("posthog.integrations.django.PosthogContextMiddleware")
