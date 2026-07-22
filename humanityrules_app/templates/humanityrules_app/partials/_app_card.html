@@ -14,6 +14,16 @@
     </div>
     <div class="space-y-2 text-sm">
         <div class="flex items-center justify-between">
+            <span class="text-gray-500 dark:text-gray-400">URL</span>
+            {% if app.service_url %}
+            <a href="{{ app.service_url }}" target="_blank" rel="noopener noreferrer"
+               title="{{ app.service_url }}"
+               class="relative z-10 text-indigo-600 dark:text-indigo-400 hover:underline truncate ml-2">{{ app.service_url }}</a>
+            {% else %}
+            <span class="text-gray-500 dark:text-gray-400">—</span>
+            {% endif %}
+        </div>
+        <div class="flex items-center justify-between">
             <span class="text-gray-500 dark:text-gray-400">Template</span>
             <span class="text-gray-700 dark:text-gray-300 truncate ml-2">{{ app.source_template.name }}</span>
         </div>
@@ -29,18 +39,20 @@
         </div>
         {% endif %}
         <div class="flex items-center justify-between">
-            <span class="text-gray-500 dark:text-gray-400">Last deployed</span>
-            <span class="text-gray-700 dark:text-gray-300">{% if app.last_deployed_at %}{{ app.last_deployed_at|timesince }} ago{% else %}Never{% endif %}</span>
+            <span class="text-gray-500 dark:text-gray-400">Environment</span>
+            <span class="text-gray-700 dark:text-gray-300 truncate ml-2">{{ app.environment.name }}</span>
         </div>
         <div class="flex items-center justify-between">
-            <span class="text-gray-500 dark:text-gray-400">URL</span>
-            {% if app.service_url %}
-            <a href="{{ app.service_url }}" target="_blank" rel="noopener noreferrer"
-               title="{{ app.service_url }}"
-               class="relative z-10 text-indigo-600 dark:text-indigo-400 hover:underline truncate ml-2">{{ app.name }}</a>
-            {% else %}
-            <span class="text-gray-500 dark:text-gray-400">—</span>
-            {% endif %}
+            <span class="text-gray-500 dark:text-gray-400">Created by</span>
+            <span class="text-gray-700 dark:text-gray-300 truncate ml-2">{% if app.created_by %}{{ app.created_by }}{% else %}—{% endif %}</span>
+        </div>
+        <div class="flex items-center justify-between">
+            <span class="text-gray-500 dark:text-gray-400">Created</span>
+            <span class="text-gray-700 dark:text-gray-300">{{ app.created_at|timesince }} ago</span>
+        </div>
+        <div class="flex items-center justify-between">
+            <span class="text-gray-500 dark:text-gray-400">Last deployed</span>
+            <span class="text-gray-700 dark:text-gray-300">{% if app.last_deployed_at %}{{ app.last_deployed_at|timesince }} ago{% else %}Never{% endif %}</span>
         </div>
         {% include "humanityrules_app/partials/_app_card_status.html" %}
     </div>

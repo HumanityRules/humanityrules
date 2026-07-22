@@ -19,7 +19,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
 
     apps_prefetch = Prefetch(
         "apps",
-        queryset=App.objects.select_related("environment", "repository").order_by("name"),
+        queryset=App.objects.select_related("environment", "source_template", "created_by").order_by("name"),
         to_attr="dashboard_apps",
     )
     visible_workspaces = Workspace.objects.filter(organization=org).prefetch_related(apps_prefetch)
