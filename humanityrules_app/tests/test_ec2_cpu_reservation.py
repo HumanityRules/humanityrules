@@ -5,7 +5,7 @@ from aws_cdk.assertions import Template
 from django.test import SimpleTestCase
 
 from humanityrules_app.services.infra_customer import deploy_app
-from humanityrules_app.services.infra_customer.appconfig import AppConfig, ContainerConfig
+from humanityrules_app.services.infra_customer.appconfig import AppConfig, ContainerConfig, ContainerRole, ImageSource
 
 
 def _task_definition_properties(template: Template) -> dict:
@@ -34,7 +34,7 @@ def _render_ec2(containers: list[ContainerConfig], cpu: int, alb_target_containe
             owner_username=None,
             serialize_task_replacement=serialize_task_replacement,
         ),
-        image_tag="test",
+        image_tags={c.template_path: "test" for c in containers},
         env_slug="staging",
         resource_prefix="humr-staging-my-app",
         subdomain="myapp",
@@ -55,8 +55,8 @@ class Ec2CpuReservationTests(SimpleTestCase):
             containers=[
                 ContainerConfig(
                     name="hermes",
-                    image_source="dockerfile",
-                    ecr_repo_name="humr/staging/my-app-hermes",
+                    image_source=ImageSource.TEMPLATE,
+                    template_path="hermes_agent",
                     container_port=8787,
                     memory_limit_mib=4096,
                     memory_reservation_mib=2048,
@@ -64,7 +64,9 @@ class Ec2CpuReservationTests(SimpleTestCase):
                 ),
                 ContainerConfig(
                     name="policy-proxy",
-                    image_source="policy_proxy",
+                    image_source=ImageSource.TEMPLATE,
+                    template_path="policy_proxy",
+                    role=ContainerRole.POLICY_PROXY,
                     upstream_container="hermes",
                     container_port=8788,
                     memory_limit_mib=256,
@@ -87,8 +89,8 @@ class Ec2CpuReservationTests(SimpleTestCase):
             containers=[
                 ContainerConfig(
                     name="app",
-                    image_source="dockerfile",
-                    ecr_repo_name="humr/staging/my-app-app",
+                    image_source=ImageSource.TEMPLATE,
+                    template_path="app_tree",
                     container_port=8080,
                     memory_limit_mib=512,
                 ),
@@ -107,8 +109,8 @@ class Ec2CpuReservationTests(SimpleTestCase):
             containers=[
                 ContainerConfig(
                     name="app",
-                    image_source="dockerfile",
-                    ecr_repo_name="humr/staging/my-app-app",
+                    image_source=ImageSource.TEMPLATE,
+                    template_path="app_tree",
                     container_port=8080,
                     memory_limit_mib=512,
                 ),
@@ -126,8 +128,8 @@ class Ec2CpuReservationTests(SimpleTestCase):
             containers=[
                 ContainerConfig(
                     name="app",
-                    image_source="dockerfile",
-                    ecr_repo_name="humr/staging/my-app-app",
+                    image_source=ImageSource.TEMPLATE,
+                    template_path="app_tree",
                     container_port=8080,
                     memory_limit_mib=512,
                 ),

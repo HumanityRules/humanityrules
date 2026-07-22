@@ -13,11 +13,11 @@ from humanityrules_app.models import (
     EnvironmentBearerToken,
     Organization,
     OrganizationMembership,
-    Repository,
     ResourceTag,
     User,
     Workspace,
 )
+from humanityrules_app.tests.app_test_factories import make_source_template
 
 
 def _hash(raw: str) -> str:
@@ -41,14 +41,6 @@ class TestMergeCallerResolution(TestCase):
             name="Assistants",
             slug="assistants",
         )
-        self.repository = Repository.objects.create(
-            organization=self.org,
-            provider="github",
-            name="hermes",
-            full_name="org/hermes",
-            default_branch="main",
-            clone_url="https://github.com/org/hermes.git",
-        )
         self.owner = User.objects.create_user(
             username="vmendi",
             email="vmendi@example.com",
@@ -63,10 +55,9 @@ class TestMergeCallerResolution(TestCase):
         self.app = App.objects.create(
             organization=self.org,
             workspace=self.workspace,
-            repository=self.repository,
+            source_template=make_source_template(),
             name="Hermes",
             slug="hermes",
-            build_strategy=App.BuildStrategy.DOCKERFILE,
             environment=self.env,
             container_port=8000,
             health_check_path="/health",

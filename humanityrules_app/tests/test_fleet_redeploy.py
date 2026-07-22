@@ -8,6 +8,7 @@ from django.test import TestCase
 from humanityrules_app import models
 from humanityrules_app.services import fleet_service
 from humanityrules_app.services.jobs import job_worker
+from humanityrules_app.tests import app_test_factories
 
 
 class TestFleetRedeployAll(TestCase):
@@ -19,13 +20,7 @@ class TestFleetRedeployAll(TestCase):
             name="Assistants",
             slug="assistants",
         )
-        self.repository = models.Repository.objects.create(
-            organization=self.organization,
-            provider="github",
-            name="hermes",
-            full_name="fleet/hermes",
-            clone_url="https://github.com/fleet/hermes.git",
-        )
+        self.source_template = app_test_factories.make_source_template()
         self.environment = self._create_environment(name="Staging", slug="staging", status=models.Environment.Status.READY)
         self.app = self._make_app(
             slug="fleetagent",
@@ -67,10 +62,9 @@ class TestFleetRedeployAll(TestCase):
             organization=self.organization,
             workspace=self.workspace,
             environment=environment,
-            repository=self.repository,
+            source_template=self.source_template,
             name=slug,
             slug=slug,
-            build_strategy=models.App.BuildStrategy.DOCKERFILE,
             container_port=8787,
             health_check_path="/health",
             cpu=256,

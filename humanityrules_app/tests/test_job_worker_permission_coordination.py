@@ -6,6 +6,7 @@ from django.test import TestCase
 from humanityrules_app import models
 from humanityrules_app.services import permissions_service
 from humanityrules_app.services.jobs import job_worker
+from humanityrules_app.tests.app_test_factories import make_source_template
 
 
 class TestJobWorkerPermissionCoordination(TestCase):
@@ -28,13 +29,6 @@ class TestJobWorkerPermissionCoordination(TestCase):
             name="Operations",
             slug="operations",
         )
-        self.repository = models.Repository.objects.create(
-            organization=self.organization,
-            provider="github",
-            name="hermes",
-            full_name="permission-coordination/hermes",
-            clone_url="https://github.com/permission-coordination/hermes.git",
-        )
         self.app = self._create_app(name="Permission Agent", slug="permission-agent")
         self.other_app = self._create_app(name="Other Agent", slug="other-agent")
 
@@ -44,10 +38,9 @@ class TestJobWorkerPermissionCoordination(TestCase):
             organization=self.organization,
             workspace=self.workspace,
             environment=self.environment,
-            repository=self.repository,
+            source_template=make_source_template(),
             name=name,
             slug=slug,
-            build_strategy=models.App.BuildStrategy.DOCKERFILE,
             container_port=8787,
             health_check_path="/health",
             cpu=256,

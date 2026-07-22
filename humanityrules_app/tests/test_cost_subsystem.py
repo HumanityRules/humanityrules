@@ -21,7 +21,6 @@ from humanityrules_app.models import (
     Environment,
     Organization,
     OrganizationMembership,
-    Repository,
     User,
     Workspace,
 )
@@ -29,6 +28,7 @@ from humanityrules_app.services.cost import bedrock_pricing as pricing
 from humanityrules_app.services.cost import cost_refresh, panel
 from humanityrules_app.services.cost.cost_source import DailyCostRow
 from humanityrules_app.services.jobs import job_worker
+from humanityrules_app.tests.app_test_factories import make_source_template
 
 _REAL_RECORD_ARN = "arn:aws:bedrock:us-east-1:266117665083:inference-profile/us.anthropic.claude-sonnet-4-6"
 
@@ -129,14 +129,12 @@ class _CostFixtureMixin:
         self.env = Environment.objects.create(
             aws_account=self.aws_account, name="Default", slug="default", aws_region="us-east-1",
         )
-        self.repository = Repository.objects.create(
-            organization=self.org, provider="github", name="hermes", full_name="org/hermes",
-            default_branch="main", clone_url="https://github.com/org/hermes.git",
-        )
         self.workspace = Workspace.objects.create(organization=self.org, name="Eng", slug="eng")
+        self.source_template = make_source_template()
         self.app = App.objects.create(
-            organization=self.org, workspace=self.workspace, environment=self.env, repository=self.repository,
-            name="Hermes", slug="hermes", build_strategy=App.BuildStrategy.DOCKERFILE,
+            organization=self.org, workspace=self.workspace, environment=self.env,
+            source_template=self.source_template,
+            name="Hermes", slug="hermes",
             container_port=8000, health_check_path="/health", cpu=256, memory=512,
         )
 
@@ -323,10 +321,9 @@ class TestCostRefreshCoordination(_CostFixtureMixin, TestCase):
             organization=self.org,
             workspace=self.workspace,
             environment=self.env,
-            repository=self.repository,
+            source_template=self.source_template,
             name="Other Hermes",
             slug="other-hermes",
-            build_strategy=App.BuildStrategy.DOCKERFILE,
             container_port=8000,
             health_check_path="/health",
             cpu=256,

@@ -9,6 +9,7 @@ import humanityrules_app.services.jobs.app_deployment_debug_simulator as app_dep
 import humanityrules_app.services.jobs.app_deployment_executor as app_deployment_executor
 from humanityrules_app.services import sandbox_service
 from humanityrules_app.services.jobs import app_job_service
+from humanityrules_app.tests.app_test_factories import make_source_template
 
 
 class TestAppDeploymentExecutor(TestCase):
@@ -22,14 +23,6 @@ class TestAppDeploymentExecutor(TestCase):
             current_organization=self.organization,
         )
         self.aws_account = models.AWSAccount.objects.create(organization=self.organization, name="Deploy AWS")
-        self.repository = models.Repository.objects.create(
-            organization=self.organization,
-            provider="github",
-            name="repo",
-            full_name="org/repo",
-            default_branch="main",
-            clone_url="https://github.com/org/repo.git",
-        )
         self.workspace = models.Workspace.objects.create(
             organization=self.organization,
             name="Engineering",
@@ -47,10 +40,9 @@ class TestAppDeploymentExecutor(TestCase):
             organization=self.organization,
             workspace=self.workspace,
             environment=self.environment,
-            repository=self.repository,
+            source_template=make_source_template(),
             name="MyApp",
             slug="myapp",
-            build_strategy="dockerfile",
             container_port=8000,
             health_check_path="/health",
             cpu=256,
@@ -71,8 +63,6 @@ class TestAppDeploymentExecutor(TestCase):
 
         with (
             patch("humanityrules_app.services.jobs.app_deployment_debug_simulator.time.sleep") as sleep_mock,
-            patch("humanityrules_app.services.jobs.app_deployment_executor.repo_service.clone_repository") as clone_repository_mock,
-            patch("humanityrules_app.services.jobs.app_deployment_executor.repo_service.cleanup_repository") as cleanup_repository_mock,
             patch("humanityrules_app.services.jobs.app_deployment_executor.infra_customer.deploy_app.deploy") as deploy_app_mock,
             patch("humanityrules_app.services.jobs.app_deployment_executor._get_aws_session") as get_aws_session_mock,
         ):
@@ -82,8 +72,6 @@ class TestAppDeploymentExecutor(TestCase):
         sleep_mock.assert_called_once_with(
             app_deployment_debug_simulator.DEBUG_DEPLOYMENT_STEP_DELAY_SECONDS,
         )
-        clone_repository_mock.assert_not_called()
-        cleanup_repository_mock.assert_not_called()
         deploy_app_mock.assert_not_called()
         get_aws_session_mock.assert_not_called()
 
@@ -125,10 +113,9 @@ class TestAppDeploymentExecutor(TestCase):
             service_url="",
             alb_dns="",
             error="stack rollback",
+            image_hashes={},
         )
         with (
-            patch("humanityrules_app.services.jobs.app_deployment_executor.repo_service.clone_repository"),
-            patch("humanityrules_app.services.jobs.app_deployment_executor.repo_service.cleanup_repository"),
             patch("humanityrules_app.services.jobs.app_deployment_executor._get_aws_session"),
             patch("humanityrules_app.services.jobs.app_deployment_executor.app_config_builder.build_app_config_from_app"),
             patch("humanityrules_app.services.jobs.app_deployment_executor.infra_customer.deploy_app.deploy", return_value=deploy_result),
@@ -170,10 +157,9 @@ class TestAppDeploymentExecutor(TestCase):
             organization=self.organization,
             workspace=self.workspace,
             environment=other_env,
-            repository=self.repository,
+            source_template=make_source_template(),
             name="CrossTenant",
             slug="crosstenant",
-            build_strategy="dockerfile",
             container_port=8000,
             health_check_path="/health",
             cpu=256,
