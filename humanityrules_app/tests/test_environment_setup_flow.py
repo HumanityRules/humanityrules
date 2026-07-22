@@ -1,14 +1,13 @@
-"""Tests for the surviving environment-setup logic: exclusive zone ownership and the provisioning gate.
+"""Tests for the surviving environment-setup logic: exclusive zone ownership and provisioning transitions.
 
 The user-facing form path is covered by test_environment_setup_form; this pins the model/service
 logic that path relies on.
 """
 
-from asgiref.sync import async_to_sync
 from django.test import TestCase
 
 import humanityrules_app.models as models
-from humanityrules_app.services.jobs import environment_operation_gate
+from humanityrules_app.services.jobs import environment_job_service
 
 
 class TestEnvironmentZoneOwnership(TestCase):
@@ -52,7 +51,7 @@ class TestEnvironmentZoneOwnership(TestCase):
 
 
 class TestEnvironmentProvisioningGate(TestCase):
-    """A draft environment transitions to PENDING for the job worker via the operation gate."""
+    """A draft environment transitions to PENDING for the job worker."""
 
     def setUp(self) -> None:
         self.organization = models.Organization.objects.create(name="Gate Org", slug="gate-org")
@@ -69,7 +68,7 @@ class TestEnvironmentProvisioningGate(TestCase):
             aws_region="us-east-1", status=models.Environment.Status.DRAFT,
         )
 
-        transitioned = async_to_sync(environment_operation_gate.atransition_environment_status)(
+        transitioned = environment_job_service.transition_status(
             environment_id=environment.id,
             expected_statuses=(models.Environment.Status.DRAFT,),
             new_status=models.Environment.Status.PENDING,
@@ -87,7 +86,7 @@ class TestEnvironmentProvisioningGate(TestCase):
             aws_region="us-east-1", status=models.Environment.Status.READY,
         )
 
-        transitioned = async_to_sync(environment_operation_gate.atransition_environment_status)(
+        transitioned = environment_job_service.transition_status(
             environment_id=environment.id,
             expected_statuses=(models.Environment.Status.DRAFT,),
             new_status=models.Environment.Status.PENDING,

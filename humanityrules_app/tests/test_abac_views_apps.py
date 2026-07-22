@@ -45,7 +45,11 @@ class TestAppEndpoints(TestCase):
         )
 
         self.env = Environment.objects.create(
-            aws_account=self.aws_account, name="Staging", slug="staging", aws_region="us-east-1",
+            aws_account=self.aws_account,
+            name="Staging",
+            slug="staging",
+            aws_region="us-east-1",
+            status=Environment.Status.READY,
         )
         # A live, idle app: deployed with infra behind it, so teardown is offered.
         self.app = App.objects.create(

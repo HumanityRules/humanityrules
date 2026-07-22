@@ -3,7 +3,6 @@
 from io import StringIO
 from unittest.mock import patch
 
-from asgiref.sync import async_to_sync
 from django.core.management import call_command
 from django.db import IntegrityError, transaction
 from django.test import TestCase, override_settings
@@ -110,7 +109,7 @@ class TestSandboxAppNameCollision(TestCase):
         )
 
     def _claim(self, organization: models.Organization, slug: str) -> None:
-        async_to_sync(sandbox_service.aclaim_sandbox_app_slug)(
+        sandbox_service.claim_sandbox_app_slug(
             app_slug=slug,
             organization_id=organization.id,
             environment=self._sandbox_env(organization),
@@ -144,7 +143,7 @@ class TestSandboxAppNameCollision(TestCase):
         )
         # Conflicting slug exists in the sandbox, but this deploy targets a non-sandbox env:
         # no raise and no claim row is written.
-        async_to_sync(sandbox_service.aclaim_sandbox_app_slug)(
+        sandbox_service.claim_sandbox_app_slug(
             app_slug="demo",
             organization_id=org_b.id,
             environment=regular_env,
@@ -191,6 +190,8 @@ class TestSandboxTeardownGuard(TestCase):
     def test_sandbox_env_teardown_skips_shared_base_infra(self, mock_teardown) -> None:
         org = models.Organization.objects.create(name="Acme", slug="acme")
         env = models.Environment.objects.get(aws_account__organization=org, slug="sandbox")
+        env.status = models.Environment.Status.TEARING_DOWN
+        env.save(update_fields=["status", "updated_at"])
         ok = environment_teardown_executor.run_environment_teardown(environment_id=str(env.id))
         self.assertTrue(ok)
         mock_teardown.assert_not_called()
@@ -201,11 +202,13 @@ class TestSandboxTeardownGuard(TestCase):
         org = models.Organization.objects.create(name="Acme", slug="acme")
         env = models.Environment.objects.get(aws_account__organization=org, slug="sandbox")
         app = _make_app(org, "demo", env)
-        async_to_sync(sandbox_service.aclaim_sandbox_app_slug)(
+        sandbox_service.claim_sandbox_app_slug(
             app_slug="demo",
             organization_id=org.id,
             environment=env,
         )
+        env.status = models.Environment.Status.TEARING_DOWN
+        env.save(update_fields=["status", "updated_at"])
         self.assertTrue(models.SandboxSlugClaim.objects.filter(slug="demo").exists())
 
         # The purge helper hits AWS; stub it while recording that it runs before the slug release.
@@ -236,11 +239,13 @@ class TestSandboxTeardownGuard(TestCase):
         org = models.Organization.objects.create(name="Acme", slug="acme")
         env = models.Environment.objects.get(aws_account__organization=org, slug="sandbox")
         app = _make_app(org, "demo", env)
-        async_to_sync(sandbox_service.aclaim_sandbox_app_slug)(
+        sandbox_service.claim_sandbox_app_slug(
             app_slug="demo",
             organization_id=org.id,
             environment=env,
         )
+        env.status = models.Environment.Status.TEARING_DOWN
+        env.save(update_fields=["status", "updated_at"])
 
         with patch.object(
             environment_teardown_executor.app_remove_executor,

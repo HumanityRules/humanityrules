@@ -1,6 +1,7 @@
 """Tests for staff-only fleet redeploy and recovery actions against the App job model."""
 
 import uuid
+from unittest.mock import patch
 
 from django.test import TestCase
 
@@ -202,6 +203,17 @@ class TestFleetRedeployAll(TestCase):
 
         self.assertContains(response, "Queued 0 redeployments")
         self.assertContains(response, fleet_service.SKIP_APP_BUSY)
+
+    def test_per_ha_redeploy_reports_environment_that_becomes_not_ready_during_admission(self) -> None:
+        def reject_deploy(*, app: models.App, created_by: models.User) -> None:
+            models.Environment.objects.filter(id=app.environment_id).update(status=models.Environment.Status.TEARDOWN_PENDING)
+            raise fleet_service.app_job_service.AppJobAdmissionError("Environment is not ready")
+
+        with patch.object(fleet_service.app_job_service, "queue_deploy", side_effect=reject_deploy):
+            result = fleet_service.queue_redeploy(app_id=self.app.id, created_by=self.staff)
+
+        self.assertEqual(result.queued_count, 0)
+        self.assertEqual(result.skipped_counts, {fleet_service.SKIP_ENVIRONMENT_NOT_READY: 1})
 
     def test_per_ha_redeploy_button_is_hidden_when_ineligible(self) -> None:
         self.app.live_state = models.App.LiveState.TORN_DOWN

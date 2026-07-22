@@ -2,7 +2,6 @@
 
 from unittest.mock import patch
 
-from asgiref.sync import async_to_sync
 from django.test import TestCase, override_settings
 
 import humanityrules_app.models as models
@@ -196,14 +195,14 @@ class TestAppDeploymentExecutor(TestCase):
     def test_sandbox_slug_reservation_rejects_cross_org_slug(self) -> None:
         """A slug another org already holds in the shared sandbox is rejected by the slug
         reservation, before any App is created for this org. Every deploy path (template and
-        CLI) reserves via this same aclaim_sandbox_app_slug."""
+        CLI) reserves via this same claim_sandbox_app_slug."""
         self.aws_account.is_humr_sandbox = True
         self.aws_account.save(update_fields=["is_humr_sandbox"])
         other_org = models.Organization.objects.create(name="Other Sandbox Org", slug="other-sb")
         models.SandboxSlugClaim.objects.create(slug="freshslug", organization=other_org)
 
         with self.assertRaises(ValueError):
-            async_to_sync(sandbox_service.aclaim_sandbox_app_slug)(
+            sandbox_service.claim_sandbox_app_slug(
                 app_slug="freshslug",
                 organization_id=self.organization.id,
                 environment=self.environment,
