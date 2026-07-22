@@ -112,7 +112,8 @@ def _delete_environment_apps(environment: models.Environment) -> bool:
                     {"app_slug": app.slug, "message": message},
                 )
                 return False
-        sandbox_service.release_sandbox_app_slug(app_slug=app.slug, organization_id=app.organization_id)
+            sandbox_service.release_sandbox_app_slug(app_slug=app.slug, organization_id=app.organization_id)
+
         app.delete()
     return True
 
