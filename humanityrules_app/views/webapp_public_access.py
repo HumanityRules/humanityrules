@@ -98,7 +98,7 @@ def build_public_access_context(request: HttpRequest, app: App) -> dict[str, obj
 def webapp_public_access_new(request: HttpRequest, app_slug: str) -> HttpResponse:
     """Confirm page: the one place a webapp becomes public. Deep-link target."""
     if not request.htmx:
-        context = base.get_app_shell_context(request=request, current_page="workspaces")
+        context = base.get_app_shell_context(request=request, current_page="dashboard")
         query = request.META.get("QUERY_STRING", "")
         context["content_url"] = f"/apps/{app_slug}/public-access/new" + (f"?{query}" if query else "")
         return render(request, "humanityrules_app/app_shell.html", context=context)
@@ -112,7 +112,7 @@ def webapp_public_access_new(request: HttpRequest, app_slug: str) -> HttpRespons
 
     prefill_slug = request.GET.get("slug", "")
 
-    context = base.get_app_shell_context(request=request, current_page="workspaces")
+    context = base.get_app_shell_context(request=request, current_page="dashboard")
     context["app"] = app
     context["app_hostname"] = _app_hostname(app=app)
     context["prefill_slug"] = prefill_slug if _SLUG_RE.match(prefill_slug) else ""
@@ -186,7 +186,7 @@ def webapp_public_access_create(request: HttpRequest, app_slug: str) -> HttpResp
 def webapp_public_access_status(request: HttpRequest, app_slug: str, grant_id: UUID) -> HttpResponse:
     """Post-confirm landing: shows the public URL and polls until it answers."""
     if not request.htmx:
-        context = base.get_app_shell_context(request=request, current_page="workspaces")
+        context = base.get_app_shell_context(request=request, current_page="dashboard")
         context["content_url"] = f"/apps/{app_slug}/public-access/{grant_id}/"
         return render(request, "humanityrules_app/app_shell.html", context=context)
 
@@ -196,7 +196,7 @@ def webapp_public_access_status(request: HttpRequest, app_slug: str, grant_id: U
         return denied
     grant = get_object_or_404(WebappPublicGrant, id=grant_id, app=app)
 
-    context = base.get_app_shell_context(request=request, current_page="workspaces")
+    context = base.get_app_shell_context(request=request, current_page="dashboard")
     context["app"] = app
     context["grant"] = grant
     context["public_url"] = _public_url(grant=grant)

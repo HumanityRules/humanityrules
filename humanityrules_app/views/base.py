@@ -1,5 +1,7 @@
+from typing import Any
+
 from django.conf import settings as django_settings
-from django.http import HttpResponseForbidden
+from django.http import HttpRequest, HttpResponseForbidden
 from django.templatetags.static import static
 
 from ..models import OrganizationMembership
@@ -14,13 +16,13 @@ def require_org_admin(request):
     return HttpResponseForbidden("You do not have permission to access this page.")
 
 
-def get_app_shell_context(request, current_page):
+def get_app_shell_context(request: HttpRequest, current_page: str) -> dict[str, Any]:
     """
     Returns the common sidebar context used across all pages.
     
     Args:
         request: The HTTP request object (needed for user and session)
-        current_page: The name of the current page to mark as active (e.g., 'dashboard', 'workspaces')
+        current_page: The name of the current page to mark as active (e.g., 'dashboard', 'environments')
     """
     user = request.user
     current_org = user.current_organization
@@ -38,7 +40,6 @@ def get_app_shell_context(request, current_page):
     
     navigation_items = [
         {"name": "Dashboard", "url": "/dashboard/", "icon": "dashboard", "is_active": current_page == "dashboard"},
-        {"name": "Workspaces", "url": "/workspaces/", "icon": "workspaces", "is_active": current_page == "workspaces"},
         {"name": "Environments", "url": "/environments/", "icon": "environments", "is_active": current_page == "environments"},
         {"name": "Security", "url": "/security/hub/", "icon": "security", "is_active": current_page == "security"},
     ]
