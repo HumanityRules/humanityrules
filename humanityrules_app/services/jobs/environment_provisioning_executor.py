@@ -14,7 +14,7 @@ from humanityrules_app import models
 from humanityrules_app.services import infra_customer
 from humanityrules_app.services.infra_customer import cloudformation_utils
 
-from . import environment_operation_gate
+from . import environment_job_service
 from . import job_logging
 
 logger = logging.getLogger(__name__)
@@ -56,7 +56,7 @@ def run_provisioning(environment_id: str) -> bool:
     This is the main entry point called by the job worker.
     It orchestrates the full provisioning flow:
     1. Load environment and related models
-    2. Update status to PROVISIONING
+    2. Require the worker's PROVISIONING claim
     3. Execute CDK deployment (VPC + ECS cluster + shared ALB)
     4. Update environment status
 
@@ -91,16 +91,6 @@ def run_provisioning(environment_id: str) -> bool:
             "Starting provisioning for environment '%(environment_name)s' in account '%(account_name)s'",
             {"environment_name": environment.name, "account_name": aws_account.name},
         )
-
-        started = environment_operation_gate.transition_environment_status(
-            environment_id=environment.id,
-            expected_statuses=(models.Environment.Status.PROVISIONING,),
-            new_status=models.Environment.Status.PROVISIONING,
-            status_message="Provisioning started",
-        )
-        if not started:
-            logger.error("Environment %(environment_id)s provisioning claim was superseded", {"environment_id": environment_id})
-            return False
 
         try:
             # Get AWS session
@@ -154,7 +144,7 @@ def run_provisioning(environment_id: str) -> bool:
                 )
                 return True
 
-            environment_operation_gate.transition_environment_status(
+            environment_job_service.transition_status(
                 environment_id=environment.id,
                 expected_statuses=(models.Environment.Status.PROVISIONING,),
                 new_status=models.Environment.Status.ERROR,
@@ -170,7 +160,7 @@ def run_provisioning(environment_id: str) -> bool:
         except Exception as e:
             logger.exception("Provisioning error: %(error)s", {"error": str(e)})
 
-            environment_operation_gate.transition_environment_status(
+            environment_job_service.transition_status(
                 environment_id=environment.id,
                 expected_statuses=(models.Environment.Status.PROVISIONING,),
                 new_status=models.Environment.Status.ERROR,

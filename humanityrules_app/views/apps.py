@@ -4,7 +4,6 @@ from uuid import UUID
 
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
-from django.db import transaction
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
@@ -14,7 +13,6 @@ from humanityrules_app.models import App, DeploymentLog, DeploymentRecord, Envir
 from humanityrules_app.services import abac_service
 from humanityrules_app.services.cost import panel as cost_panel
 from humanityrules_app.services.jobs import app_job_service
-from humanityrules_app.services.jobs import environment_operation_gate
 
 from . import abac_view_checks
 from . import base
@@ -29,7 +27,11 @@ MAX_DEPLOYMENT_RECORDS = 30
 
 def _app_removable(app: App) -> bool:
     """An app can be removed only while idle with no infra possibly behind it."""
-    return app.job_status == App.JobStatus.IDLE and not app.may_have_infra
+    return (
+        app.environment.status == Environment.Status.READY
+        and app.job_status == App.JobStatus.IDLE
+        and not app.may_have_infra
+    )
 
 
 def _app_has_persistent_data(app: App) -> bool:
@@ -144,15 +146,10 @@ def app_deployment_teardown(request: HttpRequest, app_slug: str) -> HttpResponse
     if denied:
         return denied
 
-    with transaction.atomic():
-        locked_app = get_object_or_404(
-            App.objects.select_for_update(),
-            id=app.id,
-            organization=request.user.current_organization,
-        )
-        if locked_app.job_status != App.JobStatus.IDLE or not locked_app.may_have_infra:
-            return HttpResponse(status=422)
-        app_job_service.queue_teardown(app=locked_app, created_by=request.user)
+    try:
+        app_job_service.queue_teardown(app=app, created_by=request.user, label=None)
+    except app_job_service.AppJobAdmissionError:
+        return HttpResponse(status=422)
 
     context = build_app_detail_context(request=request, app=_get_app_for_user(request, app_slug))
     return render(request, "humanityrules_app/apps/app_detail.html", context=context)
@@ -260,15 +257,10 @@ def app_deployment_redeploy(request: HttpRequest, app_slug: str) -> HttpResponse
     if denied:
         return denied
 
-    with transaction.atomic():
-        locked_app = get_object_or_404(
-            App.objects.select_for_update().select_related("repository"),
-            id=app.id,
-            organization=request.user.current_organization,
-        )
-        if locked_app.job_status != App.JobStatus.IDLE:
-            return HttpResponse(status=422)
-        app_job_service.queue_deploy(app=locked_app, created_by=request.user)
+    try:
+        app_job_service.queue_deploy(app=app, created_by=request.user)
+    except app_job_service.AppJobAdmissionError:
+        return HttpResponse(status=422)
 
     context = build_app_detail_context(request, _get_app_for_user(request, app_slug))
     return render(request, "humanityrules_app/apps/app_detail.html", context=context)
@@ -404,25 +396,16 @@ def app_remove(request: HttpRequest, app_slug: str) -> HttpResponse:
     # the full-purge choice is mandatory, not a user checkbox.
     is_sandbox = app.environment.aws_account.is_humr_sandbox
     delete_all_data = is_sandbox or request.POST.get("delete_all_data") == "on"
-    with transaction.atomic():
-        locked_app = get_object_or_404(
-            App.objects.select_for_update().select_related("workspace"),
-            id=app.id,
-            organization=request.user.current_organization,
-        )
-        if not _app_removable(locked_app):
-            return HttpResponse(status=422)
-
-        environment = environment_operation_gate.lock_app_environment_for_removal(app_id=locked_app.id)
-        if environment.status == Environment.Status.TEARING_DOWN:
-            return HttpResponse(status=422)
-
+    try:
         app_job_service.queue_removal(
-            app=locked_app,
+            app=app,
             created_by=request.user,
             delete_all_data=delete_all_data,
             teardown_first=False,
+            label=None,
         )
+    except app_job_service.AppJobAdmissionError:
+        return HttpResponse(status=422)
 
     response = HttpResponse(status=200)
     response["HX-Redirect"] = reverse(

@@ -1,4 +1,4 @@
-"""Tests for environment teardown coordination against the App job model."""
+"""Tests for environment teardown admission against the App job model."""
 
 import uuid
 from io import StringIO
@@ -9,7 +9,8 @@ from django.urls import reverse
 
 from humanityrules_app import models
 from humanityrules_app.services import abac_service
-from humanityrules_app.services.jobs import environment_operation_gate
+from humanityrules_app.services.jobs import app_job_service
+from humanityrules_app.services.jobs import environment_job_service
 from humanityrules_app.services.jobs import job_worker
 
 
@@ -92,127 +93,97 @@ class TestJobWorkerEnvironmentCoordination(TestCase):
         self.assertIsNone(app_teardown)
         self.assertIsNone(permission_apply)
 
-    def test_environment_teardown_waits_for_a_running_deployment(self) -> None:
-        self._set_job_status(self.app, models.App.JobStatus.DEPLOYING)
-        self._set_environment_status(models.Environment.Status.TEARDOWN_PENDING)
+    def test_teardown_queue_rejects_each_unsettled_app_job(self) -> None:
+        unsettled_statuses = (
+            models.App.JobStatus.DEPLOY_PENDING,
+            models.App.JobStatus.DEPLOYING,
+            models.App.JobStatus.TEARDOWN_PENDING,
+            models.App.JobStatus.TEARING_DOWN,
+            models.App.JobStatus.REMOVAL_PENDING,
+            models.App.JobStatus.REMOVING,
+        )
+        for job_status in unsettled_statuses:
+            with self.subTest(job_status=job_status):
+                self._set_job_status(app=self.app, job_status=job_status)
+                with self.assertRaisesMessage(environment_job_service.EnvironmentJobAdmissionError, "unsettled job"):
+                    environment_job_service.queue_teardown(
+                        environment_id=self.environment.id,
+                        status_message="Teardown queued by test",
+                    )
+                self.environment.refresh_from_db()
+                self.assertEqual(self.environment.status, models.Environment.Status.READY)
 
-        first_claim = job_worker._claim_pending_environment_teardown()
-        self._set_job_status(self.app, models.App.JobStatus.IDLE)
-        second_claim = job_worker._claim_pending_environment_teardown()
+    def test_teardown_queue_rejects_running_permission_apply(self) -> None:
+        self._create_permission_request(app=self.app, status=models.AppPermissionRequest.Status.APPLYING)
 
-        self.assertIsNone(first_claim)
-        self.assertIsNotNone(second_claim)
-        self.assertEqual(second_claim.id, self.environment.id)
+        with self.assertRaisesMessage(environment_job_service.EnvironmentJobAdmissionError, "permissions update in progress"):
+            environment_job_service.queue_teardown(
+                environment_id=self.environment.id,
+                status_message="Teardown queued by test",
+            )
 
-    def test_environment_teardown_waits_for_a_running_permission_apply(self) -> None:
-        permission_request = self._create_permission_request(app=self.app, status=models.AppPermissionRequest.Status.APPLYING)
-        self._set_environment_status(models.Environment.Status.TEARDOWN_PENDING)
+        self.environment.refresh_from_db()
+        self.assertEqual(self.environment.status, models.Environment.Status.READY)
 
-        first_claim = job_worker._claim_pending_environment_teardown()
-        permission_request.status = models.AppPermissionRequest.Status.APPLIED
-        permission_request.save(update_fields=["status", "updated_at"])
-        second_claim = job_worker._claim_pending_environment_teardown()
+    def test_teardown_queue_transitions_a_clean_environment(self) -> None:
+        previous_status = environment_job_service.queue_teardown(
+            environment_id=self.environment.id,
+            status_message="Teardown queued by test",
+        )
 
-        self.assertIsNone(first_claim)
-        self.assertIsNotNone(second_claim)
+        self.environment.refresh_from_db()
+        self.assertEqual(previous_status, models.Environment.Status.READY)
+        self.assertEqual(self.environment.status, models.Environment.Status.TEARDOWN_PENDING)
+        self.assertEqual(self.environment.status_message, "Teardown queued by test")
 
-    def test_environment_teardown_can_claim_with_only_queued_app_jobs(self) -> None:
-        self._set_job_status(self.app, models.App.JobStatus.DEPLOY_PENDING)
-        self._create_permission_request(app=self.app, status=models.AppPermissionRequest.Status.APPROVED_PENDING_APPLY)
-        self._set_environment_status(models.Environment.Status.TEARDOWN_PENDING)
+    def test_teardown_queue_accepts_an_error_environment(self) -> None:
+        self._set_environment_status(models.Environment.Status.ERROR)
+
+        previous_status = environment_job_service.queue_teardown(
+            environment_id=self.environment.id,
+            status_message="Teardown queued by test",
+        )
+
+        self.environment.refresh_from_db()
+        self.assertEqual(previous_status, models.Environment.Status.ERROR)
+        self.assertEqual(self.environment.status, models.Environment.Status.TEARDOWN_PENDING)
+
+    def test_teardown_queue_rejects_provisioning(self) -> None:
+        self._set_environment_status(models.Environment.Status.PROVISIONING)
+
+        with self.assertRaisesMessage(environment_job_service.EnvironmentJobAdmissionError, "cannot be torn down"):
+            environment_job_service.queue_teardown(
+                environment_id=self.environment.id,
+                status_message="Teardown queued by test",
+            )
+
+    def test_environment_worker_claims_an_admitted_teardown(self) -> None:
+        environment_job_service.queue_teardown(
+            environment_id=self.environment.id,
+            status_message="Teardown queued by test",
+        )
 
         claimed = job_worker._claim_pending_environment_teardown()
 
         self.assertIsNotNone(claimed)
+        self.assertEqual(claimed.id, self.environment.id)
         self.assertEqual(claimed.status, models.Environment.Status.TEARING_DOWN)
+        self.assertEqual(claimed.status_message, "Claimed by worker")
 
-    def test_pending_app_removal_runs_before_environment_teardown(self) -> None:
-        app_id = self.app.id
-        self._set_job_status(self.app, models.App.JobStatus.REMOVAL_PENDING)
-        self._set_environment_status(models.Environment.Status.TEARDOWN_PENDING)
+    def test_environment_worker_claim_sets_provisioning_started_message(self) -> None:
+        self._set_environment_status(models.Environment.Status.PENDING)
 
-        environment_claim = job_worker._claim_pending_environment_teardown()
-        removal_claim = job_worker._claim_pending_app_removal(label="")
-        environment_claim_during_removal = job_worker._claim_pending_environment_teardown()
+        claimed = job_worker._claim_pending_environment_provisioning()
 
-        self.assertIsNone(environment_claim)
-        self.assertIsNotNone(removal_claim)
-        self.assertEqual(removal_claim.id, app_id)
-        self.assertEqual(removal_claim.job_status, models.App.JobStatus.REMOVING)
-        self.assertIsNone(environment_claim_during_removal)
-
-        # A completed removal deletes the app row; the env teardown can then claim.
-        self.app.delete()
-        environment_claim_after_removal = job_worker._claim_pending_environment_teardown()
-        self.assertIsNotNone(environment_claim_after_removal)
-
-    def test_app_removal_does_not_start_after_environment_teardown_claim(self) -> None:
-        self._set_job_status(self.app, models.App.JobStatus.REMOVAL_PENDING)
-        self._set_environment_status(models.Environment.Status.TEARING_DOWN)
-
-        removal_claim = job_worker._claim_pending_app_removal(label="")
-
-        self.assertIsNone(removal_claim)
-        self.app.refresh_from_db()
-        self.assertEqual(self.app.job_status, models.App.JobStatus.REMOVAL_PENDING)
-
-    def test_teardown_queue_supersedes_queued_app_work(self) -> None:
-        self._set_job_status(self.app, models.App.JobStatus.DEPLOY_PENDING)
-        self._create_permission_request(app=self.app, status=models.AppPermissionRequest.Status.APPROVED_PENDING_APPLY)
-
-        result = environment_operation_gate.queue_environment_teardown(
-            environment_id=self.environment.id,
-            status_message="Teardown queued by test",
-            force=False,
-        )
-
-        self.environment.refresh_from_db()
-        self.assertTrue(result.queued)
-        self.assertEqual(self.environment.status, models.Environment.Status.TEARDOWN_PENDING)
-
-    def test_teardown_queue_rejects_running_app_work(self) -> None:
-        self._set_job_status(self.app, models.App.JobStatus.DEPLOYING)
-
-        result = environment_operation_gate.queue_environment_teardown(
-            environment_id=self.environment.id,
-            status_message="Teardown queued by test",
-            force=False,
-        )
-
-        self.environment.refresh_from_db()
-        self.assertFalse(result.queued)
-        self.assertEqual(result.reason, environment_operation_gate.REASON_ACTIVE_APP_OPERATIONS)
-        self.assertEqual(self.environment.status, models.Environment.Status.READY)
-
-    def test_teardown_queue_transitions_a_clean_environment(self) -> None:
-        result = environment_operation_gate.queue_environment_teardown(
-            environment_id=self.environment.id,
-            status_message="Teardown queued by test",
-            force=False,
-        )
-
-        self.environment.refresh_from_db()
-        self.assertTrue(result.queued)
-        self.assertEqual(result.previous_status, models.Environment.Status.READY)
-        self.assertEqual(self.environment.status, models.Environment.Status.TEARDOWN_PENDING)
-        self.assertEqual(self.environment.status_message, "Teardown queued by test")
-
-    def test_teardown_queue_rejects_provisioning_without_force(self) -> None:
-        self._set_environment_status(models.Environment.Status.PROVISIONING)
-
-        result = environment_operation_gate.queue_environment_teardown(
-            environment_id=self.environment.id,
-            status_message="Teardown queued by test",
-            force=False,
-        )
-
-        self.assertFalse(result.queued)
-        self.assertEqual(result.reason, environment_operation_gate.REASON_NOT_TEARDOWNABLE)
+        self.assertIsNotNone(claimed)
+        self.assertEqual(claimed.id, self.environment.id)
+        self.assertEqual(claimed.status, models.Environment.Status.PROVISIONING)
+        self.assertEqual(claimed.status_message, "Provisioning started")
 
     def test_conditional_status_transition_preserves_teardown(self) -> None:
         self._set_environment_status(models.Environment.Status.TEARDOWN_PENDING)
 
-        transitioned = environment_operation_gate.transition_environment_status(
+        transitioned = environment_job_service.transition_status(
             environment_id=self.environment.id,
             expected_statuses=(models.Environment.Status.ERROR,),
             new_status=models.Environment.Status.PENDING,
@@ -223,58 +194,8 @@ class TestJobWorkerEnvironmentCoordination(TestCase):
         self.assertFalse(transitioned)
         self.assertEqual(self.environment.status, models.Environment.Status.TEARDOWN_PENDING)
 
-    def test_force_teardown_recovers_stranded_environment_work(self) -> None:
-        self._set_job_status(self.app, models.App.JobStatus.DEPLOYING)
-        permission_request = self._create_permission_request(app=self.app, status=models.AppPermissionRequest.Status.APPLYING)
-        self._set_environment_status(models.Environment.Status.PROVISIONING)
-        stdout = StringIO()
-        stderr = StringIO()
-
-        call_command(
-            "humr_control",
-            "teardown-env",
-            "--slug",
-            self.environment.slug,
-            "--aws-account",
-            self.aws_account.name,
-            "--force",
-            stdout=stdout,
-            stderr=stderr,
-        )
-
-        self.environment.refresh_from_db()
-        self.app.refresh_from_db()
-        permission_request.refresh_from_db()
-        self.assertEqual(self.environment.status, models.Environment.Status.TEARDOWN_PENDING)
-        self.assertEqual(self.app.job_status, models.App.JobStatus.IDLE)
-        self.assertEqual(self.app.last_attempt_error, environment_operation_gate.FORCED_FAILURE_MESSAGE)
-        self.assertEqual(permission_request.status, models.AppPermissionRequest.Status.FAILED)
-        self.assertIn("Force recovery: yes", stdout.getvalue())
-        self.assertEqual(stderr.getvalue(), "")
-
-    def test_force_teardown_does_not_bypass_running_app_removal(self) -> None:
-        self._set_job_status(self.app, models.App.JobStatus.REMOVING)
-        stdout = StringIO()
-        stderr = StringIO()
-
-        call_command(
-            "humr_control",
-            "teardown-env",
-            "--slug",
-            self.environment.slug,
-            "--aws-account",
-            self.aws_account.name,
-            "--force",
-            stdout=stdout,
-            stderr=stderr,
-        )
-
-        self.environment.refresh_from_db()
-        self.assertEqual(self.environment.status, models.Environment.Status.READY)
-        self.assertIn("cannot skip required app cleanup", stderr.getvalue())
-
     def test_management_command_teardown_rejects_running_app_work(self) -> None:
-        self._set_job_status(self.app, models.App.JobStatus.DEPLOYING)
+        self._set_job_status(app=self.app, job_status=models.App.JobStatus.DEPLOYING)
         stdout = StringIO()
         stderr = StringIO()
 
@@ -291,10 +212,10 @@ class TestJobWorkerEnvironmentCoordination(TestCase):
 
         self.environment.refresh_from_db()
         self.assertEqual(self.environment.status, models.Environment.Status.READY)
-        self.assertIn("while an app deployment", stderr.getvalue())
+        self.assertIn("unsettled job", stderr.getvalue())
 
     def test_web_teardown_rejects_running_app_work(self) -> None:
-        self._set_job_status(self.app, models.App.JobStatus.DEPLOYING)
+        self._set_job_status(app=self.app, job_status=models.App.JobStatus.DEPLOYING)
         self.client.force_login(self.user)
 
         response = self.client.post(reverse("environment_teardown", kwargs={"environment_id": self.environment.id}))
@@ -303,22 +224,21 @@ class TestJobWorkerEnvironmentCoordination(TestCase):
         self.assertEqual(response.status_code, 422)
         self.assertEqual(self.environment.status, models.Environment.Status.READY)
 
-    def test_app_removal_queue_is_allowed_while_environment_teardown_is_pending(self) -> None:
+    def test_app_removal_queue_is_rejected_after_environment_teardown_is_pending(self) -> None:
         self._set_environment_status(models.Environment.Status.TEARDOWN_PENDING)
         self.client.force_login(self.user)
 
         response = self.client.post(reverse("app_remove", kwargs={"app_slug": self.app.slug}))
 
-        self.assertEqual(response.status_code, 200)
-        self.app.refresh_from_db()
-        self.assertEqual(self.app.job_status, models.App.JobStatus.REMOVAL_PENDING)
-
-    def test_app_removal_queue_is_rejected_after_environment_teardown_starts(self) -> None:
-        self._set_environment_status(models.Environment.Status.TEARING_DOWN)
-        self.client.force_login(self.user)
-
-        response = self.client.post(reverse("app_remove", kwargs={"app_slug": self.app.slug}))
-
         self.assertEqual(response.status_code, 422)
+        self.app.refresh_from_db()
+        self.assertEqual(self.app.job_status, models.App.JobStatus.IDLE)
+
+    def test_direct_app_deploy_is_rejected_after_environment_teardown_is_pending(self) -> None:
+        self._set_environment_status(models.Environment.Status.TEARDOWN_PENDING)
+
+        with self.assertRaisesMessage(app_job_service.AppJobAdmissionError, "not ready for app operations"):
+            app_job_service.queue_deploy(app=self.app, created_by=self.user)
+
         self.app.refresh_from_db()
         self.assertEqual(self.app.job_status, models.App.JobStatus.IDLE)

@@ -70,39 +70,34 @@ def _sandbox_slug_taken_message(app_slug: str) -> str:
     )
 
 
-async def aclaim_sandbox_app_slug(app_slug: str, organization_id: uuid.UUID, environment: Environment) -> None:
-    """Reserve app_slug in the shared sandbox; raise ValueError if another org already holds it.
+def claim_sandbox_app_slug(app_slug: str, organization_id: uuid.UUID, environment: Environment) -> None:
+    """Reserve an app slug in the shared sandbox; reject claims held by another organization.
 
-    Two layers, because the slug is one global namespace across every org's sandbox. First a
-    friendly pre-check against existing apps — it produces a helpful message in the common
-    case and covers apps that predate the claim table (no backfill needed). Then an atomic
-    SandboxSlugClaim row whose UNIQUE(slug) closes the check-then-create race that two concurrent
-    first-time deploys (neither with a committed App yet) would otherwise slip through.
+    Sandbox app slugs form one global namespace across organizations. The App pre-check gives a
+    useful error for the common case and covers Apps created before SandboxSlugClaim existed. The
+    claim table's unique slug constraint closes the race between concurrent first-time creates.
 
-    No-op outside the shared sandbox — dedicated customer accounts have a private AWS account per
-    org and may reuse a slug across orgs. Released on app removal (see release_sandbox_app_slug).
+    This is a no-op for customer environments, where organizations have separate AWS accounts.
+    App removal releases the claim through release_sandbox_app_slug.
     """
-    is_sandbox = await AWSAccount.objects.filter(
-        id=environment.aws_account_id, is_humr_sandbox=True,
-    ).aexists()
-    if not is_sandbox:
+    if not environment.aws_account.is_humr_sandbox:
         return
-    conflict = await (
+    conflict = (
         App.objects
         .filter(environment__aws_account__is_humr_sandbox=True, slug=app_slug)
         .exclude(organization_id=organization_id)
-        .aexists()
+        .exists()
     )
     if conflict:
-        raise ValueError(_sandbox_slug_taken_message(app_slug))
-    # aget_or_create absorbs the racing INSERT: the loser's UNIQUE(slug) violation is caught
-    # internally and re-fetched, surfacing here as created=False with the winner's org.
-    claim, created = await SandboxSlugClaim.objects.aget_or_create(
+        raise ValueError(_sandbox_slug_taken_message(app_slug=app_slug))
+    # get_or_create catches a racing unique-constraint failure and re-fetches the winner,
+    # which surfaces here as created=False with the winning organization's claim.
+    claim, created = SandboxSlugClaim.objects.get_or_create(
         slug=app_slug,
         defaults={"organization_id": organization_id},
     )
     if not created and claim.organization_id != organization_id:
-        raise ValueError(_sandbox_slug_taken_message(app_slug))
+        raise ValueError(_sandbox_slug_taken_message(app_slug=app_slug))
 
 
 def release_sandbox_app_slug(app_slug: str, organization_id: uuid.UUID) -> None:
