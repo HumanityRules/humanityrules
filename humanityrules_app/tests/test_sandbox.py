@@ -48,15 +48,6 @@ def _make_app(organization: models.Organization, slug: str, environment: models.
     )
 
 
-def _make_deployment(app: models.App) -> models.Deployment:
-    return models.Deployment.objects.create(
-        app=app,
-        git_ref="main",
-        image_tag=f"{app.slug}-x",
-        status=models.Deployment.Status.SUCCEEDED,
-    )
-
-
 @override_settings(**SANDBOX_SETTINGS)
 class TestSandboxProvisioning(TestCase):
     def test_org_creation_provisions_connected_sandbox_account_and_ready_env(self) -> None:
@@ -128,24 +119,21 @@ class TestSandboxAppNameCollision(TestCase):
     def test_conflicting_slug_from_other_org_is_rejected(self) -> None:
         org_a = models.Organization.objects.create(name="Org A", slug="org-a")
         org_b = models.Organization.objects.create(name="Org B", slug="org-b")
-        app_a = _make_app(org_a, "demo", self._sandbox_env(org_a))
-        # Org A claims "demo" by having a committed deployment in its sandbox env.
-        _make_deployment(app_a)
+        _make_app(org_a, "demo", self._sandbox_env(org_a))
+        # Org A holds "demo" by owning a committed App in its sandbox env.
         with self.assertRaises(ValueError):
             self._claim(org_b, "demo")
 
     def test_same_org_redeploy_is_allowed(self) -> None:
         org_a = models.Organization.objects.create(name="Org A", slug="org-a")
-        app_a = _make_app(org_a, "demo", self._sandbox_env(org_a))
-        _make_deployment(app_a)
-        # No raise: the only conflicting deployment belongs to the same org.
+        _make_app(org_a, "demo", self._sandbox_env(org_a))
+        # No raise: the only conflicting app belongs to the same org.
         self._claim(org_a, "demo")
 
     def test_non_sandbox_env_skips_check(self) -> None:
         org_a = models.Organization.objects.create(name="Org A", slug="org-a")
         org_b = models.Organization.objects.create(name="Org B", slug="org-b")
-        app_a = _make_app(org_a, "demo", self._sandbox_env(org_a))
-        _make_deployment(app_a)
+        _make_app(org_a, "demo", self._sandbox_env(org_a))
         regular_account = models.AWSAccount.objects.create(organization=org_b, name="Own AWS")
         regular_env = models.Environment.objects.create(
             aws_account=regular_account,
@@ -170,12 +158,12 @@ class TestSandboxAppNameCollision(TestCase):
 
     def test_claim_blocks_other_org_before_any_deployment_exists(self) -> None:
         # The race the claim row exists to close: org A has reserved "demo" but committed no
-        # Deployment yet, so the friendly Deployment pre-check passes — only the UNIQUE(slug)
+        # App yet, so the friendly App pre-check passes — only the UNIQUE(slug)
         # row stops org B from also taking it.
         org_a = models.Organization.objects.create(name="Org A", slug="org-a")
         org_b = models.Organization.objects.create(name="Org B", slug="org-b")
         self._claim(org_a, "demo")
-        self.assertFalse(models.Deployment.objects.filter(app__slug="demo").exists())
+        self.assertFalse(models.App.objects.filter(slug="demo").exists())
         with self.assertRaises(ValueError):
             self._claim(org_b, "demo")
 
@@ -281,10 +269,10 @@ class TestSandboxRemovalForcesDataPurge(TestCase):
             stdout=StringIO(), stderr=StringIO(),
         )
 
-        job = models.AppRemovalJob.objects.get(app_slug_snapshot="demo")
-        self.assertTrue(job.delete_secrets)
-        self.assertTrue(job.delete_persistent_data)
-        self.assertTrue(job.delete_policies)
+        app = models.App.objects.get(slug="demo")
+        self.assertEqual(app.job_status, models.App.JobStatus.REMOVAL_PENDING)
+        self.assertTrue(app.removal_delete_all_data)
+        self.assertTrue(app.removal_teardown_first)
 
 
 @override_settings(**SANDBOX_SETTINGS)
@@ -365,6 +353,6 @@ class TestSandboxEnvironmentTeardownUI(TestCase):
         self.client.force_login(self.admin_user)
         response = self.client.post(reverse("app_remove", kwargs={"app_slug": "demo"}), **HTMX)
         self.assertEqual(response.status_code, 200)
-        job = models.AppRemovalJob.objects.get(app_slug_snapshot="demo")
-        self.assertTrue(job.delete_secrets)
-        self.assertTrue(job.delete_policies)
+        app = models.App.objects.get(slug="demo")
+        self.assertEqual(app.job_status, models.App.JobStatus.REMOVAL_PENDING)
+        self.assertTrue(app.removal_delete_all_data)

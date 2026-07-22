@@ -8,8 +8,9 @@
 - **Organization** — Top-level tenant. All resources, users, policies, and integrations are scoped to an organization.
 - **Workspace** — Governance container for Apps. Used for access-control grouping. A "Default" workspace is auto-created with every new Organization.
 - **Repository** — A Git repository connected to an organization via GitHub App integration.
-- **App** — Identity, build, and runtime configuration for a deployable application. Belongs to a Workspace, deploys to exactly one Environment, and sources code from a Repository. Owns runtime configuration: cpu, memory, compute mode, per-container env vars and secrets.
-- **Deployment** — An execution record for one attempt to deploy an App. Tracks build, deploy, and teardown lifecycle.
+- **App** — Identity, build, runtime configuration, **and live deployment state** for a deployable application. Belongs to a Workspace, deploys to exactly one Environment, and sources code from a Repository. Owns runtime configuration (cpu, memory, compute mode, per-container env vars and secrets) and the single in-flight job plus the last-known live state (`job_status`, `live_state`, `service_url`, …).
+- **DeploymentRecord** — An append-only audit event for one App job attempt (deploy, teardown, or removal). Records the trail; never read operationally.
+- **DeploymentLog** — Log lines produced by one App job attempt, keyed by `(app, attempt_id)`.
 - **Environment** — Deployment target with its own VPC, ECS cluster, and shared ALB. Scoped to an AWS Account. Multiple Workspaces can deploy Apps to the same Environment. Apps live and die with their Environment: tearing down an Environment deletes its Apps.
 - **AppPermissions** — The last-applied IAM policy baseline for an App.
 - **AppPermissionRequest** — A request to modify IAM task-role policies for a deployed App, with approval workflow.
@@ -21,9 +22,9 @@
 - Organization owns AWS Accounts, Git integrations, Workspaces, and ABAC configuration.
 - AWS Account has Environments (shared infrastructure: VPC, ECS cluster, shared ALB).
 - Workspace contains definitions (Apps) — the "what" to deploy.
-- App sources code from a Repository, defines identity + build + runtime config, and points at the one Environment it deploys to.
+- App sources code from a Repository, defines identity + build + runtime config, and points at the one Environment it deploys to. It also carries its own runtime state: the one in-flight job (`job_status`), what is actually running (`live_state`), and the outputs of the last successful deploy.
 - Environment is where things run (AWS account + region + VPC + ECS cluster + shared ALB) — the "where."
-- Deployment is an execution record for one attempt to deploy an App.
+- DeploymentRecord/DeploymentLog are the append-only audit trail and log lines for App job attempts, correlated by `attempt_id`.
 - Multiple Workspaces can deploy to the same Environment, sharing VPC and cluster while having isolated app resources (ECR, ECS service, secrets).
 - ABAC controls who can do what: identity attributes on users are matched against resource tags on Workspaces/Environments/Apps via Policies.
 - AppPermissionRequests manage the IAM policies attached to an App's ECS task role, with a draft → approve → apply workflow.
@@ -40,7 +41,8 @@ Organization
 │   └── Repositories
 ├── Workspaces
 │   └── Apps → Repository (source), Environment (target)
-│       ├── Deployments
+│       ├── DeploymentRecords (audit events)
+│       ├── DeploymentLogs (job log lines)
 │       ├── AppPermissions
 │       └── AppPermissionRequests
 └── ABAC
@@ -130,7 +132,6 @@ Identity, build, and runtime configuration. Deploys to exactly one Environment, 
 - **environment** — FK to Environment (PROTECT; the app is deleted when its environment is torn down)
 - **repository** — FK to Repository (required; the build branch is the repository's default_branch)
 - **name, slug** — Display name and URL-safe identifier; the slug is also the app's hostname label
-- **app_type** — web / worker / scheduled
 - **build_strategy** — dockerfile / nixpacks / buildpack
 - **repo_subpath** — Subdirectory within repository (for monorepos)
 - **dockerfile_path** — Path to Dockerfile (if using dockerfile strategy)
@@ -143,19 +144,35 @@ Identity, build, and runtime configuration. Deploys to exactly one Environment, 
 - **containers** — Per-container materialized runtime values (env vars + secrets), one entry per template container
 - Unique constraint: (organization, slug)
 
-### Deployment
-An execution record for one attempt to deploy an App.
-- **app** — FK to App
-- **git_ref** — Branch, tag, or commit SHA
-- **git_commit_sha** — Resolved commit SHA
-- **image_tag** — Docker image tag (generated: `{app_slug}-{short_ref}-{timestamp}`)
-- **image_uri** — Full ECR image URI (set after push)
-- **status** — pending / deploying / succeeded / failed / teardown_pending / tearing_down / torn_down
-- **service_url** — URL where the deployed service is accessible
-- **alb_dns** — ALB DNS name
-- **started_at, completed_at** — Timing
+The App row also carries all runtime deployment state (there is no separate Deployment row):
+- **job_status** — The single in-flight operation: idle / deploy_pending / deploying / teardown_pending / tearing_down / removal_pending / removing. The job worker claims the `*_pending` values; executors return the row to `idle` when the attempt settles. `job_in_flight` = anything but idle; `is_pending_removal` = removal_pending/removing.
+- **live_state** — What is actually running in AWS: not_deployed / deployed / torn_down. Written only at deploy/teardown **success**, so a failed attempt never clobbers it.
+- **may_have_infra** — A deploy attempt (even a failed one) may have created AWS resources. Set when a deploy is claimed, cleared only on teardown success. Gates whether teardown is offered and blocks removal (unless removal tears down first).
+- **service_url, alb_dns, last_deployed_at** — Live-deploy outputs, written only at deploy success and cleared on teardown success.
+- **last_attempt_id** — Correlation id shared by the current/latest attempt's DeploymentRecord events and DeploymentLog lines. Kept after the attempt settles; selects the log tab's content and anchors the failure banner.
+- **last_attempt_error** — Failure message of the latest attempt; empty when it succeeded or none ran. Drives `display_status` and the failure banner.
+- **removal_delete_all_data, removal_teardown_first** — Removal-job inputs, set when removal is queued.
+- **claimed_by_run** — FK to JobWorkerRun that claimed the in-flight job (liveness input for stale-job detection).
+- **display_status / display_status_label** — Derived UI pill vocabulary folding job_status, live_state, and last error (pending / deploying / … / succeeded / failed / torn_down / removing / "").
 
-Status lifecycle: pending → deploying → succeeded / failed. Teardown: teardown_pending → tearing_down → torn_down / failed.
+All of these transitions go through `services/jobs/app_job_service.py` (queue_deploy / queue_teardown / queue_removal / settle_deploy_success / settle_teardown_success / settle_failure), which writes the App fields and the paired DeploymentRecord event together.
+
+### DeploymentRecord
+Append-only audit event for one App job attempt. Insert-only; nothing operational reads this table (App fields are the runtime truth).
+- **app** — FK to App
+- **attempt_id** — Correlation id; rows sharing it describe one attempt (matches `App.last_attempt_id` for the latest attempt)
+- **event_type** — deploy_started / deploy_succeeded / deploy_failed / teardown_started / teardown_succeeded / teardown_failed / removal_started / removal_failed (no removal_succeeded — a successful removal cascade-deletes the App row and its events)
+- **git_ref** — Branch deployed by this attempt (deploy events only)
+- **error** — Failure message (failure events only)
+- **created_by** — FK to User (nullable)
+
+### DeploymentLog
+Log lines from one App job attempt, keyed by `(app, attempt_id)`. The app-detail log tab selects `attempt_id = app.last_attempt_id`.
+- **app** — FK to App
+- **attempt_id** — Correlation id (matches DeploymentRecord / `App.last_attempt_id`)
+- **source** — app / cdk / docker / system
+- **level** — debug / info / error
+- **message, details** — Rendered line plus structured context
 
 
 ## ABAC Authorization System
@@ -242,21 +259,21 @@ Workflow: The user builds a draft in the permissions editor → user approves �
 5. On failure: status → error
 
 ### Deployment Flow
-1. Deploying from a template creates the App (with its environment and materialized runtime config) and a Deployment record (status: pending)
-2. Job worker claims pending deployments once the app's environment is READY, transitions to deploying
-3. Executor clones repository, builds AppConfig from the App + template, deploys via CDK
+1. Deploying from a template creates the App (with its environment and materialized runtime config); queueing a deploy opens an attempt (`job_status` → deploy_pending, fresh `last_attempt_id`, deploy_started event)
+2. Job worker claims deploy_pending apps once the app's environment is READY: `job_status` → deploying, `may_have_infra` → True, `claimed_by_run` stamped
+3. Executor clones repository, builds AppConfig from the App + template, deploys via CDK (image_tag is minted per attempt inside the executor; git_ref is the repository's default branch)
 4. CDK creates/updates: ECR repository, ECS task definition, ECS service, ALB target group, and listener rules
-5. On success: deployment status → succeeded, service_url populated
-6. On failure: deployment → failed
+5. On success (`settle_deploy_success`): `job_status` → idle, `live_state` → deployed, `service_url`/`alb_dns`/`last_deployed_at` populated, deploy_succeeded event
+6. On failure (`settle_failure`): `job_status` → idle, `last_attempt_error` set, deploy_failed event — `live_state`/`service_url` are left untouched, so a failed redeploy of a live app keeps serving
 
 ### Hostname Resolution
 - The app serves at `https://{app_slug}.{hosted_zone}` when its environment has a hosted zone
 - At app creation, a slug whose label an existing app already holds on the same hosted zone is rejected
 
 ### Teardown Flows
-- **App teardown:** Deployment → teardown_pending → tearing_down → torn_down. CDK deletes app stacks. The App row survives, still pointing at its environment, and can redeploy.
-- **App removal:** An AppRemovalJob tears down the live deployment (when teardown_first), optionally cleans persistent data and secrets, releases the sandbox slug claim, and deletes the App row (cascading deployments, permissions, logs, tags).
-- **Environment teardown:** All deployments torn down first (sequentially, stop on failure), then cluster/VPC CloudFormation stacks deleted, then the environment's App rows deleted (releasing sandbox slug claims), then the environment record deleted from database.
+- **App teardown:** `job_status` teardown_pending → tearing_down; CDK deletes app stacks. On success (`settle_teardown_success`): `job_status` → idle, `live_state` → torn_down, `may_have_infra` cleared, `service_url`/`alb_dns` cleared. The App row survives, still pointing at its environment, and can redeploy.
+- **App removal:** Queued via `app_job_service.queue_removal`, which records the removal inputs on the App (`removal_delete_all_data`, `removal_teardown_first`) and moves `job_status` → removal_pending → removing. The removal executor tears down live infra inline when `removal_teardown_first` (and refuses while `may_have_infra` is set otherwise), optionally cleans persistent data and secrets, releases the sandbox slug claim, and deletes the App row (cascading DeploymentRecords, DeploymentLogs, permissions, tags). A failed removal settles back to idle and is retryable. There is no removal_succeeded event — success deletes the row.
+- **Environment teardown:** All apps torn down first (sequentially, stop on failure), then cluster/VPC CloudFormation stacks deleted, then the environment's App rows deleted (releasing sandbox slug claims), then the environment record deleted from database.
 
 ### Permissions Apply Flow
 1. User approves AppPermissionRequest → status: approved_pending_apply
@@ -266,7 +283,7 @@ Workflow: The user builds a draft in the permissions editor → user approves �
 5. On failure: request → failed
 
 ### Job Worker
-A polling-based background worker that claims pending jobs using `SELECT ... FOR UPDATE SKIP LOCKED` and spawns threads for execution. Handles five job types: environment provisioning, app deployment, app teardown, environment teardown, permissions apply.
+A polling-based background worker that claims pending jobs using `SELECT ... FOR UPDATE SKIP LOCKED` and spawns threads for execution. App jobs are claimed by `App.job_status` (one in-flight job per app by construction — the single field makes overlap impossible). Handles environment provisioning, app deployment, app teardown, app removal, environment teardown, permissions apply, and cost refresh. A stale-job reaper settles apps abandoned in an executing status (`deploying` / `tearing_down` / `removing`) back to idle via `settle_failure` when their owning worker run died or they stopped making progress; claimable (`*_pending`) statuses are left for a new worker to pick up.
 
 ### Signal-Driven Auto-Creation
 - Organization created → "Default" workspace auto-created
