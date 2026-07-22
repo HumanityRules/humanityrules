@@ -35,7 +35,6 @@ from humanityrules_app.models import (
     AWSAccount,
     Environment,
     EnvironmentBearerToken,
-    Repository,
     ResourceTag,
     User,
     Workspace,
@@ -201,28 +200,13 @@ class Command(BaseCommand):
             raise CommandError(f"No Workspace slug={workspace_slug!r} in org {org.name!r}.")
 
         primary = self._primary_build_container(template=template)
-        clone_url = f"humr-template://{primary['source_repo_path']}"
-        repo, _created = Repository.objects.get_or_create(
-            organization=org,
-            full_name=f"template/{template.slug}",
-            defaults={
-                "provider": Repository.Provider.LOCAL,
-                "integration": None,
-                "name": template.name,
-                "clone_url": clone_url,
-                "default_branch": "main",
-            },
-        )
         app = App.objects.create(
             organization=org,
             workspace=workspace,
             environment=environment,
-            repository=repo,
             source_template=template,
             name=app_slug.replace("-", " ").title(),
             slug=app_slug,
-            build_strategy=App.BuildStrategy.DOCKERFILE,
-            dockerfile_path=primary.get("dockerfile_path", ""),
             container_port=primary["container_port"],
             health_check_path=primary.get("health_check_path", ""),
             health_check_command=primary.get("health_check_command", ""),
@@ -244,12 +228,12 @@ class Command(BaseCommand):
         return app
 
     def _primary_build_container(self, template: AppTemplate) -> dict:
-        """Return the template's dockerfile-built app container (not the policy proxy)."""
+        """Return the template's app container (not the policy proxy)."""
         target_name = template.alb_target_container
         target = next((c for c in template.containers if c["name"] == target_name), None)
         if target is None:
             raise CommandError(f"Template {template.slug!r} has no alb_target_container {target_name!r}.")
-        if target["image_source"] == "policy_proxy":
+        if target.get("role") == "policy_proxy":
             upstream = target.get("upstream_container")
             if not upstream:
                 raise CommandError(f"Template {template.slug!r} policy proxy has no upstream_container.")

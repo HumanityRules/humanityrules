@@ -759,7 +759,7 @@ def create_default_app_policy(app: App) -> None:
     )
 
     template = app.source_template
-    if template and any(c.get("image_source") == "policy_proxy" for c in (template.containers or [])):
+    if template and any(c.get("role") == "policy_proxy" for c in (template.containers or [])):
         return
 
     # Create open-access policy for this app

@@ -1,8 +1,7 @@
 """
 Deploy an application from an AppTemplate.
 
-Creates the Repository + App records and queues the deploy attempt for the
-job worker.
+Creates the App record and queues the deploy attempt for the job worker.
 """
 
 import logging
@@ -99,14 +98,14 @@ def _alb_target_container(template: models.AppTemplate) -> dict:
 
 
 def _primary_build_container(template: models.AppTemplate) -> dict:
-    """Return the template container that the App row's identity/build fields describe.
+    """Return the template container that the App row's identity fields describe.
 
     Normally the ALB target, except when a policy proxy fronts the task: then
     the ALB target is the platform-owned proxy and the real primary is its
-    upstream (the dockerfile-built app container).
+    upstream (the app container).
     """
     target = _alb_target_container(template)
-    if target["image_source"] != "policy_proxy":
+    if target.get("role") != "policy_proxy":
         return target
     upstream = target.get("upstream_container")
     if not upstream:
@@ -169,21 +168,14 @@ def deploy_from_template(
     compute_mode: str,
     label: str,
 ) -> models.App:
-    """Create Repository + App from a template and queue its first deploy attempt."""
+    """Create an App from a template and queue its first deploy attempt."""
     app_slugs.require_valid_app_hostname_label(value=app_slug)
 
-    # The App row still carries identity/build fields for a single canonical
-    # container — the ALB-target one (for multi-container templates) or the
-    # sole container (for single-container templates). The rest of the
-    # container spec lives on the template and is interpreted at deploy time.
+    # The App row still carries identity fields (port, health checks) for a
+    # single canonical container — the ALB-target one, or the policy proxy's
+    # upstream. The rest of the container spec lives on the template and is
+    # interpreted at deploy time.
     primary = _primary_build_container(template)
-    if primary["image_source"] != "dockerfile":
-        raise ValueError(
-            f"Template '{template.slug}' primary build container '{primary['name']}' must be "
-            f"image_source=dockerfile; got {primary['image_source']}"
-        )
-
-    clone_url = f"humr-template://{primary['source_repo_path']}"
 
     # Persist the org's stable LLM preset name; the Hermes container expands it
     # into concrete provider/model settings during startup. Explicit caller
@@ -214,27 +206,13 @@ def deploy_from_template(
             organization_id=organization.id,
             environment=locked_environment,
         )
-        repo, _created = models.Repository.objects.get_or_create(
-            organization=organization,
-            full_name=f"template/{template.slug}",
-            defaults={
-                "provider": models.Repository.Provider.LOCAL,
-                "integration": None,
-                "name": template.name,
-                "clone_url": clone_url,
-                "default_branch": "main",
-            },
-        )
         app = models.App.objects.create(
             organization=organization,
             workspace=workspace,
             environment=locked_environment,
-            repository=repo,
             source_template=template,
             name=app_name,
             slug=app_slug,
-            build_strategy=models.App.BuildStrategy.DOCKERFILE,
-            dockerfile_path=primary.get("dockerfile_path", ""),
             container_port=primary["container_port"],
             health_check_path=primary.get("health_check_path", ""),
             health_check_command=primary.get("health_check_command", ""),

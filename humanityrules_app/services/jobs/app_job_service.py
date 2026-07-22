@@ -31,7 +31,7 @@ class AppJobAdmissionError(ValueError):
 def _open_attempt(app: models.App, job_status: str) -> None:
     """Assign a fresh attempt id and move the app into `job_status`."""
     app.job_status = job_status
-    app.last_attempt_id = uuid.uuid7()
+    app.last_attempt_id = uuid.uuid7() 
     app.last_attempt_error = ""
     app.save(update_fields=["job_status", "last_attempt_id", "last_attempt_error", "updated_at"])
 
@@ -46,7 +46,6 @@ def _lock_app_for_admission(app: models.App) -> models.App:
     return (
         models.App.objects
         .select_for_update(of=("self",))
-        .select_related("repository")
         .get(id=app.id, environment_id=environment.id)
     )
 
@@ -67,7 +66,6 @@ def queue_deploy(app: models.App, created_by: models.User | None) -> models.App:
             app=locked_app,
             attempt_id=locked_app.last_attempt_id,
             event_type=models.DeploymentRecord.EventType.DEPLOY_STARTED,
-            git_ref=locked_app.repository.default_branch,
             created_by=created_by,
         )
     return locked_app
@@ -123,8 +121,8 @@ def queue_removal(
     return locked_app
 
 
-def settle_deploy_success(app: models.App, service_url: str, alb_dns: str) -> None:
-    """Conclude a deploy attempt as succeeded: live outputs + IDLE + event."""
+def settle_deploy_success(app: models.App, service_url: str, alb_dns: str, image_hashes: dict[str, str]) -> None:
+    """Conclude a deploy attempt as succeeded: live outputs + IDLE + event stamped with the deployed image versions."""
     app.job_status = models.App.JobStatus.IDLE
     app.live_state = models.App.LiveState.DEPLOYED
     app.service_url = service_url
@@ -139,6 +137,7 @@ def settle_deploy_success(app: models.App, service_url: str, alb_dns: str) -> No
         app=app,
         attempt_id=app.last_attempt_id,
         event_type=models.DeploymentRecord.EventType.DEPLOY_SUCCEEDED,
+        details={"image_hashes": image_hashes} if image_hashes else None,
     )
 
 

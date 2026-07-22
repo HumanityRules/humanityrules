@@ -14,12 +14,8 @@
     </div>
     <div class="space-y-2 text-sm">
         <div class="flex items-center justify-between">
-            <span class="text-gray-500 dark:text-gray-400">Repository</span>
-            <span class="text-gray-700 dark:text-gray-300 truncate ml-2">{{ app.repository.full_name }}</span>
-        </div>
-        <div class="flex items-center justify-between">
-            <span class="text-gray-500 dark:text-gray-400">Branch</span>
-            <span class="text-gray-700 dark:text-gray-300">{{ app.repository.default_branch }}</span>
+            <span class="text-gray-500 dark:text-gray-400">Template</span>
+            <span class="text-gray-700 dark:text-gray-300 truncate ml-2">{{ app.source_template.name }}</span>
         </div>
         {% if show_workspace %}
         <div class="flex items-center justify-between">

@@ -624,16 +624,16 @@ class AppTemplate(models.Model):
     # Ordered, non-empty list of container dicts. Each entry:
     #   {
     #     "name": "<stable identifier>",
-    #     "image_source": "dockerfile" | "prebuilt" | "registry" | "policy_proxy",
-    #     # image_source == "dockerfile":
-    #     "source_repo_path": "hermes_agent",
-    #     "dockerfile_path": "Dockerfile",
-    #     # image_source == "prebuilt":
-    #     "ecr_repo": "sidecar-mcp",    # within humr/{env_slug}/ namespace
-    #     "version": "0.1.0",
-    #     # image_source == "registry":
-    #     "registry_image": "docker:26.1.0-dind",
-    #     # image_source == "policy_proxy":
+    #     # "template" is the only image_source today; it stays explicit as the
+    #     # hook point for future sourcing modes. The image is built from the
+    #     # template_path tree under template_repos/ into the shared per-env
+    #     # repo humr/{env_slug}/<image>:{tree-hash}, on miss, at deploy time.
+    #     "image_source": "template",
+    #     "template_path": "hermes_agent",
+    #     # Platform role. "policy_proxy" turns on the SSO+ABAC proxy wiring
+    #     # (env-bearer overlay, upstream forwarding, ALB-target requirement);
+    #     # upstream_container names the sibling the proxy fronts.
+    #     "role": "policy_proxy",
     #     "upstream_container": "<sibling container name>",
     #     # common:
     #     "container_port": 8787,
@@ -704,11 +704,6 @@ class AppTemplate(models.Model):
 class App(models.Model):
     """An application within a workspace."""
 
-    class BuildStrategy(models.TextChoices):
-        DOCKERFILE = "dockerfile", "Dockerfile"
-        NIXPACKS = "nixpacks", "Nixpacks (auto-detect)"
-        BUILDPACK = "buildpack", "Cloud Native Buildpack"
-
     class JobStatus(models.TextChoices):
         IDLE = "idle", "Idle"
         DEPLOY_PENDING = "deploy_pending", "Deploy Pending"
@@ -749,16 +744,13 @@ class App(models.Model):
         related_name="apps",
         help_text="The environment this app deploys to. Set at creation, immutable; the app is deleted when its environment is torn down.",
     )
-    repository = models.ForeignKey(
-        Repository,
-        on_delete=models.PROTECT,
-        related_name="apps",
-    )
+    # The app's single source of code: the template names the containers and
+    # their template_path trees; the deploy path resolves each tree to a
+    # content-hashed shared image (humr/{env}/{image}:{tree-hash}) and builds
+    # it on miss. Nothing is cloned or built per app.
     source_template = models.ForeignKey(
         AppTemplate,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
+        on_delete=models.PROTECT,
         related_name="deployed_apps",
     )
     name = models.CharField(max_length=255)
@@ -766,22 +758,6 @@ class App(models.Model):
         max_length=255,
         validators=[app_slugs.validate_app_hostname_label],
         help_text="Hostname label containing lowercase letters and digits only.",
-    )
-    build_strategy = models.CharField(
-        max_length=20,
-        choices=BuildStrategy.choices,
-    )
-
-    # Source configuration. The build branch is Repository.default_branch.
-    repo_subpath = models.CharField(
-        max_length=500,
-        blank=True,
-        help_text="Subdirectory within repository (for monorepos, optional)",
-    )
-    dockerfile_path = models.CharField(
-        max_length=500,
-        blank=True,
-        help_text="Path to Dockerfile if using dockerfile build strategy",
     )
 
     # Container configuration
@@ -980,12 +956,10 @@ class DeploymentRecord(models.Model):
     )
     attempt_id = models.UUIDField(db_index=True)
     event_type = models.CharField(max_length=30, choices=EventType.choices)
-    git_ref = models.CharField(
-        max_length=255,
-        blank=True,
-        help_text="Branch deployed by this attempt (deploy events only)",
-    )
     error = models.TextField(blank=True, help_text="Failure message (failure events only)")
+    # Free-form event payload. Deploy-success events carry
+    # {"image_hashes": {image_name: tree_hash}} — the record of which template
+    # image versions this attempt actually deployed.
     details = models.JSONField(null=True, blank=True)
     created_by = models.ForeignKey(
         User,

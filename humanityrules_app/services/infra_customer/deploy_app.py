@@ -1,5 +1,5 @@
 """
-Deploy HumanityRules apps (ECR, ALB, ECS service) using AWS CDK.
+Deploy HumanityRules apps (shared template images + ALB + ECS service) using AWS CDK.
 """
 
 import logging
@@ -9,9 +9,8 @@ from pathlib import Path
 import boto3
 
 from humanityrules_app.models import Environment
-from aws_cdk import App, Aws, CfnOutput, Duration, Fn, RemovalPolicy, Stack, Tags
+from aws_cdk import App, Aws, CfnOutput, Duration, Fn, Stack, Tags
 from aws_cdk import aws_ec2 as ec2
-from aws_cdk import aws_ecr as ecr
 from aws_cdk import aws_ecs as ecs
 from aws_cdk import aws_efs as efs
 from aws_cdk import aws_elasticloadbalancingv2 as elbv2
@@ -24,17 +23,11 @@ from . import appconfig
 from . import cdk_utils
 from . import cloudformation_utils
 from . import deploy_base
-from . import ecr_utils
 from . import secrets_utils
+from . import template_images
 
 
-# Policy-proxy image published once per env into humr/{env_slug}/policy-proxy:{tag}.
-# Pinned here rather than on AppConfig: the policy proxy is HUMR-owned, not
-# AppTemplate-driven, and a version bump is a platform operation.
-POLICY_PROXY_IMAGE_VERSION = "0.8.0"
-POLICY_PROXY_SOURCE_DIR = Path(__file__).resolve().parents[3] / "template_repos" / "policy_proxy"
-
-# A single flag signals deployment-time capabilities that we need to grant to, at least, the ECS task. 
+# A single flag signals deployment-time capabilities that we need to grant to, at least, the ECS task.
 # Check the journal "Hermes Bedrock access moved from static keys to ECS task role" for more details.
 PLATFORM_CAPABILITY_BEDROCK_RUNTIME = "bedrock-runtime"
 
@@ -59,11 +52,6 @@ BEDROCK_RUNTIME_ACTIONS = [
     "bedrock:ListPrompts",
     "bedrock:RenderPrompt",
 ]
-
-
-def policy_proxy_ecr_repo_name(env_slug: str) -> str:
-    """Per-env ECR repo for the policy-proxy image: humr/{env_slug}/policy-proxy."""
-    return f"humr/{env_slug}/policy-proxy"
 
 
 def _resolve_control_plane_url() -> str:
@@ -96,6 +84,9 @@ class DeployResult:
     error: str        # failure reason (empty on success)
     service_url: str  # best URL (HTTPS if available, else HTTP ALB)
     alb_dns: str      # raw ALB DNS hostname
+    # Template-image versions this deploy resolved: {image_name: tree_hash}.
+    # Stamped onto the DeploymentRecord as the attempt's version history.
+    image_hashes: dict[str, str]
 
 
 # =============================================================================
@@ -116,16 +107,6 @@ def _container_dependency_condition(cond: str) -> ecs.ContainerDependencyConditi
     return mapping[cond]
 
 
-def dockerfile_containers(app_config: appconfig.AppConfig) -> list[appconfig.ContainerConfig]:
-    """Return the subset of containers that HUMR builds from source at deploy time."""
-    return [c for c in app_config.containers if c.image_source == appconfig.ImageSource.DOCKERFILE]
-
-
-def prebuilt_containers(app_config: appconfig.AppConfig) -> list[appconfig.ContainerConfig]:
-    """Return the subset of containers that reference a pre-pushed ECR image."""
-    return [c for c in app_config.containers if c.image_source == appconfig.ImageSource.PREBUILT]
-
-
 def _grants_bedrock_runtime(app_config: appconfig.AppConfig) -> bool:
     """Return True when the template declares the bedrock-runtime platform capability.
 
@@ -136,24 +117,6 @@ def _grants_bedrock_runtime(app_config: appconfig.AppConfig) -> bool:
     grant for a user to pick a Bedrock model.
     """
     return PLATFORM_CAPABILITY_BEDROCK_RUNTIME in app_config.platform_capabilities
-
-
-def _missing_prebuilt_images(
-    session: boto3.Session,
-    app_config: appconfig.AppConfig,
-    env_slug: str,
-) -> list[str]:
-    """Return '{repo}:{tag}' identifiers for prebuilt containers whose image is absent from ECR.
-
-    Hard-fails before CDK runs — a deploy with a dangling prebuilt reference
-    would only surface as an ECS pull error hours later.
-    """
-    missing: list[str] = []
-    for c in prebuilt_containers(app_config):
-        repo_name = f"humr/{env_slug}/{c.prebuilt_ecr_repo}"
-        if not ecr_utils.image_tag_exists(session=session, ecr_repo_name=repo_name, image_tag=c.prebuilt_version):
-            missing.append(f"{repo_name}:{c.prebuilt_version}")
-    return missing
 
 
 def _environment_has_ec2_capacity_provider(session: boto3.Session, env_slug: str) -> bool:
@@ -168,109 +131,12 @@ def _environment_has_ec2_capacity_provider(session: boto3.Session, env_slug: str
     return capacity_provider_name in clusters[0].get("capacityProviders", [])
 
 
-def _container_image_uri(
-    container: appconfig.ContainerConfig,
-    account: str,
-    region: str,
-    env_slug: str,
-    app_image_tag: str,
-) -> str:
-    """Resolve the ECR image URI for a container, dispatching on ImageSource."""
+def _container_image_uri(container: appconfig.ContainerConfig, account: str, region: str, env_slug: str, image_tags: dict[str, str]) -> str:
+    """Resolve the shared template-image URI for a container: humr/{env}/<image>:<tree-hash>."""
+    assert container.template_path, f"container '{container.name}' has no template_path"
     registry = f"{account}.dkr.ecr.{region}.amazonaws.com"
-    if container.image_source == appconfig.ImageSource.DOCKERFILE:
-        assert container.ecr_repo_name, "dockerfile container must have ecr_repo_name"
-        return f"{registry}/{container.ecr_repo_name}:{app_image_tag}"
-    if container.image_source == appconfig.ImageSource.PREBUILT:
-        assert container.prebuilt_ecr_repo and container.prebuilt_version, (
-            "prebuilt container must have prebuilt_ecr_repo + prebuilt_version"
-        )
-        return f"{registry}/humr/{env_slug}/{container.prebuilt_ecr_repo}:{container.prebuilt_version}"
-    if container.image_source == appconfig.ImageSource.REGISTRY:
-        assert container.registry_image, "registry container must have registry_image"
-        return container.registry_image
-    if container.image_source == appconfig.ImageSource.POLICY_PROXY:
-        return f"{registry}/{policy_proxy_ecr_repo_name(env_slug)}:{POLICY_PROXY_IMAGE_VERSION}"
-    raise ValueError(f"Unknown image_source='{container.image_source}' on container '{container.name}'")
-
-
-class EcrStack(Stack):
-    """
-    HumanityRules ECR Stack — one ECR repo per dockerfile-built container in the app.
-
-    Containers with other ImageSource values (prebuilt, registry, policy_proxy)
-    are not created here; see the ImageSource enum for where each is sourced.
-    """
-
-    def __init__(
-        self,
-        scope: Construct,
-        construct_id: str,
-        app_config: appconfig.AppConfig,
-        resource_prefix: str,
-        **kwargs,
-    ) -> None:
-        super().__init__(scope, construct_id, **kwargs)
-
-        self.repositories: dict[str, ecr.Repository] = {}
-        for idx, c in enumerate(dockerfile_containers(app_config)):
-            assert c.ecr_repo_name is not None, "dockerfile container must have ecr_repo_name"
-            repo = ecr.Repository(
-                self, f"EcrRepository{idx}",
-                repository_name=c.ecr_repo_name,
-                image_scan_on_push=True,
-                removal_policy=RemovalPolicy.DESTROY,
-                empty_on_delete=True,
-                lifecycle_rules=[ecr.LifecycleRule(description="Keep last 10 images", max_image_count=10, rule_priority=1)],
-            )
-            Tags.of(repo).add("App", app_config.app_name)
-            Tags.of(repo).add("Container", c.name)
-            self.repositories[c.name] = repo
-
-            # Export the URI/ARN for the primary (first) container under the
-            # legacy output names so consumers of the CFN exports keep working.
-            if idx == 0:
-                CfnOutput(self, "EcrRepositoryUri", value=repo.repository_uri, export_name=f"{resource_prefix}-ecr-uri")
-                CfnOutput(self, "EcrRepositoryArn", value=repo.repository_arn, export_name=f"{resource_prefix}-ecr-arn")
-
-
-class PolicyProxyEcrStack(Stack):
-    """Per-env ECR repo for the HUMR policy-proxy image.
-
-    One repo per environment: humr/{env_slug}/policy-proxy. Shared by every app
-    in the env that runs behind a policy proxy. Created once per env on the
-    first policy-proxy deploy and then imported from subsequent deploys.
-    """
-
-    def __init__(
-        self,
-        scope: Construct,
-        construct_id: str,
-        env_slug: str,
-        **kwargs,
-    ) -> None:
-        super().__init__(scope, construct_id, **kwargs)
-
-        repo_name = policy_proxy_ecr_repo_name(env_slug)
-        self.repository = ecr.Repository(
-            self, "PolicyProxyEcrRepository",
-            repository_name=repo_name,
-            image_scan_on_push=True,
-            # Keep older policy-proxy images around: a version bump that needs
-            # to be rolled back mustn't be blocked by the lifecycle policy.
-            lifecycle_rules=[ecr.LifecycleRule(
-                description="Keep last 20 policy-proxy images", max_image_count=20, rule_priority=1,
-            )],
-            removal_policy=RemovalPolicy.DESTROY,
-            empty_on_delete=True,
-        )
-        Tags.of(self.repository).add("Env", env_slug)
-        Tags.of(self.repository).add("Component", "policy-proxy")
-
-        CfnOutput(
-            self, "PolicyProxyEcrRepositoryUri",
-            value=self.repository.repository_uri,
-            export_name=f"humr-{env_slug}-policy-proxy-ecr-uri",
-        )
+    repo_name = template_images.ecr_repo_name(env_slug=env_slug, template_path=container.template_path)
+    return f"{registry}/{repo_name}:{image_tags[container.template_path]}"
 
 
 def _compute_listener_rule_priority(app_name: str) -> int:
@@ -287,7 +153,7 @@ class AppStack(Stack):
         scope: Construct,
         construct_id: str,
         app_config: appconfig.AppConfig,
-        image_tag: str,
+        image_tags: dict[str, str],
         env_slug: str,
         resource_prefix: str,
         subdomain: str,
@@ -317,8 +183,7 @@ class AppStack(Stack):
             )
 
         # Policy proxy (SSO + ABAC) is opt-in: a template declares a container
-        # with image_source=POLICY_PROXY and points alb_target_container at
-        # it. No separate flag — presence of the container drives everything.
+        # with role=policy_proxy and points alb_target_container at it.
         policy_proxy = app_config.policy_proxy_container()
         if policy_proxy is not None:
             if not auth_base_url:
@@ -574,7 +439,7 @@ class AppStack(Stack):
                 account=self.account,
                 region=self.region,
                 env_slug=env_slug,
-                app_image_tag=image_tag,
+                image_tags=image_tags,
             )
 
             container_needs_env_bearer = app_config.container_needs_env_bearer(container=c)
@@ -585,7 +450,7 @@ class AppStack(Stack):
             environment = {e["name"]: e["value"] for e in c.environment_variables}
             if container_needs_env_bearer:
                 environment.update(env_bearer_environment_overlay)
-            if c.image_source == appconfig.ImageSource.POLICY_PROXY:
+            if c.role == appconfig.ContainerRole.POLICY_PROXY:
                 environment.update(policy_proxy_environment_overlay)
 
             # Secrets: the container's declared fields from the shared app_secrets bag,
@@ -902,7 +767,7 @@ def deploy(
     account_id: str,
     region: str,
     app_config: appconfig.AppConfig,
-    image_tag: str,
+    build_id: str,
     env_slug: str,
     environment: Environment,
     subdomain: str,
@@ -913,13 +778,15 @@ def deploy(
     Deploy an app to existing infrastructure.
 
     Assumes VPC and ECS cluster are already deployed (run deploy_base first).
+    Container images are shared per-env template images resolved by tree hash;
+    a missing image is built on the spot (see template_images).
 
     Args:
         session: Boto3 session with assumed role credentials.
         account_id: Target AWS account ID.
         region: Target AWS region.
         app_config: Application configuration.
-        image_tag: Docker image tag to deploy.
+        build_id: Unique id for this attempt, isolating any image builds on the shared EC2 builder.
         env_slug: Environment slug (e.g., "default", "prod").
         subdomain: Hostname label this deployment is served under.
         synth_only: If True, only synthesize templates, don't deploy.
@@ -934,8 +801,7 @@ def deploy(
 
     cf_client = session.client("cloudformation")
 
-    app_stack_names = [f"{resource_prefix}-ecr", f"{resource_prefix}-app"]
-    cloudformation_utils.cleanup_rollback_complete_stacks(cf_client, app_stack_names)
+    cloudformation_utils.cleanup_rollback_complete_stacks(cf_client, [f"{resource_prefix}-app"])
 
     # Verify infrastructure exists
     vpc_stack_name = f"humr-{env_slug}-vpc"
@@ -944,11 +810,11 @@ def deploy(
     if not cloudformation_utils.stack_exists(cf_client, vpc_stack_name):
         msg = f"Base layer not deployed. VPC stack '{vpc_stack_name}' not found"
         logger.error(msg)
-        return DeployResult(success=False, error=msg, service_url="", alb_dns="")
+        return DeployResult(success=False, error=msg, service_url="", alb_dns="", image_hashes={})
     if not cloudformation_utils.stack_exists(cf_client, cluster_stack_name):
         msg = f"ECS cluster not deployed. Cluster stack '{cluster_stack_name}' not found"
         logger.error(msg)
-        return DeployResult(success=False, error=msg, service_url="", alb_dns="")
+        return DeployResult(success=False, error=msg, service_url="", alb_dns="", image_hashes={})
     if app_config.compute_mode == "ec2" and not _environment_has_ec2_capacity_provider(session=session, env_slug=env_slug):
         capacity_provider_name = deploy_base.ec2_capacity_provider_name(env_slug=env_slug)
         msg = (
@@ -956,7 +822,7 @@ def deploy(
             f"cluster 'humr-{env_slug}-cluster'. Redeploy the environment base infrastructure first."
         )
         logger.error(msg)
-        return DeployResult(success=False, error=msg, service_url="", alb_dns="")
+        return DeployResult(success=False, error=msg, service_url="", alb_dns="", image_hashes={})
 
     # Resolve shared + app-level secrets in Secrets Manager (created outside CDK for security)
     if app_config.app_secrets:
@@ -977,39 +843,48 @@ def deploy(
             session=session, env=environment,
         )
 
-    # Policy-proxy prerequisites: per-env ECR repo + image push.
+    # Policy-proxy prerequisites (auth Lambda config + per-env secrets).
     policy_proxy_auth_base_url: str | None = None
     if policy_proxy_needed:
         if not shared_alb_hosted_zone:
             msg = "Policy-proxy apps require a hosted zone (HTTPS)"
             logger.error(msg)
-            return DeployResult(success=False, error=msg, service_url="", alb_dns="")
+            return DeployResult(success=False, error=msg, service_url="", alb_dns="", image_hashes={})
 
         secrets_utils.ensure_env_policy_proxy_secrets_exist(session=session, env=environment)
         policy_proxy_auth_base_url = _resolve_control_plane_url()
 
+    # Phase 1: Resolve every container's shared template image, building on
+    # miss. In synth-only mode just compute the tags — no AWS calls.
+    template_paths = sorted({c.template_path for c in app_config.containers if c.template_path})
+    image_tags: dict[str, str] = {}
+    if synth_only:
+        from django.conf import settings
+        image_tags = {tp: template_images.tree_hash(settings.TEMPLATE_REPOS_DIR / tp) for tp in template_paths}
+    else:
+        for template_path in template_paths:
+            try:
+                image_tags[template_path] = template_images.ensure_template_image(
+                    session=session,
+                    account_id=account_id,
+                    region=region,
+                    env_slug=env_slug,
+                    template_path=template_path,
+                    build_id=build_id,
+                )
+            except template_images.TemplateImageBuildError as exc:
+                logger.error("Template image resolution failed: %(error)s", {"error": str(exc)})
+                return DeployResult(success=False, error=str(exc), service_url="", alb_dns="", image_hashes={})
+
+    image_hashes = {template_images.image_name(tp): tag for tp, tag in image_tags.items()}
+
+    # Phase 2: Deploy the App stack (images exist, so ECS can start tasks immediately).
     cdk_app = App(outdir=str(cdk_utils.create_synth_dir(name=resource_prefix)))
-
-    ecr_stack = EcrStack(
-        cdk_app,
-        f"{resource_prefix}-ecr",
-        app_config=app_config,
-        resource_prefix=resource_prefix,
-    )
-
-    policy_proxy_ecr_stack = None
-    if policy_proxy_needed:
-        policy_proxy_ecr_stack = PolicyProxyEcrStack(
-            cdk_app,
-            f"humr-{env_slug}-policy-proxy-ecr",
-            env_slug=env_slug,
-        )
-
-    app_stack = AppStack(
+    AppStack(
         scope=cdk_app,
         construct_id=f"{resource_prefix}-app",
         app_config=app_config,
-        image_tag=image_tag,
+        image_tags=image_tags,
         env_slug=env_slug,
         resource_prefix=resource_prefix,
         subdomain=subdomain,
@@ -1017,105 +892,14 @@ def deploy(
         env_bearer_shared_secrets_arn=env_bearer_shared_secrets_arn,
         auth_base_url=policy_proxy_auth_base_url,
     )
-    app_stack.add_dependency(ecr_stack)
-
     assembly_dir = cdk_utils.synth_cdk_app(cdk_app)
 
     if synth_only:
-        return DeployResult(success=True, error="", service_url="", alb_dns="")
+        return DeployResult(success=True, error="", service_url="", alb_dns="", image_hashes=image_hashes)
 
-    # Phase 1a: Policy-proxy infra for policy-proxy apps only.
-    #   1. Deploy the per-env policy-proxy ECR repo stack.
-    #   2. Build + push the policy-proxy image at POLICY_PROXY_IMAGE_VERSION.
-    if policy_proxy_needed:
-        if not cdk_utils.deploy_from_assembly(
-            assembly_dir=assembly_dir, session=session,
-            stack_names=[f"humr-{env_slug}-policy-proxy-ecr"],
-        ):
-            logger.error("CDK deployment failed (policy-proxy-ecr)")
-            return DeployResult(success=False, error="CDK deployment failed (policy-proxy-ecr)", service_url="", alb_dns="")
-
-        # Push the HUMR-owned policy-proxy image into the per-env repo, but only
-        # when the pinned version isn't there yet. Skipping when the tag exists
-        # keeps the version pin honest (source edits without a version bump can't
-        # silently overwrite a published tag) and avoids concurrent deployments
-        # racing on the builder's shared /build/{version} directory.
-        if ecr_utils.image_tag_exists(session=session, ecr_repo_name=policy_proxy_ecr_repo_name(env_slug), image_tag=POLICY_PROXY_IMAGE_VERSION):
-            logger.info("Policy-proxy image %s already in ECR, skipping build", POLICY_PROXY_IMAGE_VERSION)
-        else:
-            logger.info("Building and pushing policy-proxy image (%s)", POLICY_PROXY_IMAGE_VERSION)
-            policy_proxy_image_uri = ecr_utils.build_and_push_docker_image(
-                session=session,
-                account_id=account_id,
-                region=region,
-                env_slug=env_slug,
-                app_name="policy-proxy",
-                ecr_repo_name=policy_proxy_ecr_repo_name(env_slug),
-                app_source_path=POLICY_PROXY_SOURCE_DIR,
-                image_tag=POLICY_PROXY_IMAGE_VERSION,
-            )
-            if not policy_proxy_image_uri:
-                logger.error("Policy-proxy image build/push failed")
-                return DeployResult(success=False, error="Policy-proxy image build/push failed", service_url="", alb_dns="")
-
-    # Phase 1b: Deploy stacks the App stack depends on. ECR must exist before
-    # we push images.
-    pre_app_stacks = [f"{resource_prefix}-ecr"]
-
-    if not cdk_utils.deploy_from_assembly(assembly_dir=assembly_dir, session=session, stack_names=pre_app_stacks):
-        logger.error("CDK deployment failed (pre-app stacks)")
-        return DeployResult(success=False, error="CDK deployment failed (pre-app stacks)", service_url="", alb_dns="")
-
-    # Phase 2a: Verify all prebuilt containers exist in ECR before we start
-    # building the dockerfile ones. Hard-fail here with a clear operator
-    # message — a missing prebuilt image would only surface as an ECS pull
-    # error hours later, long after the CDK deploy succeeded.
-    missing = _missing_prebuilt_images(
-        session=session,
-        app_config=app_config,
-        env_slug=env_slug,
-    )
-    if missing:
-        msg = (
-            "Missing prebuilt images in ECR:\n  - "
-            + "\n  - ".join(missing)
-            + "\nBuild each with:\n  uv run manage.py humr_build_prebuilt_image "
-            "--account <acct> [--env <env>] --source-dir <path> --ecr-repo <repo> --tag <tag>"
-        )
-        logger.error(msg)
-        return DeployResult(success=False, error=msg, service_url="", alb_dns="")
-
-    # Phase 2b: Build and push every dockerfile container's image from the
-    # cloned source tree at app_source_path. Today all dockerfile containers
-    # in a template share the same source tree (the template's clone root) —
-    # their container.dockerfile_path distinguishes them if needed. A future
-    # monorepo multi-image use case will need per-container subpaths; that
-    # requirement doesn't exist yet.
-    for c in dockerfile_containers(app_config):
-        logger.info("Building and pushing image for container '%s'", c.name)
-        assert c.ecr_repo_name is not None
-        image_uri = ecr_utils.build_and_push_docker_image(
-            session=session,
-            account_id=account_id,
-            region=region,
-            env_slug=env_slug,
-            app_name=f"{app_config.app_name}-{c.name}",
-            ecr_repo_name=c.ecr_repo_name,
-            app_source_path=app_config.app_source_path,
-            image_tag=image_tag,
-        )
-        if not image_uri:
-            logger.error("Docker build/push failed for container '%s'", c.name)
-            return DeployResult(
-                success=False,
-                error=f"Docker build/push failed for container '{c.name}'",
-                service_url="", alb_dns="",
-            )
-
-    # Phase 3: Deploy the App stack (image exists, so ECS can start tasks immediately)
     if not cdk_utils.deploy_from_assembly(assembly_dir=assembly_dir, session=session, stack_names=[f"{resource_prefix}-app"]):
         logger.error("CDK deployment failed (App)")
-        return DeployResult(success=False, error="CDK deployment failed (App)", service_url="", alb_dns="")
+        return DeployResult(success=False, error="CDK deployment failed (App)", service_url="", alb_dns="", image_hashes=image_hashes)
 
     logger.info("Deployment of %(app_name)s completed successfully", {"app_name": app_config.app_name})
 
@@ -1129,52 +913,29 @@ def deploy(
         account_id=account_id,
         region=region,
         app_name=app_config.app_name,
-        image_tag=image_tag,
+        image_tag=",".join(f"{name}:{tag}" for name, tag in sorted(image_hashes.items())),
         service_url=service_url,
         alb_dns=alb_dns,
     )
 
-    return DeployResult(success=True, error="", service_url=service_url, alb_dns=alb_dns)
+    return DeployResult(success=True, error="", service_url=service_url, alb_dns=alb_dns, image_hashes=image_hashes)
 
 
-def teardown(
-    session: boto3.Session,
-    env_slug: str,
-    app_name: str,
-    dockerfile_ecr_repo_names: list[str],
-) -> bool:
-    """Delete app-specific CDK stacks (ECR, ALB, ECS service).
+def teardown(session: boto3.Session, env_slug: str, app_name: str) -> bool:
+    """Delete the app's CDK stack (ALB routing + ECS service).
 
-    Prebuilt-container repos are per-env shared resources and are not torn
-    down here — only the per-app dockerfile ECR repos get emptied.
+    Template-image repos are per-env shared resources owned by their own
+    stacks; per-app teardown never touches them.
     """
     cf_client = session.client("cloudformation")
 
-    resource_prefix = f"humr-{env_slug}-{app_name}"
+    stack_name = f"humr-{env_slug}-{app_name}-app"
 
-    # App-specific stacks in reverse dependency order
-    stacks_to_delete = [f"{resource_prefix}-app"]
-    stacks_to_delete.append(f"{resource_prefix}-ecr")
+    logger.info("Tearing down app: %(app_name)s (stack %(stack_name)s)", {"app_name": app_name, "stack_name": stack_name})
 
-    logger.info("Tearing down app: %(app_name)s", {"app_name": app_name})
-    logger.info("Stacks to delete (in order):")
-    for stack in stacks_to_delete:
-        logger.info("   - %(stack_name)s", {"stack_name": stack})
-
-    # CloudFormation can't delete non-empty ECR repos.
-    for repo_name in dockerfile_ecr_repo_names:
-        ecr_utils.delete_all_ecr_images(session=session, ecr_repo_name=repo_name)
-
-    all_success = True
-    for stack_name in stacks_to_delete:
-        success = cloudformation_utils.delete_stack_and_wait(cf_client, stack_name=stack_name)
-        if not success:
-            all_success = False
-
-    if all_success:
-        logger.info("App '%(app_name)s' stacks deleted successfully", {"app_name": app_name})
-        return all_success
-
-    logger.error("Some stacks failed to delete")
-
-    return all_success
+    success = cloudformation_utils.delete_stack_and_wait(cf_client, stack_name=stack_name)
+    if success:
+        logger.info("App '%(app_name)s' stack deleted successfully", {"app_name": app_name})
+    else:
+        logger.error("App '%(app_name)s' stack failed to delete", {"app_name": app_name})
+    return success

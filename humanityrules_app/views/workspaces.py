@@ -58,7 +58,7 @@ def workspace_detail(request: HttpRequest, workspace_slug: str) -> HttpResponse:
     if denied:
         return denied
 
-    apps = list(workspace.apps.select_related("repository", "environment").order_by("name"))
+    apps = list(workspace.apps.select_related("environment").order_by("name"))
 
     tags = ResourceTag.objects.filter(workspace=workspace).order_by("key", "value")
     can_edit = abac_service.check_action(request.user.current_organization, request.user, workspace, "workspace", "workspace:edit")

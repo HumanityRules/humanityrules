@@ -289,7 +289,7 @@ def _collect_candidates() -> _FleetRedeployCandidates:
     apps = (
         models.App.objects
         .filter(last_attempt_id__isnull=False)
-        .select_related("environment", "repository")
+        .select_related("environment")
         .order_by("organization__slug", "environment__slug", "slug")
     )
     for app in apps:
@@ -322,7 +322,7 @@ def queue_redeploy(app_id: UUID, created_by: models.User) -> FleetRedeployResult
     """Queue one fleet row when it remains eligible."""
     app = (
         models.App.objects
-        .select_related("environment", "repository")
+        .select_related("environment")
         .get(id=app_id)
     )
     skip_reason = get_redeploy_skip_reason(app=app)
