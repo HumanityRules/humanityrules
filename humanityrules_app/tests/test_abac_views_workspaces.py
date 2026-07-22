@@ -8,6 +8,7 @@ from django.test import TestCase
 from humanityrules_app.models import (
     AWSAccount,
     App,
+    AppTemplate,
     Environment,
     IdentityAttribute,
     Organization,
@@ -71,29 +72,116 @@ class TestWorkspaceEndpoints(TestCase):
         self.no_access_user = User.objects.create_user(username="ws_noaccess", password="x", current_organization=self.org)
         OrganizationMembership.objects.create(organization=self.org, user=self.no_access_user, role=OrganizationMembership.Role.MEMBER)
 
-    # --- Workspace List (filter_permitted_resources) ---
+    # --- Dashboard workspace sections (filter_permitted_resources) ---
 
-    def test_admin_workspace_list_shows_all(self) -> None:
+    def test_admin_dashboard_shows_default_first_then_workspaces_alphabetically(self) -> None:
         self.client.force_login(self.admin_user)
-        response = self.client.get("/workspaces/", **HTMX)
+        response = self.client.get("/dashboard/", **HTMX)
         self.assertEqual(response.status_code, 200)
-        pks = set(response.context["workspaces"].values_list("pk", flat=True))
+        pks = {workspace.pk for workspace in response.context["workspaces"]}
         self.assertIn(self.ws_eng.pk, pks)
         self.assertIn(self.ws_fin.pk, pks)
+        self.assertEqual(
+            [workspace.slug for workspace in response.context["workspaces"]],
+            ["default", "engineering", "finance"],
+        )
 
-    def test_viewer_workspace_list_only_shows_permitted(self) -> None:
+    def test_viewer_dashboard_only_shows_permitted_workspaces(self) -> None:
         self.client.force_login(self.viewer_user)
-        response = self.client.get("/workspaces/", **HTMX)
+        response = self.client.get("/dashboard/", **HTMX)
         self.assertEqual(response.status_code, 200)
-        pks = set(response.context["workspaces"].values_list("pk", flat=True))
+        pks = {workspace.pk for workspace in response.context["workspaces"]}
         self.assertIn(self.ws_eng.pk, pks)
         self.assertNotIn(self.ws_fin.pk, pks)
 
-    def test_no_access_workspace_list_is_empty(self) -> None:
+    def test_no_access_dashboard_workspace_list_is_empty(self) -> None:
         self.client.force_login(self.no_access_user)
-        response = self.client.get("/workspaces/", **HTMX)
+        response = self.client.get("/dashboard/", **HTMX)
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.context["workspaces"].count(), 0)
+        self.assertEqual(response.context["workspaces"], [])
+
+    def test_dashboard_hides_default_title_and_links_other_workspace_titles(self) -> None:
+        self.client.force_login(self.admin_user)
+        response = self.client.get("/dashboard/", **HTMX)
+
+        self.assertContains(response, 'data-workspace-section="default"')
+        self.assertNotContains(response, 'data-workspace-title="default"')
+        self.assertContains(response, 'data-workspace-title="engineering"')
+        self.assertContains(response, 'href="/workspaces/engineering/"')
+
+    def test_dashboard_shows_create_workspace_and_admin_action_menus(self) -> None:
+        self.client.force_login(self.admin_user)
+        response = self.client.get("/dashboard/", **HTMX)
+
+        self.assertContains(response, "Create Workspace")
+        self.assertContains(response, 'aria-label="Open actions for Default"')
+        self.assertContains(response, 'aria-label="Open actions for Engineering"')
+        self.assertContains(response, "Delete Workspace")
+
+    def test_dashboard_shell_navigation_omits_workspaces(self) -> None:
+        self.client.force_login(self.admin_user)
+        response = self.client.get("/dashboard/")
+
+        navigation_names = [item["name"] for item in response.context["navigation_items"]]
+        self.assertIn("Dashboard", navigation_names)
+        self.assertNotIn("Workspaces", navigation_names)
+
+    def test_dashboard_new_agent_card_carries_workspace_selection(self) -> None:
+        self.client.force_login(self.admin_user)
+        response = self.client.get("/dashboard/", **HTMX)
+
+        deploy_url = f'/deploy/from-template/hermes-personal/?workspace_id={self.ws_eng.id}'
+        self.assertContains(response, deploy_url, count=2)
+
+    def test_template_deploy_form_uses_requested_permitted_workspace(self) -> None:
+        template = AppTemplate.objects.create(
+            name="Hermes Personal",
+            slug="hermes-personal",
+            description="Personal agent",
+            icon="H",
+            category="ai-assistant",
+            cpu=256,
+            memory=512,
+            containers=[],
+            is_active=True,
+        )
+        self.client.force_login(self.admin_user)
+        response = self.client.get(
+            f"/deploy/from-template/{template.slug}/?workspace_id={self.ws_eng.id}",
+            **HTMX,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["selected_workspace_id"], str(self.ws_eng.id))
+        self.assertEqual(response.context["selected_workspace_label"], self.ws_eng.name)
+
+    def test_template_deploy_shell_preserves_requested_workspace(self) -> None:
+        template = AppTemplate.objects.create(
+            name="Hermes Personal",
+            slug="hermes-personal",
+            description="Personal agent",
+            icon="H",
+            category="ai-assistant",
+            cpu=256,
+            memory=512,
+            containers=[],
+            is_active=True,
+        )
+        self.client.force_login(self.admin_user)
+        response = self.client.get(
+            f"/deploy/from-template/{template.slug}/?workspace_id={self.ws_eng.id}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.context["content_url"],
+            f"/deploy/from-template/{template.slug}/?workspace_id={self.ws_eng.id}",
+        )
+
+    def test_legacy_workspace_list_route_is_gone(self) -> None:
+        self.client.force_login(self.admin_user)
+        response = self.client.get("/workspaces/", **HTMX)
+        self.assertEqual(response.status_code, 404)
 
     # --- Workspace Detail ---
 
@@ -123,6 +211,11 @@ class TestWorkspaceEndpoints(TestCase):
         self.client.force_login(self.admin_user)
         response = self.client.post("/workspaces/create/", {"name": "New WS"})
         self.assertEqual(response.status_code, 302)
+
+    def test_blank_workspace_name_redirects_to_dashboard(self) -> None:
+        self.client.force_login(self.admin_user)
+        response = self.client.post("/workspaces/create/", {"name": ""})
+        self.assertRedirects(response, "/dashboard/", fetch_redirect_response=False)
 
     def test_no_access_gets_403_on_workspace_create(self) -> None:
         self.client.force_login(self.no_access_user)
@@ -154,7 +247,7 @@ class TestWorkspaceEndpoints(TestCase):
         ws = Workspace.objects.create(organization=self.org, name="Disposable", slug="disposable")
         response = self.client.post("/workspaces/disposable/remove/")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response["HX-Redirect"], "/workspaces/")
+        self.assertEqual(response["HX-Redirect"], "/dashboard/")
         self.assertFalse(Workspace.objects.filter(pk=ws.pk).exists())
 
     def test_admin_cannot_delete_workspace_with_app(self) -> None:

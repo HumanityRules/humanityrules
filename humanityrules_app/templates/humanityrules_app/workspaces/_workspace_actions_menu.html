@@ -1,0 +1,25 @@
+{% partialdef workspace_actions_menu %}
+{% if can_admin %}
+<el-dropdown class="relative shrink-0">
+    <button type="button"
+            class="flex size-8 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-300"
+            aria-label="Open actions for {{ workspace.name }}"
+            aria-haspopup="menu">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" class="size-5">
+            <circle cx="12" cy="5" r="1.75" />
+            <circle cx="12" cy="12" r="1.75" />
+            <circle cx="12" cy="19" r="1.75" />
+        </svg>
+    </button>
+    <el-menu anchor="bottom end" popover class="w-44 origin-top-right rounded-md bg-white py-1 shadow-lg outline outline-gray-900/5 transition transition-discrete [--anchor-gap:--spacing(1)] data-closed:scale-95 data-closed:transform data-closed:opacity-0 data-enter:duration-100 data-enter:ease-out data-leave:duration-75 data-leave:ease-in dark:bg-gray-800 dark:shadow-none dark:-outline-offset-1 dark:outline-white/10">
+        <button type="button"
+                hx-get="{% url 'workspace_remove_confirm' workspace_slug=workspace.slug %}"
+                hx-target="#modal-container"
+                hx-swap="innerHTML"
+                class="block w-full px-3 py-2 text-left text-sm text-red-700 focus:bg-red-50 focus:outline-hidden dark:text-red-400 dark:focus:bg-red-500/10">
+            Delete Workspace
+        </button>
+    </el-menu>
+</el-dropdown>
+{% endif %}
+{% endpartialdef %}
