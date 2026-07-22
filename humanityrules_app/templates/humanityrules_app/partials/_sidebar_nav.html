@@ -54,8 +54,11 @@ Expected context:
 if (!window._navHighlightInit) {
     window._navHighlightInit = true;
     function updateNavHighlight() {
+        const currentSection = location.pathname.split('/')[1];
+        const dashboardSections = ['apps', 'dashboard', 'deploy', 'workspaces'];
+        const activeSection = dashboardSections.includes(currentSection) ? 'dashboard' : currentSection;
         document.querySelectorAll('.nav-link').forEach(link => {
-            const isActive = location.pathname.split('/')[1] === link.dataset.navUrl.split('/')[1];
+            const isActive = activeSection === link.dataset.navUrl.split('/')[1];
             link.classList.toggle('bg-white/5', isActive);
             link.classList.toggle('text-white', isActive);
             link.classList.toggle('text-gray-400', !isActive);
@@ -65,4 +68,3 @@ if (!window._navHighlightInit) {
     window.addEventListener('popstate', updateNavHighlight);
 }
 </script>
-

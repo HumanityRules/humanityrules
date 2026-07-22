@@ -1,7 +1,6 @@
 import json
 
 from django.contrib.auth.decorators import login_required
-from django.db.models import Prefetch
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -16,35 +15,10 @@ from . import base
 
 
 @login_required
-def workspaces(request: HttpRequest) -> HttpResponse:
-    """List all workspaces in the current organization."""
-    if not request.htmx:
-        context = base.get_app_shell_context(request=request, current_page="workspaces")
-        context["content_url"] = "/workspaces/"
-        return render(request, "humanityrules_app/app_shell.html", context=context)
-
-    apps_prefetch = Prefetch(
-        "apps",
-        queryset=App.objects.select_related("environment").order_by("name"),
-        to_attr="annotated_apps",
-    )
-    workspace_list = Workspace.objects.filter(
-        organization=request.user.current_organization,
-    ).prefetch_related(apps_prefetch).order_by("name")
-    workspace_list = abac_service.filter_permitted_resources(
-        request.user.current_organization, request.user, workspace_list, "workspace", "workspace:view",
-    )
-
-    context = base.get_app_shell_context(request=request, current_page="workspaces")
-    context["workspaces"] = workspace_list
-    return render(request, "humanityrules_app/workspaces/workspaces.html", context=context)
-
-
-@login_required
 def workspace_detail(request: HttpRequest, workspace_slug: str) -> HttpResponse:
     """Show workspace detail with apps and deployments."""
     if not request.htmx:
-        context = base.get_app_shell_context(request=request, current_page="workspaces")
+        context = base.get_app_shell_context(request=request, current_page="dashboard")
         context["content_url"] = f"/workspaces/{workspace_slug}/"
         return render(request, "humanityrules_app/app_shell.html", context=context)
 
@@ -64,7 +38,7 @@ def workspace_detail(request: HttpRequest, workspace_slug: str) -> HttpResponse:
     can_edit = abac_service.check_action(request.user.current_organization, request.user, workspace, "workspace", "workspace:edit")
     can_admin = abac_service.check_action(request.user.current_organization, request.user, workspace, "workspace", "workspace:admin")
 
-    context = base.get_app_shell_context(request=request, current_page="workspaces")
+    context = base.get_app_shell_context(request=request, current_page="dashboard")
     context["workspace"] = workspace
     context["apps"] = apps
     context["tags"] = tags
@@ -87,7 +61,7 @@ def workspace_create(request: HttpRequest) -> HttpResponse:
 
     name = request.POST.get("name", "").strip()
     if not name:
-        return redirect("workspaces")
+        return redirect("dashboard")
 
     org = request.user.current_organization
     base_slug = slugify(name)
@@ -145,7 +119,7 @@ def workspace_remove(request: HttpRequest, workspace_slug: str) -> HttpResponse:
     workspace.delete()
 
     response = HttpResponse(status=200)
-    response["HX-Redirect"] = reverse("workspaces")
+    response["HX-Redirect"] = reverse("dashboard")
     return response
 
 
