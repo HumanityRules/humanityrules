@@ -13,11 +13,11 @@ Common queries:
     humr_query AWSAccount name aws_account_id status
     humr_query Environment name slug aws_region status
 
-  Apps and deployments:
+  Apps and deployment history:
     humr_query App name slug build_strategy
-    humr_query Deployment id status created_at --order created_at --desc --limit 10
-    humr_query Deployment status --filter status=failed --limit 10
-    humr_query DeploymentLog level source message --filter deployment_id=123 --order created_at --desc
+    humr_query App slug job_status live_state --order updated_at --desc --limit 10
+    humr_query DeploymentRecord event_type created_at --filter app__slug=myapp --order created_at --desc
+    humr_query DeploymentLog level source message --filter attempt_id=<uuid> --order created_at --desc
 
   Repositories:
     humr_query Repository full_name default_branch
@@ -40,7 +40,7 @@ class Command(BaseCommand):
     help = "Query model data without shell quoting issues"
 
     def add_arguments(self, parser):
-        parser.add_argument("model", help="Model name (e.g., Repository, App, Deployment)")
+        parser.add_argument("model", help="Model name (e.g., Repository, App, DeploymentRecord)")
         parser.add_argument("fields", nargs="*", help="Fields to display (default: all)")
         parser.add_argument("--filter", "-f", action="append", dest="filters", help="Filter as key=value (can repeat)")
         parser.add_argument("--limit", "-l", type=int, default=50, help="Max rows to return (default: 50)")

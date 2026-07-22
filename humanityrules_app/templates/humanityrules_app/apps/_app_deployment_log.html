@@ -1,31 +1,31 @@
 {% comment %}
-Deployment-log fragment for the app-detail "Deployment Log" tab. Shows the most recent
-deployment's log, colorized by source/level. Self-terminating HTMX poll: while the deployment
-is transient it re-renders itself every second (hx-swap=outerHTML); once concluded the polling
-attributes are omitted and refreshing stops. See docs/ui_live_update_contract.md.
+Deployment-log fragment for the app-detail "Deployment Log" tab. Shows the latest
+attempt's log, colorized by source/level. Self-terminating HTMX poll: while a job
+is in flight it re-renders itself every second (hx-swap=outerHTML); once concluded
+the polling attributes are omitted and refreshing stops. See docs/ui_live_update_contract.md.
 {% endcomment %}
 <div id="deployment-log-inner"
-     {% if deployment %}
-     data-deployment-status="{{ deployment.status }}"
-     data-service-url="{{ deployment.service_url }}"
+     {% if app.last_attempt_id %}
+     data-deployment-status="{{ app.display_status }}"
+     data-service-url="{{ app.service_url }}"
      {% endif %}
-     {% if not deployment.is_settled %}
+     {% if app.job_in_flight %}
      hx-get="{% url 'app_deployment_log' app_slug=app.slug %}"
      hx-trigger="load delay:1s"
      hx-target="#deployment-log-inner"
      hx-swap="outerHTML"
      {% endif %}>
-    {% if deployment %}
+    {% if app.last_attempt_id %}
     <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
         <div class="min-w-0">
             <h3 class="text-sm font-medium text-gray-900 dark:text-white truncate">
-                {{ deployment.app.environment.name }}
-                <span class="font-normal text-gray-400 dark:text-gray-500">· {{ deployment.git_ref }}{% if deployment.git_commit_sha %} · {{ deployment.git_commit_sha|slice:":7" }}{% endif %}</span>
+                {{ app.environment.name }}
+                <span class="font-normal text-gray-400 dark:text-gray-500">· {{ app.repository.default_branch }}</span>
             </h3>
-            <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">Started {{ deployment.created_at|timesince }} ago</p>
+            <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">Updated {{ app.updated_at|timesince }} ago</p>
         </div>
         <div class="flex items-center gap-2 shrink-0">
-            {% if not deployment.is_settled %}
+            {% if app.job_in_flight %}
             <span class="inline-flex items-center gap-1.5 text-xs font-medium text-green-600 dark:text-green-400">
                 <span class="relative flex h-2 w-2">
                     <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75"></span>
@@ -34,7 +34,7 @@ attributes are omitted and refreshing stops. See docs/ui_live_update_contract.md
                 Live
             </span>
             {% endif %}
-            {% include "humanityrules_app/partials/_status_pill.html" with status=deployment.status label=deployment.get_status_display only %}
+            {% include "humanityrules_app/partials/_status_pill.html" with status=app.display_status label=app.display_status_label only %}
         </div>
     </div>
 

@@ -2,15 +2,14 @@ import json
 from uuid import UUID
 
 from django.contrib.auth.decorators import login_required
-from django.db.models import Max, OuterRef, Prefetch, Subquery, Value
-from django.db.models.functions import Coalesce
+from django.db.models import Prefetch
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.text import slugify
 from django.views.decorators.http import require_GET, require_POST
 
-from humanityrules_app.models import App, Deployment, ResourceTag, Workspace
+from humanityrules_app.models import App, ResourceTag, Workspace
 from humanityrules_app.services import abac_service
 
 from . import abac_view_checks
@@ -25,16 +24,9 @@ def workspaces(request: HttpRequest) -> HttpResponse:
         context["content_url"] = "/workspaces/"
         return render(request, "humanityrules_app/app_shell.html", context=context)
 
-    latest_deployment_status = (
-        Deployment.objects.filter(app=OuterRef("pk"))
-        .order_by("-created_at")
-        .values("status")[:1]
-    )
     apps_prefetch = Prefetch(
         "apps",
-        queryset=App.objects.select_related("environment").annotate(
-            latest_status=Coalesce(Subquery(latest_deployment_status), Value("never_deployed")),
-        ).order_by("name"),
+        queryset=App.objects.select_related("environment").order_by("name"),
         to_attr="annotated_apps",
     )
     workspace_list = Workspace.objects.filter(
@@ -67,45 +59,15 @@ def workspace_detail(request: HttpRequest, workspace_slug: str) -> HttpResponse:
     if denied:
         return denied
 
-    # Prefetch active deployments (deployed, not being torn down)
-    active_deployments_prefetch = Prefetch(
-        "deployments",
-        queryset=Deployment.objects.filter(
-            status=Deployment.Status.SUCCEEDED,
-        ).select_related("app__environment", "app__environment__aws_account").order_by("-created_at"),
-        to_attr="active_deployments",
-    )
-    latest_deployment_status = (
-        Deployment.objects.filter(app=OuterRef("pk"))
-        .order_by("-created_at")
-        .values("status")[:1]
-    )
-    latest_deployed_service_url = (
-        Deployment.objects.filter(app=OuterRef("pk"), status=Deployment.Status.SUCCEEDED)
-        .order_by("-created_at")
-        .values("service_url")[:1]
-    )
-    apps = workspace.apps.select_related("repository", "environment").prefetch_related(
-        active_deployments_prefetch,
-    ).annotate(
-        last_deployed_at=Max("deployments__created_at"),
-        latest_status=Subquery(latest_deployment_status),
-        deployed_service_url=Subquery(latest_deployed_service_url),
-    ).order_by("name")
-    apps = list(apps)
+    apps = list(workspace.apps.select_related("repository", "environment").order_by("name"))
 
     tags = ResourceTag.objects.filter(workspace=workspace).order_by("key", "value")
     can_edit = abac_service.check_action(request.user.current_organization, request.user, workspace, "workspace", "workspace:edit")
     can_admin = abac_service.check_action(request.user.current_organization, request.user, workspace, "workspace", "workspace:admin")
 
-    deployments = Deployment.objects.filter(
-        app__workspace=workspace,
-    ).select_related("app", "app__environment", "app__environment__aws_account").order_by("-created_at")[:20]
-
     context = base.get_app_shell_context(request=request, current_page="workspaces")
     context["workspace"] = workspace
     context["apps"] = apps
-    context["deployments"] = deployments
     context["tags"] = tags
     context["tags_json"] = json.dumps([{"key": t.key, "value": t.value} for t in tags])
     context["can_edit"] = can_edit

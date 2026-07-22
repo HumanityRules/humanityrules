@@ -223,7 +223,7 @@ def onboarding_agent(request: HttpRequest) -> HttpResponse:
         error = _validate_agent_name(org=org, agent_name=agent_name)
         if error is None:
             try:
-                deployment = async_to_sync(template_deploy_service.deploy_from_template)(
+                app = async_to_sync(template_deploy_service.deploy_from_template)(
                     template=template,
                     organization=org,
                     workspace=workspace,
@@ -242,7 +242,7 @@ def onboarding_agent(request: HttpRequest) -> HttpResponse:
                 request.session.pop(_FIRST_AGENT_SESSION_FLAG, None)
                 # ?welcome=1 makes the app page show the first-run welcome dialog
                 # over the live deployment log; the dialog strips it after display.
-                return redirect(f"/apps/{deployment.app.slug}/?welcome=1")
+                return redirect(f"/apps/{app.slug}/?welcome=1")
 
     return render(request, "humanityrules_app/onboarding_agent.html", {
         "agent_name": agent_name,

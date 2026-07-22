@@ -29,8 +29,8 @@
                         {% if app.environment %}
                         <span class="text-xs text-gray-400 dark:text-gray-500">{{ app.environment.name }}</span>
                         {% endif %}
-                        {% if app.latest_status %}
-                        {% include "humanityrules_app/partials/_status_pill.html" with status=app.latest_status label=app.latest_status|title only %}
+                        {% if app.display_status %}
+                        {% include "humanityrules_app/partials/_status_pill.html" with status=app.display_status label=app.display_status_label only %}
                         {% endif %}
                     </div>
                 </div>

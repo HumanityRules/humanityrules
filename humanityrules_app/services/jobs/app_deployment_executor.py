@@ -2,7 +2,8 @@
 Deployment executor.
 
 Orchestrates the actual deployment by calling CDK infrastructure code.
-This is the main entry point called by the job worker.
+This is the main entry point called by the job worker, which has already
+moved the app to DEPLOYING and stamped its claim.
 """
 
 import logging
@@ -16,6 +17,7 @@ from humanityrules_app.services.gitproviders import repo_service
 import humanityrules_app.services.jobs.app_deployment_debug_simulator as app_deployment_debug_simulator
 
 from . import app_config_builder
+from . import app_job_service
 from . import job_logging
 from . import tenant_consistency
 
@@ -35,89 +37,70 @@ def _get_aws_session(environment: models.Environment):
     )
 
 
-def run_deployment(deployment_id: str) -> bool:
-    """
-    Execute a deployment.
+def build_image_tag(app: models.App, git_ref: str) -> str:
+    """Mint the ECR tag for one deploy attempt; unique per attempt via the timestamp."""
+    short_ref = git_ref[:8] if len(git_ref) > 8 else git_ref
+    timestamp = timezone.now().strftime("%Y%m%d%H%M%S%f")
+    return f"{app.slug}-{short_ref}-{timestamp}"
 
-    This is the main entry point called by the job worker.
-    It orchestrates the full deployment flow:
-    1. Load deployment and related models
-    2. Verify environment is READY (agent must create it first)
-    3. Update status to DEPLOYING
-    4. Build AppConfig from Django models
-    5. Execute CDK deployment
-    6. Update deployment status and outputs
 
-    Args:
-        deployment_id: UUID of the Deployment to execute.
-
-    Returns:
-        True if deployment succeeded, False otherwise.
-    """
+def run_deployment(app_id: str) -> bool:
+    """Execute the deploy attempt for an app the worker claimed. Returns success."""
     try:
-        deployment = models.Deployment.objects.select_related(
-            "app",
-            "app__workspace",
-            "app__repository",
-            "app__source_template",
-            "app__environment",
-            "app__environment__aws_account",
-        ).get(id=deployment_id)
-    except models.Deployment.DoesNotExist:
-        logger.error("Deployment %(deployment_id)s not found", {"deployment_id": deployment_id})
+        app = models.App.objects.select_related(
+            "workspace",
+            "repository",
+            "source_template",
+            "environment",
+            "environment__aws_account",
+        ).get(id=app_id)
+    except models.App.DoesNotExist:
+        logger.error("App %(app_id)s not found", {"app_id": app_id})
         return False
 
-    try:
-        tenant_consistency.assert_deployment_consistent(deployment)
-    except tenant_consistency.TenantConsistencyError as exc:
-        logger.error("Refusing to run deployment: %(msg)s", {"msg": str(exc)})
-        deployment.status = models.Deployment.Status.FAILED
-        deployment.status_message = f"Refused: {exc}"
-        deployment.completed_at = timezone.now()
-        deployment.save()
-        return False
-
-    app = deployment.app
     environment = app.environment
 
+    try:
+        tenant_consistency.assert_app_owns_environment(app=app, environment=environment)
+    except tenant_consistency.TenantConsistencyError as exc:
+        logger.error("Refusing to run deployment: %(msg)s", {"msg": str(exc)})
+        app_job_service.settle_failure(app=app, error=f"Refused: {exc}")
+        return False
+
     with job_logging.DeploymentLogContext(
-        deployment=deployment,
+        app=app,
+        attempt_id=app.last_attempt_id,
         source_default=models.DeploymentLog.Source.APP,
     ):
         logger.info(
-            "Starting deployment %(deployment_id)s for app '%(app_name)s' to environment '%(environment_name)s'",
-            {"deployment_id": str(deployment_id), "app_name": app.name, "environment_name": environment.name},
+            "Starting deployment for app '%(app_name)s' to environment '%(environment_name)s'",
+            {"app_name": app.name, "environment_name": environment.name},
         )
 
         # Verify environment is READY (agent must provision it via provision_environment tool)
         if environment.status != models.Environment.Status.READY:
             error_msg = f"Environment '{environment.name}' is not ready (status: {environment.status}). Use provision_environment to provision it first."
             logger.error(error_msg)
-            deployment.status = models.Deployment.Status.FAILED
-            deployment.status_message = error_msg
-            deployment.completed_at = timezone.now()
-            deployment.save()
+            app_job_service.settle_failure(app=app, error=error_msg)
             return False
 
         if settings.HUMR_DEBUG_DEPLOYMENTS:
-            return app_deployment_debug_simulator.run_debug_deployment(deployment=deployment)
+            return app_deployment_debug_simulator.run_debug_deployment(app=app)
 
-        deployment.status = models.Deployment.Status.DEPLOYING
-        deployment.status_message = "Deployment started"
-        deployment.started_at = timezone.now()
-        deployment.save()
+        git_ref = app.repository.default_branch
+        image_tag = build_image_tag(app=app, git_ref=git_ref)
 
         logger.info(
             "Starting deployment of '%(app_name)s' to '%(environment_name)s' (git_ref=%(git_ref)s, image_tag=%(image_tag)s)",
-            {"app_name": app.name, "environment_name": environment.name, "git_ref": deployment.git_ref, "image_tag": deployment.image_tag},
+            {"app_name": app.name, "environment_name": environment.name, "git_ref": git_ref, "image_tag": image_tag},
         )
 
         try:
             # Clone the repository
-            cloned_repo_path = settings.REPO_CLONE_DIR / f"deployment-{deployment_id}"
+            cloned_repo_path = settings.REPO_CLONE_DIR / f"deploy-{app.last_attempt_id}"
             repo_service.clone_repository(
                 repository=app.repository,
-                branch=deployment.git_ref,
+                branch=git_ref,
                 target_dir=cloned_repo_path,
             )
 
@@ -128,15 +111,15 @@ def run_deployment(deployment_id: str) -> bool:
                 repo_path=cloned_repo_path,
             )
 
-            deployment.status_message = "Deploying infrastructure"
-            deployment.save(update_fields=["status_message", "updated_at"])
+            # Progress marker for the no-progress tier of the stale-job reaper.
+            app.save(update_fields=["updated_at"])
 
             result = infra_customer.deploy_app.deploy(
                 session=session,
                 account_id=environment.aws_account.aws_account_id,
                 region=environment.aws_region,
                 app_config=app_config,
-                image_tag=deployment.image_tag,
+                image_tag=image_tag,
                 env_slug=environment.slug,
                 environment=environment,
                 subdomain=app.slug,
@@ -145,33 +128,17 @@ def run_deployment(deployment_id: str) -> bool:
             )
 
             if result.success:
-                deployment.status = models.Deployment.Status.SUCCEEDED
-                deployment.status_message = "Deployment completed successfully"
-                deployment.completed_at = timezone.now()
-                deployment.service_url = result.service_url
-                deployment.alb_dns = result.alb_dns
-
-                deployment.save()
-
-                logger.info("Deployment %(deployment_id)s completed successfully", {"deployment_id": str(deployment_id)})
+                app_job_service.settle_deploy_success(app=app, service_url=result.service_url, alb_dns=result.alb_dns)
+                logger.info("Deployment of '%(app_slug)s' completed successfully", {"app_slug": app.slug})
                 return True
             else:
-                deployment.status = models.Deployment.Status.FAILED
-                deployment.status_message = result.error or "Deployment failed"
-                deployment.completed_at = timezone.now()
-                deployment.save()
-
-                logger.error("Deployment %(deployment_id)s failed, error: %(error)s", {"deployment_id": str(deployment_id), "error": result.error})
+                app_job_service.settle_failure(app=app, error=result.error or "Deployment failed")
+                logger.error("Deployment of '%(app_slug)s' failed, error: %(error)s", {"app_slug": app.slug, "error": result.error})
                 return False
 
         except Exception as e:
             logger.exception("Deployment error: %(error)s", {"error": str(e)})
-
-            deployment.status = models.Deployment.Status.FAILED
-            deployment.status_message = f"Deployment error: {e}"
-            deployment.completed_at = timezone.now()
-            deployment.save()
-
+            app_job_service.settle_failure(app=app, error=f"Deployment error: {e}")
             return False
 
         finally:

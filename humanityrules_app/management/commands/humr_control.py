@@ -10,7 +10,7 @@ Usage:
     uv run manage.py humr_control deploy-app-template --template hermes-agent --org acme-corp --workspace default --env default --app-name "Hermes Vmendi"
     uv run manage.py humr_control redeploy-env --slug default --aws-account "Name"
     uv run manage.py humr_control redeploy-app --app simpledashboard
-    uv run manage.py humr_control redeploy-app --app simpledashboard --deployment <uuid>
+    uv run manage.py humr_control redeploy-app --app simpledashboard
     uv run manage.py humr_control restart-task --app hermesvmendi01
 
 For production, use ./prod_manage.sh humr_control <operation> instead.
@@ -18,9 +18,7 @@ For production, use ./prod_manage.sh humr_control <operation> instead.
 For querying data, use humr_query instead.
 """
 
-from datetime import datetime
 from typing import Any
-from uuid import UUID
 
 from asgiref.sync import async_to_sync
 from botocore.exceptions import ClientError
@@ -32,6 +30,7 @@ from humanityrules_app import app_slugs
 from humanityrules_app import models
 from humanityrules_app.services import template_deploy_service
 from humanityrules_app.services.infra_customer import iam_utils
+from humanityrules_app.services.jobs import app_job_service
 from humanityrules_app.services.jobs import environment_operation_gate
 
 
@@ -64,19 +63,11 @@ class Command(BaseCommand):
         teardown_app.add_argument("--app", required=True, help="App slug")
         teardown_app.add_argument(
             "--remove-app", action="store_true",
-            help="After tearing down all live deployments, also remove the app (creates an AppRemovalJob with teardown_first=True). Equivalent to the UI's 'Remove App' button.",
+            help="After tearing down any live infra, also remove the app (queues a removal attempt with teardown_first=True). Equivalent to the UI's 'Remove App' button.",
         )
         teardown_app.add_argument(
-            "--delete-secrets", action="store_true",
-            help="With --remove-app: also delete humr/{env}/{app}/* AWS Secrets Manager secrets in every env.",
-        )
-        teardown_app.add_argument(
-            "--delete-persistent-data", action="store_true",
-            help="With --remove-app: also delete the app's persistent data (EFS subtree /deployments/{app} and EC2 host bind-mount directories) in every env. No-op if the template declares neither.",
-        )
-        teardown_app.add_argument(
-            "--delete-policies", action="store_true",
-            help="With --remove-app: also delete policies targeting app-name={app}.",
+            "--delete-all-data", action="store_true",
+            help="With --remove-app: also delete the app's persistent data (EFS subtree /deployments/{app} and EC2 host bind-mount directories), humr/{env}/{app}/* Secrets Manager secrets, and policies targeting app-name={app}.",
         )
 
         # redeploy-env
@@ -93,10 +84,6 @@ class Command(BaseCommand):
             help="Redeploy an app to the same environment (CLI parity with the UI's 'Redeploy' button)",
         )
         redeploy_app.add_argument("--app", required=True, help="App slug")
-        redeploy_app.add_argument(
-            "--deployment",
-            help="Source deployment UUID. Clones from this exact row instead of the app's latest concluded deployment.",
-        )
         redeploy_app.add_argument(
             "--created-by",
             help="Username to attribute the redeploy to (audit trail). Defaults to the first admin in the app's org, then any superuser.",
@@ -351,14 +338,10 @@ class Command(BaseCommand):
         """Tear down an app's most recent deployment, and optionally remove the app entirely."""
         app_slug = options["app"]
         remove_app = options.get("remove_app", False)
-        delete_secrets = options.get("delete_secrets", False)
-        delete_persistent_data = options.get("delete_persistent_data", False)
-        delete_policies = options.get("delete_policies", False)
+        delete_all_data = options.get("delete_all_data", False)
 
-        if not remove_app and (delete_secrets or delete_persistent_data or delete_policies):
-            self.stderr.write(self.style.ERROR(
-                "--delete-secrets, --delete-persistent-data, --delete-policies require --remove-app"
-            ))
+        if not remove_app and delete_all_data:
+            self.stderr.write(self.style.ERROR("--delete-all-data requires --remove-app"))
             return
 
         try:
@@ -370,77 +353,65 @@ class Command(BaseCommand):
         if remove_app:
             # Sandbox slugs are reusable across orgs, so a released slug must never leave data
             # behind. Force a full purge regardless of the flags the caller passed.
-            if app.environment.aws_account.is_humr_sandbox and not (delete_secrets and delete_persistent_data and delete_policies):
+            if app.environment.aws_account.is_humr_sandbox and not delete_all_data:
                 self.stdout.write(self.style.WARNING(
-                    "Sandbox account: forcing --delete-secrets --delete-persistent-data --delete-policies "
-                    "(sandbox slug release requires a full data purge)"
+                    "Sandbox account: forcing --delete-all-data (sandbox slug release requires a full data purge)"
                 ))
-                delete_secrets = delete_persistent_data = delete_policies = True
-            self._queue_app_removal(
-                app=app,
-                delete_secrets=delete_secrets,
-                delete_persistent_data=delete_persistent_data,
-                delete_policies=delete_policies,
-            )
+                delete_all_data = True
+            self._queue_app_removal(app=app, delete_all_data=delete_all_data)
             return
 
-        deployment = models.Deployment.objects.filter(app=app).order_by("-created_at").first()
-        if not deployment:
-            self.stderr.write(self.style.ERROR(f"No deployments found for app '{app_slug}'"))
+        if app.job_status == models.App.JobStatus.TEARDOWN_PENDING:
+            self.stdout.write(self.style.WARNING("App is already queued for teardown"))
             return
 
-        if deployment.status == models.Deployment.Status.TEARDOWN_PENDING:
-            self.stdout.write(self.style.WARNING("Deployment is already queued for teardown"))
-            return
-
-        if deployment.status == models.Deployment.Status.TEARING_DOWN:
-            self.stderr.write(self.style.ERROR("Deployment is already being torn down"))
-            return
-
-        teardownable_statuses = [
-            models.Deployment.Status.SUCCEEDED,
-            models.Deployment.Status.FAILED,
-        ]
-        if deployment.status not in teardownable_statuses:
+        if app.job_status != models.App.JobStatus.IDLE:
             self.stderr.write(self.style.ERROR(
-                f"Deployment is in progress ({deployment.status}) - cannot tear down. Wait for it to complete."
+                f"App has a job in progress ({app.job_status}) - cannot tear down. Wait for it to complete."
             ))
             return
 
-        old_status = deployment.status
+        if not app.may_have_infra:
+            self.stderr.write(self.style.ERROR(f"App '{app_slug}' has no infra to tear down"))
+            return
+
+        old_status = app.display_status
         old_label = app.label
         with transaction.atomic():
-            deployment.status = models.Deployment.Status.TEARDOWN_PENDING
-            deployment.status_message = "Teardown triggered via humr_control"
-            deployment.save(update_fields=["status", "status_message", "updated_at"])
+            locked_app = models.App.objects.select_for_update().get(id=app.id)
+            app_job_service.queue_teardown(app=locked_app, created_by=None)
             # Clear App.label so the unscoped main worker picks up the teardown.
             # The label scopes verification-time work to a specific run_job_worker;
             # by teardown time that worker is typically gone, leaving the row stranded.
-            if app.label:
-                app.label = ""
-                app.save(update_fields=["label", "updated_at"])
+            if locked_app.label:
+                locked_app.label = ""
+                locked_app.save(update_fields=["label", "updated_at"])
 
-        self.stdout.write(self.style.SUCCESS(f"\nDeployment for '{app_slug}' set to TEARDOWN_PENDING"))
+        self.stdout.write(self.style.SUCCESS(f"\nApp '{app_slug}' set to TEARDOWN_PENDING"))
         self.stdout.write(f"  App: {app.name}")
         self.stdout.write(f"  Environment: {app.environment.name}")
-        self.stdout.write(f"  Deployment: {deployment.id}")
         self.stdout.write(f"  Previous status: {old_status}")
         if old_label:
             self.stdout.write(f"  Cleared App.label: {old_label!r} → '' (unscoped main worker will claim)")
         self.stdout.write(self.style.WARNING("Teardown will start automatically (job worker picks up pending teardowns)"))
         self.stdout.write("")
 
-    def _queue_app_removal(self, app: models.App, delete_secrets: bool, delete_persistent_data: bool, delete_policies: bool) -> None:
-        """Queue an AppRemovalJob with teardown_first=True; the worker tears down live deployments inline, then removes the app."""
+    def _queue_app_removal(self, app: models.App, delete_all_data: bool) -> None:
+        """Queue a removal attempt with teardown_first=True; the worker tears down live infra inline, then removes the app."""
         with transaction.atomic():
             locked_app = (
                 models.App.objects
                 .select_for_update()
-                .select_related("organization", "workspace")
+                .select_related("organization", "workspace", "repository")
                 .get(id=app.id, organization_id=app.organization_id)
             )
-            if locked_app.status == models.App.Status.PENDING_REMOVAL:
+            if locked_app.job_status in models.App.REMOVAL_JOB_STATUSES:
                 self.stdout.write(self.style.WARNING(f"App '{locked_app.slug}' is already pending removal"))
+                return
+            if locked_app.job_status != models.App.JobStatus.IDLE:
+                self.stderr.write(self.style.ERROR(
+                    f"App '{locked_app.slug}' has a job in progress ({locked_app.job_status}) - wait for it to complete."
+                ))
                 return
 
             old_label = locked_app.label
@@ -451,87 +422,56 @@ class Command(BaseCommand):
                 ))
                 return
 
-            job = models.AppRemovalJob.objects.create(
-                organization=locked_app.organization,
-                app_id_snapshot=locked_app.id,
-                app_slug_snapshot=locked_app.slug,
-                app_name_snapshot=locked_app.name,
-                workspace_slug_snapshot=locked_app.workspace.slug,
-                delete_secrets=delete_secrets,
-                delete_persistent_data=delete_persistent_data,
-                delete_policies=delete_policies,
-                teardown_first=True,
+            app_job_service.queue_removal(
+                app=locked_app,
                 created_by=None,
-                status_message="Queued via humr_control teardown-app --remove-app",
+                delete_all_data=delete_all_data,
+                teardown_first=True,
             )
-            locked_app.status = models.App.Status.PENDING_REMOVAL
             # Clear App.label so the unscoped main worker picks up the removal.
             # The label scopes verification-time work to a specific run_job_worker;
             # by removal time that worker is typically gone, leaving the row stranded.
-            update_fields = ["status", "updated_at"]
             if locked_app.label:
                 locked_app.label = ""
-                update_fields.append("label")
-            locked_app.save(update_fields=update_fields)
+                locked_app.save(update_fields=["label", "updated_at"])
 
-        self.stdout.write(self.style.SUCCESS(f"\nApp '{locked_app.slug}' set to PENDING_REMOVAL"))
+        self.stdout.write(self.style.SUCCESS(f"\nApp '{locked_app.slug}' set to REMOVAL_PENDING"))
         self.stdout.write(f"  App: {locked_app.name}")
         self.stdout.write(f"  Workspace: {locked_app.workspace.name}")
-        self.stdout.write(f"  Removal job: {job.id}")
         self.stdout.write(f"  teardown_first: True")
-        self.stdout.write(f"  delete_secrets: {delete_secrets}")
-        self.stdout.write(f"  delete_persistent_data: {delete_persistent_data}")
-        self.stdout.write(f"  delete_policies: {delete_policies}")
+        self.stdout.write(f"  delete_all_data: {delete_all_data}")
         if old_label:
             self.stdout.write(f"  Cleared App.label: {old_label!r} → '' (unscoped main worker will claim)")
         self.stdout.write(self.style.WARNING(
-            "Worker will tear down all live deployments inline, then perform cleanup + cascade delete"
+            "Worker will tear down any live infra inline, then perform cleanup + cascade delete"
         ))
         self.stdout.write("")
 
     def _handle_redeploy_app(self, options: dict[str, Any]) -> None:
-        """Redeploy an app: clone a concluded source Deployment into a new PENDING row.
+        """Redeploy an app: queue a fresh deploy attempt.
 
-        Mirrors the UI's 'Redeploy' button (`app_deployment_redeploy`): same git_ref,
-        fresh image_tag so the build is rebuilt. Allowed source statuses: SUCCEEDED,
-        FAILED, TORN_DOWN. Refuses if any deployment or teardown for the app is unsettled, or
-        if the app is PENDING_REMOVAL.
+        Mirrors the UI's 'Redeploy' button (`app_deployment_redeploy`): builds the
+        repository's default branch with a fresh image tag. Refuses while any job
+        is in flight for the app.
         """
         app_slug = options["app"]
-        deployment_id_str = options.get("deployment")
         created_by_username = options.get("created_by")
 
         try:
             app = models.App.objects.select_related(
-                "workspace", "organization", "environment", "environment__aws_account",
+                "workspace", "organization", "repository", "environment", "environment__aws_account",
             ).get(slug=app_slug)
         except models.App.DoesNotExist:
             self.stderr.write(self.style.ERROR(f"App '{app_slug}' not found"))
             return
 
-        if app.status == models.App.Status.PENDING_REMOVAL:
+        if app.job_status in models.App.REMOVAL_JOB_STATUSES:
             self.stderr.write(self.style.ERROR(f"App '{app_slug}' is pending removal - cannot redeploy"))
             return
 
-        if models.Deployment.objects.filter(app=app).exclude(status__in=models.Deployment.SETTLED_STATUSES).exists():
+        if app.job_status != models.App.JobStatus.IDLE:
             self.stderr.write(self.style.ERROR(
-                f"App '{app_slug}' has a deployment or teardown in progress - wait for it to complete before redeploying"
-            ))
-            return
-
-        source = self._resolve_redeploy_source(app=app, deployment_id_str=deployment_id_str)
-        if source is None:
-            return
-
-        allowed_source_statuses = (
-            models.Deployment.Status.SUCCEEDED,
-            models.Deployment.Status.FAILED,
-            models.Deployment.Status.TORN_DOWN,
-        )
-        if source.status not in allowed_source_statuses:
-            self.stderr.write(self.style.ERROR(
-                f"Source deployment status '{source.status}' is not redeployable. "
-                f"Expected one of: {', '.join(allowed_source_statuses)}"
+                f"App '{app_slug}' has a job in progress ({app.job_status}) - wait for it to complete before redeploying"
             ))
             return
 
@@ -539,59 +479,21 @@ class Command(BaseCommand):
         if created_by is None:
             return
 
-        git_ref = source.git_ref
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-        short_ref = git_ref[:8] if len(git_ref) > 8 else git_ref
-        image_tag = f"{app.slug}-{short_ref}-{timestamp}"
-
-        new_deployment = models.Deployment.objects.create(
-            app=app,
-            git_ref=git_ref,
-            image_tag=image_tag,
-            status=models.Deployment.Status.PENDING,
-            status_message="Redeploy triggered via humr_control",
-            created_by=created_by,
-        )
+        with transaction.atomic():
+            locked_app = models.App.objects.select_for_update().select_related("repository").get(id=app.id)
+            if locked_app.job_status != models.App.JobStatus.IDLE:
+                self.stderr.write(self.style.ERROR(f"App '{app_slug}' job state changed - retry"))
+                return
+            app_job_service.queue_deploy(app=locked_app, created_by=created_by)
 
         self.stdout.write(self.style.SUCCESS(f"\nRedeploy queued for app '{app.slug}'"))
         self.stdout.write(f"  App: {app.name}")
         self.stdout.write(f"  Environment: {app.environment.name} ({app.environment.aws_account.name})")
-        self.stdout.write(f"  Source deployment: {source.id} (status: {source.status})")
-        self.stdout.write(f"  New deployment: {new_deployment.id}")
-        self.stdout.write(f"  git_ref: {git_ref}")
-        self.stdout.write(f"  image_tag: {image_tag}")
+        self.stdout.write(f"  git_ref: {app.repository.default_branch}")
+        self.stdout.write(f"  Attempt: {locked_app.last_attempt_id}")
         self.stdout.write(f"  Created by: {created_by.username}")
         self.stdout.write(self.style.WARNING("Deployment will start automatically (job worker picks up pending deployments)"))
         self.stdout.write("")
-
-    def _resolve_redeploy_source(self, app: models.App, deployment_id_str: str | None) -> models.Deployment | None:
-        """Pick the source Deployment to clone: --deployment <uuid> wins, else the latest settled one."""
-        if deployment_id_str:
-            try:
-                deployment_id = UUID(deployment_id_str)
-            except ValueError:
-                self.stderr.write(self.style.ERROR(f"--deployment '{deployment_id_str}' is not a valid UUID"))
-                return None
-            try:
-                return models.Deployment.objects.get(id=deployment_id, app=app)
-            except models.Deployment.DoesNotExist:
-                self.stderr.write(self.style.ERROR(
-                    f"Deployment '{deployment_id_str}' not found for app '{app.slug}'"
-                ))
-                return None
-
-        source = (
-            models.Deployment.objects
-            .filter(app=app, status__in=models.Deployment.SETTLED_STATUSES)
-            .order_by("-created_at")
-            .first()
-        )
-        if source is None:
-            self.stderr.write(self.style.ERROR(
-                f"No settled deployments found for app '{app.slug}' - nothing to redeploy from"
-            ))
-            return None
-        return source
 
     def _handle_restart_task(self, options: dict) -> None:
         """Stop the running ECS task for an app so the service scheduler respawns it.
@@ -667,7 +569,7 @@ class Command(BaseCommand):
 
         Mirrors the UI's 'Deploy from template' flow: resolves template, workspace, env,
         owner, created_by, and configurable variable overrides; then calls
-        template_deploy_service.deploy_from_template to create the App + Deployment
+        template_deploy_service.deploy_from_template to create the App and queue its deploy
         chain and queue it for the job worker.
         """
         template_slug = options["template"]
@@ -781,7 +683,7 @@ class Command(BaseCommand):
         label = options.get("label") or ""
 
         try:
-            deployment = async_to_sync(template_deploy_service.deploy_from_template)(
+            app = async_to_sync(template_deploy_service.deploy_from_template)(
                 template=template,
                 organization=org,
                 workspace=workspace,
@@ -805,7 +707,7 @@ class Command(BaseCommand):
         self.stdout.write(f"  Compute mode: {compute_mode}")
         self.stdout.write(f"  Owner: {owner_username or '(not applicable)'}")
         self.stdout.write(f"  Created by: {created_by.username}")
-        self.stdout.write(f"  Deployment id: {deployment.id}")
+        self.stdout.write(f"  Attempt: {app.last_attempt_id}")
         self.stdout.write(f"  Variable overrides: {len(overrides)}")
         self.stdout.write(f"  Label: {label or '(none — picked up by unscoped main worker)'}")
         self.stdout.write(self.style.WARNING("Build/push/deploy will start automatically (job worker picks up pending deployments)"))

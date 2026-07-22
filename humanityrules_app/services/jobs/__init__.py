@@ -6,6 +6,7 @@ by bridging Django models to CDK infrastructure.
 """
 
 from . import app_config_builder
+from . import app_job_service
 from . import app_deployment_debug_simulator
 from . import app_deployment_executor
 from . import app_deployment_teardown_executor
@@ -17,6 +18,7 @@ from . import job_worker
 
 __all__ = [
     "app_config_builder",
+    "app_job_service",
     "app_deployment_debug_simulator",
     "app_deployment_executor",
     "app_deployment_teardown_executor",

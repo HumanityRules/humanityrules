@@ -124,9 +124,9 @@ def build_environments_context(request: HttpRequest) -> dict[str, object]:
 def build_environment_detail_context(request: HttpRequest, environment: models.Environment) -> dict[str, object]:
     """Build the shared context for environment detail rendering."""
     context = base.get_app_shell_context(request=request, current_page="environments")
-    deployments = models.Deployment.objects.filter(
-        app__environment=environment,
-    ).select_related("app", "app__workspace").order_by("-created_at")[:20]
+    env_apps = models.App.objects.filter(
+        environment=environment,
+    ).select_related("workspace").order_by("name")
     tags = models.ResourceTag.objects.filter(environment=environment).order_by("key", "value")
     org = request.user.current_organization
     can_admin = abac_service.check_action(org, request.user, environment, "environment", "environment:admin")
@@ -135,7 +135,7 @@ def build_environment_detail_context(request: HttpRequest, environment: models.E
     # provisioning/teardown is in flight), and opened by default while in flight.
     has_logs = models.EnvironmentLog.objects.filter(environment=environment).exists()
     context["environment"] = environment
-    context["deployments"] = deployments
+    context["env_apps"] = env_apps
     context["tags"] = tags
     context["tags_json"] = json.dumps([{"key": tag.key, "value": tag.value} for tag in tags])
     context["can_admin"] = can_admin

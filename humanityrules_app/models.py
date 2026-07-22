@@ -709,9 +709,23 @@ class App(models.Model):
         NIXPACKS = "nixpacks", "Nixpacks (auto-detect)"
         BUILDPACK = "buildpack", "Cloud Native Buildpack"
 
-    class Status(models.TextChoices):
-        ACTIVE = "active", "Active"
-        PENDING_REMOVAL = "pending_removal", "Pending Removal"
+    class JobStatus(models.TextChoices):
+        IDLE = "idle", "Idle"
+        DEPLOY_PENDING = "deploy_pending", "Deploy Pending"
+        DEPLOYING = "deploying", "Deploying"
+        TEARDOWN_PENDING = "teardown_pending", "Teardown Pending"
+        TEARING_DOWN = "tearing_down", "Tearing Down"
+        REMOVAL_PENDING = "removal_pending", "Removal Pending"
+        REMOVING = "removing", "Removing"
+
+    class LiveState(models.TextChoices):
+        NOT_DEPLOYED = "not_deployed", "Not Deployed"
+        DEPLOYED = "deployed", "Deployed"
+        TORN_DOWN = "torn_down", "Torn Down"
+
+    # Claimed-and-running job states; a worker thread (or inline executor) owns the row.
+    EXECUTING_JOB_STATUSES = (JobStatus.DEPLOYING, JobStatus.TEARING_DOWN, JobStatus.REMOVING)
+    REMOVAL_JOB_STATUSES = (JobStatus.REMOVAL_PENDING, JobStatus.REMOVING)
 
     id = models.UUIDField(
         primary_key=True,
@@ -798,10 +812,56 @@ class App(models.Model):
     # from a container's configurable_variables.
     containers = models.JSONField(default=list)
 
-    status = models.CharField(
+    # The one in-flight operation on this app. The job worker claims pending
+    # values; executors return it to IDLE when the attempt settles.
+    job_status = models.CharField(
         max_length=20,
-        choices=Status.choices,
-        default=Status.ACTIVE,
+        choices=JobStatus.choices,
+        default=JobStatus.IDLE,
+    )
+    # What is actually running in AWS. Written only at deploy/teardown success,
+    # so a failed attempt never clobbers it.
+    live_state = models.CharField(
+        max_length=20,
+        choices=LiveState.choices,
+        default=LiveState.NOT_DEPLOYED,
+    )
+    # A deploy attempt (even a failed one) may have created AWS resources.
+    # Set when a deploy starts, cleared on successful teardown. Gates whether
+    # teardown is offered and whether removal requires a teardown first.
+    may_have_infra = models.BooleanField(default=False)
+
+    # Live-deploy outputs, written only at deploy success and cleared on teardown success.
+    service_url = models.URLField(
+        max_length=2048,
+        blank=True,
+        help_text="URL where the deployed service is accessible",
+    )
+    alb_dns = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="ALB DNS name",
+    )
+    last_deployed_at = models.DateTimeField(null=True, blank=True)
+
+    # Correlation id shared by the current/latest attempt's DeploymentRecord
+    # events and DeploymentLog lines. Kept after the attempt settles: it selects
+    # the log tab's content and anchors the failure banner.
+    last_attempt_id = models.UUIDField(null=True, blank=True)
+    # Failure message of the latest attempt; empty when it succeeded or none ran.
+    last_attempt_error = models.TextField(blank=True)
+
+    # Removal-job inputs, set when removal is queued.
+    removal_delete_all_data = models.BooleanField(default=False)
+    removal_teardown_first = models.BooleanField(default=False)
+
+    claimed_by_run = models.ForeignKey(
+        "humanityrules_app.JobWorkerRun",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        help_text="Worker run that claimed the in-flight job; liveness input for stale-job detection",
     )
 
     # Free-form tag used to scope async work to a specific job worker. The unscoped
@@ -832,6 +892,35 @@ class App(models.Model):
     def __str__(self) -> str:
         return self.name
 
+    @property
+    def display_status(self) -> str:
+        """One status string for UI pills, folding job_status, live_state, and the last error."""
+        if self.job_status == self.JobStatus.DEPLOY_PENDING:
+            return "pending"
+        if self.job_status in self.REMOVAL_JOB_STATUSES:
+            return "removing"
+        if self.job_status != self.JobStatus.IDLE:
+            return self.job_status
+        if self.live_state == self.LiveState.DEPLOYED:
+            return "succeeded"
+        if self.last_attempt_error:
+            return "failed"
+        if self.live_state == self.LiveState.TORN_DOWN:
+            return "torn_down"
+        return ""
+
+    @property
+    def display_status_label(self) -> str:
+        return self.display_status.replace("_", " ").title()
+
+    @property
+    def is_pending_removal(self) -> bool:
+        return self.job_status in self.REMOVAL_JOB_STATUSES
+
+    @property
+    def job_in_flight(self) -> bool:
+        return self.job_status != self.JobStatus.IDLE
+
 
 class SandboxSlugClaim(models.Model):
     """Globally-unique, first-come reservation of an app slug in the shared HumR sandbox.
@@ -859,23 +948,25 @@ class SandboxSlugClaim(models.Model):
         return self.slug
 
 
-class Deployment(models.Model):
-    """An execution record for one attempt to deploy an app."""
+class DeploymentRecord(models.Model):
+    """Append-only audit event for one app job attempt (deploy, teardown, or removal).
 
-    class Status(models.TextChoices):
-        PENDING = "pending", "Pending"
-        DEPLOYING = "deploying", "Deploying"
-        SUCCEEDED = "succeeded", "Succeeded"
-        FAILED = "failed", "Failed"
-        TORN_DOWN = "torn_down", "Torn Down"
-        TEARDOWN_PENDING = "teardown_pending", "Teardown Pending"
-        TEARING_DOWN = "tearing_down", "Tearing Down"
+    Insert-only: a `*_started` event is written when the attempt is queued and a
+    settle event when it concludes; rows sharing an `attempt_id` describe one
+    attempt. Nothing operational reads this table — App.job_status and friends
+    are the runtime truth. The stale-job reaper appends the failure event for
+    attempts whose worker died.
+    """
 
-    SETTLED_STATUSES = (
-        Status.SUCCEEDED,
-        Status.FAILED,
-        Status.TORN_DOWN,
-    )
+    class EventType(models.TextChoices):
+        DEPLOY_STARTED = "deploy_started", "Deploy Started"
+        DEPLOY_SUCCEEDED = "deploy_succeeded", "Deploy Succeeded"
+        DEPLOY_FAILED = "deploy_failed", "Deploy Failed"
+        TEARDOWN_STARTED = "teardown_started", "Teardown Started"
+        TEARDOWN_SUCCEEDED = "teardown_succeeded", "Teardown Succeeded"
+        TEARDOWN_FAILED = "teardown_failed", "Teardown Failed"
+        REMOVAL_STARTED = "removal_started", "Removal Started"
+        REMOVAL_FAILED = "removal_failed", "Removal Failed"
 
     id = models.UUIDField(
         primary_key=True,
@@ -885,81 +976,31 @@ class Deployment(models.Model):
     app = models.ForeignKey(
         App,
         on_delete=models.CASCADE,
-        related_name="deployments",
+        related_name="deployment_records",
     )
-
-    # Source
+    attempt_id = models.UUIDField(db_index=True)
+    event_type = models.CharField(max_length=30, choices=EventType.choices)
     git_ref = models.CharField(
         max_length=255,
-        help_text="Branch, tag, or commit SHA",
-    )
-    git_commit_sha = models.CharField(
-        max_length=40,
         blank=True,
-        help_text="Resolved commit SHA",
+        help_text="Branch deployed by this attempt (deploy events only)",
     )
-    git_commit_message = models.CharField(
-        max_length=500,
-        blank=True,
-    )
-
-    # Image
-    image_tag = models.CharField(max_length=255)
-    image_uri = models.CharField(
-        max_length=2048,
-        blank=True,
-        help_text="Full ECR image URI (set after push)",
-    )
-
-    # Status
-    status = models.CharField(
-        max_length=20,
-        choices=Status.choices,
-        default=Status.PENDING,
-    )
-    status_message = models.TextField(blank=True)
-    started_at = models.DateTimeField(null=True, blank=True)
-    completed_at = models.DateTimeField(null=True, blank=True)
-
-    # Outputs
-    service_url = models.URLField(
-        max_length=2048,
-        blank=True,
-        help_text="URL where the deployed service is accessible",
-    )
-    alb_dns = models.CharField(
-        max_length=255,
-        blank=True,
-        help_text="ALB DNS name",
-    )
-
-    claimed_by_run = models.ForeignKey(
-        "humanityrules_app.JobWorkerRun",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="+",
-        help_text="Worker run that claimed this job; liveness input for stale-job detection",
-    )
+    error = models.TextField(blank=True, help_text="Failure message (failure events only)")
+    details = models.JSONField(null=True, blank=True)
     created_by = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
         null=True,
-        related_name="created_deployments",
+        blank=True,
+        related_name="created_deployment_records",
     )
     created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["-created_at"]
 
     def __str__(self) -> str:
-        return f"{self.app.name} - {self.git_ref} ({self.status})"
-
-    @property
-    def is_settled(self) -> bool:
-        """Return whether no deployment or teardown work is queued or running."""
-        return self.status in self.SETTLED_STATUSES
+        return f"{self.app.slug} {self.event_type}"
 
 
 class AppEnvironmentActivity(models.Model):
@@ -995,7 +1036,7 @@ class AppEnvironmentActivity(models.Model):
 
 
 class DeploymentLog(models.Model):
-    """Log entries from a deployment."""
+    """Log entries from one app job attempt, keyed by the attempt id on App/DeploymentRecord."""
 
     class Level(models.TextChoices):
         DEBUG = "debug", "Debug"
@@ -1013,11 +1054,12 @@ class DeploymentLog(models.Model):
         default=uuid.uuid7,
         editable=False,
     )
-    deployment = models.ForeignKey(
-        Deployment,
+    app = models.ForeignKey(
+        App,
         on_delete=models.CASCADE,
-        related_name="logs",
+        related_name="deployment_logs",
     )
+    attempt_id = models.UUIDField(db_index=True)
     source = models.CharField(
         max_length=20,
         choices=Source.choices,
@@ -1169,69 +1211,6 @@ class AppPermissionRequest(models.Model):
 
     def __str__(self) -> str:
         return f"AppPermissionRequest {self.id} ({self.status})"
-
-
-class AppRemovalJob(models.Model):
-    """Async job to remove an App: optional persistent-data/secrets/policy cleanup, then DB cascade delete.
-
-    `delete_persistent_data` covers both EFS app data (`/deployments/{app_slug}` on the
-    env's shared EFS, when the template declares `efs_config`) and EC2 host bind-mount
-    data (paths from `template.containers[*].host_mounts[*].source_path`, when any
-    container declares `host_mounts`). The executor skips each branch when the template
-    has nothing of that kind to clean.
-    """
-
-    class Status(models.TextChoices):
-        PENDING = "pending", "Pending"
-        RUNNING = "running", "Running"
-        SUCCEEDED = "succeeded", "Succeeded"
-        FAILED = "failed", "Failed"
-
-    id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
-    organization = models.ForeignKey(
-        "Organization", on_delete=models.CASCADE, related_name="app_removal_jobs",
-    )
-    # Snapshot fields so the job row remains meaningful after the App row is deleted
-    app_id_snapshot = models.UUIDField()
-    app_slug_snapshot = models.SlugField(max_length=255)
-    app_name_snapshot = models.CharField(max_length=255)
-    workspace_slug_snapshot = models.SlugField(max_length=255)
-    delete_secrets = models.BooleanField(default=False)
-    delete_persistent_data = models.BooleanField(default=False)
-    delete_policies = models.BooleanField(default=False)
-    # If True, the executor first tears down every live deployment of this app
-    # (calling app_deployment_teardown_executor.run_teardown inline) before
-    # running the cleanup + DB cascade delete. Set by the CLI's
-    # `humr_control teardown-app --remove-app` flow; the UI's "Remove App"
-    # button leaves this False because it only enables when the app is already
-    # not live.
-    teardown_first = models.BooleanField(default=False)
-    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
-    status_message = models.TextField(blank=True)
-    claimed_by_run = models.ForeignKey(
-        "humanityrules_app.JobWorkerRun",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="+",
-        help_text="Worker run that claimed this job; liveness input for stale-job detection",
-    )
-    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        ordering = ["-created_at"]
-        constraints = [
-            models.UniqueConstraint(
-                fields=["app_id_snapshot"],
-                condition=models.Q(status__in=("pending", "running")),
-                name="unique_active_app_removal_per_app",
-            ),
-        ]
-
-    def __str__(self) -> str:
-        return f"AppRemovalJob {self.app_slug_snapshot} ({self.status})"
 
 
 class AwsResourceCache(models.Model):

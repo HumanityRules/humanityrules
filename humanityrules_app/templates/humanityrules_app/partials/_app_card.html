@@ -38,9 +38,9 @@
         </div>
         <div class="flex items-center justify-between">
             <span class="text-gray-500 dark:text-gray-400">URL</span>
-            {% if app.deployed_service_url %}
-            <a href="{{ app.deployed_service_url }}" target="_blank" rel="noopener noreferrer"
-               title="{{ app.deployed_service_url }}"
+            {% if app.service_url %}
+            <a href="{{ app.service_url }}" target="_blank" rel="noopener noreferrer"
+               title="{{ app.service_url }}"
                class="relative z-10 text-indigo-600 dark:text-indigo-400 hover:underline truncate ml-2">{{ app.name }}</a>
             {% else %}
             <span class="text-gray-500 dark:text-gray-400">—</span>

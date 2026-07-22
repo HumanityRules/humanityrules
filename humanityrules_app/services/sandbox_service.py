@@ -9,7 +9,7 @@ import uuid
 
 from django.conf import settings
 
-from humanityrules_app.models import AWSAccount, Deployment, Environment, Organization, SandboxSlugClaim
+from humanityrules_app.models import App, AWSAccount, Environment, Organization, SandboxSlugClaim
 
 SANDBOX_ACCOUNT_NAME = "Humanity Rules Sandbox"
 
@@ -74,10 +74,10 @@ async def aclaim_sandbox_app_slug(app_slug: str, organization_id: uuid.UUID, env
     """Reserve app_slug in the shared sandbox; raise ValueError if another org already holds it.
 
     Two layers, because the slug is one global namespace across every org's sandbox. First a
-    friendly pre-check against committed deploys — it produces a helpful message in the common
+    friendly pre-check against existing apps — it produces a helpful message in the common
     case and covers apps that predate the claim table (no backfill needed). Then an atomic
     SandboxSlugClaim row whose UNIQUE(slug) closes the check-then-create race that two concurrent
-    first-time deploys (neither with a committed Deployment yet) would otherwise slip through.
+    first-time deploys (neither with a committed App yet) would otherwise slip through.
 
     No-op outside the shared sandbox — dedicated customer accounts have a private AWS account per
     org and may reuse a slug across orgs. Released on app removal (see release_sandbox_app_slug).
@@ -88,9 +88,9 @@ async def aclaim_sandbox_app_slug(app_slug: str, organization_id: uuid.UUID, env
     if not is_sandbox:
         return
     conflict = await (
-        Deployment.objects
-        .filter(app__environment__aws_account__is_humr_sandbox=True, app__slug=app_slug)
-        .exclude(app__organization_id=organization_id)
+        App.objects
+        .filter(environment__aws_account__is_humr_sandbox=True, slug=app_slug)
+        .exclude(organization_id=organization_id)
         .aexists()
     )
     if conflict:

@@ -43,12 +43,12 @@ urlpatterns = [
 
     path("apps/<slug:app_slug>/deployment-section-status/", views.app_deployment_section_status, name="app_deployment_section_status"),
 
-    path("apps/<slug:app_slug>/deployments/<uuid:deployment_id>/teardown/", views.app_deployment_teardown, name="app_deployment_teardown"),
-    path("apps/<slug:app_slug>/deployments/<uuid:deployment_id>/redeploy/", views.app_deployment_redeploy, name="app_deployment_redeploy"),
-    path("apps/<slug:app_slug>/deployments/<uuid:deployment_id>/status/", views.app_deployment_status, name="app_deployment_status"),
+    path("apps/<slug:app_slug>/teardown/", views.app_deployment_teardown, name="app_deployment_teardown"),
+    path("apps/<slug:app_slug>/redeploy/", views.app_deployment_redeploy, name="app_deployment_redeploy"),
+    path("apps/<slug:app_slug>/status-row/", views.app_status_row, name="app_status_row"),
     path("apps/<slug:app_slug>/deployment-log/", views.app_deployment_log, name="app_deployment_log"),
     path("apps/<slug:app_slug>/card-status/", views.app_card_status, name="app_card_status"),
-    path("apps/<slug:app_slug>/deployments/<uuid:deployment_id>/teardown-confirm/", views.app_teardown_confirm, name="app_teardown_confirm"),
+    path("apps/<slug:app_slug>/teardown-confirm/", views.app_teardown_confirm, name="app_teardown_confirm"),
     path("apps/<slug:app_slug>/remove/", views.app_remove, name="app_remove"),
     path("apps/<slug:app_slug>/remove-confirm/", views.app_remove_confirm, name="app_remove_confirm"),
 
@@ -228,6 +228,6 @@ urlpatterns = [
     path("platform/fleet/redeploy-all/confirm/", views.fleet_redeploy_all_confirm, name="fleet_redeploy_all_confirm"),
     path("platform/fleet/redeploy-all/", views.fleet_redeploy_all, name="fleet_redeploy_all"),
     path("platform/fleet/env/<uuid:environment_id>/live/", views.fleet_env_live_state, name="fleet_env_live_state"),
-    path("platform/fleet/deployment/<uuid:deployment_id>/redeploy/", views.fleet_deployment_redeploy, name="fleet_deployment_redeploy"),
-    path("platform/fleet/deployment/<uuid:deployment_id>/log/", views.fleet_deployment_log, name="fleet_deployment_log"),
+    path("platform/fleet/app/<uuid:app_id>/redeploy/", views.fleet_deployment_redeploy, name="fleet_deployment_redeploy"),
+    path("platform/fleet/app/<uuid:app_id>/log/", views.fleet_deployment_log, name="fleet_deployment_log"),
 ]

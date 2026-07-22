@@ -13,11 +13,11 @@ from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 from django.conf import settings
 from django.db import transaction
-from django.db.models import OuterRef, QuerySet, Subquery
-from django.utils import timezone
+from django.db.models import OuterRef, Subquery
 
 from humanityrules_app import models
 from humanityrules_app.services.infra_customer import iam_utils
+from humanityrules_app.services.jobs import app_job_service
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,6 @@ SKIP_APP_BUSY = "Deployment or teardown already in progress"
 SKIP_APP_PENDING_REMOVAL = "App pending removal"
 SKIP_ENVIRONMENT_NOT_READY = "Environment not ready"
 SKIP_FAILED_NOT_INCLUDED = "Failed not included"
-SKIP_NEWER_DEPLOYMENT = "Newer deployment exists"
 SKIP_NOT_REDEPLOYABLE = "Not redeployable"
 SKIP_TORN_DOWN = "Torn down"
 
@@ -45,7 +44,7 @@ class EnvGroup:
     """One org/env group for the fleet page: the env row plus its app rows."""
     organization: models.Organization
     environment: models.Environment
-    deployments: list[models.Deployment] = field(default_factory=list)
+    apps: list[models.App] = field(default_factory=list)
 
 
 @dataclass
@@ -77,54 +76,35 @@ class EnvLiveState:
 
 
 def build_fleet_snapshot() -> list[EnvGroup]:
-    """Return the DB-tier fleet view: every environment (with or without deployments), grouped by owning org."""
+    """Return the DB-tier fleet view: every environment (with or without apps), grouped by owning org."""
     groups: dict = {}
     environments = models.Environment.objects.select_related("aws_account__organization")
     for environment in environments:
         groups[environment.id] = EnvGroup(organization=environment.aws_account.organization, environment=environment)
 
-    latest_per_app = (
-        models.Deployment.objects
-        .filter(app=OuterRef("app"))
-        .order_by("-created_at")
-        .values("id")[:1]
-    )
-    # The app's live URL comes from its latest SUCCEEDED deploy — a failed or
-    # in-progress redeploy must not hide the URL that is still serving.
-    latest_succeeded_url = (
-        models.Deployment.objects
-        .filter(app=OuterRef("app"), status=models.Deployment.Status.SUCCEEDED)
-        .order_by("-created_at")
-        .values("service_url")[:1]
-    )
     latest_policy_proxy_activity = (
         models.AppEnvironmentActivity.objects
         .filter(
-            organization_id=OuterRef("app__organization_id"),
-            app_id=OuterRef("app_id"),
+            organization_id=OuterRef("organization_id"),
+            app_id=OuterRef("pk"),
         )
         .values("last_policy_proxy_activity_at")[:1]
     )
-    deployments = (
-        models.Deployment.objects
-        .filter(id=Subquery(latest_per_app))
-        .select_related("app", "app__environment")
+    apps = (
+        models.App.objects
+        .filter(last_attempt_id__isnull=False)
+        .select_related("environment")
         .annotate(
-            live_service_url=Subquery(latest_succeeded_url),
             last_policy_proxy_activity_at=Subquery(latest_policy_proxy_activity),
         )
-        .order_by("app__slug")
+        .order_by("slug")
     )
-    apps_with_unsettled_deployments = get_apps_with_unsettled_deployments()
-    for deployment in deployments:
-        deployment.redeploy_skip_reason = get_redeploy_skip_reason(
-            source=deployment,
-            apps_with_unsettled_deployments=apps_with_unsettled_deployments,
-        )
-        groups[deployment.app.environment_id].deployments.append(deployment)
+    for app in apps:
+        app.redeploy_skip_reason = get_redeploy_skip_reason(app=app)
+        groups[app.environment_id].apps.append(app)
 
     for group in groups.values():
-        group.deployments.sort(key=lambda d: (d.is_settled, d.app.slug))
+        group.apps.sort(key=lambda a: (not a.job_in_flight, a.slug))
 
     return sorted(groups.values(), key=lambda g: (g.organization.slug, g.environment.slug))
 
@@ -271,69 +251,48 @@ class FleetRedeployResult:
 
 @dataclass(frozen=True)
 class _FleetRedeployCandidates:
-    """Eligible source deployments plus exclusions discovered in one snapshot."""
+    """Eligible apps plus exclusions discovered in one snapshot."""
 
-    succeeded: list[models.Deployment]
-    failed: list[models.Deployment]
+    succeeded: list[models.App]
+    failed: list[models.App]
     skipped_counts: dict[str, int]
 
 
-def _latest_deployment_per_app() -> QuerySet[models.Deployment]:
-    """Return the newest deployment attempt for every app."""
-    latest_deployment_id = (
-        models.Deployment.objects
-        .filter(app_id=OuterRef("app_id"))
-        .order_by("-created_at")
-        .values("id")[:1]
-    )
-    return (
-        models.Deployment.objects
-        .filter(id=Subquery(latest_deployment_id))
-        .select_related("app", "app__environment")
-        .order_by("app__organization__slug", "app__environment__slug", "app__slug")
-    )
-
-
-def get_apps_with_unsettled_deployments() -> set[UUID]:
-    """Return app IDs with queued or running deployment or teardown work."""
-    return set(
-        models.Deployment.objects.exclude(status__in=models.Deployment.SETTLED_STATUSES).values_list("app_id", flat=True)
-    )
-
-
-def get_redeploy_skip_reason(source: models.Deployment, apps_with_unsettled_deployments: set[UUID]) -> str | None:
-    """Return why a current fleet row cannot redeploy, or None when eligible."""
-    if source.app.status == models.App.Status.PENDING_REMOVAL:
+def get_redeploy_skip_reason(app: models.App) -> str | None:
+    """Return why a fleet row cannot redeploy, or None when eligible."""
+    if app.job_status in models.App.REMOVAL_JOB_STATUSES:
         return SKIP_APP_PENDING_REMOVAL
-    if source.app_id in apps_with_unsettled_deployments:
+    if app.job_status != models.App.JobStatus.IDLE:
         return SKIP_APP_BUSY
-    if source.status == models.Deployment.Status.TORN_DOWN:
+    if app.live_state == models.App.LiveState.TORN_DOWN:
         return SKIP_TORN_DOWN
-    if source.status not in (models.Deployment.Status.SUCCEEDED, models.Deployment.Status.FAILED):
+    if app.last_attempt_id is None:
         return SKIP_NOT_REDEPLOYABLE
-    if source.app.environment.status != models.Environment.Status.READY:
+    if app.environment.status != models.Environment.Status.READY:
         return SKIP_ENVIRONMENT_NOT_READY
     return None
 
 
 def _collect_candidates() -> _FleetRedeployCandidates:
     """Classify current fleet rows without mutating them."""
-    apps_with_unsettled_deployments = get_apps_with_unsettled_deployments()
-    succeeded: list[models.Deployment] = []
-    failed: list[models.Deployment] = []
+    succeeded: list[models.App] = []
+    failed: list[models.App] = []
     skipped_counts: Counter[str] = Counter()
 
-    for source in _latest_deployment_per_app():
-        skip_reason = get_redeploy_skip_reason(
-            source=source,
-            apps_with_unsettled_deployments=apps_with_unsettled_deployments,
-        )
+    apps = (
+        models.App.objects
+        .filter(last_attempt_id__isnull=False)
+        .select_related("environment", "repository")
+        .order_by("organization__slug", "environment__slug", "slug")
+    )
+    for app in apps:
+        skip_reason = get_redeploy_skip_reason(app=app)
         if skip_reason is not None:
             skipped_counts[skip_reason] += 1
-        elif source.status == models.Deployment.Status.SUCCEEDED:
-            succeeded.append(source)
+        elif app.live_state == models.App.LiveState.DEPLOYED and not app.last_attempt_error:
+            succeeded.append(app)
         else:
-            failed.append(source)
+            failed.append(app)
 
     return _FleetRedeployCandidates(
         succeeded=succeeded,
@@ -352,61 +311,27 @@ def build_redeploy_all_preview() -> FleetRedeployPreview:
     )
 
 
-def _lock_deployed_apps() -> None:
+def _lock_attempted_apps() -> None:
     """Serialize fleet redeploy submissions that target the same app rows."""
-    deployed_app_ids = models.Deployment.objects.values("app_id").distinct()
     list(
         models.App.objects
         .select_for_update()
-        .filter(id__in=Subquery(deployed_app_ids))
+        .filter(last_attempt_id__isnull=False)
         .order_by("id")
         .values_list("id", flat=True)
     )
 
 
-def _build_image_tag(source: models.Deployment) -> str:
-    """Build a fresh image tag that stays distinct across concurrent redeploys."""
-    git_ref = source.git_ref
-    short_ref = git_ref[:8] if len(git_ref) > 8 else git_ref
-    timestamp = timezone.now().strftime("%Y%m%d%H%M%S%f")
-    return f"{source.app.slug}-{short_ref}-{timestamp}-{source.id.hex[:8]}"
-
-
-def _queue_source(source: models.Deployment, created_by: models.User, status_message: str) -> None:
-    """Clone a source deployment into the normal pending deployment queue."""
-    models.Deployment.objects.create(
-        app=source.app,
-        git_ref=source.git_ref,
-        image_tag=_build_image_tag(source=source),
-        status=models.Deployment.Status.PENDING,
-        status_message=status_message,
-        created_by=created_by,
-    )
-
-
-def queue_redeploy(source_id: UUID, created_by: models.User) -> FleetRedeployResult:
-    """Queue one current fleet row when it remains eligible."""
+def queue_redeploy(app_id: UUID, created_by: models.User) -> FleetRedeployResult:
+    """Queue one fleet row when it remains eligible."""
     with transaction.atomic():
-        source_identity = models.Deployment.objects.only("app_id").get(id=source_id)
-        models.App.objects.select_for_update().get(id=source_identity.app_id)
-        source = (
-            models.Deployment.objects
-            .filter(app_id=source_identity.app_id)
-            .select_related("app", "app__environment")
-            .order_by("-created_at")
-            .first()
+        app = (
+            models.App.objects
+            .select_for_update()
+            .select_related("environment", "repository")
+            .get(id=app_id)
         )
-        if source is None or source.id != source_id:
-            return FleetRedeployResult(
-                queued_count=0,
-                skipped_counts={SKIP_NEWER_DEPLOYMENT: 1},
-                included_failed=False,
-            )
-
-        skip_reason = get_redeploy_skip_reason(
-            source=source,
-            apps_with_unsettled_deployments=get_apps_with_unsettled_deployments(),
-        )
+        skip_reason = get_redeploy_skip_reason(app=app)
         if skip_reason is not None:
             return FleetRedeployResult(
                 queued_count=0,
@@ -414,41 +339,34 @@ def queue_redeploy(source_id: UUID, created_by: models.User) -> FleetRedeployRes
                 included_failed=False,
             )
 
-        _queue_source(
-            source=source,
-            created_by=created_by,
-            status_message="Fleet redeploy triggered via web UI",
-        )
+        included_failed = app.live_state != models.App.LiveState.DEPLOYED or bool(app.last_attempt_error)
+        app_job_service.queue_deploy(app=app, created_by=created_by)
 
     return FleetRedeployResult(
         queued_count=1,
         skipped_counts={},
-        included_failed=source.status == models.Deployment.Status.FAILED,
+        included_failed=included_failed,
     )
 
 
 def queue_redeploy_all(created_by: models.User, include_failed: bool) -> FleetRedeployResult:
     """Queue eligible current fleet rows through the standard deployment worker."""
     with transaction.atomic():
-        _lock_deployed_apps()
+        _lock_attempted_apps()
         candidates = _collect_candidates()
-        selected_sources = [*candidates.succeeded]
+        selected = [*candidates.succeeded]
         skipped_counts = Counter(candidates.skipped_counts)
 
         if include_failed:
-            selected_sources.extend(candidates.failed)
+            selected.extend(candidates.failed)
         elif candidates.failed:
             skipped_counts[SKIP_FAILED_NOT_INCLUDED] += len(candidates.failed)
 
-        for source in selected_sources:
-            _queue_source(
-                source=source,
-                created_by=created_by,
-                status_message="Fleet redeploy all triggered via web UI",
-            )
+        for app in selected:
+            app_job_service.queue_deploy(app=app, created_by=created_by)
 
     return FleetRedeployResult(
-        queued_count=len(selected_sources),
+        queued_count=len(selected),
         skipped_counts=dict(skipped_counts),
         included_failed=include_failed,
     )
@@ -459,37 +377,26 @@ def queue_redeploy_all(created_by: models.User, include_failed: bool) -> FleetRe
 
 @dataclass(frozen=True)
 class FleetRecoveryResult:
-    """Outcome of failing every deployment left in an unsettled state."""
+    """Outcome of failing every app job left in an unsettled state."""
 
     failed_count: int
 
 
 def count_unsettled_deployments() -> int:
-    """Return the number of deployment jobs that the recovery action would fail."""
-    return models.Deployment.objects.exclude(status__in=models.Deployment.SETTLED_STATUSES).count()
+    """Return the number of app jobs that the recovery action would fail."""
+    return models.App.objects.exclude(job_status=models.App.JobStatus.IDLE).count()
 
 
 def fail_unsettled_deployments() -> FleetRecoveryResult:
-    """Atomically mark every currently unsettled deployment as failed."""
+    """Atomically fail every app job not currently IDLE."""
     with transaction.atomic():
-        deployment_ids = list(
-            models.Deployment.objects
+        apps = list(
+            models.App.objects
             .select_for_update()
-            .exclude(status__in=models.Deployment.SETTLED_STATUSES)
+            .exclude(job_status=models.App.JobStatus.IDLE)
             .order_by("id")
-            .values_list("id", flat=True)
         )
-        if not deployment_ids:
-            return FleetRecoveryResult(failed_count=0)
+        for app in apps:
+            app_job_service.settle_failure(app=app, error=RECOVERY_STATUS_MESSAGE)
 
-        completed_at = timezone.now()
-        failed_count = models.Deployment.objects.filter(id__in=deployment_ids).exclude(
-            status__in=models.Deployment.SETTLED_STATUSES,
-        ).update(
-            status=models.Deployment.Status.FAILED,
-            status_message=RECOVERY_STATUS_MESSAGE,
-            completed_at=completed_at,
-            updated_at=completed_at,
-        )
-
-    return FleetRecoveryResult(failed_count=failed_count)
+    return FleetRecoveryResult(failed_count=len(apps))

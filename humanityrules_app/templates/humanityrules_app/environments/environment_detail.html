@@ -69,10 +69,10 @@
         {% include "humanityrules_app/partials/_security_tags_section.html" with tags_title="Environment Tags" items=tags %}
     </div>
 
-    {# Deployments section #}
+    {# Deployment status section: one row per app #}
     <div>
-        <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Recent Deployments</h2>
-        {% if deployments %}
+        <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Deployments</h2>
+        {% if env_apps %}
         <div class="overflow-x-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
             <table class="min-w-full table-auto">
                 <colgroup>
@@ -88,15 +88,15 @@
                     </tr>
                 </thead>
                 <tbody class="[&_tr:not(:last-child)>td]:border-b [&_tr:not(:last-child)>td]:border-gray-200 dark:[&_tr:not(:last-child)>td]:border-gray-700">
-                    {% for deployment in deployments %}
-                        {% include "humanityrules_app/apps/_app_deployment_row.html" with mode="environment" %}
+                    {% for app in env_apps %}
+                        {% include "humanityrules_app/apps/_app_status_row.html" with mode="environment" %}
                     {% endfor %}
                 </tbody>
             </table>
         </div>
         {% else %}
         <div class="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 border-dashed rounded-lg p-6 text-center">
-            <p class="text-sm text-gray-500 dark:text-gray-400">No deployments in this environment yet.</p>
+            <p class="text-sm text-gray-500 dark:text-gray-400">No apps in this environment yet.</p>
         </div>
         {% endif %}
     </div>
