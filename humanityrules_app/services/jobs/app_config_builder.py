@@ -5,8 +5,6 @@ Converts a Django App model (with related Workspace, Environment)
 into an appconfig.AppConfig suitable for CDK deployment.
 """
 
-from pathlib import Path
-
 from humanityrules_app.models import App, AppTemplate, ResourceTag
 from humanityrules_app.services import infra_customer
 from humanityrules_app.services import template_deploy_service
@@ -14,6 +12,7 @@ from humanityrules_app.services.infra_customer.appconfig import (
     AppConfig,
     ContainerConfig,
     ContainerDependencyConfig,
+    ContainerRole,
     ImageSource,
 )
 
@@ -77,12 +76,23 @@ def _build_container_config(
 ) -> ContainerConfig:
     """Project a (template, app) container pair into a ContainerConfig."""
     name = template_container["name"]
+    # ImageSource(...) hard-fails on pre-template-image spec shapes
+    # ("dockerfile", "prebuilt", ...) — re-run seed_app_templates.
     image_source = ImageSource(template_container["image_source"])
+    role = ContainerRole(template_container["role"]) if template_container.get("role") else None
+
+    if not template_container.get("template_path"):
+        raise ValueError(f"Container '{name}' has no template_path")
+    if role == ContainerRole.POLICY_PROXY and not template_container.get("upstream_container"):
+        raise ValueError(f"Container '{name}' is role=policy_proxy but has no upstream_container")
 
     command = template_container.get("command")
-    common = dict(
+    return ContainerConfig(
         name=name,
         image_source=image_source,
+        template_path=template_container["template_path"],
+        role=role,
+        upstream_container=template_container.get("upstream_container") or None,
         container_port=template_container["container_port"],
         health_check_path=template_container.get("health_check_path") or None,
         health_check_command=template_container.get("health_check_command") or None,
@@ -118,38 +128,6 @@ def _build_container_config(
         requires_env_bearer=bool(template_container.get("requires_env_bearer", False)),
     )
 
-    if image_source == ImageSource.DOCKERFILE:
-        return ContainerConfig(
-            **common,
-            source_repo_path=template_container["source_repo_path"],
-            dockerfile_path=template_container.get("dockerfile_path") or None,
-            ecr_repo_name=f"humr/{env_slug}/{app_name}-{name}",
-        )
-    if image_source == ImageSource.PREBUILT:
-        return ContainerConfig(
-            **common,
-            prebuilt_ecr_repo=template_container["ecr_repo"],
-            prebuilt_version=template_container["version"],
-        )
-    if image_source == ImageSource.REGISTRY:
-        if not template_container.get("registry_image"):
-            msg = f"Container '{name}' is image_source=registry but has no registry_image"
-            raise ValueError(msg)
-        return ContainerConfig(
-            **common,
-            registry_image=template_container["registry_image"],
-        )
-    if image_source == ImageSource.POLICY_PROXY:
-        upstream = template_container.get("upstream_container")
-        if not upstream:
-            msg = f"Container '{name}' is image_source=policy_proxy but has no upstream_container"
-            raise ValueError(msg)
-        return ContainerConfig(
-            **common,
-            upstream_container=upstream,
-        )
-    raise ValueError(f"Unknown image_source='{image_source}' on container '{name}'")
-
 
 def _match_app_containers_to_template(
     template_containers: list[dict],
@@ -160,20 +138,13 @@ def _match_app_containers_to_template(
     return {c["name"]: by_name.get(c["name"], {"name": c["name"]}) for c in template_containers}
 
 
-def build_app_config_from_app(app: App, repo_path: Path) -> AppConfig:
-    """Build an AppConfig sourcing identity/build from App + template and runtime from the App's materialized fields."""
+def build_app_config_from_app(app: App) -> AppConfig:
+    """Build an AppConfig sourcing identity from App + template and runtime from the App's materialized fields."""
     environment = app.environment
-    template: AppTemplate | None = app.source_template
+    template: AppTemplate = app.source_template
 
-    if template is None or not template.containers:
-        raise ValueError(
-            f"App '{app.slug}' has no source_template with containers; "
-            f"multi-container deploy path requires a template-backed app."
-        )
-
-    app_source_path = repo_path
-    if app.repo_subpath:
-        app_source_path = repo_path / app.repo_subpath
+    if not template.containers:
+        raise ValueError(f"App '{app.slug}' template '{template.slug}' has no containers")
 
     efs_config = None
     if template.efs_config:
@@ -222,7 +193,6 @@ def build_app_config_from_app(app: App, repo_path: Path) -> AppConfig:
         memory=app.memory,
         containers=containers,
         compute_mode=app.compute_mode,
-        app_source_path=app_source_path,
         alb_target_container=template.alb_target_container,
         app_secrets=app_secrets_union or None,
         efs_config=efs_config,

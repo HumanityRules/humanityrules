@@ -33,28 +33,8 @@ def _get_aws_session(environment: models.Environment):
     )
 
 
-def _dockerfile_ecr_repo_names(app: models.App) -> list[str]:
-    """ECR repo names for the app's dockerfile-built containers, for teardown cleanup.
-
-    Prebuilt-container repos are per-env shared resources and are not torn
-    down by per-app teardown. If the source template is gone (deleted after
-    the deploy), fall back to the legacy app-level repo name so we still
-    empty the right one.
-    """
-    env_slug = app.environment.slug
-    template = app.source_template
-
-    if template and template.containers:
-        return [
-            f"humr/{env_slug}/{app.slug}-{tc['name']}"
-            for tc in template.containers
-            if tc["image_source"] == "dockerfile"
-        ]
-    return [f"humr/{env_slug}/{app.slug}"]
-
-
 def teardown_infra(app: models.App) -> bool:
-    """Delete the app's stacks and ECR repos without touching App job state.
+    """Delete the app's stack without touching App job state.
 
     For flows that tear down inline as part of a larger attempt (app removal,
     environment teardown) and manage App transitions themselves.
@@ -64,7 +44,6 @@ def teardown_infra(app: models.App) -> bool:
         session=session,
         env_slug=app.environment.slug,
         app_name=app.slug,
-        dockerfile_ecr_repo_names=_dockerfile_ecr_repo_names(app),
     )
 
 
@@ -112,7 +91,6 @@ def run_teardown(app_id: str) -> bool:
                 session=session,
                 env_slug=environment.slug,
                 app_name=app.slug,
-                dockerfile_ecr_repo_names=_dockerfile_ecr_repo_names(app),
             )
 
             if success:

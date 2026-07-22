@@ -38,26 +38,6 @@ def clone_repository(repository: Repository, branch: str, target_dir: Path) -> N
         )
         return
 
-    # Template-backed apps: resolve against the *worker's* TEMPLATE_REPOS_DIR,
-    # so git worktrees build from their own template_repos/ instead of the
-    # main checkout that originally created the app.
-    if clone_url.startswith("humr-template://"):
-        rel_path = clone_url[len("humr-template://"):]
-        source_path = settings.TEMPLATE_REPOS_DIR / rel_path
-        if not source_path.exists():
-            raise ValueError(f"Template repository path does not exist: {source_path}")
-
-        logger.info(
-            "Copying template repository %(source)s to %(target)s",
-            {"source": str(source_path), "target": str(target_dir)},
-        )
-
-        # symlinks=True copies links verbatim instead of dereferencing them, so a
-        # dangling symlink in the source (e.g. a dev .venv whose bin/python points at
-        # a non-existent path) doesn't abort the whole copy with shutil.Error.
-        shutil.copytree(src=source_path, dst=target_dir, dirs_exist_ok=False, symlinks=True)
-        return
-
     # Handle local file:// URLs (backward compatibility with deployable_repos/)
     if clone_url.startswith("file://"):
         source_path = Path(clone_url[7:])

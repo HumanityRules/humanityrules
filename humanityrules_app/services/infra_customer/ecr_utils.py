@@ -126,6 +126,7 @@ def build_and_push_docker_image(
     ecr_repo_name: str,
     app_source_path: Path | None,
     image_tag: str,
+    build_id: str,
 ) -> str | None:
     """
     Build Docker image and push to ECR.
@@ -142,6 +143,9 @@ def build_and_push_docker_image(
         ecr_repo_name: ECR repository name (e.g., "humr/default/simple-dashboard")
         app_source_path: Path to the app source directory containing Dockerfile
         image_tag: Docker image tag (e.g., "latest", "v1.0.0")
+        build_id: Unique id isolating this build's /build dir on the shared EC2
+            builder. Must be unique per attempt — two deploys racing to build
+            the same tag then waste work instead of corrupting each other.
 
     Returns:
         The full image URI on success, None on failure.
@@ -167,7 +171,7 @@ def build_and_push_docker_image(
             env_slug=env_slug,
             app_source_path=app_source_path,
             image_uri=image_uri,
-            image_tag=image_tag,
+            build_id=build_id,
         )
     else:
         logger.info("Using local Docker")
@@ -324,7 +328,7 @@ def _build_and_push_local(session: boto3.Session, app_source_path: Path, image_u
     return image_uri
 
 
-def _build_and_push_remote(session: boto3.Session, env_slug: str, app_source_path: Path, image_uri: str, image_tag: str) -> str | None:
+def _build_and_push_remote(session: boto3.Session, env_slug: str, app_source_path: Path, image_uri: str, build_id: str) -> str | None:
     """Build and push Docker image using remote EC2 builder."""
     try:
         # Start EC2 builder if stopped
@@ -335,13 +339,13 @@ def _build_and_push_remote(session: boto3.Session, env_slug: str, app_source_pat
             logger.error("SSM agent did not come online in time")
             return None
 
-        # Transfer source code to builder (use image_tag as build_id for concurrent build isolation)
-        if not ec2_builder_utils.transfer_source(session=session, instance_id=instance_id, source_path=app_source_path, build_id=image_tag):
+        # Transfer source code to builder (build_id isolates concurrent builds' /build dirs)
+        if not ec2_builder_utils.transfer_source(session=session, instance_id=instance_id, source_path=app_source_path, build_id=build_id):
             logger.error("Failed to transfer source code to builder")
             return None
 
         # Run Docker build and push
-        success, logs = ec2_builder_utils.run_remote_docker_build(session=session, instance_id=instance_id, image_uri=image_uri, build_id=image_tag)
+        success, logs = ec2_builder_utils.run_remote_docker_build(session=session, instance_id=instance_id, image_uri=image_uri, build_id=build_id)
         if not success:
             logger.error("Remote Docker build failed: %(logs)s", {"logs": logs})
             return None

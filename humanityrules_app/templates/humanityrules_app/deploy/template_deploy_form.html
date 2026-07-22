@@ -145,12 +145,8 @@
                 <li class="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/60 p-2">
                     <div class="flex items-center gap-2 mb-1">
                         <span class="font-mono text-xs font-medium text-gray-900 dark:text-white">{{ c.name }}</span>
-                        {% if c.image_source == "prebuilt" %}
-                        <span class="inline-flex items-center rounded bg-amber-100 dark:bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">prebuilt</span>
-                        {% elif c.image_source == "registry" %}
-                        <span class="inline-flex items-center rounded bg-purple-100 dark:bg-purple-500/20 px-1.5 py-0.5 text-[10px] font-medium text-purple-700 dark:text-purple-300">registry</span>
-                        {% elif c.image_source == "dockerfile" %}
-                        <span class="inline-flex items-center rounded bg-sky-100 dark:bg-sky-500/20 px-1.5 py-0.5 text-[10px] font-medium text-sky-700 dark:text-sky-300">dockerfile</span>
+                        {% if c.role == "policy_proxy" %}
+                        <span class="inline-flex items-center rounded bg-purple-100 dark:bg-purple-500/20 px-1.5 py-0.5 text-[10px] font-medium text-purple-700 dark:text-purple-300">policy proxy</span>
                         {% endif %}
                         {% if c.name == template.alb_target_container %}
                         <span class="inline-flex items-center rounded bg-green-100 dark:bg-green-500/20 px-1.5 py-0.5 text-[10px] font-medium text-green-700 dark:text-green-300">ALB target</span>
@@ -170,20 +166,10 @@
                             <dd class="text-gray-700 dark:text-gray-300 font-mono">{{ c.health_check_path }}</dd>
                         </div>
                         {% endif %}
-                        {% if c.image_source == "dockerfile" %}
+                        {% if c.template_path %}
                         <div class="flex">
                             <dt class="text-gray-500 dark:text-gray-400 w-20">Source</dt>
-                            <dd class="text-gray-700 dark:text-gray-300 font-mono">template_repos/{{ c.source_repo_path }}/{{ c.dockerfile_path }}</dd>
-                        </div>
-                        {% elif c.image_source == "prebuilt" %}
-                        <div class="flex">
-                            <dt class="text-gray-500 dark:text-gray-400 w-20">Image</dt>
-                            <dd class="text-gray-700 dark:text-gray-300 font-mono">humr/{env}/{{ c.ecr_repo }}:{{ c.version }}</dd>
-                        </div>
-                        {% elif c.image_source == "registry" %}
-                        <div class="flex">
-                            <dt class="text-gray-500 dark:text-gray-400 w-20">Image</dt>
-                            <dd class="text-gray-700 dark:text-gray-300 font-mono">{{ c.registry_image }}</dd>
+                            <dd class="text-gray-700 dark:text-gray-300 font-mono">template_repos/{{ c.template_path }}</dd>
                         </div>
                         {% endif %}
                     </dl>

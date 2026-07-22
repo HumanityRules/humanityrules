@@ -9,11 +9,9 @@ moved the app to DEPLOYING and stamped its claim.
 import logging
 
 from django.conf import settings
-from django.utils import timezone
 
 from humanityrules_app import models
 from humanityrules_app.services import infra_customer
-from humanityrules_app.services.gitproviders import repo_service
 import humanityrules_app.services.jobs.app_deployment_debug_simulator as app_deployment_debug_simulator
 
 from . import app_config_builder
@@ -37,19 +35,11 @@ def _get_aws_session(environment: models.Environment):
     )
 
 
-def build_image_tag(app: models.App, git_ref: str) -> str:
-    """Mint the ECR tag for one deploy attempt; unique per attempt via the timestamp."""
-    short_ref = git_ref[:8] if len(git_ref) > 8 else git_ref
-    timestamp = timezone.now().strftime("%Y%m%d%H%M%S%f")
-    return f"{app.slug}-{short_ref}-{timestamp}"
-
-
 def run_deployment(app_id: str) -> bool:
     """Execute the deploy attempt for an app the worker claimed. Returns success."""
     try:
         app = models.App.objects.select_related(
             "workspace",
-            "repository",
             "source_template",
             "environment",
             "environment__aws_account",
@@ -87,29 +77,10 @@ def run_deployment(app_id: str) -> bool:
         if settings.HUMR_DEBUG_DEPLOYMENTS:
             return app_deployment_debug_simulator.run_debug_deployment(app=app)
 
-        git_ref = app.repository.default_branch
-        image_tag = build_image_tag(app=app, git_ref=git_ref)
-
-        logger.info(
-            "Starting deployment of '%(app_name)s' to '%(environment_name)s' (git_ref=%(git_ref)s, image_tag=%(image_tag)s)",
-            {"app_name": app.name, "environment_name": environment.name, "git_ref": git_ref, "image_tag": image_tag},
-        )
-
         try:
-            # Clone the repository
-            cloned_repo_path = settings.REPO_CLONE_DIR / f"deploy-{app.last_attempt_id}"
-            repo_service.clone_repository(
-                repository=app.repository,
-                branch=git_ref,
-                target_dir=cloned_repo_path,
-            )
-
             session = _get_aws_session(environment=environment)
 
-            app_config = app_config_builder.build_app_config_from_app(
-                app=app,
-                repo_path=cloned_repo_path,
-            )
+            app_config = app_config_builder.build_app_config_from_app(app=app)
 
             # Progress marker for the no-progress tier of the stale-job reaper.
             app.save(update_fields=["updated_at"])
@@ -119,7 +90,7 @@ def run_deployment(app_id: str) -> bool:
                 account_id=environment.aws_account.aws_account_id,
                 region=environment.aws_region,
                 app_config=app_config,
-                image_tag=image_tag,
+                build_id=str(app.last_attempt_id),
                 env_slug=environment.slug,
                 environment=environment,
                 subdomain=app.slug,
@@ -128,7 +99,9 @@ def run_deployment(app_id: str) -> bool:
             )
 
             if result.success:
-                app_job_service.settle_deploy_success(app=app, service_url=result.service_url, alb_dns=result.alb_dns)
+                app_job_service.settle_deploy_success(
+                    app=app, service_url=result.service_url, alb_dns=result.alb_dns, image_hashes=result.image_hashes,
+                )
                 logger.info("Deployment of '%(app_slug)s' completed successfully", {"app_slug": app.slug})
                 return True
             else:
@@ -140,7 +113,3 @@ def run_deployment(app_id: str) -> bool:
             logger.exception("Deployment error: %(error)s", {"error": str(e)})
             app_job_service.settle_failure(app=app, error=f"Deployment error: {e}")
             return False
-
-        finally:
-            # Always cleanup the cloned repository
-            repo_service.cleanup_repository(repo_path=cloned_repo_path)

@@ -37,6 +37,7 @@ def run_debug_deployment(app: models.App) -> bool:
         app=app,
         service_url=_build_debug_service_url(app=app),
         alb_dns=_build_debug_alb_dns(app=app),
+        image_hashes={},
     )
 
     logger.info(

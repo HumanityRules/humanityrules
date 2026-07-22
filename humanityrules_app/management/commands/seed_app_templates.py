@@ -27,9 +27,8 @@ OPENCLAW_TEMPLATE = {
     "containers": [
         {
             "name": "app",
-            "image_source": "dockerfile",
-            "source_repo_path": "openclaw_agent",
-            "dockerfile_path": "Dockerfile",
+            "image_source": "template",
+            "template_path": "openclaw_agent",
             "container_port": 18789,
             "health_check_path": "/health",
             "health_check_command": "",
@@ -163,13 +162,15 @@ _HERMES_CHECKPOINT_EFS_CONFIG = {
 }
 
 # Policy proxy: platform-owned SSO+ABAC gate that fronts the Hermes container.
-# image_source="policy_proxy" is resolved at deploy time to the per-env ECR
-# repo (humr/{env_slug}/policy-proxy:POLICY_PROXY_IMAGE_VERSION), and its
-# presence drives env-level provisioning (auth Lambda, per-env secrets).
+# Its image is an ordinary template image (humr/{env_slug}/policy-proxy at the
+# tree hash of template_repos/policy_proxy); role="policy_proxy" is what turns
+# on the proxy wiring (env-bearer overlay, upstream forwarding, ALB targeting).
 # Listens on hermes.container_port + 1 to keep the upstream port free.
 _HERMES_POLICY_PROXY_CONTAINER = {
     "name": "policy-proxy",
-    "image_source": "policy_proxy",
+    "image_source": "template",
+    "template_path": "policy_proxy",
+    "role": "policy_proxy",
     "upstream_container": "hermes",
     "container_port": 8788,
     "health_check_path": "/__policy_proxy/healthz",
@@ -217,9 +218,8 @@ HERMES_PERSONAL_TEMPLATE = {
     "containers": [
         {
             "name": "hermes",
-            "image_source": "dockerfile",
-            "source_repo_path": "hermes_agent",
-            "dockerfile_path": "Dockerfile",
+            "image_source": "template",
+            "template_path": "hermes_agent",
             "container_port": 8787,
             "health_check_path": "/health",
             "health_check_command": "",

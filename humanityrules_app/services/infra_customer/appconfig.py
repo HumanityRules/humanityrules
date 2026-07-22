@@ -4,7 +4,6 @@ Application configuration dataclass for ECS deployments.
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from pathlib import Path
 from typing import Literal
 
 
@@ -15,31 +14,22 @@ ContainerDependencyCondition = Literal["START", "HEALTHY", "COMPLETE", "SUCCESS"
 class ImageSource(StrEnum):
     """How a container's image is sourced at deploy time.
 
-    This is the single source of truth for what each value means; the rest of
-    the codebase dispatches on these members.
+    A single value today; kept explicit as the hook point for future sourcing
+    modes (external registries, customer-built images, ...).
     """
 
-    # HUMR builds the image from source during the deploy. The source tree lives
-    # under template_repos/ (or the customer's cloned repo) and is pushed to
-    # the per-app ECR repo `{c.ecr_repo_name}:{image_tag}`. Fields consumed:
-    # source_repo_path, dockerfile_path, ecr_repo_name.
-    DOCKERFILE = "dockerfile"
+    # Image built from the template_path tree under template_repos/ into the
+    # shared per-env repo humr/{env_slug}/<image>:{tree-hash}. The deploy path
+    # builds the image on miss; every app in the env at the same tree hash
+    # shares one image. Fields consumed: template_path.
+    TEMPLATE = "template"
 
-    # Image already exists in the per-env ECR namespace (humr/{env_slug}/{repo})
-    # and was pushed out-of-band by `humr_build_prebuilt_image`. The deploy does
-    # not build — a missing image is a hard-fail. Fields consumed:
-    # prebuilt_ecr_repo, prebuilt_version.
-    PREBUILT = "prebuilt"
 
-    # Public registry reference resolved by ECS at pull time (e.g.
-    # "docker:26.1.0-dind", "docker.io/..."). Fields consumed: registry_image.
-    REGISTRY = "registry"
+class ContainerRole(StrEnum):
+    """Platform wiring a container carries beyond how its image is sourced."""
 
-    # Platform-owned SSO + ABAC proxy. Image resolves from the per-env
-    # humr/{env_slug}/policy-proxy repo (pushed by deploy_app at
-    # POLICY_PROXY_IMAGE_VERSION). Presence of any policy_proxy container in a
-    # task triggers env-level provisioning (ECR stack, auth Lambda, per-env
-    # auth config secret) and forces the proxy to be the ALB target. Fields
+    # SSO + ABAC proxy fronting a sibling container. Receives the env-bearer
+    # overlay and the proxy env wiring, and must be the ALB target. Fields
     # consumed: upstream_container (name of the sibling the proxy fronts;
     # resolved into HUMR_UPSTREAM_HOST=127.0.0.1 + HUMR_UPSTREAM_PORT env vars).
     POLICY_PROXY = "policy_proxy"
@@ -97,16 +87,12 @@ class ContainerConfig:
     # consumes on this dataclass.
     image_source: ImageSource
 
-    source_repo_path: str | None = None  # DOCKERFILE: repo-relative path under template_repos/
-    dockerfile_path: str | None = None   # DOCKERFILE
-    ecr_repo_name: str | None = None     # DOCKERFILE: per-app + per-container ECR repo
+    template_path: str | None = None  # TEMPLATE: tree under template_repos/ this image is built from
 
-    prebuilt_ecr_repo: str | None = None  # PREBUILT: within humr/{env_slug}/ namespace
-    prebuilt_version: str | None = None   # PREBUILT
+    # Platform wiring beyond image sourcing; see the ContainerRole enum.
+    role: ContainerRole | None = None
 
-    registry_image: str | None = None  # REGISTRY
-
-    upstream_container: str | None = None  # POLICY_PROXY: sibling container this proxy fronts
+    upstream_container: str | None = None  # role=POLICY_PROXY: sibling container this proxy fronts
 
     # Network / health
     container_port: int = 0
@@ -149,9 +135,6 @@ class ContainerConfig:
     user: str | None = None
 
     # Optional override for the container's CMD (the image's ENTRYPOINT is preserved).
-    # Useful for prebuilt images whose default CMD doesn't match how HUMR wants to
-    # run them — e.g. learneo-mcp defaults to stdio but the sidecar integration
-    # needs ["--http", "--port", "7777", "--host", "127.0.0.1"].
     command: list[str] | None = None
 
     # When False, the container's exit won't stop the task. Useful for
@@ -190,7 +173,7 @@ class ContainerConfig:
     # HUMR_OWNER_USERNAME (if the owning App has an owner tag). Any env-resident
     # component that calls the HUMR control plane sets this — Hermes integrations
     # today; future env-resident services later. Policy-proxy containers receive
-    # the overlay implicitly from image_source=policy_proxy, so templates do not
+    # the overlay implicitly from role=policy_proxy, so templates do not
     # need to set this knob for them. The IAM grant to read shared-secrets is
     # added to the task role iff any container needs the overlay.
     requires_env_bearer: bool = False
@@ -218,11 +201,6 @@ class AppConfig:
 
     # ECS compute backend for the service.
     compute_mode: ComputeMode = "fargate"
-
-    # Path to app source for the dockerfile-built containers. One path for the
-    # whole task today; all dockerfile containers build from subdirectories of
-    # this tree (per their source_repo_path/dockerfile_path).
-    app_source_path: Path | None = None
 
     # Name of the container in `containers` that receives ALB traffic.
     # None = no ALB exposure.
@@ -265,7 +243,7 @@ class AppConfig:
 
     def container_needs_env_bearer(self, container: ContainerConfig) -> bool:
         """True if this container should receive the HUMR control-plane bearer overlay."""
-        return container.requires_env_bearer or container.image_source == ImageSource.POLICY_PROXY
+        return container.requires_env_bearer or container.role == ContainerRole.POLICY_PROXY
 
     def needs_env_bearer(self) -> bool:
         """True if any container in the task needs the HUMR control-plane bearer overlay."""
@@ -285,7 +263,7 @@ class AppConfig:
 
     def policy_proxy_container(self) -> ContainerConfig | None:
         """Return the policy-proxy ContainerConfig if the task includes one, else None."""
-        matches = [c for c in self.containers if c.image_source == ImageSource.POLICY_PROXY]
+        matches = [c for c in self.containers if c.role == ContainerRole.POLICY_PROXY]
         if not matches:
             return None
         if len(matches) > 1:
