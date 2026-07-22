@@ -180,11 +180,11 @@ class AppTemplateAdmin(admin.ModelAdmin):
 
 @admin.register(App)
 class AppAdmin(admin.ModelAdmin):
-    list_display = ["name", "slug", "organization", "workspace", "environment", "repository", "source_template", "build_strategy", "cpu", "memory", "compute_mode", "container_port", "job_status", "live_state", "updated_at"]
-    list_filter = ["job_status", "live_state", "build_strategy", "compute_mode", "organization", "source_template"]
-    search_fields = ["name", "slug", "workspace__name", "organization__name", "repository__full_name", "environment__name"]
+    list_display = ["name", "slug", "organization", "workspace", "environment", "source_template", "cpu", "memory", "compute_mode", "container_port", "job_status", "live_state", "updated_at"]
+    list_filter = ["job_status", "live_state", "compute_mode", "organization", "source_template"]
+    search_fields = ["name", "slug", "workspace__name", "organization__name", "environment__name"]
     readonly_fields = ["id", "created_at", "updated_at"]
-    autocomplete_fields = ["organization", "workspace", "environment", "repository", "source_template", "created_by"]
+    autocomplete_fields = ["organization", "workspace", "environment", "source_template", "created_by"]
 
     def get_readonly_fields(self, request: HttpRequest, obj: App | None) -> list[str]:
         # environment is immutable: every historical deployment resolves its env via
@@ -197,14 +197,13 @@ class AppAdmin(admin.ModelAdmin):
 
 @admin.register(DeploymentRecord)
 class DeploymentRecordAdmin(admin.ModelAdmin):
-    list_display = ["created_at", "app", "event_type", "attempt_id", "git_ref", "created_by"]
+    list_display = ["created_at", "app", "event_type", "attempt_id", "created_by"]
     list_filter = ["event_type", "app__environment", "app__workspace__organization"]
     search_fields = [
         "app__name",
         "app__workspace__name",
         "app__workspace__organization__name",
         "app__environment__name",
-        "git_ref",
     ]
     readonly_fields = ["id", "created_at"]
     autocomplete_fields = ["app", "created_by"]

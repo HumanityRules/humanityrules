@@ -17,6 +17,7 @@ from . import iam_utils
 from . import node_packing
 from . import route53_utils
 from . import secrets_utils
+from . import template_images
 from . import vpc_utils
 
 __all__ = [
@@ -32,5 +33,6 @@ __all__ = [
     "node_packing",
     "route53_utils",
     "secrets_utils",
+    "template_images",
     "vpc_utils",
 ]

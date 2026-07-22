@@ -14,7 +14,7 @@ Common queries:
     humr_query Environment name slug aws_region status
 
   Apps and deployment history:
-    humr_query App name slug build_strategy
+    humr_query App name slug compute_mode
     humr_query App slug job_status live_state --order updated_at --desc --limit 10
     humr_query DeploymentRecord event_type created_at --filter app__slug=myapp --order created_at --desc
     humr_query DeploymentLog level source message --filter attempt_id=<uuid> --order created_at --desc

@@ -395,16 +395,16 @@ class Command(BaseCommand):
     def _handle_redeploy_app(self, options: dict[str, Any]) -> None:
         """Redeploy an app: queue a fresh deploy attempt.
 
-        Mirrors the UI's 'Redeploy' button (`app_deployment_redeploy`): builds the
-        repository's default branch with a fresh image tag. Refuses while any job
-        is in flight for the app.
+        Mirrors the UI's 'Redeploy' button (`app_deployment_redeploy`): resolves the
+        template images by tree hash, building on miss. Refuses while any job is in
+        flight for the app.
         """
         app_slug = options["app"]
         created_by_username = options.get("created_by")
 
         try:
             app = models.App.objects.select_related(
-                "workspace", "organization", "repository", "environment", "environment__aws_account",
+                "workspace", "organization", "source_template", "environment", "environment__aws_account",
             ).get(slug=app_slug)
         except models.App.DoesNotExist:
             self.stderr.write(self.style.ERROR(f"App '{app_slug}' not found"))
@@ -433,7 +433,6 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(f"\nRedeploy queued for app '{app.slug}'"))
         self.stdout.write(f"  App: {app.name}")
         self.stdout.write(f"  Environment: {app.environment.name} ({app.environment.aws_account.name})")
-        self.stdout.write(f"  git_ref: {app.repository.default_branch}")
         self.stdout.write(f"  Attempt: {queued_app.last_attempt_id}")
         self.stdout.write(f"  Created by: {created_by.username}")
         self.stdout.write(self.style.WARNING("Deployment will start automatically (job worker picks up pending deployments)"))
@@ -766,7 +765,7 @@ class Command(BaseCommand):
     def _template_requires_owner(self, template):
         """True iff the template is a Personal Assistant (policy-proxy-fronted + app-type=personal-assistant)."""
         has_policy_proxy = any(
-            c.get("image_source") == "policy_proxy"
+            c.get("role") == "policy_proxy"
             for c in (template.containers or [])
         )
         if not has_policy_proxy:

@@ -50,7 +50,7 @@ def _get_app_for_user(request: HttpRequest, app_slug: str) -> App:
     """Get an app that belongs to the current user's organization."""
     return get_object_or_404(
         App.objects.select_related(
-            "workspace", "repository", "created_by", "source_template",
+            "workspace", "created_by", "source_template",
             "environment", "environment__aws_account",
         ),
         slug=app_slug,

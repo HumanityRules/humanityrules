@@ -23,7 +23,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
 
     apps = (
         App.objects.filter(workspace__in=visible_workspaces)
-        .select_related("workspace", "repository")
+        .select_related("workspace")
         .order_by("-created_at")
     )
     apps = list(apps)

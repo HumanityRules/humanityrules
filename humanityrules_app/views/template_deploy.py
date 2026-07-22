@@ -91,7 +91,7 @@ def _selected_label(options: list[dict], value: str, placeholder: str) -> str:
 def _template_requires_owner(template: models.AppTemplate) -> bool:
     """True iff the template's default_tags mark it as a Personal Assistant."""
     has_policy_proxy = any(
-        c.get("image_source") == "policy_proxy"
+        c.get("role") == "policy_proxy"
         for c in (template.containers or [])
     )
     if not has_policy_proxy:
