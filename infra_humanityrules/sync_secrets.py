@@ -9,7 +9,6 @@ Usage:
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -33,11 +32,6 @@ SECRET_DEFINITIONS = {
         "GITHUB_APP_CLIENT_SECRET",
         "GITHUB_APP_PRIVATE_KEY",
         "GITHUB_WEBHOOK_SECRET",
-    ],
-    "humr/prod/bedrock": [
-        "AWS_BEDROCK_REGION",
-        "AWS_BEDROCK_ACCESS_KEY_ID",
-        "AWS_BEDROCK_SECRET_ACCESS_KEY",
     ],
     "humr/prod/api": [
         "HUMR_API_SECRET_KEY",

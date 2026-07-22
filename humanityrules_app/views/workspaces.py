@@ -1,5 +1,4 @@
 import json
-from uuid import UUID
 
 from django.contrib.auth.decorators import login_required
 from django.db.models import Prefetch
@@ -152,57 +151,6 @@ def workspace_remove(request: HttpRequest, workspace_slug: str) -> HttpResponse:
 
 @login_required
 @require_POST
-def workspace_tag_add(request: HttpRequest, workspace_slug: str) -> HttpResponse:
-    """Add a tag to a workspace. Returns updated tag partial."""
-    workspace = get_object_or_404(Workspace, slug=workspace_slug, organization=request.user.current_organization)
-
-    denied = abac_view_checks.check_abac(request, workspace, "workspace", "workspace:admin")
-    if denied:
-        return denied
-
-    key = request.POST.get("key", "").strip()
-    value = request.POST.get("value", "").strip()
-    if key and value:
-        ResourceTag.objects.get_or_create(
-            organization=request.user.current_organization,
-            resource_type="workspace",
-            workspace=workspace,
-            key=key,
-            value=value,
-        )
-
-    org = request.user.current_organization
-    tags = ResourceTag.objects.filter(workspace=workspace).order_by("key", "value")
-    url_base = f"/workspaces/{workspace.slug}/tags/"
-    return render(request, "humanityrules_app/partials/_kv_tag_editor.html", {
-        "items": tags, "can_edit": True, "url_base": url_base, "hx_target": "#workspace-tags", "empty_text": "No tags",
-        **dict(zip(("suggested_keys", "suggested_values"), abac_service.get_resource_tag_suggestions(org, "workspace"))),
-    })
-
-
-@login_required
-@require_POST
-def workspace_tag_remove(request: HttpRequest, workspace_slug: str, tag_id: UUID) -> HttpResponse:
-    """Remove a tag from a workspace. Returns updated tag partial."""
-    workspace = get_object_or_404(Workspace, slug=workspace_slug, organization=request.user.current_organization)
-
-    denied = abac_view_checks.check_abac(request, workspace, "workspace", "workspace:admin")
-    if denied:
-        return denied
-
-    ResourceTag.objects.filter(id=tag_id, workspace=workspace).delete()
-
-    org = request.user.current_organization
-    tags = ResourceTag.objects.filter(workspace=workspace).order_by("key", "value")
-    url_base = f"/workspaces/{workspace.slug}/tags/"
-    return render(request, "humanityrules_app/partials/_kv_tag_editor.html", {
-        "items": tags, "can_edit": True, "url_base": url_base, "hx_target": "#workspace-tags", "empty_text": "No tags",
-        **dict(zip(("suggested_keys", "suggested_values"), abac_service.get_resource_tag_suggestions(org, "workspace"))),
-    })
-
-
-@login_required
-@require_POST
 def workspace_tags_save(request: HttpRequest, workspace_slug: str) -> HttpResponse:
     """Bulk-save workspace tags. Replaces all existing tags with the submitted array."""
 
@@ -237,4 +185,3 @@ def workspace_tags_save(request: HttpRequest, workspace_slug: str) -> HttpRespon
         "suggested_keys": suggested_keys,
         "suggested_values": suggested_values,
     })
-

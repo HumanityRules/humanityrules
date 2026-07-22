@@ -4,7 +4,6 @@ from aws_cdk import Aws, CfnOutput, Duration, Stack
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_ecr as ecr
 from aws_cdk import aws_ecs as ecs
-from aws_cdk import aws_efs as efs
 from aws_cdk import aws_elasticloadbalancingv2 as elbv2
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_logs as logs
@@ -30,10 +29,8 @@ class AppStack(Stack):
         log_group: logs.ILogGroup,
         ecr_repository: ecr.IRepository,
         database_secret: secretsmanager.ISecret,
-        claude_efs: efs.IFileSystem,
-        claude_efs_access_point: efs.IAccessPoint,
         sandbox_cfg: SandboxAwsAccountCfg,
-        **kwargs,
+        **kwargs: object,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
@@ -49,28 +46,12 @@ class AppStack(Stack):
             actions=["secretsmanager:GetSecretValue"],
             resources=[f"arn:aws:secretsmanager:{Aws.REGION}:{Aws.ACCOUNT_ID}:secret:humr/*"],
         ))
-        # Grant access to Bedrock for AI features
-        task_role.add_to_policy(iam.PolicyStatement(
-            actions=["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
-            resources=["*"],
-        ))
         # Grant permission to assume customer-installed HumanityRules roles (cross-account)
         # Security: Customer roles have trust policies requiring our account + ExternalId
         task_role.add_to_policy(iam.PolicyStatement(
             actions=["sts:AssumeRole"],
             resources=["arn:aws:iam::*:role/humr-*"],
         ))
-        # Grant permission to mount EFS with IAM authorization
-        task_role.add_to_policy(iam.PolicyStatement(
-            actions=["elasticfilesystem:ClientMount", "elasticfilesystem:ClientWrite"],
-            resources=[claude_efs.file_system_arn],
-            conditions={
-                "StringEquals": {
-                    "elasticfilesystem:AccessPointArn": claude_efs_access_point.access_point_arn,
-                },
-            },
-        ))
-
         # Task Definition
         task_definition = ecs.FargateTaskDefinition(
             self,
@@ -86,24 +67,10 @@ class AppStack(Stack):
             ),
         )
 
-        # EFS volume for Claude session persistence (using access point for correct ownership)
-        task_definition.add_volume(
-            name="claude-data",
-            efs_volume_configuration=ecs.EfsVolumeConfiguration(
-                file_system_id=claude_efs.file_system_id,
-                transit_encryption="ENABLED",
-                authorization_config=ecs.AuthorizationConfig(
-                    access_point_id=claude_efs_access_point.access_point_id,
-                    iam="ENABLED",
-                ),
-            ),
-        )
-
         # Secret references (created once, shared between containers)
         django_secret = secretsmanager.Secret.from_secret_name_v2(self, "DjangoSecret", "humr/prod/django")
         workos_secret = secretsmanager.Secret.from_secret_name_v2(self, "WorkosSecret", "humr/prod/workos")
         github_secret = secretsmanager.Secret.from_secret_name_v2(self, "GithubSecret", "humr/prod/github")
-        bedrock_secret = secretsmanager.Secret.from_secret_name_v2(self, "BedrockSecret", "humr/prod/bedrock")
         api_secret = secretsmanager.Secret.from_secret_name_v2(self, "ApiSecret", "humr/prod/api")
         posthog_secret = secretsmanager.Secret.from_secret_name_v2(self, "PosthogSecret", "humr/prod/posthog")
         env_sso_secret = secretsmanager.Secret.from_secret_name_v2(self, "EnvSsoSecret", "humr/prod/env-sso")
@@ -128,9 +95,6 @@ class AppStack(Stack):
             "GITHUB_APP_CLIENT_SECRET": ecs.Secret.from_secrets_manager(github_secret, field="GITHUB_APP_CLIENT_SECRET"),
             "GITHUB_APP_PRIVATE_KEY": ecs.Secret.from_secrets_manager(github_secret, field="GITHUB_APP_PRIVATE_KEY"),
             "GITHUB_WEBHOOK_SECRET": ecs.Secret.from_secrets_manager(github_secret, field="GITHUB_WEBHOOK_SECRET"),
-            "AWS_BEDROCK_REGION": ecs.Secret.from_secrets_manager(bedrock_secret, field="AWS_BEDROCK_REGION"),
-            "AWS_BEDROCK_ACCESS_KEY_ID": ecs.Secret.from_secrets_manager(bedrock_secret, field="AWS_BEDROCK_ACCESS_KEY_ID"),
-            "AWS_BEDROCK_SECRET_ACCESS_KEY": ecs.Secret.from_secrets_manager(bedrock_secret, field="AWS_BEDROCK_SECRET_ACCESS_KEY"),
             "HUMR_API_SECRET_KEY": ecs.Secret.from_secrets_manager(api_secret, field="HUMR_API_SECRET_KEY"),
             "POSTHOG_API_KEY": ecs.Secret.from_secrets_manager(posthog_secret, field="POSTHOG_API_KEY"),
             "POSTHOG_HOST": ecs.Secret.from_secrets_manager(posthog_secret, field="POSTHOG_HOST"),
@@ -188,11 +152,6 @@ class AppStack(Stack):
                 "HUMR_STALE_JOB_TIMEOUT_MINUTES": "30",
                 "HUMR_DEAD_WORKER_TIMEOUT_MINUTES": "2",
                 "HUMR_USE_REMOTE_BUILDER": "1",
-                "CLAUDE_CODE_USE_BEDROCK": "1",
-                "CLAUDE_CONFIG_DIR": "/home/appuser/.claude",
-                "CLAUDE_MODEL_GENERAL": "opus-4.8",
-                "CLAUDE_MODEL_ENVIRONMENT": "opus-4.8",
-                "CLAUDE_MODEL_APP_DEPLOYMENT": "opus-4.8",
                 **sandbox_environment,
             },
             secrets=app_secrets,
@@ -205,14 +164,6 @@ class AppStack(Stack):
             ),
         )
         app_container.add_port_mappings(ecs.PortMapping(container_port=8000, protocol=ecs.Protocol.TCP))
-        # Mount EFS for Claude session persistence
-        app_container.add_mount_points(
-            ecs.MountPoint(
-                container_path="/home/appuser/.claude",
-                source_volume="claude-data",
-                read_only=False,
-            )
-        )
 
         # App container waits for migration to complete successfully
         app_container.add_container_dependencies(
