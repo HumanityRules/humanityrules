@@ -12,20 +12,16 @@
     <div class="space-y-10">
         {% for workspace in workspaces %}
         <section aria-label="{{ workspace.name }} workspace" data-workspace-section="{{ workspace.slug }}">
-            <div class="mb-4 flex items-center gap-1 {% if workspace.slug == 'default' %}justify-end{% endif %}">
-                {% if workspace.slug != "default" %}
-                <h2 class="min-w-0 truncate text-lg font-semibold">
-                    <a href="{% url 'workspace_detail' workspace_slug=workspace.slug %}"
-                       hx-get="{% url 'workspace_detail' workspace_slug=workspace.slug %}"
-                       hx-target="#main-content"
-                       hx-swap="innerHTML"
-                       hx-push-url="true"
-                       data-workspace-title="{{ workspace.slug }}"
-                       class="text-gray-900 hover:text-indigo-600 dark:text-white dark:hover:text-indigo-400">
-                        {{ workspace.name }}
-                    </a>
-                </h2>
-                {% endif %}
+            <div class="mb-4 flex items-center gap-3">
+                <a href="{% url 'workspace_detail' workspace_slug=workspace.slug %}"
+                   hx-get="{% url 'workspace_detail' workspace_slug=workspace.slug %}"
+                   hx-target="#main-content"
+                   hx-swap="innerHTML"
+                   hx-push-url="true"
+                   data-workspace-title="{{ workspace.slug }}"
+                   class="min-w-0 truncate text-lg font-semibold text-gray-900 hover:text-indigo-600 dark:text-white dark:hover:text-indigo-400">
+                    {{ workspace.name }} workspace
+                </a>
                 {% include "humanityrules_app/workspaces/_workspace_actions_menu.html#workspace_actions_menu" with can_admin=workspace.can_admin %}
             </div>
 

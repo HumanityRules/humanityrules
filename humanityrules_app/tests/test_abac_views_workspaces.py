@@ -100,13 +100,16 @@ class TestWorkspaceEndpoints(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["workspaces"], [])
 
-    def test_dashboard_hides_default_title_and_links_other_workspace_titles(self) -> None:
+    def test_dashboard_links_workspace_titles(self) -> None:
         self.client.force_login(self.admin_user)
         response = self.client.get("/dashboard/", **HTMX)
 
         self.assertContains(response, 'data-workspace-section="default"')
-        self.assertNotContains(response, 'data-workspace-title="default"')
+        self.assertContains(response, 'data-workspace-title="default"')
+        self.assertContains(response, "Default workspace")
+        self.assertContains(response, 'href="/workspaces/default/"')
         self.assertContains(response, 'data-workspace-title="engineering"')
+        self.assertContains(response, "Engineering workspace")
         self.assertContains(response, 'href="/workspaces/engineering/"')
 
     def test_dashboard_shows_create_workspace_and_admin_action_menus(self) -> None:
@@ -210,7 +213,7 @@ class TestWorkspaceEndpoints(TestCase):
     def test_admin_can_create_workspace(self) -> None:
         self.client.force_login(self.admin_user)
         response = self.client.post("/workspaces/create/", {"name": "New WS"})
-        self.assertEqual(response.status_code, 302)
+        self.assertRedirects(response, "/dashboard/", fetch_redirect_response=False)
 
     def test_blank_workspace_name_redirects_to_dashboard(self) -> None:
         self.client.force_login(self.admin_user)
