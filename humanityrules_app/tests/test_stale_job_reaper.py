@@ -1,5 +1,6 @@
-"""Tests for stale-job detection after a worker dies mid-job."""
+"""Tests for stale-job detection after a worker dies or hangs mid-job."""
 
+import uuid
 from datetime import timedelta
 
 from django.db.models import Model
@@ -40,18 +41,23 @@ class TestStaleJobReaper(TestCase):
             full_name="stale-reaper/hermes",
             clone_url="https://github.com/stale-reaper/hermes.git",
         )
-        self.app = models.App.objects.create(
+
+    def _make_app(self, slug: str, job_status: str) -> models.App:
+        """Create an app fixed in `job_status` with an open attempt id."""
+        return models.App.objects.create(
             organization=self.organization,
             workspace=self.workspace,
             environment=self.environment,
             repository=self.repository,
-            name="Stale Agent",
-            slug="stale-agent",
+            name=slug,
+            slug=slug,
             build_strategy=models.App.BuildStrategy.DOCKERFILE,
             container_port=8787,
             health_check_path="/health",
             cpu=256,
             memory=512,
+            job_status=job_status,
+            last_attempt_id=uuid.uuid7(),
         )
 
     def _make_stale(self, obj: Model) -> None:
@@ -62,94 +68,115 @@ class TestStaleJobReaper(TestCase):
         """Create a worker run whose last heartbeat was `heartbeat_age` ago."""
         return models.JobWorkerRun.objects.create(label="", heartbeat_at=timezone.now() - heartbeat_age)
 
-    def _create_deployment(self, status: str) -> models.Deployment:
-        """Create a deployment for the fixture app."""
-        return models.Deployment.objects.create(
-            app=self.app,
-            git_ref="main",
-            image_tag="stale-test",
-            status=status,
+    def test_stale_executing_deploy_fails(self) -> None:
+        app = self._make_app(slug="deployapp", job_status=models.App.JobStatus.DEPLOYING)
+        self._make_stale(app)
+
+        stale_job_reaper.reap_stale_jobs(no_progress_timeout=TIMEOUT, dead_worker_timeout=DEAD_WORKER_TIMEOUT)
+
+        app.refresh_from_db()
+        self.assertEqual(app.job_status, models.App.JobStatus.IDLE)
+        self.assertIn("stale-job detection", app.last_attempt_error)
+        self.assertTrue(
+            models.DeploymentRecord.objects.filter(
+                app=app,
+                attempt_id=app.last_attempt_id,
+                event_type=models.DeploymentRecord.EventType.DEPLOY_FAILED,
+            ).exists()
         )
 
-    def test_stale_executing_deployment_fails(self) -> None:
-        deployment = self._create_deployment(status=models.Deployment.Status.DEPLOYING)
-        self._make_stale(deployment)
+    def test_fresh_executing_deploy_is_untouched(self) -> None:
+        app = self._make_app(slug="deployapp", job_status=models.App.JobStatus.DEPLOYING)
 
         stale_job_reaper.reap_stale_jobs(no_progress_timeout=TIMEOUT, dead_worker_timeout=DEAD_WORKER_TIMEOUT)
 
-        deployment.refresh_from_db()
-        self.assertEqual(deployment.status, models.Deployment.Status.FAILED)
-        self.assertIn("stale-job detection", deployment.status_message)
-        self.assertIsNotNone(deployment.completed_at)
+        app.refresh_from_db()
+        self.assertEqual(app.job_status, models.App.JobStatus.DEPLOYING)
 
-    def test_fresh_executing_deployment_is_untouched(self) -> None:
-        deployment = self._create_deployment(status=models.Deployment.Status.DEPLOYING)
-
-        stale_job_reaper.reap_stale_jobs(no_progress_timeout=TIMEOUT, dead_worker_timeout=DEAD_WORKER_TIMEOUT)
-
-        deployment.refresh_from_db()
-        self.assertEqual(deployment.status, models.Deployment.Status.DEPLOYING)
-
-    def test_old_claimable_and_terminal_deployments_are_untouched(self) -> None:
-        pending = self._create_deployment(status=models.Deployment.Status.PENDING)
-        teardown_pending = self._create_deployment(status=models.Deployment.Status.TEARDOWN_PENDING)
-        succeeded = self._create_deployment(status=models.Deployment.Status.SUCCEEDED)
-        for deployment in (pending, teardown_pending, succeeded):
-            self._make_stale(deployment)
+    def test_old_claimable_jobs_are_untouched(self) -> None:
+        deploy_pending = self._make_app(slug="deploypending", job_status=models.App.JobStatus.DEPLOY_PENDING)
+        teardown_pending = self._make_app(slug="teardownpending", job_status=models.App.JobStatus.TEARDOWN_PENDING)
+        removal_pending = self._make_app(slug="removalpending", job_status=models.App.JobStatus.REMOVAL_PENDING)
+        for app in (deploy_pending, teardown_pending, removal_pending):
+            self._make_stale(app)
 
         stale_job_reaper.reap_stale_jobs(no_progress_timeout=TIMEOUT, dead_worker_timeout=DEAD_WORKER_TIMEOUT)
 
-        pending.refresh_from_db()
+        deploy_pending.refresh_from_db()
         teardown_pending.refresh_from_db()
-        succeeded.refresh_from_db()
-        self.assertEqual(pending.status, models.Deployment.Status.PENDING)
-        self.assertEqual(teardown_pending.status, models.Deployment.Status.TEARDOWN_PENDING)
-        self.assertEqual(succeeded.status, models.Deployment.Status.SUCCEEDED)
+        removal_pending.refresh_from_db()
+        self.assertEqual(deploy_pending.job_status, models.App.JobStatus.DEPLOY_PENDING)
+        self.assertEqual(teardown_pending.job_status, models.App.JobStatus.TEARDOWN_PENDING)
+        self.assertEqual(removal_pending.job_status, models.App.JobStatus.REMOVAL_PENDING)
 
-    def test_stale_tearing_down_deployment_fails(self) -> None:
-        deployment = self._create_deployment(status=models.Deployment.Status.TEARING_DOWN)
-        self._make_stale(deployment)
+    def test_stale_tearing_down_app_fails_with_teardown_event(self) -> None:
+        app = self._make_app(slug="teardownapp", job_status=models.App.JobStatus.TEARING_DOWN)
+        self._make_stale(app)
 
         stale_job_reaper.reap_stale_jobs(no_progress_timeout=TIMEOUT, dead_worker_timeout=DEAD_WORKER_TIMEOUT)
 
-        deployment.refresh_from_db()
-        self.assertEqual(deployment.status, models.Deployment.Status.FAILED)
+        app.refresh_from_db()
+        self.assertEqual(app.job_status, models.App.JobStatus.IDLE)
+        self.assertTrue(
+            models.DeploymentRecord.objects.filter(
+                app=app,
+                attempt_id=app.last_attempt_id,
+                event_type=models.DeploymentRecord.EventType.TEARDOWN_FAILED,
+            ).exists()
+        )
 
-    def test_deployment_claimed_by_dead_run_fails_fast(self) -> None:
+    def test_stale_removing_app_fails_and_stays_retryable(self) -> None:
+        app = self._make_app(slug="removingapp", job_status=models.App.JobStatus.REMOVING)
+        self._make_stale(app)
+
+        stale_job_reaper.reap_stale_jobs(no_progress_timeout=TIMEOUT, dead_worker_timeout=DEAD_WORKER_TIMEOUT)
+
+        app.refresh_from_db()
+        # Back to idle (not wedged), so the removal can be re-queued.
+        self.assertEqual(app.job_status, models.App.JobStatus.IDLE)
+        self.assertTrue(
+            models.DeploymentRecord.objects.filter(
+                app=app,
+                attempt_id=app.last_attempt_id,
+                event_type=models.DeploymentRecord.EventType.REMOVAL_FAILED,
+            ).exists()
+        )
+
+    def test_app_claimed_by_dead_run_fails_fast(self) -> None:
         dead_run = self._create_worker_run(heartbeat_age=DEAD_WORKER_TIMEOUT + timedelta(minutes=1))
-        deployment = self._create_deployment(status=models.Deployment.Status.DEPLOYING)
-        deployment.claimed_by_run = dead_run
-        deployment.save(update_fields=["claimed_by_run", "updated_at"])
+        app = self._make_app(slug="deployapp", job_status=models.App.JobStatus.DEPLOYING)
+        app.claimed_by_run = dead_run
+        app.save(update_fields=["claimed_by_run", "updated_at"])
 
         stale_job_reaper.reap_stale_jobs(no_progress_timeout=TIMEOUT, dead_worker_timeout=DEAD_WORKER_TIMEOUT)
 
-        deployment.refresh_from_db()
-        self.assertEqual(deployment.status, models.Deployment.Status.FAILED)
-        self.assertEqual(deployment.status_message, stale_job_reaper.DEAD_WORKER_MESSAGE)
+        app.refresh_from_db()
+        self.assertEqual(app.job_status, models.App.JobStatus.IDLE)
+        self.assertEqual(app.last_attempt_error, stale_job_reaper.DEAD_WORKER_MESSAGE)
 
-    def test_deployment_claimed_by_live_run_is_untouched(self) -> None:
+    def test_app_claimed_by_live_run_is_untouched(self) -> None:
         live_run = self._create_worker_run(heartbeat_age=timedelta(seconds=10))
-        deployment = self._create_deployment(status=models.Deployment.Status.DEPLOYING)
-        deployment.claimed_by_run = live_run
-        deployment.save(update_fields=["claimed_by_run", "updated_at"])
+        app = self._make_app(slug="deployapp", job_status=models.App.JobStatus.DEPLOYING)
+        app.claimed_by_run = live_run
+        app.save(update_fields=["claimed_by_run", "updated_at"])
 
         stale_job_reaper.reap_stale_jobs(no_progress_timeout=TIMEOUT, dead_worker_timeout=DEAD_WORKER_TIMEOUT)
 
-        deployment.refresh_from_db()
-        self.assertEqual(deployment.status, models.Deployment.Status.DEPLOYING)
+        app.refresh_from_db()
+        self.assertEqual(app.job_status, models.App.JobStatus.DEPLOYING)
 
-    def test_deployment_claimed_by_live_run_still_reaped_on_no_progress(self) -> None:
+    def test_app_claimed_by_live_run_still_reaped_on_no_progress(self) -> None:
         live_run = self._create_worker_run(heartbeat_age=timedelta(seconds=10))
-        deployment = self._create_deployment(status=models.Deployment.Status.DEPLOYING)
-        deployment.claimed_by_run = live_run
-        deployment.save(update_fields=["claimed_by_run", "updated_at"])
-        self._make_stale(deployment)
+        app = self._make_app(slug="deployapp", job_status=models.App.JobStatus.DEPLOYING)
+        app.claimed_by_run = live_run
+        app.save(update_fields=["claimed_by_run", "updated_at"])
+        self._make_stale(app)
 
         stale_job_reaper.reap_stale_jobs(no_progress_timeout=TIMEOUT, dead_worker_timeout=DEAD_WORKER_TIMEOUT)
 
-        deployment.refresh_from_db()
-        self.assertEqual(deployment.status, models.Deployment.Status.FAILED)
-        self.assertIn("no progress", deployment.status_message)
+        app.refresh_from_db()
+        self.assertEqual(app.job_status, models.App.JobStatus.IDLE)
+        self.assertIn("no progress", app.last_attempt_error)
 
     def test_environment_claimed_by_dead_run_errors_fast(self) -> None:
         dead_run = self._create_worker_run(heartbeat_age=DEAD_WORKER_TIMEOUT + timedelta(minutes=1))
@@ -168,26 +195,26 @@ class TestStaleJobReaper(TestCase):
         self.assertEqual(provisioning.status, models.Environment.Status.ERROR)
         self.assertEqual(provisioning.status_message, stale_job_reaper.DEAD_WORKER_MESSAGE)
 
-    def test_dead_worker_runs_are_pruned_and_detach_terminal_rows(self) -> None:
+    def test_dead_worker_runs_are_pruned_and_detach_idle_apps(self) -> None:
         ancient_run = self._create_worker_run(heartbeat_age=stale_job_reaper.WORKER_RUN_RETENTION + timedelta(hours=1))
         live_run = self._create_worker_run(heartbeat_age=timedelta(seconds=10))
-        succeeded = self._create_deployment(status=models.Deployment.Status.SUCCEEDED)
-        succeeded.claimed_by_run = ancient_run
-        succeeded.save(update_fields=["claimed_by_run", "updated_at"])
+        idle = self._make_app(slug="idleapp", job_status=models.App.JobStatus.IDLE)
+        idle.claimed_by_run = ancient_run
+        idle.save(update_fields=["claimed_by_run", "updated_at"])
 
         stale_job_reaper.reap_stale_jobs(no_progress_timeout=TIMEOUT, dead_worker_timeout=DEAD_WORKER_TIMEOUT)
 
-        succeeded.refresh_from_db()
+        idle.refresh_from_db()
         self.assertFalse(models.JobWorkerRun.objects.filter(id=ancient_run.id).exists())
         self.assertTrue(models.JobWorkerRun.objects.filter(id=live_run.id).exists())
-        self.assertIsNone(succeeded.claimed_by_run)
-        self.assertEqual(succeeded.status, models.Deployment.Status.SUCCEEDED)
+        self.assertIsNone(idle.claimed_by_run)
+        self.assertEqual(idle.job_status, models.App.JobStatus.IDLE)
 
     def test_claim_stamps_worker_run(self) -> None:
         from humanityrules_app.services.jobs import job_worker
 
         run = self._create_worker_run(heartbeat_age=timedelta(seconds=0))
-        deployment = self._create_deployment(status=models.Deployment.Status.PENDING)
+        app = self._make_app(slug="deployapp", job_status=models.App.JobStatus.DEPLOY_PENDING)
         original_run_id = job_worker._worker_run_id
         job_worker._worker_run_id = run.id
         try:
@@ -196,9 +223,9 @@ class TestStaleJobReaper(TestCase):
             job_worker._worker_run_id = original_run_id
 
         self.assertIsNotNone(claimed)
-        deployment.refresh_from_db()
-        self.assertEqual(deployment.status, models.Deployment.Status.DEPLOYING)
-        self.assertEqual(deployment.claimed_by_run_id, run.id)
+        app.refresh_from_db()
+        self.assertEqual(app.job_status, models.App.JobStatus.DEPLOYING)
+        self.assertEqual(app.claimed_by_run_id, run.id)
 
     def test_stale_provisioning_and_tearing_down_environments_error(self) -> None:
         provisioning = models.Environment.objects.create(
@@ -235,12 +262,13 @@ class TestStaleJobReaper(TestCase):
         self.assertEqual(pending.status, models.Environment.Status.PENDING)
 
     def test_stale_applying_permission_request_fails(self) -> None:
+        app = self._make_app(slug="permapp", job_status=models.App.JobStatus.IDLE)
         applying = models.AppPermissionRequest.objects.create(
-            app=self.app,
+            app=app,
             status=models.AppPermissionRequest.Status.APPLYING,
         )
         approved = models.AppPermissionRequest.objects.create(
-            app=self.app,
+            app=app,
             status=models.AppPermissionRequest.Status.APPROVED_PENDING_APPLY,
         )
         for request in (applying, approved):
@@ -253,30 +281,11 @@ class TestStaleJobReaper(TestCase):
         self.assertEqual(applying.status, models.AppPermissionRequest.Status.FAILED)
         self.assertEqual(approved.status, models.AppPermissionRequest.Status.APPROVED_PENDING_APPLY)
 
-    def test_stale_running_app_removal_fails_and_reverts_app(self) -> None:
-        self.app.status = models.App.Status.PENDING_REMOVAL
-        self.app.save(update_fields=["status", "updated_at"])
-        job = models.AppRemovalJob.objects.create(
-            organization=self.organization,
-            app_id_snapshot=self.app.id,
-            app_slug_snapshot=self.app.slug,
-            app_name_snapshot=self.app.name,
-            workspace_slug_snapshot=self.workspace.slug,
-            status=models.AppRemovalJob.Status.RUNNING,
-        )
-        self._make_stale(job)
-
-        stale_job_reaper.reap_stale_jobs(no_progress_timeout=TIMEOUT, dead_worker_timeout=DEAD_WORKER_TIMEOUT)
-
-        job.refresh_from_db()
-        self.app.refresh_from_db()
-        self.assertEqual(job.status, models.AppRemovalJob.Status.FAILED)
-        self.assertEqual(self.app.status, models.App.Status.ACTIVE)
-
     def test_stale_running_cost_refresh_fails(self) -> None:
+        app = self._make_app(slug="costapp", job_status=models.App.JobStatus.IDLE)
         job = models.CostRefreshJob.objects.create(
             organization=self.organization,
-            app=self.app,
+            app=app,
             status=models.CostRefreshJob.Status.RUNNING,
         )
         self._make_stale(job)
