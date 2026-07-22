@@ -2,9 +2,8 @@
 
 import uuid
 from io import StringIO
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
 
-from asgiref.sync import async_to_sync
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.core.management.base import CommandError
@@ -72,7 +71,7 @@ class AgentSlugTests(SimpleTestCase):
         placeholder = MagicMock()
 
         with self.assertRaisesMessage(ValueError, app_slugs.APP_HOSTNAME_LABEL_ERROR):
-            async_to_sync(template_deploy_service.deploy_from_template)(
+            template_deploy_service.deploy_from_template(
                 template=placeholder,
                 organization=placeholder,
                 workspace=placeholder,
@@ -178,7 +177,7 @@ class TemplateDeployConflictTests(TestCase):
 
     def test_template_deploy_aborts_before_persisting_on_label_conflict(self) -> None:
         with self.assertRaisesMessage(ValueError, "'takenlabel.apps.example.com' is already in use. Please choose a different name."):
-            async_to_sync(template_deploy_service.deploy_from_template)(
+            template_deploy_service.deploy_from_template(
                 template=self.template,
                 organization=self.organization,
                 workspace=self.workspace,
@@ -317,7 +316,7 @@ class AgentSlugErrorSurfaceTests(TestCase):
 
     def test_template_deploy_form_surfaces_service_value_error(self) -> None:
         self.client.force_login(self.user)
-        deploy_mock = AsyncMock(side_effect=ValueError("Simulated deploy failure."))
+        deploy_mock = Mock(side_effect=ValueError("Simulated deploy failure."))
 
         with patch(
             "humanityrules_app.views.template_deploy.template_deploy_service.deploy_from_template",
@@ -336,11 +335,11 @@ class AgentSlugErrorSurfaceTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Simulated deploy failure.")
         self.assertFalse(models.App.objects.filter(organization=self.organization, slug="myagent").exists())
-        self.assertEqual(deploy_mock.await_args.kwargs["app_slug"], "myagent")
+        self.assertEqual(deploy_mock.call_args.kwargs["app_slug"], "myagent")
 
     def test_humr_control_deploy_template_writes_service_value_error_to_stderr(self) -> None:
         stderr = StringIO()
-        deploy_mock = AsyncMock(side_effect=ValueError("Simulated deploy failure."))
+        deploy_mock = Mock(side_effect=ValueError("Simulated deploy failure."))
 
         with patch(
             "humanityrules_app.management.commands.humr_control.template_deploy_service.deploy_from_template",
@@ -358,7 +357,7 @@ class AgentSlugErrorSurfaceTests(TestCase):
             )
 
         self.assertIn("Simulated deploy failure.", stderr.getvalue())
-        self.assertEqual(deploy_mock.await_args.kwargs["app_slug"], "myagent")
+        self.assertEqual(deploy_mock.call_args.kwargs["app_slug"], "myagent")
 
     def test_humr_control_redeploy_queues_a_fresh_deploy_attempt(self) -> None:
         app = self._create_redeploy_source()

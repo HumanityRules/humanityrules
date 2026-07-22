@@ -273,6 +273,13 @@ def get_redeploy_skip_reason(app: models.App) -> str | None:
     return None
 
 
+def _refresh_redeploy_skip_reason(app: models.App) -> str:
+    """Reclassify an admission failure from current App and Environment state."""
+    app.refresh_from_db()
+    app.environment.refresh_from_db()
+    return get_redeploy_skip_reason(app=app) or SKIP_APP_BUSY
+
+
 def _collect_candidates() -> _FleetRedeployCandidates:
     """Classify current fleet rows without mutating them."""
     succeeded: list[models.App] = []
@@ -311,36 +318,31 @@ def build_redeploy_all_preview() -> FleetRedeployPreview:
     )
 
 
-def _lock_attempted_apps() -> None:
-    """Serialize fleet redeploy submissions that target the same app rows."""
-    list(
-        models.App.objects
-        .select_for_update()
-        .filter(last_attempt_id__isnull=False)
-        .order_by("id")
-        .values_list("id", flat=True)
-    )
-
-
 def queue_redeploy(app_id: UUID, created_by: models.User) -> FleetRedeployResult:
     """Queue one fleet row when it remains eligible."""
-    with transaction.atomic():
-        app = (
-            models.App.objects
-            .select_for_update()
-            .select_related("environment", "repository")
-            .get(id=app_id)
+    app = (
+        models.App.objects
+        .select_related("environment", "repository")
+        .get(id=app_id)
+    )
+    skip_reason = get_redeploy_skip_reason(app=app)
+    if skip_reason is not None:
+        return FleetRedeployResult(
+            queued_count=0,
+            skipped_counts={skip_reason: 1},
+            included_failed=False,
         )
-        skip_reason = get_redeploy_skip_reason(app=app)
-        if skip_reason is not None:
-            return FleetRedeployResult(
-                queued_count=0,
-                skipped_counts={skip_reason: 1},
-                included_failed=False,
-            )
 
-        included_failed = app.live_state != models.App.LiveState.DEPLOYED or bool(app.last_attempt_error)
+    included_failed = app.live_state != models.App.LiveState.DEPLOYED or bool(app.last_attempt_error)
+    try:
         app_job_service.queue_deploy(app=app, created_by=created_by)
+    except app_job_service.AppJobAdmissionError:
+        skip_reason = _refresh_redeploy_skip_reason(app=app)
+        return FleetRedeployResult(
+            queued_count=0,
+            skipped_counts={skip_reason: 1},
+            included_failed=False,
+        )
 
     return FleetRedeployResult(
         queued_count=1,
@@ -351,22 +353,26 @@ def queue_redeploy(app_id: UUID, created_by: models.User) -> FleetRedeployResult
 
 def queue_redeploy_all(created_by: models.User, include_failed: bool) -> FleetRedeployResult:
     """Queue eligible current fleet rows through the standard deployment worker."""
-    with transaction.atomic():
-        _lock_attempted_apps()
-        candidates = _collect_candidates()
-        selected = [*candidates.succeeded]
-        skipped_counts = Counter(candidates.skipped_counts)
+    candidates = _collect_candidates()
+    selected = [*candidates.succeeded]
+    skipped_counts = Counter(candidates.skipped_counts)
 
-        if include_failed:
-            selected.extend(candidates.failed)
-        elif candidates.failed:
-            skipped_counts[SKIP_FAILED_NOT_INCLUDED] += len(candidates.failed)
+    if include_failed:
+        selected.extend(candidates.failed)
+    elif candidates.failed:
+        skipped_counts[SKIP_FAILED_NOT_INCLUDED] += len(candidates.failed)
 
-        for app in selected:
+    queued_count = 0
+    for app in selected:
+        try:
             app_job_service.queue_deploy(app=app, created_by=created_by)
+        except app_job_service.AppJobAdmissionError:
+            skipped_counts[_refresh_redeploy_skip_reason(app=app)] += 1
+        else:
+            queued_count += 1
 
     return FleetRedeployResult(
-        queued_count=len(selected),
+        queued_count=queued_count,
         skipped_counts=dict(skipped_counts),
         included_failed=include_failed,
     )

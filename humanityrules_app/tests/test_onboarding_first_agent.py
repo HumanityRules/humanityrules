@@ -1,6 +1,6 @@
 """Tests for the name-your-first-agent onboarding step in views/onboarding.py."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 from django.core.management import call_command
 from django.test import TestCase, override_settings
@@ -95,13 +95,13 @@ class OnboardingFirstAgentTests(TestCase):
         user = self._onboard(email="founder@test.com", org_name="Founder Co")
         fake_app = MagicMock()
         fake_app.slug = "myagent007"
-        deploy_mock = AsyncMock(return_value=fake_app)
+        deploy_mock = Mock(return_value=fake_app)
         with patch("humanityrules_app.views.onboarding.template_deploy_service.deploy_from_template", new=deploy_mock):
             response = self.client.post(reverse("onboarding_agent"), {"agent_name": "Mý Agent-007"})
         self.assertRedirects(response, "/apps/myagent007/?welcome=1", fetch_redirect_response=False)
         self.assertNotIn("onboarding_first_agent", self.client.session)
-        deploy_mock.assert_awaited_once()
-        kwargs = deploy_mock.await_args.kwargs
+        deploy_mock.assert_called_once()
+        kwargs = deploy_mock.call_args.kwargs
         self.assertEqual(kwargs["app_name"], "Mý Agent-007")
         self.assertEqual(kwargs["app_slug"], "myagent007")
         self.assertEqual(kwargs["owner_username"], user.username)
@@ -111,7 +111,7 @@ class OnboardingFirstAgentTests(TestCase):
 
     def test_post_deploy_value_error_shows_message_and_keeps_flag(self) -> None:
         self._onboard(email="founder@test.com", org_name="Founder Co")
-        deploy_mock = AsyncMock(side_effect=ValueError("That name is already taken in the sandbox."))
+        deploy_mock = Mock(side_effect=ValueError("That name is already taken in the sandbox."))
         with patch("humanityrules_app.views.onboarding.template_deploy_service.deploy_from_template", new=deploy_mock):
             response = self.client.post(reverse("onboarding_agent"), {"agent_name": "My Agent"})
         self.assertEqual(response.status_code, 200)

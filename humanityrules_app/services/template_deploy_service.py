@@ -7,6 +7,8 @@ job worker.
 
 import logging
 
+from django.db import transaction
+
 from humanityrules_app import app_slugs
 from humanityrules_app import models
 from humanityrules_app.services import llm_preset_service
@@ -119,7 +121,7 @@ def _primary_build_container(template: models.AppTemplate) -> dict:
     )
 
 
-async def _stamp_template_tags(
+def _stamp_template_tags(
     organization: models.Organization,
     app: models.App,
     template: models.AppTemplate,
@@ -127,7 +129,7 @@ async def _stamp_template_tags(
 ) -> None:
     """Write ResourceTag rows for template.default_tags, plus the owner tag for PAs."""
     for tag in (template.default_tags or []):
-        await models.ResourceTag.objects.aget_or_create(
+        models.ResourceTag.objects.get_or_create(
             organization=organization,
             resource_type="app",
             app=app,
@@ -135,7 +137,7 @@ async def _stamp_template_tags(
             value=tag["value"],
         )
     if owner_username:
-        await models.ResourceTag.objects.aget_or_create(
+        models.ResourceTag.objects.get_or_create(
             organization=organization,
             resource_type="app",
             app=app,
@@ -144,17 +146,17 @@ async def _stamp_template_tags(
         )
 
 
-async def _araise_for_hostname_label_conflict(environment: models.Environment, app_slug: str) -> None:
+def _raise_for_hostname_label_conflict(environment: models.Environment, app_slug: str) -> None:
     """Reject a slug whose hostname label an existing app already holds on the environment's hosted zone."""
     hosted_zone = environment.shared_alb_hosted_zone
     if not hosted_zone:
         return
-    label_taken = await models.App.objects.filter(environment__shared_alb_hosted_zone=hosted_zone, slug=app_slug).aexists()
+    label_taken = models.App.objects.filter(environment__shared_alb_hosted_zone=hosted_zone, slug=app_slug).exists()
     if label_taken:
         raise ValueError(f"'{app_slug}.{hosted_zone}' is already in use. Please choose a different name.")
 
 
-async def deploy_from_template(
+def deploy_from_template(
     template: models.AppTemplate,
     organization: models.Organization,
     workspace: models.Workspace,
@@ -170,20 +172,6 @@ async def deploy_from_template(
     """Create Repository + App from a template and queue its first deploy attempt."""
     app_slugs.require_valid_app_hostname_label(value=app_slug)
 
-    # The app serves at its slug. Check the label before any write: a conflict must
-    # abort with nothing persisted — no slug claim, no App — so the user can simply
-    # retry with a different name.
-    await _araise_for_hostname_label_conflict(environment=environment, app_slug=app_slug)
-
-    # Reserve the slug before creating any rows: in the shared sandbox app resources are named
-    # humr-sandbox-{slug}-* across all orgs, so the slug is global and first-come. Raises a
-    # friendly ValueError if another org holds it, and a race loss here leaves no orphan App.
-    await sandbox_service.aclaim_sandbox_app_slug(
-        app_slug=app_slug,
-        organization_id=organization.id,
-        environment=environment,
-    )
-
     # The App row still carries identity/build fields for a single canonical
     # container — the ALB-target one (for multi-container templates) or the
     # sole container (for single-container templates). The rest of the
@@ -197,18 +185,6 @@ async def deploy_from_template(
 
     clone_url = f"humr-template://{primary['source_repo_path']}"
 
-    repo, _created = await models.Repository.objects.aget_or_create(
-        organization=organization,
-        full_name=f"template/{template.slug}",
-        defaults={
-            "provider": models.Repository.Provider.LOCAL,
-            "integration": None,
-            "name": template.name,
-            "clone_url": clone_url,
-            "default_branch": "main",
-        },
-    )
-
     # Persist the org's stable LLM preset name; the Hermes container expands it
     # into concrete provider/model settings during startup. Explicit caller
     # overrides (CLI --var) are applied afterward so they still win.
@@ -217,34 +193,66 @@ async def deploy_from_template(
     containers_with_overrides = _apply_variable_overrides(containers_with_preset, runtime_variable_overrides)
     app_containers = _materialize_app_containers(containers_with_overrides)
 
-    app = await models.App.objects.acreate(
-        organization=organization,
-        workspace=workspace,
-        environment=environment,
-        repository=repo,
-        source_template=template,
-        name=app_name,
-        slug=app_slug,
-        build_strategy=models.App.BuildStrategy.DOCKERFILE,
-        dockerfile_path=primary.get("dockerfile_path", ""),
-        container_port=primary["container_port"],
-        health_check_path=primary.get("health_check_path", ""),
-        health_check_command=primary.get("health_check_command", ""),
-        health_check_grace_period=primary.get("health_check_grace_period", 0),
-        cpu=template.cpu,
-        memory=template.memory,
-        compute_mode=compute_mode,
-        containers=app_containers,
-        created_by=created_by,
-        label=label,
-    )
+    with transaction.atomic():
+        locked_environment = (
+            models.Environment.objects
+            .select_for_update(of=("self",))
+            .select_related("aws_account")
+            .get(id=environment.id)
+        )
+        if locked_environment.status != models.Environment.Status.READY:
+            raise ValueError(
+                f"Environment '{locked_environment.name}' is not ready for app operations "
+                f"(status: {locked_environment.status})."
+            )
 
-    await _stamp_template_tags(
-        organization=organization, app=app, template=template,
-        owner_username=owner_username,
-    )
-
-    await app_job_service.aqueue_deploy(app=app, created_by=created_by)
+        # The App row and its sandbox slug claim become visible together. Holding
+        # the environment lock prevents teardown admission from interleaving.
+        _raise_for_hostname_label_conflict(environment=locked_environment, app_slug=app_slug)
+        sandbox_service.claim_sandbox_app_slug(
+            app_slug=app_slug,
+            organization_id=organization.id,
+            environment=locked_environment,
+        )
+        repo, _created = models.Repository.objects.get_or_create(
+            organization=organization,
+            full_name=f"template/{template.slug}",
+            defaults={
+                "provider": models.Repository.Provider.LOCAL,
+                "integration": None,
+                "name": template.name,
+                "clone_url": clone_url,
+                "default_branch": "main",
+            },
+        )
+        app = models.App.objects.create(
+            organization=organization,
+            workspace=workspace,
+            environment=locked_environment,
+            repository=repo,
+            source_template=template,
+            name=app_name,
+            slug=app_slug,
+            build_strategy=models.App.BuildStrategy.DOCKERFILE,
+            dockerfile_path=primary.get("dockerfile_path", ""),
+            container_port=primary["container_port"],
+            health_check_path=primary.get("health_check_path", ""),
+            health_check_command=primary.get("health_check_command", ""),
+            health_check_grace_period=primary.get("health_check_grace_period", 0),
+            cpu=template.cpu,
+            memory=template.memory,
+            compute_mode=compute_mode,
+            containers=app_containers,
+            created_by=created_by,
+            label=label,
+        )
+        _stamp_template_tags(
+            organization=organization,
+            app=app,
+            template=template,
+            owner_username=owner_username,
+        )
+        app = app_job_service.queue_deploy(app=app, created_by=created_by)
 
     logger.info(
         "Queued template deployment: app=%(app)s, template=%(template)s, environment=%(env)s",

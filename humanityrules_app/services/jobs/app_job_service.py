@@ -2,12 +2,13 @@
 
 Every queue/settle transition on an app goes through here so the mutable runtime
 truth (App fields) and the append-only audit trail (DeploymentRecord) stay in
-step. Callers hold whatever App lock their flow requires; these helpers only
-write.
+step. Queue functions own admission and locking; executors call the settle
+helpers after already owning an in-flight attempt.
 """
 
 import uuid
 
+from django.db import transaction
 from django.utils import timezone
 
 from humanityrules_app import models
@@ -23,6 +24,10 @@ FAILURE_EVENT_BY_JOB_STATUS = {
 }
 
 
+class AppJobAdmissionError(ValueError):
+    """Raised when an environment or app cannot accept a new lifecycle operation."""
+
+
 def _open_attempt(app: models.App, job_status: str) -> None:
     """Assign a fresh attempt id and move the app into `job_status`."""
     app.job_status = job_status
@@ -31,67 +36,91 @@ def _open_attempt(app: models.App, job_status: str) -> None:
     app.save(update_fields=["job_status", "last_attempt_id", "last_attempt_error", "updated_at"])
 
 
-def queue_deploy(app: models.App, created_by: models.User | None) -> None:
-    """Open a deploy attempt on an idle app: DEPLOY_PENDING + started event."""
-    _open_attempt(app=app, job_status=models.App.JobStatus.DEPLOY_PENDING)
-    models.DeploymentRecord.objects.create(
-        app=app,
-        attempt_id=app.last_attempt_id,
-        event_type=models.DeploymentRecord.EventType.DEPLOY_STARTED,
-        git_ref=app.repository.default_branch,
-        created_by=created_by,
+def _lock_app_for_admission(app: models.App) -> models.App:
+    """Lock the environment lifecycle boundary before locking its app."""
+    environment = models.Environment.objects.select_for_update().get(id=app.environment_id)
+    if environment.status != models.Environment.Status.READY:
+        raise AppJobAdmissionError(
+            f"Environment '{environment.name}' is not ready for app operations (status: {environment.status})."
+        )
+    return (
+        models.App.objects
+        .select_for_update(of=("self",))
+        .select_related("repository")
+        .get(id=app.id, environment_id=environment.id)
     )
 
 
-async def aqueue_deploy(app: models.App, created_by: models.User | None) -> None:
-    """Async form of queue_deploy."""
-    app.job_status = models.App.JobStatus.DEPLOY_PENDING
-    app.last_attempt_id = uuid.uuid7()
-    app.last_attempt_error = ""
-    await app.asave(update_fields=["job_status", "last_attempt_id", "last_attempt_error", "updated_at"])
-    await models.DeploymentRecord.objects.acreate(
-        app=app,
-        attempt_id=app.last_attempt_id,
-        event_type=models.DeploymentRecord.EventType.DEPLOY_STARTED,
-        git_ref=app.repository.default_branch,
-        created_by=created_by,
-    )
+def _require_idle(app: models.App) -> None:
+    """Reject a new operation while another App job owns the row."""
+    if app.job_status != models.App.JobStatus.IDLE:
+        raise AppJobAdmissionError(f"App '{app.slug}' has a job in progress ({app.job_status}).")
 
 
-def queue_teardown(app: models.App, created_by: models.User | None) -> None:
-    """Open a teardown attempt on an idle app: TEARDOWN_PENDING + started event."""
-    _open_attempt(app=app, job_status=models.App.JobStatus.TEARDOWN_PENDING)
-    models.DeploymentRecord.objects.create(
-        app=app,
-        attempt_id=app.last_attempt_id,
-        event_type=models.DeploymentRecord.EventType.TEARDOWN_STARTED,
-        created_by=created_by,
-    )
+def queue_deploy(app: models.App, created_by: models.User | None) -> models.App:
+    """Atomically admit and queue a deploy attempt."""
+    with transaction.atomic():
+        locked_app = _lock_app_for_admission(app=app)
+        _require_idle(app=locked_app)
+        _open_attempt(app=locked_app, job_status=models.App.JobStatus.DEPLOY_PENDING)
+        models.DeploymentRecord.objects.create(
+            app=locked_app,
+            attempt_id=locked_app.last_attempt_id,
+            event_type=models.DeploymentRecord.EventType.DEPLOY_STARTED,
+            git_ref=locked_app.repository.default_branch,
+            created_by=created_by,
+        )
+    return locked_app
 
 
-def start_inline_teardown(app: models.App, created_by: models.User | None) -> None:
-    """Open a teardown attempt directly in TEARING_DOWN, for executors that run it synchronously."""
-    _open_attempt(app=app, job_status=models.App.JobStatus.TEARING_DOWN)
-    models.DeploymentRecord.objects.create(
-        app=app,
-        attempt_id=app.last_attempt_id,
-        event_type=models.DeploymentRecord.EventType.TEARDOWN_STARTED,
-        created_by=created_by,
-    )
+def queue_teardown(app: models.App, created_by: models.User | None, label: str | None) -> models.App:
+    """Atomically admit and queue an App infrastructure teardown."""
+    with transaction.atomic():
+        locked_app = _lock_app_for_admission(app=app)
+        _require_idle(app=locked_app)
+        if not locked_app.may_have_infra:
+            raise AppJobAdmissionError(f"App '{locked_app.slug}' has no infrastructure to tear down.")
+        if label is not None:
+            locked_app.label = label
+            locked_app.save(update_fields=["label", "updated_at"])
+        _open_attempt(app=locked_app, job_status=models.App.JobStatus.TEARDOWN_PENDING)
+        models.DeploymentRecord.objects.create(
+            app=locked_app,
+            attempt_id=locked_app.last_attempt_id,
+            event_type=models.DeploymentRecord.EventType.TEARDOWN_STARTED,
+            created_by=created_by,
+        )
+    return locked_app
 
 
-def queue_removal(app: models.App, created_by: models.User | None, delete_all_data: bool, teardown_first: bool) -> None:
-    """Open a removal attempt on an idle app: REMOVAL_PENDING + started event."""
-    app.removal_delete_all_data = delete_all_data
-    app.removal_teardown_first = teardown_first
-    app.save(update_fields=["removal_delete_all_data", "removal_teardown_first", "updated_at"])
-    _open_attempt(app=app, job_status=models.App.JobStatus.REMOVAL_PENDING)
-    models.DeploymentRecord.objects.create(
-        app=app,
-        attempt_id=app.last_attempt_id,
-        event_type=models.DeploymentRecord.EventType.REMOVAL_STARTED,
-        created_by=created_by,
-    )
+def queue_removal(
+    app: models.App,
+    created_by: models.User | None,
+    delete_all_data: bool,
+    teardown_first: bool,
+    label: str | None,
+) -> models.App:
+    """Atomically admit and queue an App removal."""
+    with transaction.atomic():
+        locked_app = _lock_app_for_admission(app=app)
+        _require_idle(app=locked_app)
+        if locked_app.may_have_infra and not teardown_first:
+            raise AppJobAdmissionError(f"App '{locked_app.slug}' may still have deployed infrastructure; tear it down first.")
+        locked_app.removal_delete_all_data = delete_all_data
+        locked_app.removal_teardown_first = teardown_first
+        if label is not None:
+            locked_app.label = label
+        locked_app.save(update_fields=[
+            "removal_delete_all_data", "removal_teardown_first", "label", "updated_at",
+        ])
+        _open_attempt(app=locked_app, job_status=models.App.JobStatus.REMOVAL_PENDING)
+        models.DeploymentRecord.objects.create(
+            app=locked_app,
+            attempt_id=locked_app.last_attempt_id,
+            event_type=models.DeploymentRecord.EventType.REMOVAL_STARTED,
+            created_by=created_by,
+        )
+    return locked_app
 
 
 def settle_deploy_success(app: models.App, service_url: str, alb_dns: str) -> None:

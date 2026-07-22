@@ -13,7 +13,7 @@ from django.views.decorators.http import require_GET, require_POST
 import humanityrules_app.models as models
 from humanityrules_app.services import abac_service
 from humanityrules_app.services import infra_customer
-from humanityrules_app.services.jobs import environment_operation_gate
+from humanityrules_app.services.jobs import environment_job_service
 
 from . import abac_view_checks
 from . import base
@@ -409,7 +409,7 @@ def environment_retry(request: HttpRequest, environment_id: UUID) -> HttpRespons
     if denied:
         return denied
 
-    transitioned = environment_operation_gate.transition_environment_status(
+    transitioned = environment_job_service.transition_status(
         environment_id=environment.id,
         expected_statuses=(models.Environment.Status.ERROR,),
         new_status=models.Environment.Status.PENDING,
@@ -457,12 +457,12 @@ def environment_teardown(request: HttpRequest, environment_id: UUID) -> HttpResp
     if _is_environment_teardown_blocked(environment=environment):
         return HttpResponse(status=403)
 
-    queue_result = environment_operation_gate.queue_environment_teardown(
-        environment_id=environment.id,
-        status_message="Teardown triggered via web UI",
-        force=False,
-    )
-    if not queue_result.queued:
+    try:
+        environment_job_service.queue_teardown(
+            environment_id=environment.id,
+            status_message="Teardown triggered via web UI",
+        )
+    except environment_job_service.EnvironmentJobAdmissionError:
         return HttpResponse(status=422)
 
     environment.refresh_from_db(fields=["status", "status_message", "updated_at"])

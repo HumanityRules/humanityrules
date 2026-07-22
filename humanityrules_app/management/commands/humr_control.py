@@ -4,7 +4,6 @@ Control plane operations for environment provisioning and app deployments.
 Usage:
     uv run manage.py humr_control create-env --aws-account "Name" --name default --region us-east-1 --hosted-zone example.com
     uv run manage.py humr_control teardown-env --slug default --aws-account "Name"
-    uv run manage.py humr_control teardown-env --slug default --aws-account "Name" --force
     uv run manage.py humr_control teardown-app --app aidetectorandhumanizer
     uv run manage.py humr_control teardown-app --app foo --remove-app --delete-secrets --delete-persistent-data --delete-policies
     uv run manage.py humr_control deploy-app-template --template hermes-agent --org acme-corp --workspace default --env default --app-name "Hermes Vmendi"
@@ -20,18 +19,16 @@ For querying data, use humr_query instead.
 
 from typing import Any
 
-from asgiref.sync import async_to_sync
 from botocore.exceptions import ClientError
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandParser
-from django.db import transaction
 
 from humanityrules_app import app_slugs
 from humanityrules_app import models
 from humanityrules_app.services import template_deploy_service
 from humanityrules_app.services.infra_customer import iam_utils
 from humanityrules_app.services.jobs import app_job_service
-from humanityrules_app.services.jobs import environment_operation_gate
+from humanityrules_app.services.jobs import environment_job_service
 
 
 class Command(BaseCommand):
@@ -52,11 +49,6 @@ class Command(BaseCommand):
         teardown_env = subparsers.add_parser("teardown-env", help="Tear down an environment")
         teardown_env.add_argument("--slug", required=True, help="Environment slug")
         teardown_env.add_argument("--aws-account", required=True, help="AWS account name")
-        teardown_env.add_argument(
-            "--force",
-            action="store_true",
-            help="Recover stuck pending/provisioning or app-operation states before queuing teardown.",
-        )
 
         # teardown-app
         teardown_app = subparsers.add_parser("teardown-app", help="Tear down an app's deployment (and optionally remove the app)")
@@ -259,7 +251,7 @@ class Command(BaseCommand):
             return
 
         old_status = env.status
-        transitioned = environment_operation_gate.transition_environment_status(
+        transitioned = environment_job_service.transition_status(
             environment_id=env.id,
             expected_statuses=(old_status,),
             new_status=models.Environment.Status.PENDING,
@@ -282,7 +274,6 @@ class Command(BaseCommand):
         """Tear down an environment by setting status to TEARDOWN_PENDING."""
         slug = options["slug"]
         account_name = options["aws_account"]
-        force = bool(options.get("force", False))
 
         # Find AWS account
         try:
@@ -298,43 +289,21 @@ class Command(BaseCommand):
             self.stderr.write(self.style.ERROR(f"Environment '{slug}' not found for account '{account_name}'"))
             return
 
-        queue_result = environment_operation_gate.queue_environment_teardown(
-            environment_id=env.id,
-            status_message="Force teardown triggered via humr_control" if force else "Teardown triggered via humr_control",
-            force=force,
-        )
-        if queue_result.reason == environment_operation_gate.REASON_ALREADY_PENDING:
-            self.stdout.write(self.style.WARNING(f"Environment '{slug}' is already queued for teardown"))
-            return
-        if queue_result.reason == environment_operation_gate.REASON_ALREADY_RUNNING:
-            self.stderr.write(self.style.ERROR(f"Environment '{slug}' is already being torn down"))
-            return
-        if queue_result.reason == environment_operation_gate.REASON_ACTIVE_APP_OPERATIONS:
-            self.stderr.write(self.style.ERROR(
-                f"You cannot tear down environment '{env.name}' while an app deployment, app teardown, "
-                "or permissions update is running. Retry with --force only if that work is stranded."
-            ))
-            return
-        if queue_result.reason == environment_operation_gate.REASON_ACTIVE_APP_REMOVAL:
-            self.stderr.write(self.style.ERROR(
-                f"You cannot tear down environment '{env.name}' until its running app removal finishes; "
-                "--force cannot skip required app cleanup."
-            ))
-            return
-        if not queue_result.queued:
-            self.stderr.write(self.style.ERROR(
-                f"Environment '{slug}' is in '{queue_result.previous_status}' state - cannot tear down"
-            ))
+        try:
+            previous_status = environment_job_service.queue_teardown(
+                environment_id=env.id,
+                status_message="Teardown triggered via humr_control",
+            )
+        except environment_job_service.EnvironmentJobAdmissionError as exc:
+            self.stderr.write(self.style.ERROR(str(exc)))
             return
 
         self.stdout.write(self.style.SUCCESS(f"\nEnvironment '{slug}' set to TEARDOWN_PENDING"))
-        self.stdout.write(f"  Previous status: {queue_result.previous_status}")
-        if force:
-            self.stdout.write("  Force recovery: yes")
+        self.stdout.write(f"  Previous status: {previous_status}")
         self.stdout.write(self.style.WARNING("Teardown will start automatically (job worker picks up pending teardowns)"))
         self.stdout.write("")
 
-    def _handle_teardown_app(self, options):
+    def _handle_teardown_app(self, options: dict[str, Any]) -> None:
         """Tear down an app's most recent deployment, and optionally remove the app entirely."""
         app_slug = options["app"]
         remove_app = options.get("remove_app", False)
@@ -377,15 +346,11 @@ class Command(BaseCommand):
 
         old_status = app.display_status
         old_label = app.label
-        with transaction.atomic():
-            locked_app = models.App.objects.select_for_update().get(id=app.id)
-            app_job_service.queue_teardown(app=locked_app, created_by=None)
-            # Clear App.label so the unscoped main worker picks up the teardown.
-            # The label scopes verification-time work to a specific run_job_worker;
-            # by teardown time that worker is typically gone, leaving the row stranded.
-            if locked_app.label:
-                locked_app.label = ""
-                locked_app.save(update_fields=["label", "updated_at"])
+        try:
+            app_job_service.queue_teardown(app=app, created_by=None, label="")
+        except app_job_service.AppJobAdmissionError as exc:
+            self.stderr.write(self.style.ERROR(str(exc)))
+            return
 
         self.stdout.write(self.style.SUCCESS(f"\nApp '{app_slug}' set to TEARDOWN_PENDING"))
         self.stdout.write(f"  App: {app.name}")
@@ -398,46 +363,26 @@ class Command(BaseCommand):
 
     def _queue_app_removal(self, app: models.App, delete_all_data: bool) -> None:
         """Queue a removal attempt with teardown_first=True; the worker tears down live infra inline, then removes the app."""
-        with transaction.atomic():
-            locked_app = (
-                models.App.objects
-                .select_for_update()
-                .select_related("organization", "workspace", "repository")
-                .get(id=app.id, organization_id=app.organization_id)
-            )
-            if locked_app.job_status in models.App.REMOVAL_JOB_STATUSES:
-                self.stdout.write(self.style.WARNING(f"App '{locked_app.slug}' is already pending removal"))
-                return
-            if locked_app.job_status != models.App.JobStatus.IDLE:
-                self.stderr.write(self.style.ERROR(
-                    f"App '{locked_app.slug}' has a job in progress ({locked_app.job_status}) - wait for it to complete."
-                ))
-                return
+        if app.job_status in models.App.REMOVAL_JOB_STATUSES:
+            self.stdout.write(self.style.WARNING(f"App '{app.slug}' is already pending removal"))
+            return
 
-            old_label = locked_app.label
-            environment = environment_operation_gate.lock_app_environment_for_removal(app_id=locked_app.id)
-            if environment.status == models.Environment.Status.TEARING_DOWN:
-                self.stderr.write(self.style.ERROR(
-                    f"App '{locked_app.slug}' cannot be removed after its environment teardown has started."
-                ))
-                return
-
-            app_job_service.queue_removal(
-                app=locked_app,
+        old_label = app.label
+        try:
+            queued_app = app_job_service.queue_removal(
+                app=app,
                 created_by=None,
                 delete_all_data=delete_all_data,
                 teardown_first=True,
+                label="",
             )
-            # Clear App.label so the unscoped main worker picks up the removal.
-            # The label scopes verification-time work to a specific run_job_worker;
-            # by removal time that worker is typically gone, leaving the row stranded.
-            if locked_app.label:
-                locked_app.label = ""
-                locked_app.save(update_fields=["label", "updated_at"])
+        except app_job_service.AppJobAdmissionError as exc:
+            self.stderr.write(self.style.ERROR(str(exc)))
+            return
 
-        self.stdout.write(self.style.SUCCESS(f"\nApp '{locked_app.slug}' set to REMOVAL_PENDING"))
-        self.stdout.write(f"  App: {locked_app.name}")
-        self.stdout.write(f"  Workspace: {locked_app.workspace.name}")
+        self.stdout.write(self.style.SUCCESS(f"\nApp '{queued_app.slug}' set to REMOVAL_PENDING"))
+        self.stdout.write(f"  App: {queued_app.name}")
+        self.stdout.write(f"  Workspace: {app.workspace.name}")
         self.stdout.write(f"  teardown_first: True")
         self.stdout.write(f"  delete_all_data: {delete_all_data}")
         if old_label:
@@ -479,18 +424,17 @@ class Command(BaseCommand):
         if created_by is None:
             return
 
-        with transaction.atomic():
-            locked_app = models.App.objects.select_for_update().select_related("repository").get(id=app.id)
-            if locked_app.job_status != models.App.JobStatus.IDLE:
-                self.stderr.write(self.style.ERROR(f"App '{app_slug}' job state changed - retry"))
-                return
-            app_job_service.queue_deploy(app=locked_app, created_by=created_by)
+        try:
+            queued_app = app_job_service.queue_deploy(app=app, created_by=created_by)
+        except app_job_service.AppJobAdmissionError as exc:
+            self.stderr.write(self.style.ERROR(str(exc)))
+            return
 
         self.stdout.write(self.style.SUCCESS(f"\nRedeploy queued for app '{app.slug}'"))
         self.stdout.write(f"  App: {app.name}")
         self.stdout.write(f"  Environment: {app.environment.name} ({app.environment.aws_account.name})")
         self.stdout.write(f"  git_ref: {app.repository.default_branch}")
-        self.stdout.write(f"  Attempt: {locked_app.last_attempt_id}")
+        self.stdout.write(f"  Attempt: {queued_app.last_attempt_id}")
         self.stdout.write(f"  Created by: {created_by.username}")
         self.stdout.write(self.style.WARNING("Deployment will start automatically (job worker picks up pending deployments)"))
         self.stdout.write("")
@@ -683,7 +627,7 @@ class Command(BaseCommand):
         label = options.get("label") or ""
 
         try:
-            app = async_to_sync(template_deploy_service.deploy_from_template)(
+            app = template_deploy_service.deploy_from_template(
                 template=template,
                 organization=org,
                 workspace=workspace,

@@ -8,7 +8,6 @@ Two views:
 
 import logging
 
-from asgiref.sync import async_to_sync
 from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, render, redirect
@@ -301,7 +300,7 @@ def _handle_deploy(request: HttpRequest, template: models.AppTemplate, org: mode
     app: models.App | None = None
     if not errors:
         try:
-            app = async_to_sync(template_deploy_service.deploy_from_template)(
+            app = template_deploy_service.deploy_from_template(
                 template=template,
                 organization=org,
                 workspace=workspace,

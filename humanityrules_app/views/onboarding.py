@@ -1,4 +1,3 @@
-from asgiref.sync import async_to_sync
 from django.contrib.auth import login
 from django.db import transaction
 from django.http import HttpRequest, HttpResponse
@@ -223,7 +222,7 @@ def onboarding_agent(request: HttpRequest) -> HttpResponse:
         error = _validate_agent_name(org=org, agent_name=agent_name)
         if error is None:
             try:
-                app = async_to_sync(template_deploy_service.deploy_from_template)(
+                app = template_deploy_service.deploy_from_template(
                     template=template,
                     organization=org,
                     workspace=workspace,

@@ -38,7 +38,7 @@ target in app_detail.html so it survives the swap. {% endcomment %}
             <p class="mt-2 max-w-xl text-xs text-red-700 dark:text-red-400">{{ app.last_attempt_error }}</p>
             {% endif %}
         </div>
-        {% if not app.is_pending_removal %}
+        {% if app.environment.status == 'ready' and not app.is_pending_removal %}
         <div class="flex shrink-0 items-center gap-2 pt-1">
             {% if not app.job_in_flight %}
             <button hx-post="{% url 'app_deployment_redeploy' app_slug=app.slug %}"

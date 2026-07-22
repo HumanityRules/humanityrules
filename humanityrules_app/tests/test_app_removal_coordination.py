@@ -87,7 +87,7 @@ class TestAppRemovalCoordination(TestCase):
         self.assertEqual(self.app.job_status, models.App.JobStatus.REMOVAL_PENDING)
         self.assertEqual(self._removal_started_count(), 1)
 
-    def test_cli_enqueue_is_idempotent_for_pending_removal(self) -> None:
+    def test_cli_enqueue_rejects_a_stale_second_removal_attempt(self) -> None:
         stdout = StringIO()
         stderr = StringIO()
         command = humr_control.Command(stdout=stdout, stderr=stderr)
@@ -98,11 +98,16 @@ class TestAppRemovalCoordination(TestCase):
         self.app.refresh_from_db()
         self.assertEqual(self.app.job_status, models.App.JobStatus.REMOVAL_PENDING)
         self.assertEqual(self._removal_started_count(), 1)
-        self.assertIn("already pending removal", stdout.getvalue())
-        self.assertEqual(stderr.getvalue(), "")
+        self.assertIn("has a job in progress", stderr.getvalue())
 
     def test_worker_claims_pending_removal_into_removing(self) -> None:
-        app_job_service.queue_removal(app=self.app, created_by=self.user, delete_all_data=False, teardown_first=False)
+        app_job_service.queue_removal(
+            app=self.app,
+            created_by=self.user,
+            delete_all_data=False,
+            teardown_first=False,
+            label=None,
+        )
 
         claimed = job_worker._claim_pending_app_removal(label="")
 
@@ -114,26 +119,26 @@ class TestAppRemovalCoordination(TestCase):
     def test_removal_refused_while_infra_may_exist_and_stays_retryable(self) -> None:
         self.app.may_have_infra = True
         self.app.save(update_fields=["may_have_infra", "updated_at"])
-        app_job_service.queue_removal(app=self.app, created_by=self.user, delete_all_data=False, teardown_first=False)
-        self.app.job_status = models.App.JobStatus.REMOVING
-        self.app.save(update_fields=["job_status", "updated_at"])
-
-        success = app_remove_executor.run_removal(app_id=str(self.app.id))
-
-        self.assertFalse(success)
-        self.app.refresh_from_db()
-        # The app is not deleted and returns to idle, so the removal can be retried after teardown.
-        self.assertEqual(self.app.job_status, models.App.JobStatus.IDLE)
-        self.assertIn("tear it down first", self.app.last_attempt_error)
-        self.assertTrue(
-            models.DeploymentRecord.objects.filter(
+        with self.assertRaisesMessage(app_job_service.AppJobAdmissionError, "tear it down first"):
+            app_job_service.queue_removal(
                 app=self.app,
-                attempt_id=self.app.last_attempt_id,
-                event_type=models.DeploymentRecord.EventType.REMOVAL_FAILED,
-            ).exists()
+                created_by=self.user,
+                delete_all_data=False,
+                teardown_first=False,
+                label=None,
+            )
+
+        self.app.refresh_from_db()
+        self.assertEqual(self.app.job_status, models.App.JobStatus.IDLE)
+        self.assertFalse(models.DeploymentRecord.objects.filter(app=self.app).exists())
+
+        app_job_service.queue_removal(
+            app=self.app,
+            created_by=self.user,
+            delete_all_data=False,
+            teardown_first=True,
+            label=None,
         )
-        # Retry: an idle app accepts a fresh removal attempt.
-        app_job_service.queue_removal(app=self.app, created_by=self.user, delete_all_data=False, teardown_first=True)
         self.app.refresh_from_db()
         self.assertEqual(self.app.job_status, models.App.JobStatus.REMOVAL_PENDING)
 
@@ -142,7 +147,13 @@ class TestAppRemovalCoordination(TestCase):
         self.app.live_state = models.App.LiveState.DEPLOYED
         self.app.service_url = "https://removalagent.example.com"
         self.app.save(update_fields=["may_have_infra", "live_state", "service_url", "updated_at"])
-        app_job_service.queue_removal(app=self.app, created_by=self.user, delete_all_data=False, teardown_first=True)
+        app_job_service.queue_removal(
+            app=self.app,
+            created_by=self.user,
+            delete_all_data=False,
+            teardown_first=True,
+            label=None,
+        )
         self.app.job_status = models.App.JobStatus.REMOVING
         self.app.save(update_fields=["job_status", "updated_at"])
 
