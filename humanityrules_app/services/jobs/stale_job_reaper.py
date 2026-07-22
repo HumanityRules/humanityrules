@@ -26,7 +26,7 @@ from django.utils import timezone
 
 from humanityrules_app import models
 
-from . import environment_operation_gate
+from . import app_job_service
 
 logger = logging.getLogger(__name__)
 
@@ -52,35 +52,28 @@ def reap_stale_jobs(no_progress_timeout: timedelta, dead_worker_timeout: timedel
         (Q(updated_at__lt=now - no_progress_timeout), NO_PROGRESS_MESSAGE_TEMPLATE.format(minutes=int(no_progress_timeout.total_seconds() // 60))),
     )
     for stale_q, message in tiers:
-        _reap_stale_deployments(stale_q=stale_q, message=message)
+        _reap_stale_app_jobs(stale_q=stale_q, message=message)
         _reap_stale_environments(stale_q=stale_q, message=message)
         _reap_stale_permission_applies(stale_q=stale_q, message=message)
-        _reap_stale_app_removals(stale_q=stale_q, message=message)
         _reap_stale_cost_refreshes(stale_q=stale_q, message=message)
     _prune_dead_worker_runs(cutoff=now - WORKER_RUN_RETENTION)
 
 
-def _reap_stale_deployments(stale_q: Q, message: str) -> None:
-    """Fail stale executing deployments."""
-    now = timezone.now()
+def _reap_stale_app_jobs(stale_q: Q, message: str) -> None:
+    """Fail stale executing app jobs (deploys, teardowns, removals) back to IDLE."""
     with transaction.atomic():
-        deployment_ids = list(
-            models.Deployment.objects
+        stale_apps = list(
+            models.App.objects
             .select_for_update(skip_locked=True, of=("self",))
-            .filter(stale_q, status__in=environment_operation_gate.EXECUTING_DEPLOYMENT_STATUSES)
-            .values_list("id", flat=True)
+            .filter(stale_q, job_status__in=models.App.EXECUTING_JOB_STATUSES)
         )
-        if not deployment_ids:
+        if not stale_apps:
             return
 
-        models.Deployment.objects.filter(id__in=deployment_ids).update(
-            status=models.Deployment.Status.FAILED,
-            status_message=message,
-            completed_at=now,
-            updated_at=now,
-        )
+        for app in stale_apps:
+            app_job_service.settle_failure(app=app, error=message)
 
-    logger.error(f"Stale-job reaper failed {len(deployment_ids)} deployment(s): {deployment_ids}")
+    logger.error(f"Stale-job reaper failed {len(stale_apps)} app job(s): {[app.slug for app in stale_apps]}")
 
 
 def _reap_stale_environments(stale_q: Q, message: str) -> None:
@@ -103,34 +96,6 @@ def _reap_stale_permission_applies(stale_q: Q, message: str) -> None:
     )
     if reaped:
         logger.error(f"Stale-job reaper failed {reaped} permission apply(ies)")
-
-
-def _reap_stale_app_removals(stale_q: Q, message: str) -> None:
-    """Fail stale running app removals and revert their apps out of PENDING_REMOVAL so the user can retry."""
-    now = timezone.now()
-    with transaction.atomic():
-        stale = list(
-            models.AppRemovalJob.objects
-            .select_for_update(skip_locked=True, of=("self",))
-            .filter(stale_q, status=models.AppRemovalJob.Status.RUNNING)
-            .values_list("id", "app_id_snapshot")
-        )
-        if not stale:
-            return
-
-        job_ids = [job_id for job_id, _ in stale]
-        app_ids = [app_id for _, app_id in stale]
-        models.AppRemovalJob.objects.filter(id__in=job_ids).update(
-            status=models.AppRemovalJob.Status.FAILED,
-            status_message=message,
-            updated_at=now,
-        )
-        models.App.objects.filter(id__in=app_ids, status=models.App.Status.PENDING_REMOVAL).update(
-            status=models.App.Status.ACTIVE,
-            updated_at=now,
-        )
-
-    logger.error(f"Stale-job reaper failed {len(job_ids)} app removal(s)")
 
 
 def _reap_stale_cost_refreshes(stale_q: Q, message: str) -> None:

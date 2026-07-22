@@ -6,16 +6,11 @@ produces an incoherent row, these guards stop the worker before it uses one
 org's AWS credentials to operate on another org's resources.
 """
 
-from humanityrules_app.models import App, AppPermissionRequest, Deployment, Environment
+from humanityrules_app.models import App, AppPermissionRequest, Environment
 
 
 class TenantConsistencyError(RuntimeError):
     """Raised when a worker's job row spans multiple organizations."""
-
-
-def assert_deployment_consistent(deployment: Deployment) -> None:
-    """A Deployment's app and the app's environment must share an org."""
-    assert_app_owns_environment(app=deployment.app, environment=deployment.app.environment)
 
 
 def assert_apr_consistent(apr: AppPermissionRequest) -> None:

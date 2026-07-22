@@ -45,7 +45,7 @@ def enqueue_refresh(app: App) -> None:
             id=app.id,
             organization_id=app.organization_id,
         )
-        if locked_app.status != App.Status.ACTIVE:
+        if locked_app.job_status in App.REMOVAL_JOB_STATUSES:
             return
         already_active = CostRefreshJob.objects.filter(
             app=locked_app,

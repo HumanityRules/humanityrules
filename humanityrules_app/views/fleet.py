@@ -82,11 +82,11 @@ def fleet_fail_unsettled_deployments(request: HttpRequest) -> HttpResponse:
 
 @_staff_or_404
 @require_POST
-def fleet_deployment_redeploy(request: HttpRequest, deployment_id: UUID) -> HttpResponse:
+def fleet_deployment_redeploy(request: HttpRequest, app_id: UUID) -> HttpResponse:
     """Queue a redeploy for one eligible HA row on the fleet page."""
-    deployment = get_object_or_404(models.Deployment.objects.only("id"), id=deployment_id)
+    app = get_object_or_404(models.App.objects.only("id"), id=app_id)
     redeploy_result = fleet_service.queue_redeploy(
-        source_id=deployment.id,
+        app_id=app.id,
         created_by=request.user,
     )
     context = {
@@ -97,12 +97,15 @@ def fleet_deployment_redeploy(request: HttpRequest, deployment_id: UUID) -> Http
 
 
 @_staff_or_404
-def fleet_deployment_log(request: HttpRequest, deployment_id: str) -> HttpResponse:
-    deployment = get_object_or_404(models.Deployment.objects.select_related("app", "app__environment"), id=deployment_id)
+def fleet_deployment_log(request: HttpRequest, app_id: str) -> HttpResponse:
+    app = get_object_or_404(models.App.objects.select_related("environment"), id=app_id)
     # Fetch newest-first so the cap keeps the tail, then reverse to chronological for display.
-    recent = list(models.DeploymentLog.objects.filter(deployment=deployment).order_by("-created_at")[: FLEET_LOG_MAX_LINES + 1])
+    recent = list(
+        models.DeploymentLog.objects.filter(app=app, attempt_id=app.last_attempt_id)
+        .order_by("-created_at")[: FLEET_LOG_MAX_LINES + 1]
+    )
     context = {
-        "deployment": deployment,
+        "app": app,
         "logs": list(reversed(recent[:FLEET_LOG_MAX_LINES])),
         "truncated": len(recent) > FLEET_LOG_MAX_LINES,
         "max_lines": FLEET_LOG_MAX_LINES,

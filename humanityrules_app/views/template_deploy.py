@@ -298,10 +298,10 @@ def _handle_deploy(request: HttpRequest, template: models.AppTemplate, org: mode
         except models.Environment.DoesNotExist:
             errors.append("Selected environment not found.")
 
-    deployment: models.Deployment | None = None
+    app: models.App | None = None
     if not errors:
         try:
-            deployment = async_to_sync(template_deploy_service.deploy_from_template)(
+            app = async_to_sync(template_deploy_service.deploy_from_template)(
                 template=template,
                 organization=org,
                 workspace=workspace,
@@ -351,6 +351,6 @@ def _handle_deploy(request: HttpRequest, template: models.AppTemplate, org: mode
         context["owner_prefill_map"] = {}
         return render(request, "humanityrules_app/deploy/template_deploy_form.html", context=context)
 
-    if deployment is None:
-        raise RuntimeError("Template deployment completed without a deployment result")
-    return redirect("app_detail", app_slug=deployment.app.slug)
+    if app is None:
+        raise RuntimeError("Template deployment completed without a created app")
+    return redirect("app_detail", app_slug=app.slug)

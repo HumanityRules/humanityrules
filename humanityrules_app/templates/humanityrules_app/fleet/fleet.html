@@ -87,40 +87,40 @@
             </div>
 
             <ul class="divide-y divide-gray-100 dark:divide-white/5">
-                {% for deployment in group.deployments %}
+                {% for app in group.apps %}
                 <li class="py-2">
                     <div class="flex items-center gap-4">
-                    <span class="font-mono text-sm text-gray-900 dark:text-white w-64 truncate">{{ deployment.app.slug }}</span>
+                    <span class="font-mono text-sm text-gray-900 dark:text-white w-64 truncate">{{ app.slug }}</span>
                     <span class="text-sm px-2 py-0.5 rounded-full
-                        {% if deployment.status == 'succeeded' %}bg-green-100 text-green-800 dark:bg-green-500/10 dark:text-green-400
-                        {% elif deployment.status == 'failed' %}bg-red-100 text-red-800 dark:bg-red-500/10 dark:text-red-400
-                        {% elif not deployment.is_settled %}bg-yellow-100 text-yellow-800 dark:bg-yellow-500/10 dark:text-yellow-400
+                        {% if app.display_status == 'succeeded' %}bg-green-100 text-green-800 dark:bg-green-500/10 dark:text-green-400
+                        {% elif app.display_status == 'failed' %}bg-red-100 text-red-800 dark:bg-red-500/10 dark:text-red-400
+                        {% elif app.job_in_flight %}bg-yellow-100 text-yellow-800 dark:bg-yellow-500/10 dark:text-yellow-400
                         {% else %}bg-gray-100 text-gray-600 dark:bg-white/5 dark:text-gray-400{% endif %}">
-                        {{ deployment.get_status_display }}
+                        {{ app.display_status_label }}
                     </span>
-                    <span class="text-sm text-gray-500 dark:text-gray-400">Deploy {{ deployment.updated_at|timesince }} ago</span>
+                    <span class="text-sm text-gray-500 dark:text-gray-400">Updated {{ app.updated_at|timesince }} ago</span>
                     <span class="text-sm text-gray-500 dark:text-gray-400"
-                          {% if deployment.last_policy_proxy_activity_at %}title="{{ deployment.last_policy_proxy_activity_at|date:'c' }}"{% endif %}>
-                        {% if deployment.last_policy_proxy_activity_at %}
-                        Last activity {{ deployment.last_policy_proxy_activity_at|timesince }} ago
+                          {% if app.last_policy_proxy_activity_at %}title="{{ app.last_policy_proxy_activity_at|date:'c' }}"{% endif %}>
+                        {% if app.last_policy_proxy_activity_at %}
+                        Last activity {{ app.last_policy_proxy_activity_at|timesince }} ago
                         {% else %}
                         No activity recorded
                         {% endif %}
                     </span>
-                    {% if deployment.live_service_url %}
-                    <a href="{{ deployment.live_service_url }}" target="_blank" class="text-sm text-indigo-600 dark:text-indigo-400 hover:underline truncate">{{ deployment.live_service_url }}</a>
+                    {% if app.service_url %}
+                    <a href="{{ app.service_url }}" target="_blank" class="text-sm text-indigo-600 dark:text-indigo-400 hover:underline truncate">{{ app.service_url }}</a>
                     {% endif %}
                     <div class="ml-auto flex items-center gap-3 shrink-0">
-                        {% if not deployment.redeploy_skip_reason %}
+                        {% if not app.redeploy_skip_reason %}
                         <button type="button"
-                                hx-post="{% url 'fleet_deployment_redeploy' deployment_id=deployment.id %}"
+                                hx-post="{% url 'fleet_deployment_redeploy' app_id=app.id %}"
                                 hx-target="#fleet-list"
                                 hx-swap="innerHTML"
                                 class="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:underline">Redeploy</button>
                         {% endif %}
                         <button type="button"
-                                hx-get="{% url 'fleet_deployment_log' deployment_id=deployment.id %}"
-                                hx-target="#fleet-log-{{ deployment.id }}"
+                                hx-get="{% url 'fleet_deployment_log' app_id=app.id %}"
+                                hx-target="#fleet-log-{{ app.id }}"
                                 hx-swap="innerHTML"
                                 class="text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline">log</button>
                     </div>
@@ -128,7 +128,7 @@
                     {% comment %} hx-preserve: an opened log panel must survive the 10s fleet-list refresh.
                     The before/after-swap handlers keep the console pinned to the tail across the 1s log
                     polls unless the user scrolled up (same pattern as app_detail's #deployment-log-region). {% endcomment %}
-                    <div id="fleet-log-{{ deployment.id }}" hx-preserve="true"
+                    <div id="fleet-log-{{ app.id }}" hx-preserve="true"
                          hx-on::before-swap="const c = this.querySelector('.fleet-log-console'); this._stick = !c || c.scrollHeight - c.scrollTop - c.clientHeight < 40; this._top = c ? c.scrollTop : 0;"
                          hx-on::after-swap="const c = this.querySelector('.fleet-log-console'); if (c) c.scrollTop = this._stick ? c.scrollHeight : this._top;"></div>
                 </li>

@@ -18,6 +18,7 @@ from humanityrules_app.services import infra_customer
 from humanityrules_app.services import sandbox_service
 
 from . import app_deployment_teardown_executor
+from . import app_job_service
 from . import app_remove_executor
 from . import job_logging
 
@@ -39,57 +40,51 @@ def _get_aws_session(environment: models.Environment):
 
 def _teardown_all_deployments(environment: models.Environment) -> bool:
     """
-    Tear down and delete all deployments in the environment.
+    Tear down every app in the environment that may still have infra behind it.
 
-    Iterates through all deployments and tears them down sequentially.
-    Each deployment is deleted after successful teardown. Stops on first failure.
-
-    Returns True if all deployments were torn down successfully, False otherwise.
+    Runs each teardown synchronously, stopping on the first failure.
     """
-    deployments = list(
-        models.Deployment.objects
-        .filter(app__environment=environment)
-        .select_related("app", "app__workspace", "app__environment", "app__environment__aws_account")
+    apps = list(
+        models.App.objects
+        .filter(environment=environment, may_have_infra=True)
+        .select_related("workspace", "source_template", "environment", "environment__aws_account")
         .order_by("created_at")
     )
 
-    if not deployments:
+    if not apps:
         logger.info("No active deployments to tear down in environment '%(env_name)s'", {"env_name": environment.name})
         return True
 
     logger.info(
-        "Tearing down %(count)d deployment(s) in environment '%(env_name)s'",
-        {"count": len(deployments), "env_name": environment.name},
+        "Tearing down %(count)d app(s) in environment '%(env_name)s'",
+        {"count": len(apps), "env_name": environment.name},
     )
 
-    for deployment in deployments:
+    for app in apps:
         logger.info(
-            "Tearing down deployment for app '%(app_name)s' (%(deployment_id)s)",
-            {"app_name": deployment.app.name, "deployment_id": str(deployment.id)},
+            "Tearing down infra for app '%(app_name)s'",
+            {"app_name": app.name},
         )
 
-        # Set directly to TEARING_DOWN so the job worker won't claim this deployment
-        # (it only polls for TEARDOWN_PENDING). run_teardown() is called synchronously below.
-        deployment.status = models.Deployment.Status.TEARING_DOWN
-        deployment.status_message = "Teardown as part of environment teardown"
-        deployment.save(update_fields=["status", "status_message", "updated_at"])
+        # Open the attempt directly in TEARING_DOWN so the job worker won't claim it
+        # (it only polls TEARDOWN_PENDING). run_teardown() is called synchronously below.
+        app_job_service.start_inline_teardown(app=app, created_by=None)
 
-        # Run the teardown synchronously
-        success = app_deployment_teardown_executor.run_teardown(deployment_id=str(deployment.id))
+        success = app_deployment_teardown_executor.run_teardown(app_id=str(app.id))
 
         if not success:
             logger.error(
-                "Failed to tear down deployment for app '%(app_name)s' - stopping environment teardown",
-                {"app_name": deployment.app.name},
+                "Failed to tear down infra for app '%(app_name)s' - stopping environment teardown",
+                {"app_name": app.name},
             )
             return False
 
         logger.info(
-            "Successfully tore down deployment for app '%(app_name)s'",
-            {"app_name": deployment.app.name},
+            "Successfully tore down infra for app '%(app_name)s'",
+            {"app_name": app.name},
         )
 
-    logger.info("All deployments torn down successfully")
+    logger.info("All apps torn down successfully")
     return True
 
 

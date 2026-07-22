@@ -8,6 +8,8 @@ from django.utils import timezone
 
 from humanityrules_app import models
 
+from . import app_job_service
+
 
 TEARDOWNABLE_ENVIRONMENT_STATUSES = (
     models.Environment.Status.READY,
@@ -20,18 +22,14 @@ FORCE_TEARDOWNABLE_ENVIRONMENT_STATUSES = (
     *TEARDOWNABLE_ENVIRONMENT_STATUSES,
 )
 
-EXECUTING_DEPLOYMENT_STATUSES = (
-    models.Deployment.Status.DEPLOYING,
-    models.Deployment.Status.TEARING_DOWN,
+# Deploy/teardown work currently executing in a worker thread.
+EXECUTING_DEPLOY_JOB_STATUSES = (
+    models.App.JobStatus.DEPLOYING,
+    models.App.JobStatus.TEARING_DOWN,
 )
 
 EXECUTING_PERMISSION_STATUSES = (
     models.AppPermissionRequest.Status.APPLYING,
-)
-
-ACTIVE_APP_REMOVAL_STATUSES = (
-    models.AppRemovalJob.Status.PENDING,
-    models.AppRemovalJob.Status.RUNNING,
 )
 
 REASON_ACTIVE_APP_OPERATIONS = "active_app_operations"
@@ -90,9 +88,9 @@ def lock_app_environment_for_removal(app_id: UUID) -> models.Environment:
 
 def _has_executing_deployment_or_permission(environment_id: UUID) -> bool:
     """Return whether ordinary teardown must wait for executing environment work."""
-    if models.Deployment.objects.filter(
-        app__environment_id=environment_id,
-        status__in=EXECUTING_DEPLOYMENT_STATUSES,
+    if models.App.objects.filter(
+        environment_id=environment_id,
+        job_status__in=EXECUTING_DEPLOY_JOB_STATUSES,
     ).exists():
         return True
     return models.AppPermissionRequest.objects.filter(
@@ -103,34 +101,23 @@ def _has_executing_deployment_or_permission(environment_id: UUID) -> bool:
 
 def _has_running_app_removal(environment_id: UUID) -> bool:
     """Return whether app cleanup is currently running in the environment."""
-    running_removal_app_ids = models.AppRemovalJob.objects.filter(
-        status=models.AppRemovalJob.Status.RUNNING,
-    ).values("app_id_snapshot")
     return models.App.objects.filter(
         environment_id=environment_id,
-        id__in=running_removal_app_ids,
+        job_status=models.App.JobStatus.REMOVING,
     ).exists()
 
 
 def _fail_executing_deployments_and_permissions(environment_id: UUID) -> None:
     """Conclude force-abandoned work before queuing environment teardown."""
-    now = timezone.now()
-    models.Deployment.objects.filter(
-        app__environment_id=environment_id,
-        status__in=EXECUTING_DEPLOYMENT_STATUSES,
-    ).update(
-        status=models.Deployment.Status.FAILED,
-        status_message=FORCED_FAILURE_MESSAGE,
-        completed_at=now,
-        updated_at=now,
-    )
+    for app in models.App.objects.filter(environment_id=environment_id, job_status__in=EXECUTING_DEPLOY_JOB_STATUSES):
+        app_job_service.settle_failure(app=app, error=FORCED_FAILURE_MESSAGE)
     models.AppPermissionRequest.objects.filter(
         app__environment_id=environment_id,
         status__in=EXECUTING_PERMISSION_STATUSES,
     ).update(
         status=models.AppPermissionRequest.Status.FAILED,
         status_message=FORCED_FAILURE_MESSAGE,
-        updated_at=now,
+        updated_at=timezone.now(),
     )
 
 

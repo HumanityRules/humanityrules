@@ -1,26 +1,19 @@
 """
 Deploy an application from an AppTemplate.
 
-Creates the full record chain (Repository, App, Deployment) and queues the
-deployment for the job worker.
+Creates the Repository + App records and queues the deploy attempt for the
+job worker.
 """
 
 import logging
-from datetime import datetime
 
 from humanityrules_app import app_slugs
 from humanityrules_app import models
 from humanityrules_app.services import llm_preset_service
 from humanityrules_app.services import sandbox_service
+from humanityrules_app.services.jobs import app_job_service
 
 logger = logging.getLogger(__name__)
-
-
-def _generate_image_tag(app_slug: str, git_ref: str) -> str:
-    """Generate a unique image tag for this deployment."""
-    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-    short_ref = git_ref[:8] if len(git_ref) > 8 else git_ref
-    return f"{app_slug}-{short_ref}-{timestamp}"
 
 
 def _materialize_environment_variables(configurable_variables: list[dict]) -> list[dict[str, str]]:
@@ -173,8 +166,8 @@ async def deploy_from_template(
     owner_username: str | None,
     compute_mode: str,
     label: str,
-) -> models.Deployment:
-    """Create Repository + App + Deployment from a template and queue for deployment."""
+) -> models.App:
+    """Create Repository + App from a template and queue its first deploy attempt."""
     app_slugs.require_valid_app_hostname_label(value=app_slug)
 
     # The app serves at its slug. Check the label before any write: a conflict must
@@ -251,23 +244,11 @@ async def deploy_from_template(
         owner_username=owner_username,
     )
 
-    git_ref = repo.default_branch
-    image_tag = _generate_image_tag(app_slug=app_slug, git_ref=git_ref)
-
-    deployment = await models.Deployment.objects.acreate(
-        app=app,
-        git_ref=git_ref,
-        git_commit_sha="",
-        git_commit_message="",
-        image_tag=image_tag,
-        status=models.Deployment.Status.PENDING,
-        status_message="Deployment queued from template",
-        created_by=created_by,
-    )
+    await app_job_service.aqueue_deploy(app=app, created_by=created_by)
 
     logger.info(
         "Queued template deployment: app=%(app)s, template=%(template)s, environment=%(env)s",
         {"app": app_slug, "template": template.slug, "env": environment.slug},
     )
 
-    return deployment
+    return app

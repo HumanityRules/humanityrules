@@ -1,9 +1,10 @@
 """
 App removal executor.
 
-Runs an AppRemovalJob: optionally cleans persistent data (EFS app data + EC2 host
-bind-mount data) and Secrets Manager secrets in the app's environment, then deletes
-the App row (FK cascades handle deployments, logs, permissions, tags).
+Runs a removal attempt on an app in REMOVING: optionally tears down live infra,
+cleans persistent data (EFS app data + EC2 host bind-mount data) and Secrets
+Manager secrets in the app's environment, then deletes the App row (FK cascades
+handle records, logs, permissions, tags).
 """
 
 import json
@@ -21,38 +22,25 @@ from humanityrules_app.services.infra_customer import iam_utils
 from humanityrules_app.services.infra_customer import secrets_utils
 
 from . import app_deployment_teardown_executor
+from . import app_job_service
+from . import job_logging
 from . import tenant_consistency
 
 logger = logging.getLogger(__name__)
 
 
-def _find_live_deployment(app: "models.App") -> tuple[str, str] | None:
-    """Return (deployment_id, status) for the app's latest deployment when it isn't torn down."""
-    latest = models.Deployment.objects.filter(app=app).order_by("-created_at").values_list("id", "status").first()
-    if latest is None:
-        return None
-    deployment_id, status = latest
-    if status == models.Deployment.Status.TORN_DOWN:
-        return None
-    return str(deployment_id), status
-
-
-def _teardown_live_deployment(live: tuple[str, str]) -> tuple[bool, str]:
-    """Tear down the live deployment by calling run_teardown inline.
-
-    Returns (ok, message). On failure, the deployment row already reflects
-    the FAILED status (run_teardown writes it); we just propagate a message
-    suitable for the AppRemovalJob status_message.
-    """
-    deployment_id, status = live
-    if status not in models.Deployment.SETTLED_STATUSES:
-        return False, f"Cannot tear down: deployment in progress ({status}). Wait for it to finish."
-
-    logger.info("Tearing down deployment %s as part of app removal", deployment_id)
-    ok = app_deployment_teardown_executor.run_teardown(deployment_id=deployment_id)
+def _teardown_infra_for_removal(app: models.App) -> bool:
+    """Tear down the app's live infra inline, updating live-state fields but not job_status."""
+    logger.info("Tearing down infra for app '%s' as part of removal", app.slug)
+    ok = app_deployment_teardown_executor.teardown_infra(app=app)
     if not ok:
-        return False, "Teardown failed for the app's deployment"
-    return True, "ok"
+        return False
+    app.live_state = models.App.LiveState.TORN_DOWN
+    app.may_have_infra = False
+    app.service_url = ""
+    app.alb_dns = ""
+    app.save(update_fields=["live_state", "may_have_infra", "service_url", "alb_dns", "updated_at"])
+    return True
 
 
 CLEANUP_CONTAINER_NAME = "efs-remover"
@@ -127,74 +115,64 @@ def purge_app_namespace_data(app: models.App, env: models.Environment) -> tuple[
     return True, "ok"
 
 
-def run_removal(job_id: str) -> bool:
-    """Main entry point called by the job worker."""
-    try:
-        job = models.AppRemovalJob.objects.get(id=job_id)
-    except models.AppRemovalJob.DoesNotExist:
-        logger.error("AppRemovalJob %s not found", job_id)
-        return False
-
+def run_removal(app_id: str) -> bool:
+    """Main entry point called by the job worker for an app claimed into REMOVING."""
     app = (
         models.App.objects
         .select_related("workspace", "source_template", "environment", "environment__aws_account")
-        .filter(id=job.app_id_snapshot)
+        .filter(id=app_id)
         .first()
     )
     if app is None:
-        _mark(
-            job,
-            models.AppRemovalJob.Status.SUCCEEDED,
-            f"App row already gone for '{job.app_name_snapshot}' ({job.app_slug_snapshot}); nothing to do.",
-        )
+        logger.info("App %s already gone; nothing to remove.", app_id)
         return True
-
-    live = _find_live_deployment(app)
-    if live is not None:
-        if not job.teardown_first:
-            _fail(job, app, f"App became live again ({live[1]}); cannot remove.")
-            return False
-        logger.info("teardown_first=True: tearing down the live deployment before removal")
-        ok, message = _teardown_live_deployment(live=live)
-        if not ok:
-            _fail(job, app, message)
-            return False
 
     env = app.environment
 
     try:
         tenant_consistency.assert_app_owns_environment(app=app, environment=env)
     except tenant_consistency.TenantConsistencyError as exc:
-        _fail(job, app, f"Refused: {exc}")
+        _fail(app, f"Refused: {exc}")
         return False
 
-    try:
-        if job.delete_persistent_data:
-            ok, message = _run_persistent_data_purge(app=app, env=env)
-            if not ok:
-                _fail(job, app, message)
+    with job_logging.DeploymentLogContext(
+        app=app,
+        attempt_id=app.last_attempt_id,
+        source_default=models.DeploymentLog.Source.SYSTEM,
+    ):
+        if app.may_have_infra:
+            if not app.removal_teardown_first:
+                _fail(app, "App may still have deployed infrastructure; tear it down first.")
+                return False
+            if not _teardown_infra_for_removal(app=app):
+                _fail(app, "Teardown failed for the app's deployment")
                 return False
 
-        if job.delete_secrets:
-            _run_secrets_purge(env=env, app_slug=app.slug)
-    except ClientError as e:
-        logger.exception("AWS cleanup failed: %s", e)
-        _fail(job, app, f"AWS cleanup failed: {e}")
-        return False
+        try:
+            if app.removal_delete_all_data:
+                ok, message = _run_persistent_data_purge(app=app, env=env)
+                if not ok:
+                    _fail(app, message)
+                    return False
+                _run_secrets_purge(env=env, app_slug=app.slug)
+        except ClientError as e:
+            logger.exception("AWS cleanup failed: %s", e)
+            _fail(app, f"AWS cleanup failed: {e}")
+            return False
 
     with transaction.atomic():
-        if job.delete_policies:
+        if app.removal_delete_all_data:
             _delete_matching_policies(organization_id=app.organization_id, app_slug=app.slug)
         # Release the shared-sandbox slug claim (if any) so the name is free for reuse. It is
         # keyed by (slug, org) with no FK to App, so app.delete() does not cascade it. Removal,
         # not teardown, frees the slug — a torn-down app keeps its App row and can redeploy.
         sandbox_service.release_sandbox_app_slug(app_slug=app.slug, organization_id=app.organization_id)
-        # Cascade deletes Deployment, DeploymentLog, AppPermissions, AppPermissionRequest,
+        # Cascade deletes DeploymentRecord, DeploymentLog, AppPermissions, AppPermissionRequest,
         # and ResourceTag rows that point at this app. Policy has no FK to App; matching
-        # rows are handled above when delete_policies is set.
+        # rows are handled above when removal_delete_all_data is set.
         app.delete()
 
-    _mark(job, models.AppRemovalJob.Status.SUCCEEDED, f"App removed: '{job.app_name_snapshot}' ({job.app_slug_snapshot}).")
+    logger.info("App removed: '%s' (%s).", app.name, app.slug)
     return True
 
 
@@ -216,33 +194,17 @@ def _delete_matching_policies(organization_id, app_slug: str) -> None:
         logger.info("Deleted %d policies matching app-name=%s", deleted, app_slug)
 
 
-def _mark(job: models.AppRemovalJob, status: str, message: str) -> None:
-    job.status = status
-    job.status_message = message
-    job.save(update_fields=["status", "status_message", "updated_at"])
-    logger.info("AppRemovalJob %s -> %s: %s", job.id, status, message)
+def _fail(app: models.App, message: str) -> None:
+    """Conclude the removal attempt as failed; the app returns to IDLE so the user can retry."""
+    app_job_service.settle_failure(app=app, error=message)
+    logger.error("App removal failed for '%s': %s", app.slug, message)
 
 
-def _fail(job: models.AppRemovalJob, app: "models.App", message: str) -> None:
-    """Mark the job as failed and revert the app out of PENDING_REMOVAL so the user can retry."""
-    with transaction.atomic():
-        _mark(job, models.AppRemovalJob.Status.FAILED, message)
-        if app.status == models.App.Status.PENDING_REMOVAL:
-            app.status = models.App.Status.ACTIVE
-            app.save(update_fields=["status", "updated_at"])
-
-
-def fail_from_worker(job_id: str, message: str) -> None:
+def fail_from_worker(app_id: str, message: str) -> None:
     """Called from the worker's top-level exception handler; best-effort revert of app state."""
-    try:
-        job = models.AppRemovalJob.objects.get(id=job_id)
-    except models.AppRemovalJob.DoesNotExist:
-        return
-    app = models.App.objects.filter(id=job.app_id_snapshot).first()
-    if app is None:
-        _mark(job, models.AppRemovalJob.Status.FAILED, message)
-    else:
-        _fail(job, app, message)
+    app = models.App.objects.filter(id=app_id).first()
+    if app is not None and app.job_status == models.App.JobStatus.REMOVING:
+        _fail(app, message)
 
 
 # ---------------------------------------------------------------------------

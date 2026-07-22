@@ -3,22 +3,22 @@ by the self-terminating status poll (app_deployment_section_status), which swaps
 #deployment-section-{{ app.id }}. Alpine state (configOpen, copied) lives on a wrapper OUTSIDE that
 target in app_detail.html so it survives the swap. {% endcomment %}
 {% partialdef deployment_section %}
-<div {% if current_deployment and not current_deployment.is_settled %}
+<div {% if app.job_in_flight %}
      hx-get="{% url 'app_deployment_section_status' app_slug=app.slug %}"
      hx-trigger="load delay:10s"
      hx-target="#deployment-section-{{ app.id }}"
      hx-swap="innerHTML"
      {% endif %}>
-    {% if current_deployment %}
+    {% if app.last_attempt_id %}
     {# Hero: the deployment URL is the page's primary element #}
     <div class="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
         <div class="min-w-0">
-            {% if current_deployment.service_url %}
+            {% if app.service_url %}
             <div class="flex items-center gap-2 min-w-0">
-                <a href="{{ current_deployment.service_url }}" target="_blank" rel="noopener noreferrer"
-                   class="truncate text-xl font-semibold text-indigo-600 dark:text-indigo-400 hover:underline">{{ current_deployment.service_url }}</a>
+                <a href="{{ app.service_url }}" target="_blank" rel="noopener noreferrer"
+                   class="truncate text-xl font-semibold text-indigo-600 dark:text-indigo-400 hover:underline">{{ app.service_url }}</a>
                 <button type="button"
-                        @click="navigator.clipboard.writeText('{{ current_deployment.service_url|escapejs }}'); copied = true; setTimeout(() => copied = false, 1500)"
+                        @click="navigator.clipboard.writeText('{{ app.service_url|escapejs }}'); copied = true; setTimeout(() => copied = false, 1500)"
                         class="shrink-0 rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
                         title="Copy URL">
                     <svg x-show="!copied" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
@@ -31,19 +31,22 @@ target in app_detail.html so it survives the swap. {% endcomment %}
             </div>
             {% endif %}
             <div class="mt-3 flex items-center gap-2">
-                {% include "humanityrules_app/partials/_status_pill.html" with status=current_deployment.status label=current_deployment.get_status_display only %}
-                <span class="text-xs text-gray-500 dark:text-gray-400">{{ current_deployment.created_at|timesince }} ago</span>
+                {% include "humanityrules_app/partials/_status_pill.html" with status=app.display_status label=app.display_status_label only %}
+                <span class="text-xs text-gray-500 dark:text-gray-400">{{ app.updated_at|timesince }} ago</span>
             </div>
+            {% if app.last_attempt_error and not app.job_in_flight %}
+            <p class="mt-2 max-w-xl text-xs text-red-700 dark:text-red-400">{{ app.last_attempt_error }}</p>
+            {% endif %}
         </div>
-        {% if app.status != 'pending_removal' %}
+        {% if not app.is_pending_removal %}
         <div class="flex shrink-0 items-center gap-2 pt-1">
-            {% if current_deployment.status == 'succeeded' or current_deployment.status == 'failed' or current_deployment.status == 'torn_down' %}
-            <button hx-post="{% url 'app_deployment_redeploy' app_slug=app.slug deployment_id=current_deployment.id %}"
+            {% if not app.job_in_flight %}
+            <button hx-post="{% url 'app_deployment_redeploy' app_slug=app.slug %}"
                     hx-target="#main-content"
                     hx-swap="innerHTML"
                     class="rounded-lg bg-white dark:bg-gray-800 px-3 py-1.5 text-sm font-medium text-gray-900 dark:text-white ring-1 ring-inset ring-gray-300 dark:ring-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700">Redeploy</button>
             {% endif %}
-            {% if current_deployment.status == 'succeeded' %}
+            {% if app.live_state == 'deployed' %}
             <a href="{% url 'security_permissions_editor' %}?context_app={{ app.slug }}"
                hx-get="{% url 'security_permissions_editor' %}?context_app={{ app.slug }}"
                hx-target="#main-content"
@@ -51,9 +54,9 @@ target in app_detail.html so it survives the swap. {% endcomment %}
                hx-push-url="true"
                class="rounded-lg bg-white dark:bg-gray-800 px-3 py-1.5 text-sm font-medium text-gray-900 dark:text-white ring-1 ring-inset ring-gray-300 dark:ring-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700">Permissions</a>
             {% endif %}
-            {% if current_deployment.status == 'succeeded' or current_deployment.status == 'failed' %}
+            {% if not app.job_in_flight and app.may_have_infra %}
             <button type="button"
-                    hx-get="{% url 'app_teardown_confirm' app_slug=app.slug deployment_id=current_deployment.id %}?render=app_detail"
+                    hx-get="{% url 'app_teardown_confirm' app_slug=app.slug %}"
                     hx-target="#modal-container"
                     hx-swap="innerHTML"
                     class="rounded-lg bg-white dark:bg-gray-800 px-3 py-1.5 text-sm font-medium text-gray-900 dark:text-white ring-1 ring-inset ring-gray-300 dark:ring-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700">Tear Down</button>

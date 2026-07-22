@@ -42,19 +42,19 @@
                         </div>
                         <div class="flex justify-between">
                             <dt class="text-gray-500 dark:text-gray-400">Environment</dt>
-                            <dd class="font-medium text-gray-900 dark:text-white">{{ deployment.app.environment.name }}</dd>
+                            <dd class="font-medium text-gray-900 dark:text-white">{{ app.environment.name }}</dd>
                         </div>
                         <div class="flex justify-between">
                             <dt class="text-gray-500 dark:text-gray-400">AWS Account</dt>
-                            <dd class="font-medium text-gray-900 dark:text-white">{{ deployment.app.environment.aws_account.name }}</dd>
+                            <dd class="font-medium text-gray-900 dark:text-white">{{ app.environment.aws_account.name }}</dd>
                         </div>
                         <div class="flex justify-between">
                             <dt class="text-gray-500 dark:text-gray-400">Region</dt>
-                            <dd class="font-medium text-gray-900 dark:text-white">{{ deployment.app.environment.aws_region }}</dd>
+                            <dd class="font-medium text-gray-900 dark:text-white">{{ app.environment.aws_region }}</dd>
                         </div>
                         <div class="flex justify-between">
                             <dt class="text-gray-500 dark:text-gray-400">Status</dt>
-                            <dd class="font-medium text-gray-900 dark:text-white">{{ deployment.get_status_display }}</dd>
+                            <dd class="font-medium text-gray-900 dark:text-white">{{ app.display_status_label }}</dd>
                         </div>
                     </dl>
                 </div>
@@ -68,8 +68,8 @@
                     </button>
                     <button type="button"
                             hx-post="{{ post_url }}"
-                            hx-target="{{ response_target }}"
-                            hx-swap="{{ response_swap }}"
+                            hx-target="#main-content"
+                            hx-swap="innerHTML"
                             hx-on::after-request="document.getElementById('modal-container').innerHTML = ''"
                             class="rounded-md bg-red-600 px-3 py-2 text-sm font-semibold text-white shadow-xs hover:bg-red-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 dark:bg-red-500 dark:hover:bg-red-400">
                         Tear Down

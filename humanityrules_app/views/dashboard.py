@@ -1,9 +1,8 @@
 from django.contrib.auth.decorators import login_required
-from django.db.models import Max, OuterRef, Subquery
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
 
-from ..models import App, Deployment, Workspace
+from ..models import App, Workspace
 from ..services import abac_service
 from . import base
 
@@ -17,16 +16,6 @@ def dashboard(request: HttpRequest) -> HttpResponse:
 
     org = request.user.current_organization
 
-    latest_deployment_status = (
-        Deployment.objects.filter(app=OuterRef("pk"))
-        .order_by("-created_at")
-        .values("status")[:1]
-    )
-    latest_deployed_service_url = (
-        Deployment.objects.filter(app=OuterRef("pk"), status=Deployment.Status.SUCCEEDED)
-        .order_by("-created_at")
-        .values("service_url")[:1]
-    )
     visible_workspaces = Workspace.objects.filter(organization=org)
     visible_workspaces = abac_service.filter_permitted_resources(
         org, request.user, visible_workspaces, "workspace", "workspace:view",
@@ -35,11 +24,6 @@ def dashboard(request: HttpRequest) -> HttpResponse:
     apps = (
         App.objects.filter(workspace__in=visible_workspaces)
         .select_related("workspace", "repository")
-        .annotate(
-            last_deployed_at=Max("deployments__created_at"),
-            latest_status=Subquery(latest_deployment_status),
-            deployed_service_url=Subquery(latest_deployed_service_url),
-        )
         .order_by("-created_at")
     )
     apps = list(apps)
@@ -48,4 +32,3 @@ def dashboard(request: HttpRequest) -> HttpResponse:
     context["apps"] = apps
 
     return render(request, "humanityrules_app/dashboard.html", context=context)
-
