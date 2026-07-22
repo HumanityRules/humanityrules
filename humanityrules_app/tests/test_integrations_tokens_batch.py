@@ -25,12 +25,12 @@ from humanityrules_app.models import (
     Organization,
     PlatformSharedCredential,
     OrganizationMembership,
-    Repository,
     ResourceTag,
     User,
     Workspace,
 )
 from humanityrules_app.services import abac_service
+from humanityrules_app.tests.app_test_factories import make_source_template
 
 
 def _hash(raw: str) -> str:
@@ -76,14 +76,11 @@ class _BatchTokensEndpointTestBase(TransactionTestCase):
         # The endpoint verifies owner_username owns app_slug (ResourceTag owner check),
         # so seed app "hermes" owned by "vmendi" — the (owner, app) pair every test posts.
         self.workspace = Workspace.objects.get(organization=self.org, slug="default")
-        self.repo = Repository.objects.create(
-            organization=self.org, provider="github", name="hermes",
-            full_name="org/hermes", clone_url="https://github.com/org/hermes.git",
-        )
         self.app = App.objects.create(
-            organization=self.org, workspace=self.workspace, repository=self.repo,
+            organization=self.org, workspace=self.workspace,
+            source_template=make_source_template(),
             environment=self.env, name="Hermes", slug="hermes",
-            build_strategy="dockerfile", container_port=8000,
+            container_port=8000,
             health_check_path="/health", cpu=256, memory=512,
         )
         ResourceTag.objects.create(
@@ -599,14 +596,11 @@ class TestAppOwnership(_BatchTokensEndpointTestBase):
     before serving its tokens — a missing or unowned app is rejected, not degraded to absent."""
 
     def _make_app(self, slug: str, owner_username: str | None) -> App:
-        repo = Repository.objects.create(
-            organization=self.org, provider="github", name=slug,
-            full_name=f"org/{slug}", clone_url=f"https://github.com/org/{slug}.git",
-        )
         app = App.objects.create(
-            organization=self.org, workspace=self.workspace, repository=repo,
+            organization=self.org, workspace=self.workspace,
+            source_template=make_source_template(),
             environment=self.env, name=slug, slug=slug,
-            build_strategy="dockerfile", container_port=8000,
+            container_port=8000,
             health_check_path="/health", cpu=256, memory=512,
         )
         if owner_username is not None:

@@ -11,11 +11,11 @@ from humanityrules_app.models import (
     Environment,
     Organization,
     OrganizationMembership,
-    Repository,
     User,
     Workspace,
 )
 from humanityrules_app.services import abac_service
+from humanityrules_app.tests.app_test_factories import make_source_template
 
 HTMX = {"HTTP_HX_REQUEST": "true"}
 
@@ -26,18 +26,14 @@ class TestDeploymentLogTab(TestCase):
     def setUp(self) -> None:
         self.org = Organization.objects.create(name="Log Org", slug="log-org")
         self.aws_account = AWSAccount.objects.create(organization=self.org, name="Test AWS")
-        self.repo = Repository.objects.create(
-            organization=self.org, provider="github", name="repo",
-            full_name="org/repo", clone_url="https://github.com/org/repo.git",
-        )
         self.workspace = Workspace.objects.create(organization=self.org, name="Engineering", slug="engineering")
         self.env = Environment.objects.create(
             aws_account=self.aws_account, name="Staging", slug="staging", aws_region="us-east-1",
         )
         self.app = App.objects.create(
-            organization=self.org, workspace=self.workspace, repository=self.repo,
+            organization=self.org, workspace=self.workspace, source_template=make_source_template(),
             environment=self.env, name="MyApp", slug="myapp",
-            build_strategy="dockerfile", container_port=8000, health_check_path="/health",
+            container_port=8000, health_check_path="/health",
             cpu=256, memory=512, last_attempt_id=uuid.uuid7(),
         )
 

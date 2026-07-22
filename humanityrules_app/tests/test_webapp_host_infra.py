@@ -6,7 +6,7 @@ from aws_cdk.assertions import Template
 from django.test import SimpleTestCase
 
 from humanityrules_app.services.infra_customer import deploy_app, deploy_base
-from humanityrules_app.services.infra_customer.appconfig import AppConfig, ContainerConfig
+from humanityrules_app.services.infra_customer.appconfig import AppConfig, ContainerConfig, ImageSource
 
 
 HOSTED_ZONE = "humr.example.com"
@@ -25,14 +25,14 @@ def _render_app_stack(enable_webapp_hosts: bool) -> Template:
             containers=[
                 ContainerConfig(
                     name="agent",
-                    image_source="dockerfile",
-                    ecr_repo_name="humr/staging/wolfie-agent",
+                    image_source=ImageSource.TEMPLATE,
+                    template_path="hermes_agent",
                     container_port=8787,
                 ),
             ],
             enable_webapp_hosts=enable_webapp_hosts,
         ),
-        image_tag="test",
+        image_tags={"hermes_agent": "test"},
         env_slug="staging",
         resource_prefix="humr-staging-wolfie",
         subdomain="wolfie",

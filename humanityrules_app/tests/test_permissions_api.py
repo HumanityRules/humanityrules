@@ -23,11 +23,11 @@ from humanityrules_app.models import (
     EnvironmentBearerToken,
     Organization,
     OrganizationMembership,
-    Repository,
     ResourceTag,
     User,
     Workspace,
 )
+from humanityrules_app.tests.app_test_factories import make_source_template
 
 
 def _hash(raw: str) -> str:
@@ -63,10 +63,6 @@ class TestPermissionsApi(TestCase):
         OrganizationMembership.objects.create(
             user=self.user, organization=self.org, role=OrganizationMembership.Role.MEMBER,
         )
-        self.repository = Repository.objects.create(
-            organization=self.org, provider="github", name="hermes",
-            full_name="org/hermes", default_branch="main", clone_url="https://github.com/org/hermes.git",
-        )
         self.workspace = Workspace.objects.create(organization=self.org, name="Engineering", slug="engineering")
         self.app = self._make_app(slug="hermes", name="Hermes", owner_username=self.user.username)
 
@@ -84,9 +80,8 @@ class TestPermissionsApi(TestCase):
 
     def _make_app(self, slug: str, name: str, owner_username: str | None) -> App:
         app = App.objects.create(
-            organization=self.org, workspace=self.workspace, repository=self.repository,
+            organization=self.org, workspace=self.workspace, source_template=make_source_template(),
             environment=self.env, name=name, slug=slug,
-            build_strategy=App.BuildStrategy.DOCKERFILE,
             container_port=8000, health_check_path="/health", cpu=256, memory=512,
         )
         if owner_username is not None:

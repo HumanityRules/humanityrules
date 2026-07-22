@@ -12,12 +12,12 @@ from humanityrules_app.models import (
     IntegrationSharedCredential,
     Organization,
     Policy,
-    Repository,
     ResourceTag,
     User,
     Workspace,
 )
 from humanityrules_app.services import abac_service
+from humanityrules_app.tests.app_test_factories import make_source_template
 from humanityrules_app.views.integrations import (
     provider_anthropic,
     provider_openai,
@@ -37,10 +37,6 @@ class SharedCredentialTestBase(TestCase):
         # Seeds the three credential system policies (everyone/user/workspace).
         abac_service.bootstrap_organization(organization=self.org, admin_user=self.admin)
 
-        self.repo = Repository.objects.create(
-            organization=self.org, provider="github", name="hermes",
-            full_name="org/hermes", clone_url="https://github.com/org/hermes.git",
-        )
         self.aws_account = AWSAccount.objects.create(organization=self.org, name="Shared Account")
         self.env = Environment.objects.create(
             aws_account=self.aws_account, name="staging", slug="staging", aws_region="us-east-1",
@@ -54,15 +50,15 @@ class SharedCredentialTestBase(TestCase):
         abac_service.materialize_membership(organization=self.org, user=self.bob, role="member")
 
         self.app_eng = App.objects.create(
-            organization=self.org, workspace=self.ws_eng, repository=self.repo,
+            organization=self.org, workspace=self.ws_eng, source_template=make_source_template(),
             environment=self.env, name="AliceHermes", slug="alice-hermes",
-            build_strategy="dockerfile", container_port=8000,
+            container_port=8000,
             health_check_path="/health", cpu=256, memory=512,
         )
         self.app_sales = App.objects.create(
-            organization=self.org, workspace=self.ws_sales, repository=self.repo,
+            organization=self.org, workspace=self.ws_sales, source_template=make_source_template(),
             environment=self.env, name="SalesHermes", slug="sales-hermes",
-            build_strategy="dockerfile", container_port=8000,
+            container_port=8000,
             health_check_path="/health", cpu=256, memory=512,
         )
 

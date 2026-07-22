@@ -17,12 +17,12 @@ from humanityrules_app.models import (
     Organization,
     OrganizationMembership,
     Policy,
-    Repository,
     ResourceTag,
     User,
     Workspace,
 )
 from humanityrules_app.services import abac_service
+from humanityrules_app.tests.app_test_factories import make_source_template
 
 HTMX = {"HTTP_HX_REQUEST": "true"}
 
@@ -33,10 +33,6 @@ class TestAppEndpoints(TestCase):
     def setUp(self) -> None:
         self.org = Organization.objects.create(name="App Test Org", slug="app-test-org")
         self.aws_account = AWSAccount.objects.create(organization=self.org, name="Test AWS")
-        self.repo = Repository.objects.create(
-            organization=self.org, provider="github", name="repo",
-            full_name="org/repo", clone_url="https://github.com/org/repo.git",
-        )
 
         self.workspace = Workspace.objects.create(organization=self.org, name="Engineering", slug="engineering")
         ResourceTag.objects.create(
@@ -53,9 +49,9 @@ class TestAppEndpoints(TestCase):
         )
         # A live, idle app: deployed with infra behind it, so teardown is offered.
         self.app = App.objects.create(
-            organization=self.org, workspace=self.workspace, repository=self.repo,
+            organization=self.org, workspace=self.workspace, source_template=make_source_template(),
             environment=self.env, name="MyApp", slug="myapp",
-            build_strategy="dockerfile", container_port=8000, health_check_path="/health",
+            container_port=8000, health_check_path="/health",
             cpu=256, memory=512,
             live_state=App.LiveState.DEPLOYED, may_have_infra=True,
             service_url="https://myapp.staging.example.com", last_attempt_id=uuid.uuid7(),

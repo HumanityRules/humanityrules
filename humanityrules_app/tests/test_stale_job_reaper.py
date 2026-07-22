@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from humanityrules_app import models
 from humanityrules_app.services.jobs import stale_job_reaper
+from humanityrules_app.tests.app_test_factories import make_source_template
 
 TIMEOUT = timedelta(minutes=30)
 DEAD_WORKER_TIMEOUT = timedelta(minutes=2)
@@ -34,13 +35,6 @@ class TestStaleJobReaper(TestCase):
             name="Operations",
             slug="operations",
         )
-        self.repository = models.Repository.objects.create(
-            organization=self.organization,
-            provider="github",
-            name="hermes",
-            full_name="stale-reaper/hermes",
-            clone_url="https://github.com/stale-reaper/hermes.git",
-        )
 
     def _make_app(self, slug: str, job_status: str) -> models.App:
         """Create an app fixed in `job_status` with an open attempt id."""
@@ -48,10 +42,9 @@ class TestStaleJobReaper(TestCase):
             organization=self.organization,
             workspace=self.workspace,
             environment=self.environment,
-            repository=self.repository,
+            source_template=make_source_template(),
             name=slug,
             slug=slug,
-            build_strategy=models.App.BuildStrategy.DOCKERFILE,
             container_port=8787,
             health_check_path="/health",
             cpu=256,

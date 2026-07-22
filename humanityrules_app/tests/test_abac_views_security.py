@@ -21,12 +21,12 @@ from humanityrules_app.models import (
     Organization,
     OrganizationMembership,
     Policy,
-    Repository,
     ResourceTag,
     User,
     Workspace,
 )
 from humanityrules_app.services import abac_service
+from humanityrules_app.tests.app_test_factories import make_source_template
 
 HTMX = {"HTTP_HX_REQUEST": "true"}
 
@@ -380,19 +380,15 @@ class TestPermissionsEditorEndpoints(TestCase):
     def setUp(self) -> None:
         self.org = Organization.objects.create(name="PE Test Org", slug="pe-test-org")
         self.aws_account = AWSAccount.objects.create(organization=self.org, name="Test AWS")
-        self.repo = Repository.objects.create(
-            organization=self.org, provider="github", name="repo",
-            full_name="org/repo", clone_url="https://github.com/org/repo.git",
-        )
 
         self.workspace = Workspace.objects.create(organization=self.org, name="WS", slug="ws")
         self.env = Environment.objects.create(
             aws_account=self.aws_account, name="Production", slug="production", aws_region="us-east-1",
         )
         self.app = App.objects.create(
-            organization=self.org, workspace=self.workspace, repository=self.repo,
+            organization=self.org, workspace=self.workspace, source_template=make_source_template(),
             environment=self.env, name="PEApp", slug="peapp",
-            build_strategy="dockerfile", container_port=8000, health_check_path="/health",
+            container_port=8000, health_check_path="/health",
             cpu=256, memory=512,
         )
         ResourceTag.objects.create(
@@ -492,18 +488,14 @@ class TestPermissionsEditorStatementRendering(TestCase):
     def setUp(self) -> None:
         self.org = Organization.objects.create(name="PSR Org", slug="psr-org")
         self.aws_account = AWSAccount.objects.create(organization=self.org, name="AWS")
-        self.repo = Repository.objects.create(
-            organization=self.org, provider="github", name="repo",
-            full_name="org/repo", clone_url="https://github.com/org/repo.git",
-        )
         self.workspace = Workspace.objects.create(organization=self.org, name="WS", slug="psr-ws")
         self.env = Environment.objects.create(
             aws_account=self.aws_account, name="Production", slug="psr-prod", aws_region="us-east-1",
         )
         self.app = App.objects.create(
-            organization=self.org, workspace=self.workspace, repository=self.repo,
+            organization=self.org, workspace=self.workspace, source_template=make_source_template(),
             environment=self.env, name="PSRApp", slug="psrapp",
-            build_strategy="dockerfile", container_port=8000, health_check_path="/health",
+            container_port=8000, health_check_path="/health",
             cpu=256, memory=512,
         )
         self.user = User.objects.create_user(username="psr_user", password="x", current_organization=self.org)

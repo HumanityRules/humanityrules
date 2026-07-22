@@ -14,6 +14,8 @@ from humanityrules_app.services.infra_customer import deploy_app
 from humanityrules_app.services.infra_customer.appconfig import (
     AppConfig,
     ContainerConfig,
+    ContainerRole,
+    ImageSource,
 )
 
 
@@ -23,7 +25,7 @@ SHARED_SECRETS_ARN = "arn:aws:secretsmanager:us-east-1:123456789012:secret:humr/
 def _render(
     containers: list[ContainerConfig],
     owner_username: str | None,
-    shared_alb_hosted_zone: str | None = None,
+    shared_alb_hosted_zone: str | None,
 ) -> Template:
     cdk_app = App()
     stack = deploy_app.AppStack(
@@ -38,7 +40,7 @@ def _render(
             containers=containers,
             owner_username=owner_username,
         ),
-        image_tag="test",
+        image_tags={c.template_path: "test" for c in containers},
         env_slug="staging",
         resource_prefix="humr-staging-my-app",
         subdomain="myapp",
@@ -81,14 +83,14 @@ class TestEnvBearerOverlay(SimpleTestCase):
             containers=[
                 ContainerConfig(
                     name="hermes",
-                    image_source="dockerfile",
-                    source_repo_path="hermes_agent",
-                    ecr_repo_name="humr/staging/my-app-hermes",
+                    image_source=ImageSource.TEMPLATE,
+                    template_path="hermes_agent",
                     container_port=8787,
                     requires_env_bearer=True,
                 ),
             ],
             owner_username="vmendi",
+            shared_alb_hosted_zone=None,
         )
 
         hermes = _container_defs_by_name(template)["hermes"]
@@ -106,9 +108,8 @@ class TestEnvBearerOverlay(SimpleTestCase):
             containers=[
                 ContainerConfig(
                     name="hermes",
-                    image_source="dockerfile",
-                    source_repo_path="hermes_agent",
-                    ecr_repo_name="humr/staging/my-app-hermes",
+                    image_source=ImageSource.TEMPLATE,
+                    template_path="hermes_agent",
                     container_port=8787,
                     requires_env_bearer=True,
                 ),
@@ -127,14 +128,14 @@ class TestEnvBearerOverlay(SimpleTestCase):
             containers=[
                 ContainerConfig(
                     name="policy-proxy",
-                    image_source="dockerfile",
-                    source_repo_path="policy_proxy",
-                    ecr_repo_name="humr/staging/my-app-policy-proxy",
+                    image_source=ImageSource.TEMPLATE,
+                    template_path="policy_proxy",
                     container_port=8443,
                     requires_env_bearer=True,
                 ),
             ],
             owner_username=None,
+            shared_alb_hosted_zone=None,
         )
 
         container = _container_defs_by_name(template)["policy-proxy"]
@@ -149,19 +150,21 @@ class TestEnvBearerOverlay(SimpleTestCase):
             containers=[
                 ContainerConfig(
                     name="policy-proxy",
-                    image_source="policy_proxy",
+                    image_source=ImageSource.TEMPLATE,
+                    template_path="policy_proxy",
+                    role=ContainerRole.POLICY_PROXY,
                     upstream_container="hermes",
                     container_port=8443,
                 ),
                 ContainerConfig(
                     name="hermes",
-                    image_source="dockerfile",
-                    source_repo_path="hermes_agent",
-                    ecr_repo_name="humr/staging/my-app-hermes",
+                    image_source=ImageSource.TEMPLATE,
+                    template_path="hermes_agent",
                     container_port=8787,
                 ),
             ],
             owner_username="vmendi",
+            shared_alb_hosted_zone=None,
         )
 
         containers = _container_defs_by_name(template)
@@ -183,21 +186,21 @@ class TestEnvBearerOverlay(SimpleTestCase):
             containers=[
                 ContainerConfig(
                     name="hermes",
-                    image_source="dockerfile",
-                    source_repo_path="hermes_agent",
-                    ecr_repo_name="humr/staging/my-app-hermes",
+                    image_source=ImageSource.TEMPLATE,
+                    template_path="hermes_agent",
                     container_port=8787,
                     requires_env_bearer=True,
                 ),
                 ContainerConfig(
                     name="docker-dind",
-                    image_source="registry",
-                    registry_image="docker:26.1.0-dind",
+                    image_source=ImageSource.TEMPLATE,
+                    template_path="docker_dind",
                     container_port=0,
                     requires_env_bearer=False,
                 ),
             ],
             owner_username="vmendi",
+            shared_alb_hosted_zone=None,
         )
 
         dind = _container_defs_by_name(template)["docker-dind"]

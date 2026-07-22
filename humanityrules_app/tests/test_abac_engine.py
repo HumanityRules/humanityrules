@@ -14,7 +14,6 @@ from humanityrules_app.models import (
     IdentityAttribute,
     Organization,
     Policy,
-    Repository,
     ResourceTag,
     User,
     Workspace,
@@ -23,6 +22,7 @@ from django.core.exceptions import ValidationError
 
 from humanityrules_app.services import abac_service
 from humanityrules_app.services.abac_service import _conditions_match as _raw_conditions_match
+from humanityrules_app.tests import app_test_factories
 
 
 def _conditions_match(conditions: list[dict], self_side: set[tuple[str, str]]) -> bool:
@@ -113,16 +113,13 @@ class TestGetEffectiveTags(TestCase):
         self.env = Environment.objects.create(
             aws_account=self.aws_account, name="TagEnv", slug="tagenv", aws_region="us-east-1",
         )
-        self.repo = Repository.objects.create(
-            organization=self.org, provider="github", name="repo",
-            full_name="org/repo", clone_url="https://github.com/org/repo.git",
-        )
 
     def _make_app(self, name: str, slug: str) -> App:
         return App.objects.create(
-            organization=self.org, workspace=self.workspace, repository=self.repo,
+            organization=self.org, workspace=self.workspace,
+            source_template=app_test_factories.make_source_template(),
             environment=self.env, name=name, slug=slug,
-            build_strategy="dockerfile", container_port=8000, health_check_path="/health",
+            container_port=8000, health_check_path="/health",
             cpu=256, memory=512,
         )
 
@@ -1352,16 +1349,13 @@ class TestCreateDefaultAppPolicy(TestCase):
         self.env = Environment.objects.create(
             aws_account=self.aws_account, name="Default", slug="default", aws_region="us-east-1",
         )
-        self.repo = Repository.objects.create(
-            organization=self.org, provider="github", name="repo",
-            full_name="org/repo", clone_url="https://github.com/org/repo.git",
-        )
 
     def _make_app(self, name: str, slug: str) -> App:
         return App.objects.create(
-            organization=self.org, workspace=self.workspace, repository=self.repo,
+            organization=self.org, workspace=self.workspace,
+            source_template=app_test_factories.make_source_template(),
             environment=self.env, name=name, slug=slug,
-            build_strategy="dockerfile", container_port=8000, health_check_path="/health",
+            container_port=8000, health_check_path="/health",
             cpu=256, memory=512,
         )
 
@@ -1414,16 +1408,17 @@ class TestCreateDefaultAppPolicy(TestCase):
             containers=[
                 {
                     "name": "app",
-                    "image_source": "dockerfile",
-                    "source_repo_path": "x",
-                    "dockerfile_path": "Dockerfile",
+                    "image_source": "template",
+                    "template_path": "hermes_agent",
                     "container_port": 8000,
                     "health_check_path": "/health",
                     "configurable_variables": [],
                 },
                 {
                     "name": "policy-proxy",
-                    "image_source": "policy_proxy",
+                    "image_source": "template",
+                    "template_path": "policy_proxy",
+                    "role": "policy_proxy",
                     "upstream_container": "app",
                     "container_port": 8001,
                     "configurable_variables": [],
@@ -1432,9 +1427,9 @@ class TestCreateDefaultAppPolicy(TestCase):
             is_active=True,
         )
         app = App.objects.create(
-            organization=self.org, workspace=self.workspace, repository=self.repo,
+            organization=self.org, workspace=self.workspace,
             environment=self.env, name="Vmendi PA", slug="vmendi-pa",
-            build_strategy="dockerfile", container_port=8000,
+            container_port=8000,
             health_check_path="/health", source_template=template,
             cpu=256, memory=512,
         )
@@ -1742,10 +1737,6 @@ class TestTagInheritanceConsistency(TestCase):
             organization=self.org, resource_type="workspace", workspace=self.workspace,
             key="domain", value="finance",
         )
-        self.repo = Repository.objects.create(
-            organization=self.org, provider="github", name="finrepo",
-            full_name="org/finrepo", clone_url="https://github.com/org/finrepo.git",
-        )
         self.aws_account = AWSAccount.objects.create(
             organization=self.org, name="Test Account",
         )
@@ -1753,9 +1744,10 @@ class TestTagInheritanceConsistency(TestCase):
             aws_account=self.aws_account, name="Default", slug="default", aws_region="us-east-1",
         )
         self.app = App.objects.create(
-            organization=self.org, workspace=self.workspace, repository=self.repo,
+            organization=self.org, workspace=self.workspace,
+            source_template=app_test_factories.make_source_template(),
             environment=self.env, name="FinReports", slug="finreports",
-            build_strategy="dockerfile", container_port=8000,
+            container_port=8000,
             health_check_path="/health", cpu=256, memory=512,
         )
 
@@ -2154,10 +2146,6 @@ class TestSelfReferentialEvaluation(TestCase):
         self.workspace = Workspace.objects.create(
             organization=self.org, name="PAs", slug="pas",
         )
-        self.repo = Repository.objects.create(
-            organization=self.org, provider="github", name="hermes",
-            full_name="org/hermes", clone_url="https://github.com/org/hermes.git",
-        )
         self.owner = User.objects.create_user(
             username="vmendi", password="pw", current_organization=self.org,
         )
@@ -2171,9 +2159,10 @@ class TestSelfReferentialEvaluation(TestCase):
             aws_account=self.aws_account, name="Default", slug="default", aws_region="us-east-1",
         )
         self.pa_app = App.objects.create(
-            organization=self.org, workspace=self.workspace, repository=self.repo,
+            organization=self.org, workspace=self.workspace,
+            source_template=app_test_factories.make_source_template(),
             environment=self.env, name="VmendiPA", slug="vmendihermes",
-            build_strategy="dockerfile", container_port=8000,
+            container_port=8000,
             health_check_path="/health", cpu=256, memory=512,
         )
         # Drop the auto-created open-access policy so only the self-ref policy is in play.
@@ -2275,9 +2264,10 @@ class TestSelfReferentialEvaluation(TestCase):
     def test_filter_permitted_resources_respects_self_ref(self) -> None:
         # Second PA owned by a different user.
         other_app = App.objects.create(
-            organization=self.org, workspace=self.workspace, repository=self.repo,
+            organization=self.org, workspace=self.workspace,
+            source_template=app_test_factories.make_source_template(),
             environment=self.env, name="AlicePA", slug="alice-hermes",
-            build_strategy="dockerfile", container_port=8000,
+            container_port=8000,
             health_check_path="/health", cpu=256, memory=512,
         )
         Policy.objects.filter(

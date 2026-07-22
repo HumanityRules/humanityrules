@@ -8,6 +8,7 @@ from django.test import Client, TestCase
 from django.utils import timezone
 
 from humanityrules_app import models
+from humanityrules_app.tests.app_test_factories import make_source_template
 
 
 def _hash(raw: str) -> str:
@@ -29,21 +30,13 @@ class PolicyProxyActivityTestBase(TestCase):
             name="Assistants",
             slug="assistants",
         )
-        repository = models.Repository.objects.create(
-            organization=self.organization,
-            provider="github",
-            name="hermes",
-            full_name="activity/hermes",
-            clone_url="https://github.com/activity/hermes.git",
-        )
         self.app = models.App.objects.create(
             organization=self.organization,
             workspace=workspace,
             environment=self.environment,
-            repository=repository,
+            source_template=make_source_template(),
             name="Activity Agent",
             slug="activity-agent",
-            build_strategy=models.App.BuildStrategy.DOCKERFILE,
             container_port=8787,
             health_check_path="/health",
             cpu=256,

@@ -18,7 +18,6 @@ from humanityrules_app.models import (
     EnvironmentBearerToken,
     Organization,
     OrganizationMembership,
-    Repository,
     User,
     WebappPublicGrant,
     Workspace,
@@ -41,14 +40,10 @@ class PublicAccessTestBase(TestCase):
             aws_region="us-east-1", shared_alb_hosted_zone="staging.example.com",
         )
         self.workspace = Workspace.objects.create(organization=self.org, name="PAs", slug="pas")
-        self.repo = Repository.objects.create(
-            organization=self.org, provider="github", name="hermes",
-            full_name="org/hermes", clone_url="https://github.com/org/hermes.git",
-        )
         self.template = AppTemplate.objects.create(
             name="Hermes", slug="hermes", description="agent", icon="app",
             category="agent", cpu=1024, memory=2048,
-            containers=[{"name": "agent", "image_source": "app"}],
+            containers=[{"name": "agent", "image_source": "template", "template_path": "hermes_agent"}],
             enable_webapp_hosts=True, is_active=True,
         )
         self.admin = User.objects.create_user(username="pub_admin", password="x", current_organization=self.org)
@@ -58,9 +53,9 @@ class PublicAccessTestBase(TestCase):
         abac_service.materialize_membership(organization=self.org, user=self.member, role="member")
 
         self.app = App.objects.create(
-            organization=self.org, workspace=self.workspace, repository=self.repo,
+            organization=self.org, workspace=self.workspace,
             source_template=self.template, environment=self.environment,
-            name="Wolfie", slug="wolfie", build_strategy="dockerfile",
+            name="Wolfie", slug="wolfie",
             container_port=8000, health_check_path="/health", cpu=256, memory=512,
             live_state=App.LiveState.DEPLOYED, service_url="https://wolfie.staging.example.com",
         )

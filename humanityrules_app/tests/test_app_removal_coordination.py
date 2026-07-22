@@ -12,6 +12,7 @@ from humanityrules_app.services import abac_service
 from humanityrules_app.services.jobs import app_job_service
 from humanityrules_app.services.jobs import app_remove_executor
 from humanityrules_app.services.jobs import job_worker
+from humanityrules_app.tests.app_test_factories import make_source_template
 
 
 class TestAppRemovalCoordination(TestCase):
@@ -34,21 +35,13 @@ class TestAppRemovalCoordination(TestCase):
             name="Operations",
             slug="operations",
         )
-        self.repository = models.Repository.objects.create(
-            organization=self.organization,
-            provider="github",
-            name="hermes",
-            full_name="removal-coordination/hermes",
-            clone_url="https://github.com/removal-coordination/hermes.git",
-        )
         self.app = models.App.objects.create(
             organization=self.organization,
             workspace=self.workspace,
             environment=self.environment,
-            repository=self.repository,
+            source_template=make_source_template(),
             name="Removal Agent",
             slug="removalagent",
-            build_strategy=models.App.BuildStrategy.DOCKERFILE,
             container_port=8787,
             health_check_path="/health",
             cpu=256,

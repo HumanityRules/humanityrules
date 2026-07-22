@@ -15,11 +15,11 @@ from humanityrules_app.models import (
     IntegrationUserCredential,
     Organization,
     OrganizationMembership,
-    Repository,
     ResourceTag,
     User,
     Workspace,
 )
+from humanityrules_app.tests.app_test_factories import make_source_template
 from humanityrules_app.views.integrations import provider_slack
 
 
@@ -48,22 +48,13 @@ class _SlackVaultTestBase(TestCase):
         OrganizationMembership.objects.create(
             user=self.user, organization=self.org, role=OrganizationMembership.Role.MEMBER,
         )
-        self.repository = Repository.objects.create(
-            organization=self.org,
-            provider="github",
-            name="hermes",
-            full_name="org/hermes",
-            default_branch="main",
-            clone_url="https://github.com/org/hermes.git",
-        )
         self.workspace = Workspace.objects.create(organization=self.org, name="Eng", slug="eng")
         self.app = App.objects.create(
             organization=self.org,
             workspace=self.workspace,
-            repository=self.repository,
+            source_template=make_source_template(),
             name="Hermes",
             slug="hermes",
-            build_strategy=App.BuildStrategy.DOCKERFILE,
             environment=self.env,
             container_port=8000,
             health_check_path="/health",
@@ -202,8 +193,22 @@ class TestSlackSetupSession(_SlackVaultTestBase):
         self.assertEqual(company["display_information"]["name"], "Hermes Agent")
         self.assertEqual(company["features"]["bot_user"]["display_name"], "hermes-agent")
 
-    def test_app_name_falls_back_when_no_template(self) -> None:
-        # The base App has no source_template; default is the generic fallback.
+    def test_app_name_falls_back_when_template_name_is_blank(self) -> None:
+        # A template whose name sanitizes to empty yields the generic fallback.
+        template = AppTemplate.objects.create(
+            name="",
+            slug="blank-name",
+            description="Template",
+            icon="robot",
+            category="ai-assistant",
+            cpu=1024,
+            memory=2048,
+            containers=[],
+            is_active=True,
+        )
+        self.app.source_template = template
+        self.app.save(update_fields=["source_template"])
+
         _status, body = self._post_setup_session()
         schema = body["schema"]
         self.assertEqual(schema["app_name"], provider_slack.SLACK_DEFAULT_APP_NAME)
