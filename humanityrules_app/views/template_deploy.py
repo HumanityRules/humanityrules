@@ -149,13 +149,13 @@ def _owner_options_for(request: HttpRequest, org: models.Organization) -> list[d
 def template_deploy_picker(request: HttpRequest) -> HttpResponse:
     """Show a grid of all active templates."""
     if not request.htmx:
-        context = base.get_app_shell_context(request=request, current_page="workspaces")
+        context = base.get_app_shell_context(request=request, current_page="dashboard")
         context["content_url"] = "/deploy/from-template/"
         return render(request, "humanityrules_app/app_shell.html", context=context)
 
     templates = models.AppTemplate.objects.filter(is_active=True).order_by("name")
 
-    context = base.get_app_shell_context(request=request, current_page="workspaces")
+    context = base.get_app_shell_context(request=request, current_page="dashboard")
     context["templates"] = templates
     return render(request, "humanityrules_app/deploy/template_deploy_picker.html", context=context)
 
@@ -170,8 +170,10 @@ def template_deploy_form(request: HttpRequest, template_slug: str) -> HttpRespon
         return _handle_deploy(request=request, template=template, org=org)
 
     if not request.htmx:
-        context = base.get_app_shell_context(request=request, current_page="workspaces")
-        context["content_url"] = f"/deploy/from-template/{template_slug}/"
+        context = base.get_app_shell_context(request=request, current_page="dashboard")
+        query_string = request.GET.urlencode()
+        query_suffix = f"?{query_string}" if query_string else ""
+        context["content_url"] = f"/deploy/from-template/{template_slug}/{query_suffix}"
         return render(request, "humanityrules_app/app_shell.html", context=context)
 
     workspaces = models.Workspace.objects.filter(organization=org)
@@ -208,11 +210,16 @@ def template_deploy_form(request: HttpRequest, template_slug: str) -> HttpRespon
                 template=template, org=org, owner_username=opt["id"],
             )
 
-    context = base.get_app_shell_context(request=request, current_page="workspaces")
+    context = base.get_app_shell_context(request=request, current_page="dashboard")
     context["template"] = template
     context["workspace_options"] = workspace_options
     context["environment_options"] = environment_options
-    default_workspace_id = workspace_options[0]["id"] if len(workspace_options) == 1 else ""
+    requested_workspace_id = request.GET.get("workspace_id", "")
+    permitted_workspace_ids = {option["id"] for option in workspace_options}
+    if requested_workspace_id in permitted_workspace_ids:
+        default_workspace_id = requested_workspace_id
+    else:
+        default_workspace_id = workspace_options[0]["id"] if len(workspace_options) == 1 else ""
     default_environment_id = environment_options[0]["id"] if len(environment_options) == 1 else ""
     context["selected_workspace_id"] = default_workspace_id
     context["selected_environment_id"] = default_environment_id
@@ -331,7 +338,7 @@ def _handle_deploy(request: HttpRequest, template: models.AppTemplate, org: mode
         environment_options = _environment_options(environments)
         owner_options = _owner_options_for(request=request, org=org) if requires_owner else []
 
-        context = base.get_app_shell_context(request=request, current_page="workspaces")
+        context = base.get_app_shell_context(request=request, current_page="dashboard")
         context["template"] = template
         context["workspace_options"] = workspace_options
         context["environment_options"] = environment_options

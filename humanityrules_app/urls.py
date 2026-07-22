@@ -23,7 +23,6 @@ urlpatterns = [
     path("settings/invites/<uuid:invite_id>/revoke/", views.revoke_invite, name="invite_revoke"),
 
     # Workspaces
-    path("workspaces/", views.workspaces, name="workspaces"),
     path("workspaces/create/", views.workspace_create, name="workspace_create"),
     path("workspaces/<slug:workspace_slug>/", views.workspace_detail, name="workspace_detail"),
     path("workspaces/<slug:workspace_slug>/remove-confirm/", views.workspace_remove_confirm, name="workspace_remove_confirm"),
