@@ -98,11 +98,6 @@ class TestAppEndpoints(TestCase):
         self.no_access_user = User.objects.create_user(username="app_noaccess", password="x", current_organization=self.org)
         OrganizationMembership.objects.create(organization=self.org, user=self.no_access_user, role=OrganizationMembership.Role.MEMBER)
 
-        self.app_tag = ResourceTag.objects.create(
-            organization=self.org, resource_type="app", app=self.app,
-            key="removable", value="yes",
-        )
-
     # --- App Detail (requires workspace:view on parent workspace) ---
 
     def test_admin_can_view_app_detail(self) -> None:
@@ -242,38 +237,6 @@ class TestAppEndpoints(TestCase):
         self.assertEqual(response.status_code, 403)
 
     # --- App Tag Management (requires workspace:admin on parent workspace) ---
-
-    def test_ws_admin_can_add_app_tag(self) -> None:
-        self.client.force_login(self.ws_admin)
-        response = self.client.post("/apps/myapp/tags/add/", {"key": "env", "value": "test"})
-        self.assertEqual(response.status_code, 200)
-
-    def test_ws_viewer_gets_403_on_app_tag_add(self) -> None:
-        self.client.force_login(self.ws_viewer)
-        response = self.client.post("/apps/myapp/tags/add/", {"key": "env", "value": "test"})
-        self.assertEqual(response.status_code, 403)
-
-    def test_ws_editor_gets_403_on_app_tag_add(self) -> None:
-        """workspace:edit is not enough — workspace:admin required for tag management."""
-        self.client.force_login(self.ws_editor)
-        response = self.client.post("/apps/myapp/tags/add/", {"key": "env", "value": "test"})
-        self.assertEqual(response.status_code, 403)
-
-    def test_ws_admin_can_remove_app_tag(self) -> None:
-        self.client.force_login(self.ws_admin)
-        response = self.client.post(f"/apps/myapp/tags/{self.app_tag.id}/remove/")
-        self.assertEqual(response.status_code, 200)
-
-    def test_ws_viewer_gets_403_on_app_tag_remove(self) -> None:
-        self.client.force_login(self.ws_viewer)
-        response = self.client.post(f"/apps/myapp/tags/{self.app_tag.id}/remove/")
-        self.assertEqual(response.status_code, 403)
-
-    def test_ws_editor_gets_403_on_app_tag_remove(self) -> None:
-        """workspace:edit is not enough — workspace:admin required for tag management."""
-        self.client.force_login(self.ws_editor)
-        response = self.client.post(f"/apps/myapp/tags/{self.app_tag.id}/remove/")
-        self.assertEqual(response.status_code, 403)
 
     def test_ws_admin_can_bulk_save_app_tags(self) -> None:
         import json

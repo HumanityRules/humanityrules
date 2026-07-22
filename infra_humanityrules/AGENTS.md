@@ -75,7 +75,6 @@ Secrets are synced from `.env` to AWS Secrets Manager. The mapping is defined in
 - `humr/prod/django` — DJANGO_SECRET_KEY, DJANGO_SUPERUSER_EMAIL
 - `humr/prod/workos` — WORKOS_CLIENT_ID, WORKOS_API_KEY
 - `humr/prod/github` — GitHub App credentials
-- `humr/prod/bedrock` — Bedrock credentials for AI features
 - `humr/prod/api` — HUMR_API_SECRET_KEY
 - `humr/prod/telegram` — TELEGRAM_MANAGER_BOT_TOKEN, TELEGRAM_MANAGER_BOT_USERNAME
 

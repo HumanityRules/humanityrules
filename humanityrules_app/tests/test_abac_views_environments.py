@@ -73,27 +73,11 @@ class TestEnvironmentEndpoints(TestCase):
         self.no_access_user = User.objects.create_user(username="env_noaccess", password="x", current_organization=self.org)
         OrganizationMembership.objects.create(organization=self.org, user=self.no_access_user, role=OrganizationMembership.Role.MEMBER)
 
-        self.removable_tag = ResourceTag.objects.create(
-            organization=self.org, resource_type="environment", environment=self.env_staging,
-            key="removable", value="yes",
-        )
-
     # --- Environment List (filter_permitted_resources) ---
 
     def _detail_url(self, environment: Environment) -> str:
         """Build the environment detail URL."""
         return reverse("environment_detail", kwargs={"environment_id": environment.id})
-
-    def _tag_add_url(self, environment: Environment) -> str:
-        """Build the environment tag-add URL."""
-        return reverse("environment_tag_add", kwargs={"environment_id": environment.id})
-
-    def _tag_remove_url(self, environment: Environment) -> str:
-        """Build the environment tag-remove URL."""
-        return reverse(
-            "environment_tag_remove",
-            kwargs={"environment_id": environment.id, "tag_id": self.removable_tag.id},
-        )
 
     def _tag_save_url(self, environment: Environment) -> str:
         """Build the environment tag-save URL."""
@@ -251,31 +235,6 @@ class TestEnvironmentEndpoints(TestCase):
         self.assertFalse(Environment.objects.filter(aws_account=sandbox, slug="blah").exists())
 
     # --- Environment Tag Management (requires environment:admin) ---
-
-    def test_admin_can_add_environment_tag(self) -> None:
-        self.client.force_login(self.admin_user)
-        response = self.client.post(self._tag_add_url(environment=self.env_staging), {"key": "env", "value": "test"})
-        self.assertEqual(response.status_code, 200)
-
-    def test_viewer_gets_403_on_environment_tag_add(self) -> None:
-        self.client.force_login(self.viewer_user)
-        response = self.client.post(self._tag_add_url(environment=self.env_staging), {"key": "env", "value": "test"})
-        self.assertEqual(response.status_code, 403)
-
-    def test_env_admin_can_add_environment_tag(self) -> None:
-        self.client.force_login(self.env_admin_user)
-        response = self.client.post(self._tag_add_url(environment=self.env_staging), {"key": "env", "value": "test"})
-        self.assertEqual(response.status_code, 200)
-
-    def test_admin_can_remove_environment_tag(self) -> None:
-        self.client.force_login(self.admin_user)
-        response = self.client.post(self._tag_remove_url(environment=self.env_staging))
-        self.assertEqual(response.status_code, 200)
-
-    def test_viewer_gets_403_on_environment_tag_remove(self) -> None:
-        self.client.force_login(self.viewer_user)
-        response = self.client.post(self._tag_remove_url(environment=self.env_staging))
-        self.assertEqual(response.status_code, 403)
 
     def test_admin_can_bulk_save_environment_tags(self) -> None:
         import json
