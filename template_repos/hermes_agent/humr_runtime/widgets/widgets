@@ -9,7 +9,7 @@ import sys
 from collections.abc import Sequence
 
 sys.path.insert(0, "/opt/humr/runtime/widgets")
-sys.path.insert(0, "/opt/humr/runtime/webapps")
+sys.path.insert(0, "/opt/humr/runtime/process_supervisor")
 
 import widgets_core
 import widgets_runtime

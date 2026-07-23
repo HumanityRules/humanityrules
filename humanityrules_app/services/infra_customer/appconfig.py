@@ -236,9 +236,9 @@ class AppConfig:
     owner_username: str | None = None
 
     # When True, the ALB listener rule also matches *-<agent-host> so Caddy
-    # can route user webapps by hostname. TLS and DNS come from the
+    # can route user Web Apps by hostname. TLS and DNS come from the
     # environment's *.<zone> certificate and wildcard record. See
-    # docs/webapps_design.md.
+    # docs/app_workloads_design.md.
     enable_webapp_hosts: bool = False
 
     def container_needs_env_bearer(self, container: ContainerConfig) -> bool:
