@@ -1,30 +1,14 @@
-"""Platform-wide fleet operations: status snapshot, live AWS state, redeploy, and recovery.
+"""Platform-wide fleet status, redeploy, and recovery operations."""
 
-Two status tiers: a DB snapshot (instant, intent-level) and an on-demand live fetch
-that assumes the environment's cross-account role and reads actual ECS/CFN state.
-"""
-
-import logging
 from collections import Counter
 from dataclasses import dataclass, field
 from uuid import UUID
 
-from botocore.config import Config
-from botocore.exceptions import BotoCoreError, ClientError
-from django.conf import settings
 from django.db import transaction
 from django.db.models import OuterRef, Subquery
 
 from humanityrules_app import models
-from humanityrules_app.services.infra_customer import iam_utils
 from humanityrules_app.services.jobs import app_job_service
-
-logger = logging.getLogger(__name__)
-
-# CFN statuses that mean "settled and healthy" — anything else is worth surfacing.
-_CFN_HEALTHY_STATUSES = {"CREATE_COMPLETE", "UPDATE_COMPLETE", "IMPORT_COMPLETE"}
-
-_AWS_CLIENT_CONFIG = Config(connect_timeout=5, read_timeout=15, retries={"max_attempts": 1})
 
 RECOVERY_STATUS_MESSAGE = "Marked failed by the fleet recovery action after a control plane interruption"
 
@@ -45,34 +29,6 @@ class EnvGroup:
     organization: models.Organization
     environment: models.Environment
     apps: list[models.App] = field(default_factory=list)
-
-
-@dataclass
-class ServiceState:
-    """Live state of one ECS service in an environment's cluster."""
-    service_name: str
-    status: str
-    desired_count: int
-    running_count: int
-    pending_count: int
-    rollout_state: str
-    failure_reasons: list[str] = field(default_factory=list)
-
-
-@dataclass
-class StackState:
-    """A CloudFormation stack in a non-settled or failed status."""
-    stack_name: str
-    stack_status: str
-    status_reason: str
-
-
-@dataclass
-class EnvLiveState:
-    """Result of an on-demand live fetch for one environment."""
-    services: list[ServiceState] = field(default_factory=list)
-    unhealthy_stacks: list[StackState] = field(default_factory=list)
-    error: str = ""
 
 
 def build_fleet_snapshot() -> list[EnvGroup]:
@@ -107,110 +63,6 @@ def build_fleet_snapshot() -> list[EnvGroup]:
         group.apps.sort(key=lambda a: (not a.job_in_flight, a.slug))
 
     return sorted(groups.values(), key=lambda g: (g.organization.slug, g.environment.slug))
-
-
-def fetch_env_live_state(environment: models.Environment) -> EnvLiveState:
-    """Assume the env's cross-account role and read actual ECS service + CFN stack state."""
-    aws_account = environment.aws_account
-    try:
-        session = iam_utils.get_assumed_role_session(
-            access_key=settings.HUMR_AWS_ACCESS_KEY,
-            secret_key=settings.HUMR_AWS_SECRET_KEY,
-            account_id=aws_account.aws_account_id,
-            external_id=str(aws_account.external_id),
-            region=environment.aws_region,
-        )
-    except (ClientError, BotoCoreError) as exc:
-        logger.exception("Fleet: failed to assume role for env %s", environment.slug)
-        return EnvLiveState(error=f"Could not assume role in account {aws_account.aws_account_id}: {exc}")
-
-    state = EnvLiveState()
-    cluster = environment.cluster_arn or f"humr-{environment.slug}-cluster"
-    ecs_client = session.client("ecs", config=_AWS_CLIENT_CONFIG)
-    try:
-        state.services = _fetch_ecs_services(ecs_client=ecs_client, cluster=cluster)
-    except (ClientError, BotoCoreError) as exc:
-        logger.exception("Fleet: ECS fetch failed for env %s", environment.slug)
-        state.error = f"ECS query failed: {exc}"
-        return state
-
-    cf_client = session.client("cloudformation", config=_AWS_CLIENT_CONFIG)
-    try:
-        state.unhealthy_stacks = _fetch_unhealthy_stacks(cf_client=cf_client, env_slug=environment.slug)
-    except (ClientError, BotoCoreError) as exc:
-        logger.exception("Fleet: CFN fetch failed for env %s", environment.slug)
-        state.error = f"CloudFormation query failed: {exc}"
-
-    return state
-
-
-def _fetch_ecs_services(ecs_client, cluster: str) -> list[ServiceState]:
-    """List every service in the cluster with counts, rollout state, and recent task failures."""
-    service_arns: list[str] = []
-    paginator = ecs_client.get_paginator("list_services")
-    for page in paginator.paginate(cluster=cluster):
-        service_arns.extend(page["serviceArns"])
-
-    services: list[ServiceState] = []
-    for chunk_start in range(0, len(service_arns), 10):
-        described = ecs_client.describe_services(cluster=cluster, services=service_arns[chunk_start:chunk_start + 10])
-        for svc in described["services"]:
-            rollout_state = ""
-            for svc_deployment in svc.get("deployments", []):
-                if svc_deployment.get("status") == "PRIMARY":
-                    rollout_state = svc_deployment.get("rolloutState", "")
-            service = ServiceState(
-                service_name=svc["serviceName"],
-                status=svc["status"],
-                desired_count=svc["desiredCount"],
-                running_count=svc["runningCount"],
-                pending_count=svc["pendingCount"],
-                rollout_state=rollout_state,
-            )
-            if service.running_count < service.desired_count or rollout_state == "FAILED":
-                service.failure_reasons = _fetch_recent_task_failures(ecs_client=ecs_client, cluster=cluster, service_name=service.service_name)
-            services.append(service)
-
-    services.sort(key=lambda s: (s.running_count >= s.desired_count, s.service_name))
-    return services
-
-
-def _fetch_recent_task_failures(ecs_client, cluster: str, service_name: str) -> list[str]:
-    """Return stop reasons for recently stopped tasks of a struggling service."""
-    stopped = ecs_client.list_tasks(cluster=cluster, serviceName=service_name, desiredStatus="STOPPED")
-    if not stopped["taskArns"]:
-        return []
-
-    reasons: list[str] = []
-    details = ecs_client.describe_tasks(cluster=cluster, tasks=stopped["taskArns"][:5])
-    for task in details["tasks"]:
-        reason = task.get("stoppedReason", "")
-        if reason:
-            reasons.append(reason)
-        for container in task.get("containers", []):
-            if container.get("reason"):
-                reasons.append(f"Container '{container['name']}': {container['reason']}")
-    # Deduplicate while preserving order — crash-loops repeat the same reason.
-    return list(dict.fromkeys(reasons))
-
-
-def _fetch_unhealthy_stacks(cf_client, env_slug: str) -> list[StackState]:
-    """Return this env's CFN stacks that are in-progress, failed, or otherwise not settled."""
-    prefix = f"humr-{env_slug}-"
-    unhealthy: list[StackState] = []
-    paginator = cf_client.get_paginator("describe_stacks")
-    for page in paginator.paginate():
-        for stack in page["Stacks"]:
-            if not stack["StackName"].startswith(prefix):
-                continue
-            if stack["StackStatus"] in _CFN_HEALTHY_STATUSES:
-                continue
-            unhealthy.append(StackState(
-                stack_name=stack["StackName"],
-                stack_status=stack["StackStatus"],
-                status_reason=stack.get("StackStatusReason", ""),
-            ))
-    return unhealthy
 
 
 # --- Redeploy ---------------------------------------------------------------
