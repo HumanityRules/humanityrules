@@ -1,4 +1,4 @@
-"""Staff-only platform fleet dashboard: every org's deployments, with on-demand live AWS state.
+"""Staff-only platform fleet dashboard for every organization's deployments.
 
 Deliberately unscoped by organization — this is a platform-operator view, so the
 staff gate replaces the usual per-org query scoping.
@@ -111,13 +111,3 @@ def fleet_deployment_log(request: HttpRequest, app_id: str) -> HttpResponse:
         "max_lines": FLEET_LOG_MAX_LINES,
     }
     return render(request, "humanityrules_app/fleet/_fleet_deployment_log.html", context=context)
-
-
-@_staff_or_404
-def fleet_env_live_state(request: HttpRequest, environment_id: str) -> HttpResponse:
-    environment = get_object_or_404(models.Environment.objects.select_related("aws_account"), id=environment_id)
-    context = {
-        "environment": environment,
-        "live_state": fleet_service.fetch_env_live_state(environment),
-    }
-    return render(request, "humanityrules_app/fleet/fleet.html#env_live_state", context=context)
