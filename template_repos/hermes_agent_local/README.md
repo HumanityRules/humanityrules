@@ -14,6 +14,17 @@ docker compose up --build --watch    # recommended while developing — logs + r
 
 Open **http://localhost:8788/**
 
+Widgets use same-origin paths such as
+`http://localhost:8788/widgets/<slug>/`. Web Apps use the production-shaped
+host route `http://<slug>-localhost:8788/`. Because `<slug>-localhost` does not
+resolve automatically, add each local Web App host to `/etc/hosts`, for example:
+
+```text
+127.0.0.1 snakes-localhost
+```
+
+Then open **http://snakes-localhost:8788/**.
+
 ## Layout
 
 - **`docker-compose.yml`** — `hermes` (builds `../hermes_agent`) + `local_policy_proxy`

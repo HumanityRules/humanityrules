@@ -6,7 +6,8 @@
 #   docker compose up --build   # one-shot, no file watcher
 #
 # Browser entry: http://localhost:8788
-#   - WebUI, Web Apps panel, /webapps/__admin, user apps at <slug>.localhost:8788
+#   - WebUI, Widgets, Web Apps panel, and /webapps/__admin use localhost:8788
+#   - user Web Apps use <slug>-localhost:8788 after resolving that host to 127.0.0.1
 #
 # Hermes Caddy/WebUI ports are not published to the host; reach them through
 # local_policy_proxy (bundled here) or docker exec.

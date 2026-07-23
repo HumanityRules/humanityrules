@@ -1,392 +1,112 @@
-"""Shared helpers for the webapps mechanism.
+"""Web App ownership, routing, and process-entry helpers."""
 
-Imported by both the `webapps` CLI and the `__admin` webapp. Webapp source of
-truth is /workspace/.config/process-compose/webapps/process-compose.yaml;
-webapps.caddy is regenerated from it on every mutation. See
-docs/webapps_design.md.
-
-User webapps live at <slug>-<agent-host> (Host-based Caddy routing). The
-environment's wildcard DNS record and certificate cover these dash hosts.
-The per-agent ALB host condition is added at agent-deploy time when the
-AppTemplate sets `enable_webapp_hosts=True`.
-
-Platform-internal slugs (those starting with `__`, e.g. `__admin`) stay at
-<agent-host>/webapps/<slug>/ so the WebUI's same-origin extension can call
-their APIs without CORS surgery.
-
-`webapps/` holds user-facing artifacts (their projects, their logs);
-`.config/` holds HUMR supervision config (the process-compose YAML, the caddy
-routes). Both live under $HOME=/workspace so the sandbox owns them.
-"""
 from __future__ import annotations
 
-import fcntl
-import json
 import os
 import re
-import subprocess
 import sys
-import time
-from dataclasses import dataclass
 from pathlib import Path
 
-import yaml
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "process_supervisor"))
+
+import process_supervisor
 
 
-@dataclass(frozen=True)
-class ProcessComposeProject:
-    config_dir: Path
-    port: str
-    lock_name: str
-    required_dirs: tuple[Path, ...]
-    route_file: Path | None
+WEBAPP_PROJECTS_DIR = Path("/workspace/webapps/projects")
+WEBAPP_LOGS_DIR = Path("/workspace/webapps/logs")
+WEBAPP_ROUTES_PATH = Path("/workspace/.config/caddy/webapps.caddy")
 
-    @property
-    def yaml_path(self) -> Path:
-        return self.config_dir / "process-compose.yaml"
-
-    @property
-    def lock_file(self) -> Path:
-        return self.config_dir / self.lock_name
-
-
-LOGS_DIR = Path("/workspace/webapps/logs")
-
-PORT_MIN = 4000
-PORT_MAX = 4019
-PROCESS_COMPOSE_ADDR = "127.0.0.1"
-DEFAULT_TIMEOUT_SECONDS = 75
-PROCESS_COMPOSE_TERMINAL_STATUSES = {"Completed", "Error", "Skipped"}
-
-WEBAPPS_PROJECT = ProcessComposeProject(
-    config_dir=Path("/workspace/.config/process-compose/webapps"),
-    port="9957",
-    lock_name=".webapps.lock",
-    required_dirs=(
-        Path("/workspace/webapps/projects"),
-        Path("/workspace/.config/caddy"),
-        LOGS_DIR,
-    ),
-    route_file=Path("/workspace/.config/caddy/webapps.caddy"),
-)
-SYSTEM_PROJECT = ProcessComposeProject(
-    config_dir=Path("/workspace/.config/process-compose/system"),
-    port="9956",
-    lock_name=".system.lock",
-    required_dirs=(LOGS_DIR,),
-    route_file=None,
-)
-
-# Optional `__` prefix marks platform-internal slugs (e.g. __admin). No
-# enforcement: bootstrap wins the cold-start race; agent attempts collide.
-# Internal slugs are routed by path (<host>/webapps/<slug>/); user slugs are
-# routed by host (<slug>-<host>/). See route generation below.
 SLUG_PATTERN = re.compile(r"^(?:__)?[a-z][a-z0-9-]{0,30}[a-z0-9]$")
 INTERNAL_SLUG_PREFIX = "__"
 SYSTEM_SLUG_PREFIX = "system."
-WIDGET_PROCESS_PREFIX = "widget."
-MANAGED_PORT_KEYS = {"WEBAPP_PORT", "WIDGET_PORT"}
-
 PUBLIC_HOSTNAME_ENV = "HUMR_PUBLIC_HOSTNAME"
 
 
-class ManagedPortError(ValueError):
-    """Report invalid or ambiguous managed ports in the shared project."""
-
-
-def die(msg: str, code: int = 1) -> None:
-    print(f"webapps: {msg}", file=sys.stderr)
+def die(message: str, code: int) -> None:
+    """Print one Web Apps CLI error and terminate."""
+    print(f"webapps: {message}", file=sys.stderr)
     sys.exit(code)
 
 
-def ensure_process_compose_layout(project: ProcessComposeProject) -> None:
-    for path in (*project.required_dirs, project.config_dir):
-        path.mkdir(parents=True, exist_ok=True)
-    if not project.yaml_path.exists():
-        project.yaml_path.write_text('version: "0.5"\nprocesses: {}\n')
-    if project.route_file is not None and not project.route_file.exists():
-        project.route_file.write_text("# no routes\n")
-
-
-class ProcessComposeLock:
-    def __init__(self, project: ProcessComposeProject) -> None:
-        self.project = project
-
-    def __enter__(self) -> "ProcessComposeLock":
-        ensure_process_compose_layout(project=self.project)
-        self.fh = open(self.project.lock_file, "w")
-        fcntl.flock(self.fh.fileno(), fcntl.LOCK_EX)
-        return self
-
-    def __exit__(self, *_exc: object) -> None:
-        fcntl.flock(self.fh.fileno(), fcntl.LOCK_UN)
-        self.fh.close()
-
-
-def load_process_compose_yaml(project: ProcessComposeProject) -> dict:
-    raw = yaml.safe_load(project.yaml_path.read_text()) or {}
-    raw.setdefault("version", "0.5")
-    raw.setdefault("processes", {})
-    return raw
-
-
-def save_process_compose_yaml(project: ProcessComposeProject, doc: dict) -> None:
-    tmp = project.yaml_path.with_suffix(".yaml.tmp")
-    tmp.write_text(render_process_compose_yaml(doc=doc))
-    tmp.replace(project.yaml_path)
-
-
-def render_process_compose_yaml(doc: dict) -> str:
-    """Serialize the shared supervisor document for atomic external publication."""
-    return yaml.safe_dump(doc, sort_keys=False)
-
-
-def run_process_compose(*args: str, project: ProcessComposeProject, check: bool, capture: bool) -> subprocess.CompletedProcess:
-    cmd = [
-        "process-compose",
-        "--address", PROCESS_COMPOSE_ADDR,
-        "--port", project.port,
-        *args,
-    ]
-    return subprocess.run(cmd, check=check, capture_output=capture, text=True)
-
-
-def process_compose_project_update(project: ProcessComposeProject) -> None:
-    run_process_compose("project", "update", "--config", str(project.yaml_path), project=project, check=True, capture=False)
-
-
-def plain_text_log_configuration() -> dict:
-    return {
-        "disable_json": True,
-        "no_metadata": True,
-        "no_color": True,
-        "fields_order": ["message"],
-        "flush_each_line": True,
-    }
-
-
-def process_compose_states(project: ProcessComposeProject) -> list[dict]:
-    res = run_process_compose("list", "-o", "json", project=project, check=False, capture=True)
-    if res.returncode != 0:
-        die(f"process-compose list failed: {res.stderr.strip()}")
-    return json.loads(res.stdout or "[]")
-
-
-def process_compose_states_or_raise(project: ProcessComposeProject) -> list[dict]:
-    """Read supervisor state without terminating a calling lifecycle CLI."""
-    result = run_process_compose(
-        "list",
-        "-o",
-        "json",
-        project=project,
-        check=False,
-        capture=True,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"process-compose list failed: {result.stderr.strip() or 'unknown error'}"
-        )
-    try:
-        states = json.loads(result.stdout or "[]")
-    except json.JSONDecodeError as exc:
-        raise RuntimeError("process-compose returned invalid JSON state") from exc
-    if not isinstance(states, list) or any(not isinstance(state, dict) for state in states):
-        raise RuntimeError("process-compose returned invalid process state")
-    return states
-
-
-def process_compose_state_for(project: ProcessComposeProject, slug: str) -> dict | None:
-    return next((s for s in process_compose_states(project=project) if s.get("name") == slug), None)
-
-
-def wait_for_process_ready(
-    project: ProcessComposeProject,
-    process_name: str,
-    timeout: int,
-) -> dict:
-    """Wait until one process is ready, terminal, or the timeout expires."""
-    deadline = time.monotonic() + timeout
-    last_state: dict | None = None
-    while True:
-        last_state = next(
-            (
-                state
-                for state in process_compose_states_or_raise(project=project)
-                if state.get("name") == process_name
-            ),
-            None,
-        )
-        if last_state is not None:
-            if last_state.get("is_ready") == "Ready":
-                return last_state
-            if process_compose_state_failed_before_ready(state=last_state):
-                return last_state
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            break
-        time.sleep(min(0.5, remaining))
-    return last_state or {
-        "name": process_name,
-        "status": "unknown",
-        "is_ready": "Unknown",
-    }
-
-
-def port_from_entry(entry: dict) -> int | None:
-    for item in entry.get("environment", []):
-        if item.startswith("WEBAPP_PORT="):
-            return int(item.split("=", 1)[1])
-    return None
-
-
-def managed_port_from_entry(entry: dict, process_name: str) -> int | None:
-    """Return one validated Web App or Widget port from a process entry."""
-    environment = entry.get("environment", [])
-    if not isinstance(environment, list):
-        raise ManagedPortError(
-            f"process {process_name!r} environment must be a list of strings"
-        )
-
-    declarations: list[tuple[str, str]] = []
-    for index, item in enumerate(environment):
-        if not isinstance(item, str):
-            raise ManagedPortError(
-                f"process {process_name!r} environment item {index} must be a string"
-            )
-        key, separator, value = item.partition("=")
-        if key not in MANAGED_PORT_KEYS:
-            continue
-        if not separator or not value or re.fullmatch(r"[0-9]+", value) is None:
-            raise ManagedPortError(
-                f"process {process_name!r} has malformed {key} declaration"
-            )
-        declarations.append((key, value))
-
-    if len(declarations) > 1:
-        names = ", ".join(key for key, _value in declarations)
-        raise ManagedPortError(
-            f"process {process_name!r} has multiple managed port declarations: {names}"
-        )
-    if not declarations:
-        return None
-
-    key, value = declarations[0]
-    port = int(value)
-    if not PORT_MIN <= port <= PORT_MAX:
-        raise ManagedPortError(
-            f"process {process_name!r} has out-of-range {key}={port}; "
-            f"expected {PORT_MIN}-{PORT_MAX}"
-        )
-    return port
-
-
-def used_ports(doc: dict) -> set[int]:
-    processes = doc.get("processes", {})
-    if not isinstance(processes, dict):
-        raise ManagedPortError("process-compose processes must be a mapping")
-    owners: dict[int, str] = {}
-    for name, entry in processes.items():
-        if not isinstance(name, str) or not isinstance(entry, dict):
-            raise ManagedPortError("process-compose process entries must be named mappings")
-        port = managed_port_from_entry(entry=entry, process_name=name)
-        if port is not None:
-            prior_owner = owners.get(port)
-            if prior_owner is not None:
-                raise ManagedPortError(
-                    f"managed port {port} is assigned to both "
-                    f"{prior_owner!r} and {name!r}"
-                )
-            owners[port] = name
-    return set(owners)
-
-
-def next_free_port(doc: dict) -> int:
-    try:
-        used = used_ports(doc)
-    except ManagedPortError as exc:
-        die(f"invalid shared process-compose ports: {exc}")
-    for port in range(PORT_MIN, PORT_MAX + 1):
-        if port not in used:
-            return port
-    die(f"no free ports in {PORT_MIN}-{PORT_MAX}; delete a Web App or Widget first")
+def ensure_webapp_layout() -> None:
+    """Create Web App-owned source, log, and route locations when absent."""
+    WEBAPP_PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
+    WEBAPP_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    WEBAPP_ROUTES_PATH.parent.mkdir(parents=True, exist_ok=True)
+    if not WEBAPP_ROUTES_PATH.exists():
+        WEBAPP_ROUTES_PATH.write_text("# no Web App routes\n", encoding="utf-8")
 
 
 def validate_slug(slug: str) -> None:
+    """Validate a Web App product slug."""
     if slug.startswith(SYSTEM_SLUG_PREFIX):
         die(
-            f"invalid slug {slug!r}: the {SYSTEM_SLUG_PREFIX!r} prefix is reserved "
-            "for HUMR-managed system processes; pick another name"
+            message=(
+                f"invalid slug {slug!r}: the {SYSTEM_SLUG_PREFIX!r} prefix is "
+                "reserved for HUMR-managed system processes; pick another name"
+            ),
+            code=1,
         )
-    if not SLUG_PATTERN.match(slug):
+    if SLUG_PATTERN.fullmatch(slug) is None:
         die(
-            f"invalid slug {slug!r}: lowercase letters/digits/hyphens, "
-            "2-32 chars, must start with letter and end alphanumeric "
-            "(optional `__` prefix reserved for platform internals)"
+            message=(
+                f"invalid slug {slug!r}: lowercase letters/digits/hyphens, "
+                "2-32 chars, must start with letter and end alphanumeric "
+                "(optional `__` prefix reserved for platform internals)"
+            ),
+            code=1,
         )
 
 
 def is_internal_slug(slug: str) -> bool:
-    """Platform-internal slug (`__admin`, future runtime-admin webapps)."""
+    """Return whether a Web App slug is platform-internal."""
     return slug.startswith(INTERNAL_SLUG_PREFIX)
 
 
-def widget_process_name(slug: str) -> str:
-    """Map a validated Widget slug into its collision-proof supervisor namespace."""
-    return f"{WIDGET_PROCESS_PREFIX}{slug}"
+def webapp_process_name(slug: str) -> str:
+    """Map a Web App slug into the shared supervisor namespace."""
+    return process_supervisor.workload_process_name(
+        kind=process_supervisor.WEBAPP_WORKLOAD_KIND,
+        slug=slug,
+    )
 
 
-def is_widget_process_name(name: str) -> bool:
-    """Identify supervisor entries exclusively owned by Widgets reconciliation."""
-    return name.startswith(WIDGET_PROCESS_PREFIX)
+def webapp_processes(document: dict) -> dict[str, dict]:
+    """Return Web App workload entries keyed by product slug."""
+    return process_supervisor.workloads_for_kind(
+        document=document,
+        kind=process_supervisor.WEBAPP_WORKLOAD_KIND,
+    )
 
 
-def webapp_processes(doc: dict) -> dict:
-    """Return only Web App-owned processes from the shared supervisor document."""
-    return {
-        name: entry
-        for name, entry in doc.get("processes", {}).items()
-        if not is_widget_process_name(name=name)
-    }
+def webapp_process_entry(document: dict, slug: str) -> dict | None:
+    """Return one Web App-owned entry without exposing another workload kind."""
+    entry = document.get("processes", {}).get(webapp_process_name(slug=slug))
+    return entry if isinstance(entry, dict) else None
 
 
 def matcher_name(slug: str) -> str:
-    """Caddy named-matcher token for *slug*; sanitized for valid Caddyfile syntax."""
+    """Build a safe Caddy named-matcher token for one Web App."""
     return "webapp_" + slug.replace("-", "_").lstrip("_")
 
 
 def public_hostname() -> str:
-    """Read the agent's public hostname from the env-bearer overlay var.
-
-    `HUMR_PUBLIC_HOSTNAME` is allow-listed in the nono profile and injected
-    by CDK at task-definition build time (see deploy_app.py).
-    """
+    """Read the agent's public hostname from the env-bearer overlay."""
     host = os.environ.get(PUBLIC_HOSTNAME_ENV)
     if not host:
         die(
-            f"{PUBLIC_HOSTNAME_ENV} is not set; webapps routing requires it. "
-            "This usually means the AppTemplate isn't wired for env-bearer overlay.",
+            message=(
+                f"{PUBLIC_HOSTNAME_ENV} is not set; webapps routing requires it. "
+                "This usually means the AppTemplate is not wired for env-bearer overlay."
+            ),
+            code=1,
         )
     return host
 
 
 def route_block_webapp_host(slug: str, port: int, base_host: str) -> str:
-    """Caddy site-matcher block for a user webapp at <slug>-<base-host>.
-
-    The environment's wildcard DNS record and certificate cover this host.
-    The agent's ALB rule includes the webapp-host pattern when
-    enable_webapp_hosts=True.
-
-    Matches on X-Forwarded-Host, not Host: policy-proxy strips Host (httpx
-    rewrites it to the upstream's 127.0.0.1:8787) and copies the original
-    value into X-Forwarded-Host before forwarding to Caddy.
-
-    The `header_up X-Forwarded-Host` line propagates policy-proxy's value
-    on to the user webapp. Caddy's reverse_proxy default for that header
-    is "set from the inbound Host", which here would mean 127.0.0.1:8787 —
-    clobbering the public hostname before any link helper, OpenAPI server
-    URL, OAuth callback, or redirect could see it.
-    """
-    name = matcher_name(slug)
+    """Build a host-routed Caddy block for one user Web App."""
+    name = matcher_name(slug=slug)
     return (
         f"@{name} header X-Forwarded-Host {slug}-{base_host}\n"
         f"handle @{name} {{\n"
@@ -398,16 +118,8 @@ def route_block_webapp_host(slug: str, port: int, base_host: str) -> str:
 
 
 def route_block_internal(slug: str, port: int, base_host: str) -> str:
-    """Caddy block for a platform-internal slug at <base-host>/webapps/<slug>/.
-
-    Stays path-based on the bare host so the WebUI extension can call its API
-    same-origin. X-Forwarded-Prefix gives the upstream the public base path
-    if it needs to generate absolute URLs.
-
-    Matches on X-Forwarded-Host (not Host) for the same reason as
-    route_block_webapp_host — policy-proxy rewrites Host on the way in.
-    """
-    name = matcher_name(slug)
+    """Build a same-origin path route for one platform-internal Web App."""
+    name = matcher_name(slug=slug)
     return (
         f"@{name}_root {{\n"
         f"\theader X-Forwarded-Host {base_host}\n"
@@ -429,41 +141,59 @@ def route_block_internal(slug: str, port: int, base_host: str) -> str:
     )
 
 
-def regenerate_routes(doc: dict) -> None:
+def regenerate_webapp_routes(document: dict) -> None:
+    """Regenerate only the Web Apps Caddy fragment from owned workloads."""
+    ensure_webapp_layout()
     base_host = public_hostname()
     blocks: list[str] = []
-    for slug, entry in sorted(doc.get("processes", {}).items()):
-        if is_widget_process_name(name=slug):
-            continue
+    for slug, entry in sorted(webapp_processes(document=document).items()):
         if entry.get("disabled"):
             continue
-        port = port_from_entry(entry)
+        port = port_from_entry(entry=entry)
         if port is None:
             continue
-        if is_internal_slug(slug):
-            blocks.append(route_block_internal(slug=slug, port=port, base_host=base_host))
+        if is_internal_slug(slug=slug):
+            blocks.append(
+                route_block_internal(slug=slug, port=port, base_host=base_host)
+            )
         else:
-            blocks.append(route_block_webapp_host(slug=slug, port=port, base_host=base_host))
-    route_file = WEBAPPS_PROJECT.route_file
-    if route_file is None:
-        die("webapps project is missing a Caddy routes file")
-    route_file.write_text("".join(blocks) if blocks else "# no routes\n")
+            blocks.append(
+                route_block_webapp_host(slug=slug, port=port, base_host=base_host)
+            )
+    WEBAPP_ROUTES_PATH.write_text(
+        "".join(blocks) if blocks else "# no Web App routes\n",
+        encoding="utf-8",
+    )
+
+
+def port_from_entry(entry: dict) -> int | None:
+    """Read the Web App port declaration from one owned process entry."""
+    for item in entry.get("environment", []):
+        if isinstance(item, str) and item.startswith("WEBAPP_PORT="):
+            return int(item.split("=", 1)[1])
+    return None
+
+
+def next_free_port(document: dict) -> int:
+    """Allocate one port across every Web App and Widget workload."""
+    try:
+        return process_supervisor.next_free_port(document=document)
+    except process_supervisor.ManagedPortError as exc:
+        die(message=str(exc), code=1)
 
 
 def is_routed(entry: dict) -> bool:
-    return not entry.get("disabled") and port_from_entry(entry) is not None
-
-
-def readiness_probe_command(port: int) -> str:
-    return f"bash -c ': <> /dev/tcp/127.0.0.1/{port}'"
+    """Return whether a Web App entry currently has a Caddy route."""
+    return not entry.get("disabled") and port_from_entry(entry=entry) is not None
 
 
 def make_process_entry(slug: str, command: str, cwd: str, port: int) -> dict:
+    """Build one namespaced Web App process-compose entry."""
     return {
         "command": command,
         "working_dir": cwd,
-        "log_location": str(LOGS_DIR / f"{slug}.log"),
-        "log_configuration": plain_text_log_configuration(),
+        "log_location": str(WEBAPP_LOGS_DIR / f"{slug}.log"),
+        "log_configuration": process_supervisor.plain_text_log_configuration(),
         "environment": [f"WEBAPP_PORT={port}"],
         "availability": {
             "restart": "on_failure",
@@ -472,7 +202,7 @@ def make_process_entry(slug: str, command: str, cwd: str, port: int) -> dict:
         },
         "readiness_probe": {
             "exec": {
-                "command": readiness_probe_command(port=port),
+                "command": process_supervisor.readiness_probe_command(port=port),
             },
             "initial_delay_seconds": 5,
             "period_seconds": 10,
@@ -483,37 +213,18 @@ def make_process_entry(slug: str, command: str, cwd: str, port: int) -> dict:
     }
 
 
-def process_compose_state_failed_before_ready(state: dict) -> bool:
-    return state.get("status") in PROCESS_COMPOSE_TERMINAL_STATUSES and state.get("is_ready") != "Ready"
-
-
 def wait_for_ready(slug: str, timeout: int) -> dict:
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        state = process_compose_state_for(project=WEBAPPS_PROJECT, slug=slug)
-        if state is None:
-            time.sleep(0.5)
-            continue
-        if state.get("is_ready") == "Ready":
-            return state
-        if process_compose_state_failed_before_ready(state=state):
-            return state
-        time.sleep(0.5)
-    return process_compose_state_for(project=WEBAPPS_PROJECT, slug=slug) or {
-        "name": slug,
-        "status": "unknown",
-        "is_ready": "Unknown",
-    }
+    """Wait for one namespaced Web App process to become ready."""
+    return process_supervisor.wait_for_process_ready(
+        project=process_supervisor.APP_WORKLOADS_PROJECT,
+        process_name=webapp_process_name(slug=slug),
+        timeout=timeout,
+    )
 
 
 def url_for(slug: str) -> str:
-    """User-facing URL for a webapp.
-
-    User slugs live at <slug>-<agent-host>; platform-internal slugs (`__*`)
-    stay at <agent-host>/webapps/<slug>/ so the WebUI's same-origin extension
-    can reach them without CORS.
-    """
+    """Build the user-facing URL for one Web App."""
     host = os.environ.get(PUBLIC_HOSTNAME_ENV) or "<your-agent-hostname>"
-    if is_internal_slug(slug):
+    if is_internal_slug(slug=slug):
         return f"https://{host}/webapps/{slug}/"
     return f"https://{slug}-{host}/"

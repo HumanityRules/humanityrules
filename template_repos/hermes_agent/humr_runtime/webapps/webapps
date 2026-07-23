@@ -1,13 +1,6 @@
 #!/opt/hermes/webui/venv/bin/python3
-"""HUMR webapps CLI: register, manage, and route user-built web apps.
+"""Manage user-built Web Apps in the shared app-workloads supervisor."""
 
-Source of truth:
-/workspace/.config/process-compose/webapps/process-compose.yaml. Caddy routes
-in /workspace/.config/caddy/webapps.caddy are regenerated from that file on
-every change.
-
-See template_repos/hermes_agent/skills/development/webapps/SKILL.md for the agent contract.
-"""
 from __future__ import annotations
 
 import argparse
@@ -16,332 +9,498 @@ import shutil
 import sys
 from pathlib import Path
 
+sys.path.insert(0, "/opt/humr/runtime/process_supervisor")
 sys.path.insert(0, "/opt/humr/runtime/webapps")
-from webapps_lib import (
-    DEFAULT_TIMEOUT_SECONDS,
-    LOGS_DIR,
-    WEBAPPS_PROJECT,
-    ProcessComposeLock,
-    die,
-    is_internal_slug,
-    is_routed,
-    load_process_compose_yaml,
-    make_process_entry,
-    next_free_port,
-    port_from_entry,
-    process_compose_project_update,
-    process_compose_states,
-    regenerate_routes,
-    run_process_compose,
-    save_process_compose_yaml,
-    url_for,
-    validate_slug,
-    wait_for_ready,
-    webapp_processes,
-)
+
+import process_supervisor
+import webapps_lib
 
 
 def apply_env_pairs(entry: dict, pairs: list[str]) -> None:
-    env_map = {
-        e.split("=", 1)[0]: e.split("=", 1)[1]
-        for e in entry.get("environment", [])
-        if "=" in e
+    """Merge explicit environment pairs into one Web App process entry."""
+    environment = {
+        item.split("=", 1)[0]: item.split("=", 1)[1]
+        for item in entry.get("environment", [])
+        if isinstance(item, str) and "=" in item
     }
-    for kv in pairs:
-        if "=" not in kv:
-            die(f"bad KEY=VALUE pair: {kv!r}")
-        key, value = kv.split("=", 1)
-        env_map[key] = value
-    entry["environment"] = [f"{key}={value}" for key, value in env_map.items()]
+    for pair in pairs:
+        if "=" not in pair:
+            webapps_lib.die(message=f"bad KEY=VALUE pair: {pair!r}", code=1)
+        key, value = pair.split("=", 1)
+        environment[key] = value
+    entry["environment"] = [
+        f"{key}={value}" for key, value in environment.items()
+    ]
 
 
 def cmd_create(args: argparse.Namespace) -> None:
-    validate_slug(args.slug)
-    cwd = Path(args.cwd).resolve()
-    if not cwd.is_dir():
-        die(f"--cwd {cwd} is not a directory; create the project first")
+    """Register one stopped Web App workload."""
+    webapps_lib.validate_slug(slug=args.slug)
+    working_directory = Path(args.cwd).resolve()
+    if not working_directory.is_dir():
+        webapps_lib.die(
+            message=f"--cwd {working_directory} is not a directory; create the project first",
+            code=1,
+        )
 
-    with ProcessComposeLock(project=WEBAPPS_PROJECT):
-        doc = load_process_compose_yaml(project=WEBAPPS_PROJECT)
-        if args.slug in doc["processes"]:
+    process_name = webapps_lib.webapp_process_name(slug=args.slug)
+    with process_supervisor.ProcessComposeLock(
+        project=process_supervisor.APP_WORKLOADS_PROJECT
+    ):
+        document = process_supervisor.load_process_compose_yaml(
+            project=process_supervisor.APP_WORKLOADS_PROJECT
+        )
+        if process_name in document["processes"]:
             if args.if_missing:
-                # Routes file isn't versioned with the YAML, so an interrupted
-                # prior bootstrap (or state drift) might leave the route
-                # missing even though the entry exists. Regenerate to be sure.
-                regenerate_routes(doc)
+                webapps_lib.regenerate_webapp_routes(document=document)
                 print(f"webapps: {args.slug!r} already exists; routes refreshed.")
                 return
-            die(f"app {args.slug!r} already exists; unregister it first or pick another slug")
+            webapps_lib.die(
+                message=(
+                    f"app {args.slug!r} already exists; unregister it first "
+                    "or pick another slug"
+                ),
+                code=1,
+            )
 
-        port = next_free_port(doc)
-        entry = make_process_entry(
+        port = webapps_lib.next_free_port(document=document)
+        entry = webapps_lib.make_process_entry(
             slug=args.slug,
             command=args.command,
-            cwd=str(cwd),
+            cwd=str(working_directory),
             port=port,
         )
         apply_env_pairs(entry=entry, pairs=list(args.env))
         if not args.bootstrap_enabled:
             entry["disabled"] = True
-        doc["processes"][args.slug] = entry
-        save_process_compose_yaml(project=WEBAPPS_PROJECT, doc=doc)
-        regenerate_routes(doc)
+        document["processes"][process_name] = entry
+        process_supervisor.save_process_compose_yaml(
+            project=process_supervisor.APP_WORKLOADS_PROJECT,
+            document=document,
+        )
+        webapps_lib.regenerate_webapp_routes(document=document)
 
     if args.bootstrap_enabled:
-        print(f"webapps: registered {args.slug!r} on port {port} (bootstrap-enabled; supervisor will pick it up).")
+        print(
+            f"webapps: registered {args.slug!r} on port {port} "
+            "(bootstrap-enabled; supervisor will pick it up)."
+        )
         return
-    print(f"webapps: registered {args.slug!r} on port {port} (stopped). Run `webapps start {args.slug}` when ready.")
+    print(
+        f"webapps: registered {args.slug!r} on port {port} (stopped). "
+        f"Run `webapps start {args.slug}` when ready."
+    )
 
 
-def cmd_list(_args: argparse.Namespace) -> None:
-    doc = load_process_compose_yaml(project=WEBAPPS_PROJECT)
-    procs = webapp_processes(doc=doc)
-    if not procs:
+def cmd_list(args: argparse.Namespace) -> None:
+    """List user-facing Web Apps while hiding supervisor namespaces."""
+    del args
+    document = process_supervisor.load_process_compose_yaml(
+        project=process_supervisor.APP_WORKLOADS_PROJECT
+    )
+    processes = webapps_lib.webapp_processes(document=document)
+    if not processes:
         print("No webapps yet.")
         print("")
         print("Try:")
-        print("  webapps create my-app --command 'python -m http.server $WEBAPP_PORT' --cwd /workspace/webapps/projects/my-app")
+        print(
+            "  webapps create my-app --command "
+            "'python -m http.server $WEBAPP_PORT' "
+            "--cwd /workspace/webapps/projects/my-app"
+        )
         print("  webapps start my-app")
         return
 
-    states = {s["name"]: s for s in process_compose_states(project=WEBAPPS_PROJECT)}
+    states = {
+        state["name"]: state
+        for state in process_supervisor.process_compose_states(
+            project=process_supervisor.APP_WORKLOADS_PROJECT
+        )
+    }
     print(f"{'SLUG':<20} {'PORT':<6} {'STATUS':<14} {'READY':<10} {'URL'}")
-    for slug, entry in sorted(procs.items()):
-        port = port_from_entry(entry)
-        st = states.get(slug, {})
-        url = url_for(slug) if is_routed(entry) else "(stopped)"
+    for slug, entry in sorted(processes.items()):
+        port = webapps_lib.port_from_entry(entry=entry)
+        state = states.get(webapps_lib.webapp_process_name(slug=slug), {})
+        url = (
+            webapps_lib.url_for(slug=slug)
+            if webapps_lib.is_routed(entry=entry)
+            else "(stopped)"
+        )
         print(
-            f"{slug:<20} {port or '-':<6} {st.get('status', 'Pending'):<14} "
-            f"{st.get('is_ready', 'Unknown'):<10} {url}"
+            f"{slug:<20} {port or '-':<6} {state.get('status', 'Pending'):<14} "
+            f"{state.get('is_ready', 'Unknown'):<10} {url}"
         )
 
 
 def cmd_logs(args: argparse.Namespace) -> None:
-    validate_slug(args.slug)
-    log_path = LOGS_DIR / f"{args.slug}.log"
+    """Tail one Web App's persistent log."""
+    webapps_lib.validate_slug(slug=args.slug)
+    log_path = webapps_lib.WEBAPP_LOGS_DIR / f"{args.slug}.log"
     if not log_path.exists():
-        die(f"no log file at {log_path} (app may not have started yet)")
-    cmd = ["tail"]
+        webapps_lib.die(
+            message=f"no log file at {log_path} (app may not have started yet)",
+            code=1,
+        )
+    command = ["tail"]
     if args.follow:
-        cmd.append("-f")
-    cmd.extend(["-n", str(args.lines), str(log_path)])
-    os.execvp(cmd[0], cmd)
+        command.append("-f")
+    command.extend(["-n", str(args.lines), str(log_path)])
+    os.execvp(command[0], command)
 
 
 def cmd_start(args: argparse.Namespace) -> None:
-    validate_slug(args.slug)
-    with ProcessComposeLock(project=WEBAPPS_PROJECT):
-        doc = load_process_compose_yaml(project=WEBAPPS_PROJECT)
-        entry = doc["processes"].get(args.slug)
+    """Enable one Web App and wait for readiness."""
+    webapps_lib.validate_slug(slug=args.slug)
+    process_name = webapps_lib.webapp_process_name(slug=args.slug)
+    with process_supervisor.ProcessComposeLock(
+        project=process_supervisor.APP_WORKLOADS_PROJECT
+    ):
+        document = process_supervisor.load_process_compose_yaml(
+            project=process_supervisor.APP_WORKLOADS_PROJECT
+        )
+        entry = webapps_lib.webapp_process_entry(document=document, slug=args.slug)
         if entry is None:
-            die(f"unknown app {args.slug!r}")
+            webapps_lib.die(message=f"unknown app {args.slug!r}", code=1)
         entry.pop("disabled", None)
-        save_process_compose_yaml(project=WEBAPPS_PROJECT, doc=doc)
-        regenerate_routes(doc)
-        process_compose_project_update(project=WEBAPPS_PROJECT)
-
-    print(f"webapps: starting {args.slug!r}; waiting up to {args.timeout}s for readiness...")
-    state = wait_for_ready(args.slug, args.timeout)
-    if state.get("is_ready") != "Ready":
-        die(
-            f"{args.slug} did not become ready (status={state.get('status')}, "
-            f"is_ready={state.get('is_ready')}, exit_code={state.get('exit_code')}, "
-            f"restarts={state.get('restarts')}). The process-compose readiness probe "
-            f"may have stopped or restarted it before it bound the port. "
-            f"Check `webapps logs {args.slug}`."
+        process_supervisor.save_process_compose_yaml(
+            project=process_supervisor.APP_WORKLOADS_PROJECT,
+            document=document,
+        )
+        webapps_lib.regenerate_webapp_routes(document=document)
+        process_supervisor.process_compose_project_update(
+            project=process_supervisor.APP_WORKLOADS_PROJECT
         )
 
-    print(f"webapps: {args.slug!r} is live at {url_for(args.slug)}")
+    print(
+        f"webapps: starting {args.slug!r}; waiting up to {args.timeout}s for readiness..."
+    )
+    state = webapps_lib.wait_for_ready(slug=args.slug, timeout=args.timeout)
+    if state.get("is_ready") != "Ready":
+        webapps_lib.die(
+            message=(
+                f"{args.slug} did not become ready (status={state.get('status')}, "
+                f"is_ready={state.get('is_ready')}, exit_code={state.get('exit_code')}, "
+                f"restarts={state.get('restarts')}). The process-compose readiness "
+                "probe may have stopped or restarted it before it bound the port. "
+                f"Check `webapps logs {args.slug}`."
+            ),
+            code=1,
+        )
+
+    print(f"webapps: {args.slug!r} is live at {webapps_lib.url_for(slug=args.slug)}")
 
 
 def cmd_stop(args: argparse.Namespace) -> None:
-    validate_slug(args.slug)
-    with ProcessComposeLock(project=WEBAPPS_PROJECT):
-        doc = load_process_compose_yaml(project=WEBAPPS_PROJECT)
-        entry = doc["processes"].get(args.slug)
+    """Disable one Web App and remove its route."""
+    webapps_lib.validate_slug(slug=args.slug)
+    with process_supervisor.ProcessComposeLock(
+        project=process_supervisor.APP_WORKLOADS_PROJECT
+    ):
+        document = process_supervisor.load_process_compose_yaml(
+            project=process_supervisor.APP_WORKLOADS_PROJECT
+        )
+        entry = webapps_lib.webapp_process_entry(document=document, slug=args.slug)
         if entry is None:
-            die(f"unknown app {args.slug!r}")
+            webapps_lib.die(message=f"unknown app {args.slug!r}", code=1)
         entry["disabled"] = True
-        save_process_compose_yaml(project=WEBAPPS_PROJECT, doc=doc)
-        regenerate_routes(doc)
-        process_compose_project_update(project=WEBAPPS_PROJECT)
+        process_supervisor.save_process_compose_yaml(
+            project=process_supervisor.APP_WORKLOADS_PROJECT,
+            document=document,
+        )
+        webapps_lib.regenerate_webapp_routes(document=document)
+        process_supervisor.process_compose_project_update(
+            project=process_supervisor.APP_WORKLOADS_PROJECT
+        )
     print(f"webapps: {args.slug!r} stopped (URL now 404s).")
 
 
 def cmd_restart(args: argparse.Namespace) -> None:
-    validate_slug(args.slug)
-    with ProcessComposeLock(project=WEBAPPS_PROJECT):
-        doc = load_process_compose_yaml(project=WEBAPPS_PROJECT)
-        entry = doc["processes"].get(args.slug)
+    """Restart one enabled Web App workload."""
+    webapps_lib.validate_slug(slug=args.slug)
+    process_name = webapps_lib.webapp_process_name(slug=args.slug)
+    with process_supervisor.ProcessComposeLock(
+        project=process_supervisor.APP_WORKLOADS_PROJECT
+    ):
+        document = process_supervisor.load_process_compose_yaml(
+            project=process_supervisor.APP_WORKLOADS_PROJECT
+        )
+        entry = webapps_lib.webapp_process_entry(document=document, slug=args.slug)
         if entry is None:
-            die(f"unknown app {args.slug!r}")
+            webapps_lib.die(message=f"unknown app {args.slug!r}", code=1)
         if entry.get("disabled"):
-            die(f"{args.slug!r} is stopped; use `webapps start {args.slug}`")
-    run_process_compose("process", "restart", args.slug, project=WEBAPPS_PROJECT, check=True, capture=False)
-    with ProcessComposeLock(project=WEBAPPS_PROJECT):
-        regenerate_routes(load_process_compose_yaml(project=WEBAPPS_PROJECT))
+            webapps_lib.die(
+                message=f"{args.slug!r} is stopped; use `webapps start {args.slug}`",
+                code=1,
+            )
+    process_supervisor.run_process_compose(
+        "process",
+        "restart",
+        process_name,
+        project=process_supervisor.APP_WORKLOADS_PROJECT,
+        check=True,
+        capture=False,
+    )
+    with process_supervisor.ProcessComposeLock(
+        project=process_supervisor.APP_WORKLOADS_PROJECT
+    ):
+        document = process_supervisor.load_process_compose_yaml(
+            project=process_supervisor.APP_WORKLOADS_PROJECT
+        )
+        webapps_lib.regenerate_webapp_routes(document=document)
     print(f"webapps: {args.slug!r} restarted.")
 
 
-def cmd_reload(_args: argparse.Namespace) -> None:
-    with ProcessComposeLock(project=WEBAPPS_PROJECT):
-        doc = load_process_compose_yaml(project=WEBAPPS_PROJECT)
-        regenerate_routes(doc)
-        process_compose_project_update(project=WEBAPPS_PROJECT)
-
+def cmd_reload(args: argparse.Namespace) -> None:
+    """Resynchronize Web App routes and the shared supervisor document."""
+    del args
+    with process_supervisor.ProcessComposeLock(
+        project=process_supervisor.APP_WORKLOADS_PROJECT
+    ):
+        document = process_supervisor.load_process_compose_yaml(
+            project=process_supervisor.APP_WORKLOADS_PROJECT
+        )
+        webapps_lib.regenerate_webapp_routes(document=document)
+        process_supervisor.process_compose_project_update(
+            project=process_supervisor.APP_WORKLOADS_PROJECT
+        )
     print("webapps: resynced process-compose config and regenerated routes.")
 
 
 def cmd_set_env(args: argparse.Namespace) -> None:
-    validate_slug(args.slug)
-    with ProcessComposeLock(project=WEBAPPS_PROJECT):
-        doc = load_process_compose_yaml(project=WEBAPPS_PROJECT)
-        entry = doc["processes"].get(args.slug)
+    """Update one Web App's explicit environment."""
+    webapps_lib.validate_slug(slug=args.slug)
+    with process_supervisor.ProcessComposeLock(
+        project=process_supervisor.APP_WORKLOADS_PROJECT
+    ):
+        document = process_supervisor.load_process_compose_yaml(
+            project=process_supervisor.APP_WORKLOADS_PROJECT
+        )
+        entry = webapps_lib.webapp_process_entry(document=document, slug=args.slug)
         if entry is None:
-            die(f"unknown app {args.slug!r}")
-
+            webapps_lib.die(message=f"unknown app {args.slug!r}", code=1)
         apply_env_pairs(entry=entry, pairs=list(args.kv))
-        save_process_compose_yaml(project=WEBAPPS_PROJECT, doc=doc)
+        process_supervisor.save_process_compose_yaml(
+            project=process_supervisor.APP_WORKLOADS_PROJECT,
+            document=document,
+        )
         if not entry.get("disabled"):
-            process_compose_project_update(project=WEBAPPS_PROJECT)
+            process_supervisor.process_compose_project_update(
+                project=process_supervisor.APP_WORKLOADS_PROJECT
+            )
     print(f"webapps: env updated for {args.slug!r}.")
 
 
 def cmd_unregister(args: argparse.Namespace) -> None:
-    validate_slug(args.slug)
-    with ProcessComposeLock(project=WEBAPPS_PROJECT):
-        doc = load_process_compose_yaml(project=WEBAPPS_PROJECT)
-        if doc["processes"].pop(args.slug, None) is None:
-            die(f"unknown app {args.slug!r}")
-        save_process_compose_yaml(project=WEBAPPS_PROJECT, doc=doc)
-        regenerate_routes(doc)
-        process_compose_project_update(project=WEBAPPS_PROJECT)
-
+    """Remove one Web App workload while preserving source and logs."""
+    webapps_lib.validate_slug(slug=args.slug)
+    process_name = webapps_lib.webapp_process_name(slug=args.slug)
+    with process_supervisor.ProcessComposeLock(
+        project=process_supervisor.APP_WORKLOADS_PROJECT
+    ):
+        document = process_supervisor.load_process_compose_yaml(
+            project=process_supervisor.APP_WORKLOADS_PROJECT
+        )
+        if document["processes"].pop(process_name, None) is None:
+            webapps_lib.die(message=f"unknown app {args.slug!r}", code=1)
+        process_supervisor.save_process_compose_yaml(
+            project=process_supervisor.APP_WORKLOADS_PROJECT,
+            document=document,
+        )
+        webapps_lib.regenerate_webapp_routes(document=document)
+        process_supervisor.process_compose_project_update(
+            project=process_supervisor.APP_WORKLOADS_PROJECT
+        )
     print(f"webapps: {args.slug!r} unregistered; source and logs preserved.")
 
 
 def cmd_delete(args: argparse.Namespace) -> None:
-    validate_slug(args.slug)
+    """Permanently remove one Web App workload and its owned artifacts."""
+    webapps_lib.validate_slug(slug=args.slug)
     if not args.yes:
-        die("delete requires --yes (this WILL also remove projects/<slug>/ and logs)")
+        webapps_lib.die(
+            message="delete requires --yes (this WILL also remove projects/<slug>/ and logs)",
+            code=1,
+        )
 
-    with ProcessComposeLock(project=WEBAPPS_PROJECT):
-        doc = load_process_compose_yaml(project=WEBAPPS_PROJECT)
-        if doc["processes"].pop(args.slug, None) is None:
-            die(f"unknown app {args.slug!r}")
-        save_process_compose_yaml(project=WEBAPPS_PROJECT, doc=doc)
-        regenerate_routes(doc)
-        process_compose_project_update(project=WEBAPPS_PROJECT)
+    process_name = webapps_lib.webapp_process_name(slug=args.slug)
+    with process_supervisor.ProcessComposeLock(
+        project=process_supervisor.APP_WORKLOADS_PROJECT
+    ):
+        document = process_supervisor.load_process_compose_yaml(
+            project=process_supervisor.APP_WORKLOADS_PROJECT
+        )
+        if document["processes"].pop(process_name, None) is None:
+            webapps_lib.die(message=f"unknown app {args.slug!r}", code=1)
+        process_supervisor.save_process_compose_yaml(
+            project=process_supervisor.APP_WORKLOADS_PROJECT,
+            document=document,
+        )
+        webapps_lib.regenerate_webapp_routes(document=document)
+        process_supervisor.process_compose_project_update(
+            project=process_supervisor.APP_WORKLOADS_PROJECT
+        )
 
-        log_path = LOGS_DIR / f"{args.slug}.log"
+        log_path = webapps_lib.WEBAPP_LOGS_DIR / f"{args.slug}.log"
         if log_path.exists():
             log_path.unlink()
-        proj_path = Path("/workspace/webapps/projects") / args.slug
-        if proj_path.exists():
-            shutil.rmtree(proj_path)
-
+        project_path = webapps_lib.WEBAPP_PROJECTS_DIR / args.slug
+        if project_path.exists():
+            shutil.rmtree(project_path)
     print(f"webapps: {args.slug!r} deleted.")
 
 
 def cmd_expose(args: argparse.Namespace) -> None:
-    """Print the control-plane link where a human can make this webapp public.
+    """Print the control-plane link where a human can expose one Web App."""
+    webapps_lib.validate_slug(slug=args.slug)
+    if webapps_lib.is_internal_slug(slug=args.slug):
+        webapps_lib.die(
+            message=f"{args.slug!r} is a platform-internal webapp; it cannot be made public",
+            code=1,
+        )
 
-    Publishing is a control-plane action, not an agent capability: this
-    command only builds the deep link. The app owner opens it, sees the exact
-    hostname that would become public, and confirms there.
-    """
-    validate_slug(args.slug)
-    if is_internal_slug(args.slug):
-        die(f"{args.slug!r} is a platform-internal webapp; it cannot be made public")
-
-    doc = load_process_compose_yaml(project=WEBAPPS_PROJECT)
-    if args.slug not in doc["processes"]:
-        die(f"unknown app {args.slug!r}; create it first (see `webapps list`)")
+    document = process_supervisor.load_process_compose_yaml(
+        project=process_supervisor.APP_WORKLOADS_PROJECT
+    )
+    if webapps_lib.webapp_process_entry(document=document, slug=args.slug) is None:
+        webapps_lib.die(
+            message=f"unknown app {args.slug!r}; create it first (see `webapps list`)",
+            code=1,
+        )
 
     control_plane_url = os.environ.get("HUMR_CONTROL_PLANE_URL", "").rstrip("/")
     app_slug = os.environ.get("HUMR_APP_SLUG", "")
-    env_slug = os.environ.get("HUMR_ENV_SLUG", "")
-    if not (control_plane_url and app_slug and env_slug):
-        die(
-            "HUMR_CONTROL_PLANE_URL / HUMR_APP_SLUG / HUMR_ENV_SLUG not set; "
-            "public exposure needs the control-plane deep link and this "
-            "environment doesn't provide it"
+    environment_slug = os.environ.get("HUMR_ENV_SLUG", "")
+    if not (control_plane_url and app_slug and environment_slug):
+        webapps_lib.die(
+            message=(
+                "HUMR_CONTROL_PLANE_URL / HUMR_APP_SLUG / HUMR_ENV_SLUG not set; "
+                "public exposure needs the control-plane deep link and this "
+                "environment does not provide it"
+            ),
+            code=1,
         )
 
-    deep_link = f"{control_plane_url}/apps/{app_slug}/public-access/new?slug={args.slug}&env={env_slug}"
-    print(f"Public access to {url_for(args.slug)} is granted on the control plane, by a human.")
+    deep_link = (
+        f"{control_plane_url}/apps/{app_slug}/public-access/new"
+        f"?slug={args.slug}&env={environment_slug}"
+    )
+    print(
+        f"Public access to {webapps_lib.url_for(slug=args.slug)} is granted "
+        "on the control plane, by a human."
+    )
     print("Ask the app owner to open this link and confirm:")
     print("")
     print(f"  {deep_link}")
 
 
-def main() -> None:
-    p = argparse.ArgumentParser(
+def build_parser() -> argparse.ArgumentParser:
+    """Build the Web Apps CLI parser."""
+    parser = argparse.ArgumentParser(
         prog="webapps",
-        description="Manage user-built web apps served at https://<slug>-<agent-host>/.",
+        description=(
+            "Manage user-built web apps served at https://<slug>-<agent-host>/."
+        ),
     )
-    sub = p.add_subparsers(dest="cmd", required=True)
+    subparsers = parser.add_subparsers(dest="cmd", required=True)
 
-    pc_create = sub.add_parser("create", help="Register a new web app without starting it.")
-    pc_create.add_argument("slug")
-    pc_create.add_argument("--command", required=True)
-    pc_create.add_argument("--cwd", required=True)
-    pc_create.add_argument("--env", action="append", default=[], help="KEY=VALUE pair to set before first start.")
-    pc_create.add_argument(
+    create_parser = subparsers.add_parser(
+        "create", help="Register a new web app without starting it."
+    )
+    create_parser.add_argument("slug")
+    create_parser.add_argument("--command", required=True)
+    create_parser.add_argument("--cwd", required=True)
+    create_parser.add_argument(
+        "--env",
+        action="append",
+        default=[],
+        help="KEY=VALUE pair to set before first start.",
+    )
+    create_parser.add_argument(
         "--if-missing",
         action="store_true",
         help="Exit 0 silently if the slug already exists. For idempotent bootstrap.",
     )
-    pc_create.add_argument(
+    create_parser.add_argument(
         "--bootstrap-enabled",
         action="store_true",
         help=argparse.SUPPRESS,
     )
-    pc_create.set_defaults(func=cmd_create)
+    create_parser.set_defaults(func=cmd_create)
 
-    sub.add_parser("list", help="List webapps.").set_defaults(func=cmd_list)
+    subparsers.add_parser("list", help="List webapps.").set_defaults(func=cmd_list)
 
-    pc_logs = sub.add_parser("logs", help="Tail a webapp's stdout/stderr.")
-    pc_logs.add_argument("slug")
-    pc_logs.add_argument("-f", "--follow", action="store_true")
-    pc_logs.add_argument("-n", "--lines", type=int, default=200)
-    pc_logs.set_defaults(func=cmd_logs)
+    logs_parser = subparsers.add_parser("logs", help="Tail a webapp's stdout/stderr.")
+    logs_parser.add_argument("slug")
+    logs_parser.add_argument("-f", "--follow", action="store_true")
+    logs_parser.add_argument("-n", "--lines", type=int, default=200)
+    logs_parser.set_defaults(func=cmd_logs)
 
-    pc_start = sub.add_parser("start", help="Start a previously stopped webapp.")
-    pc_start.add_argument("slug")
-    pc_start.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_SECONDS)
-    pc_start.set_defaults(func=cmd_start)
+    start_parser = subparsers.add_parser(
+        "start", help="Start a previously stopped webapp."
+    )
+    start_parser.add_argument("slug")
+    start_parser.add_argument(
+        "--timeout",
+        type=int,
+        default=process_supervisor.DEFAULT_TIMEOUT_SECONDS,
+    )
+    start_parser.set_defaults(func=cmd_start)
 
-    pc_stop = sub.add_parser("stop", help="Stop a webapp and remove its route.")
-    pc_stop.add_argument("slug")
-    pc_stop.set_defaults(func=cmd_stop)
+    stop_parser = subparsers.add_parser("stop", help="Stop a webapp and remove its route.")
+    stop_parser.add_argument("slug")
+    stop_parser.set_defaults(func=cmd_stop)
 
-    pc_restart = sub.add_parser("restart", help="Restart a webapp's process.")
-    pc_restart.add_argument("slug")
-    pc_restart.set_defaults(func=cmd_restart)
+    restart_parser = subparsers.add_parser(
+        "restart", help="Restart a webapp's process."
+    )
+    restart_parser.add_argument("slug")
+    restart_parser.set_defaults(func=cmd_restart)
 
-    sub.add_parser("reload", help="Resync process-compose from YAML and regenerate routes.").set_defaults(func=cmd_reload)
+    subparsers.add_parser(
+        "reload",
+        help="Resync process-compose from YAML and regenerate routes.",
+    ).set_defaults(func=cmd_reload)
 
-    pc_set_env = sub.add_parser("set-env", help="Add/update env vars on a webapp.")
-    pc_set_env.add_argument("slug")
-    pc_set_env.add_argument("kv", nargs="+", help="KEY=VALUE pairs.")
-    pc_set_env.set_defaults(func=cmd_set_env)
+    environment_parser = subparsers.add_parser(
+        "set-env", help="Add/update env vars on a webapp."
+    )
+    environment_parser.add_argument("slug")
+    environment_parser.add_argument("kv", nargs="+", help="KEY=VALUE pairs.")
+    environment_parser.set_defaults(func=cmd_set_env)
 
-    pc_unregister = sub.add_parser("unregister", help="Remove route/supervision but keep source and logs.")
-    pc_unregister.add_argument("slug")
-    pc_unregister.set_defaults(func=cmd_unregister)
+    unregister_parser = subparsers.add_parser(
+        "unregister", help="Remove route/supervision but keep source and logs."
+    )
+    unregister_parser.add_argument("slug")
+    unregister_parser.set_defaults(func=cmd_unregister)
 
-    pc_delete = sub.add_parser("delete", help="Delete a webapp (route, process, logs, source).")
-    pc_delete.add_argument("slug")
-    pc_delete.add_argument("--yes", action="store_true")
-    pc_delete.set_defaults(func=cmd_delete)
+    delete_parser = subparsers.add_parser(
+        "delete", help="Delete a webapp (route, process, logs, source)."
+    )
+    delete_parser.add_argument("slug")
+    delete_parser.add_argument("--yes", action="store_true")
+    delete_parser.set_defaults(func=cmd_delete)
 
-    pc_expose = sub.add_parser("expose", help="Print the control-plane link to make a webapp public (a human confirms there).")
-    pc_expose.add_argument("slug")
-    pc_expose.set_defaults(func=cmd_expose)
+    expose_parser = subparsers.add_parser(
+        "expose",
+        help="Print the control-plane link to make a webapp public.",
+    )
+    expose_parser.add_argument("slug")
+    expose_parser.set_defaults(func=cmd_expose)
+    return parser
 
-    args = p.parse_args()
-    args.func(args)
+
+def main() -> None:
+    """Run the Web Apps CLI."""
+    webapps_lib.ensure_webapp_layout()
+    process_supervisor.ensure_process_compose_layout(
+        project=process_supervisor.APP_WORKLOADS_PROJECT
+    )
+    args = build_parser().parse_args()
+    try:
+        args.func(args)
+    except (OSError, RuntimeError, ValueError) as exc:
+        webapps_lib.die(message=str(exc), code=1)
 
 
 if __name__ == "__main__":

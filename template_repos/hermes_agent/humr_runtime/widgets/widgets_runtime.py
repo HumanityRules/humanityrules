@@ -8,12 +8,15 @@ import os
 import secrets
 import shutil
 import stat
+import sys
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-import webapps_lib
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "process_supervisor"))
+
+import process_supervisor
 import widgets_core
 
 
@@ -22,7 +25,7 @@ WIDGETS_STATIC_ROOT = widgets_core.WIDGETS_CONFIG_ROOT / "static"
 WIDGETS_TOMBSTONES_ROOT = widgets_core.WIDGETS_ROOT.parent / ".widgets-tombstones"
 WIDGETS_LOGS_ROOT = widgets_core.WIDGETS_CONFIG_ROOT / "logs"
 WIDGET_UNAVAILABLE_PATH = Path("/opt/humr/runtime/widgets/widget-unavailable.html")
-DEFAULT_APPLY_TIMEOUT_SECONDS = webapps_lib.DEFAULT_TIMEOUT_SECONDS
+DEFAULT_APPLY_TIMEOUT_SECONDS = process_supervisor.DEFAULT_TIMEOUT_SECONDS
 
 _DIRECTORY_OPEN_FLAGS = (
     os.O_RDONLY
@@ -45,7 +48,7 @@ class WidgetRuntimePaths:
     tombstones_root: Path
     logs_root: Path
     unavailable_path: Path
-    process_project: webapps_lib.ProcessComposeProject
+    process_project: process_supervisor.ProcessComposeProject
     lock_path: Path
 
 
@@ -85,9 +88,17 @@ DEFAULT_PATHS = WidgetRuntimePaths(
     tombstones_root=WIDGETS_TOMBSTONES_ROOT,
     logs_root=WIDGETS_LOGS_ROOT,
     unavailable_path=WIDGET_UNAVAILABLE_PATH,
-    process_project=webapps_lib.WEBAPPS_PROJECT,
+    process_project=process_supervisor.APP_WORKLOADS_PROJECT,
     lock_path=widgets_core.LOCK_PATH,
 )
+
+
+def _widget_process_name(slug: str) -> str:
+    """Map a Widget slug into the shared supervisor namespace."""
+    return process_supervisor.workload_process_name(
+        kind=process_supervisor.WIDGET_WORKLOAD_KIND,
+        slug=slug,
+    )
 
 
 def build_widgets_caddy_fragment(
@@ -129,7 +140,7 @@ def reconcile_widgets(paths: WidgetRuntimePaths, target_slug: str | None, update
     paths.widgets_root.mkdir(parents=True, exist_ok=True)
     paths.logs_root.mkdir(parents=True, exist_ok=True)
     with widgets_core.WidgetsLock(lock_path=paths.lock_path):
-        with webapps_lib.ProcessComposeLock(project=paths.process_project):
+        with process_supervisor.ProcessComposeLock(project=paths.process_project):
             return _reconcile_widgets_unlocked(
                 paths=paths,
                 target_slug=target_slug,
@@ -150,8 +161,8 @@ def wait_for_widget_ready(
     timeout: int,
 ) -> dict[str, Any]:
     """Wait for one reconciled Widget backend's namespaced process."""
-    process_name = webapps_lib.widget_process_name(slug=slug)
-    state = webapps_lib.wait_for_process_ready(
+    process_name = _widget_process_name(slug=slug)
+    state = process_supervisor.wait_for_process_ready(
         project=paths.process_project,
         process_name=process_name,
         timeout=timeout,
@@ -174,7 +185,7 @@ def delete_widget(paths: WidgetRuntimePaths, slug: str, confirmed: bool, update_
     paths.logs_root.mkdir(parents=True, exist_ok=True)
 
     with widgets_core.WidgetsLock(lock_path=paths.lock_path):
-        with webapps_lib.ProcessComposeLock(project=paths.process_project):
+        with process_supervisor.ProcessComposeLock(project=paths.process_project):
             paths.tombstones_root.mkdir(parents=True, exist_ok=True)
             _require_tombstones_outside_discovery(
                 widgets_root=paths.widgets_root,
@@ -285,7 +296,10 @@ def reconcile_widget_processes(
     preserved_port_owners: dict[int, str] = {}
     preserved_processes: dict[str, Any] = {}
     for name, entry in processes.items():
-        if webapps_lib.is_widget_process_name(name=name):
+        if process_supervisor.is_workload_process_name(
+            name=name,
+            kind=process_supervisor.WIDGET_WORKLOAD_KIND,
+        ):
             continue
         preserved_processes[name] = entry
         port = _managed_port(entry=entry, process_name=name)
@@ -301,7 +315,7 @@ def reconcile_widget_processes(
 
     backend_ports: dict[str, int] = {}
     for widget in backend_widgets:
-        process_name = webapps_lib.widget_process_name(slug=widget.slug)
+        process_name = _widget_process_name(slug=widget.slug)
         existing_entry = processes.get(process_name)
         existing_port = _widget_port(
             entry=existing_entry,
@@ -309,7 +323,9 @@ def reconcile_widget_processes(
         )
         if (
             existing_port is not None
-            and webapps_lib.PORT_MIN <= existing_port <= webapps_lib.PORT_MAX
+            and process_supervisor.PORT_MIN
+            <= existing_port
+            <= process_supervisor.PORT_MAX
             and existing_port not in used_ports
         ):
             backend_ports[widget.slug] = existing_port
@@ -323,7 +339,7 @@ def reconcile_widget_processes(
         used_ports.add(port)
 
     for widget in backend_widgets:
-        process_name = webapps_lib.widget_process_name(slug=widget.slug)
+        process_name = _widget_process_name(slug=widget.slug)
         preserved_processes[process_name] = make_widget_process_entry(
             widget=widget,
             widgets_root=widgets_root,
@@ -344,7 +360,7 @@ def make_widget_process_entry(
         "command": widget.backend.command,
         "working_dir": str(widgets_root / widget.slug),
         "log_location": str(logs_root / f"{widget.slug}.log"),
-        "log_configuration": webapps_lib.plain_text_log_configuration(),
+        "log_configuration": process_supervisor.plain_text_log_configuration(),
         "environment": [
             f"WIDGET_SLUG={widget.slug}",
             f"WIDGET_BASE_PATH=/widgets/{widget.slug}",
@@ -357,7 +373,7 @@ def make_widget_process_entry(
         },
         "readiness_probe": {
             "exec": {
-                "command": webapps_lib.readiness_probe_command(port=port),
+                "command": process_supervisor.readiness_probe_command(port=port),
             },
             "initial_delay_seconds": 5,
             "period_seconds": 10,
@@ -374,7 +390,7 @@ def _managed_port(entry: object, process_name: str) -> int | None:
             f"process-compose entry {process_name!r} must be a mapping"
         )
     try:
-        port = webapps_lib.managed_port_from_entry(
+        port = process_supervisor.managed_port_from_entry(
             entry=entry,
             process_name=process_name,
         )
@@ -408,11 +424,15 @@ def _widget_port(entry: object, process_name: str) -> int | None:
 
 
 def _next_widget_port(used_ports: set[int]) -> int:
-    for port in range(webapps_lib.PORT_MIN, webapps_lib.PORT_MAX + 1):
+    for port in range(
+        process_supervisor.PORT_MIN,
+        process_supervisor.PORT_MAX + 1,
+    ):
         if port not in used_ports:
             return port
     raise WidgetReconciliationError(
-        f"no free ports in {webapps_lib.PORT_MIN}-{webapps_lib.PORT_MAX}; "
+        f"no free ports in {process_supervisor.PORT_MIN}-"
+        f"{process_supervisor.PORT_MAX}; "
         "delete a Web App or Widget first"
     )
 
@@ -450,7 +470,7 @@ def _reconcile_widgets_unlocked(
                 key=lambda failure: failure.slug,
             )
         )
-        process_document = webapps_lib.load_process_compose_yaml(
+        process_document = process_supervisor.load_process_compose_yaml(
             project=paths.process_project
         )
         reconciled_process_document, backend_ports = reconcile_widget_processes(
@@ -476,15 +496,15 @@ def _reconcile_widgets_unlocked(
         )
         staged_process_yaml = _stage_text(
             destination_path=paths.process_project.yaml_path,
-            document=webapps_lib.render_process_compose_yaml(
-                doc=reconciled_process_document
+            document=process_supervisor.render_process_compose_yaml(
+                document=reconciled_process_document
             ),
         )
         publish_hook: Callable[[], None] | None = None
         rollback_hook: Callable[[], None] | None = None
         if update_processes:
             def reload_process_project() -> None:
-                webapps_lib.process_compose_project_update(
+                process_supervisor.process_compose_project_update(
                     project=paths.process_project
                 )
 

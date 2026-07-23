@@ -1,0 +1,30 @@
+# HUMR application router for Web Apps, Widgets, broker APIs, and Hermes WebUI.
+{
+	admin off
+	auto_https off
+}
+
+:8787 {
+	import /workspace/.config/caddy/webapps.caddy
+	import /workspace/.config/caddy/widgets.caddy
+
+	@broker {
+		header X-Forwarded-Host {$HUMR_PUBLIC_HOSTNAME}
+		path /__humr_broker/*
+	}
+	handle @broker {
+		uri strip_prefix /__humr_broker
+		reverse_proxy 127.0.0.1:9951
+	}
+
+	@bare header X-Forwarded-Host {$HUMR_PUBLIC_HOSTNAME}
+	handle @bare {
+		reverse_proxy 127.0.0.1:8789 {
+			header_up X-Forwarded-Host {header.X-Forwarded-Host}
+		}
+	}
+
+	handle {
+		respond "unknown host" 404
+	}
+}

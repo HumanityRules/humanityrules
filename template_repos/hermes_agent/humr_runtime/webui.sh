@@ -3,8 +3,8 @@ set -euo pipefail
 
 # Inside nono. Three direct children run here as hermeswebui:
 #   1. system process-compose on :9956 — supervises system.webui and system.gateway.
-#   2. webapps process-compose on :9957 — supervises __admin and user webapps.
-#   3. Caddy on :8787 — policy-proxy forwards here; routes to WebUI and webapps.
+#   2. app-workloads process-compose on :9957 — supervises Web Apps and Widget backends.
+#   3. Caddy on :8787 — policy-proxy forwards here; routes WebUI, Web Apps, and Widgets.
 #
 # The Hermes WebUI and gateway are supervised by process-compose so the broker
 # can restart them in place when managed integration env changes.
@@ -21,13 +21,12 @@ set -euo pipefail
 : "${HERMES_WEBUI_PYTHON:?HERMES_WEBUI_PYTHON must be set}"
 
 # Loopback Hermes agent API (gateway's api_server platform, 127.0.0.1:8642).
-# Enabled for in-sandbox webapps that want to call a full Hermes agent at
+# Enabled for in-sandbox app workloads that call a full Hermes agent at
 # http://127.0.0.1:8642/v1/. Upstream *requires* a bearer key even for
 # loopback binds, so we mint a fixed one here. This is NOT a secret: it only
 # guards a loopback port inside this nono sandbox, where every process already
 # shares a uid, venv, and workspace and fully trusts its siblings. Exporting it
-# here makes it visible to the gateway AND to every process-compose child
-# (webapps inherit the parent env), so webapps read it from $API_SERVER_KEY.
+# here makes it visible to the gateway and every process-compose child.
 export API_SERVER_ENABLED=true
 export API_SERVER_KEY=humr-loopback-gateway-key
 
@@ -42,12 +41,12 @@ fi
 
 CADDY_PORT=8787
 SYSTEM_PROCESS_COMPOSE_PORT=9956
-WEBAPPS_PROCESS_COMPOSE_PORT=9957
+APP_WORKLOADS_PROCESS_COMPOSE_PORT=9957
 PROCESS_COMPOSE_ROOT=/workspace/.config/process-compose
 
 CADDY_PID=""
 SYSTEM_PROCESS_COMPOSE_PID=""
-WEBAPPS_PROCESS_COMPOSE_PID=""
+APP_WORKLOADS_PROCESS_COMPOSE_PID=""
 
 die() {
     echo "FATAL: $*" >&2
@@ -56,7 +55,7 @@ die() {
 
 cleanup() {
     set +e
-    for pid in "$SYSTEM_PROCESS_COMPOSE_PID" "$WEBAPPS_PROCESS_COMPOSE_PID" "$CADDY_PID"; do
+    for pid in "$SYSTEM_PROCESS_COMPOSE_PID" "$APP_WORKLOADS_PROCESS_COMPOSE_PID" "$CADDY_PID"; do
         if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
             kill -TERM "$pid" 2>/dev/null
         fi
@@ -105,31 +104,31 @@ start_system_process_compose() {
     SYSTEM_PROCESS_COMPOSE_PID=$!
 }
 
-start_webapps_process_compose() {
-    echo "[webui] Starting webapps process-compose on 127.0.0.1:${WEBAPPS_PROCESS_COMPOSE_PORT}..."
+start_app_workloads_compose() {
+    echo "[webui] Starting app-workloads process-compose on 127.0.0.1:${APP_WORKLOADS_PROCESS_COMPOSE_PORT}..."
     process-compose \
-        --log-file "${PROCESS_COMPOSE_ROOT}/webapps/process-compose.log" \
+        --log-file "${PROCESS_COMPOSE_ROOT}/app-workloads/process-compose.log" \
         --log-no-color \
         up \
-        --config "${PROCESS_COMPOSE_ROOT}/webapps/process-compose.yaml" \
-        --port "$WEBAPPS_PROCESS_COMPOSE_PORT" \
+        --config "${PROCESS_COMPOSE_ROOT}/app-workloads/process-compose.yaml" \
+        --port "$APP_WORKLOADS_PROCESS_COMPOSE_PORT" \
         --address 127.0.0.1 \
         --tui=false \
         --keep-project \
         2>&1 &
-    WEBAPPS_PROCESS_COMPOSE_PID=$!
+    APP_WORKLOADS_PROCESS_COMPOSE_PID=$!
 }
 
 start_caddy() {
     echo "[webui] Starting Caddy on :${CADDY_PORT}..."
-    caddy run --config "${HUMR_RUNTIME_DIR}/webapps/Caddyfile" --adapter caddyfile --watch 2>&1 &
+    caddy run --config "${HUMR_RUNTIME_DIR}/http_router/Caddyfile" --adapter caddyfile --watch 2>&1 &
     CADDY_PID=$!
 }
 
 bootstrap_admin_webapp() {
-    # Runs *before* webapps process-compose starts. --bootstrap-enabled writes
-    # an enabled YAML entry plus the route, then `process-compose up` brings __admin up
-    # alongside any user webapps from prior boots. Talking to the daemon at
+    # Runs before the app-workloads supervisor starts. --bootstrap-enabled writes
+    # webapp.__admin plus its route, then `process-compose up` brings it up
+    # alongside registered Web Apps and Widget backends. Talking to the daemon at
     # this stage would hang: the `project update` CLI client (subprocess.run)
     # doesn't return promptly during initial supervision, blocking webui.sh forever.
     # --if-missing is the cold-restart idempotence: if __admin is already
@@ -141,8 +140,8 @@ bootstrap_admin_webapp() {
 
 seed_example_webapps() {
     # Install bundled example webapps (the image-baked catalog under
-    # /opt/humr/webapps/examples) into a fresh agent. Runs before the webapps
-    # daemon starts, so the seeder registers via `webapps create
+    # /opt/humr/runtime/webapps/examples) into a fresh agent. Runs before the
+    # app-workloads supervisor starts, so the seeder registers via `webapps create
     # --bootstrap-enabled` — no daemon RPC, same as bootstrap_admin_webapp. A
     # per-install marker under /workspace/webapps/.seeded/ holds each example's
     # update policy: "refresh" (default) re-syncs it from the image every boot,
@@ -165,7 +164,7 @@ bootstrap_gateway_process() {
     #
     # API_SERVER_ENABLED / API_SERVER_KEY are exported at container scope (top
     # of this file) so both the gateway and webapp children inherit them.
-    "$HERMES_WEBUI_PYTHON" "${HUMR_RUNTIME_DIR}/webapps/system_process_compose_seed.py" system.gateway \
+    "$HERMES_WEBUI_PYTHON" "${HUMR_RUNTIME_DIR}/process_supervisor/system_process_seed.py" system.gateway \
         --command "$HERMES_WEBUI_PYTHON -m hermes_cli.main gateway run --replace -v" \
         --cwd "$HERMES_WEBUI_AGENT_DIR"
 }
@@ -176,7 +175,7 @@ bootstrap_webui_process() {
     # targeted restart spawns a fresh server.py, which imports api.config, whose
     # module body runs init_profile_state() -> _reload_dotenv(${HERMES_HOME}),
     # loading the broker's latest .env into os.environ (override) on every start.
-    "$HERMES_WEBUI_PYTHON" "${HUMR_RUNTIME_DIR}/webapps/system_process_compose_seed.py" system.webui \
+    "$HERMES_WEBUI_PYTHON" "${HUMR_RUNTIME_DIR}/process_supervisor/system_process_seed.py" system.webui \
         --command "$HERMES_WEBUI_PYTHON server.py" \
         --cwd "$HERMES_WEBUI_DIR"
 }
@@ -193,9 +192,9 @@ wait_for_webui() {
             wait "$SYSTEM_PROCESS_COMPOSE_PID"
             exit $?
         fi
-        if ! kill -0 "$WEBAPPS_PROCESS_COMPOSE_PID" 2>/dev/null; then
-            echo "[webui] FATAL: webapps process-compose exited before WebUI became healthy." >&2
-            wait "$WEBAPPS_PROCESS_COMPOSE_PID"
+        if ! kill -0 "$APP_WORKLOADS_PROCESS_COMPOSE_PID" 2>/dev/null; then
+            echo "[webui] FATAL: app-workloads process-compose exited before WebUI became healthy." >&2
+            wait "$APP_WORKLOADS_PROCESS_COMPOSE_PID"
             exit $?
         fi
         sleep 2
@@ -214,12 +213,12 @@ main() {
     bootstrap_gateway_process
     bootstrap_webui_process
     start_system_process_compose
-    start_webapps_process_compose
+    start_app_workloads_compose
     wait_for_webui
     start_caddy
 
-    echo "[webui] All services up. caddy=${CADDY_PID} system_process_compose=${SYSTEM_PROCESS_COMPOSE_PID} webapps_process_compose=${WEBAPPS_PROCESS_COMPOSE_PID}."
-    wait -n "$CADDY_PID" "$SYSTEM_PROCESS_COMPOSE_PID" "$WEBAPPS_PROCESS_COMPOSE_PID"
+    echo "[webui] All services up. caddy=${CADDY_PID} system_process_compose=${SYSTEM_PROCESS_COMPOSE_PID} app_workloads_process_compose=${APP_WORKLOADS_PROCESS_COMPOSE_PID}."
+    wait -n "$CADDY_PID" "$SYSTEM_PROCESS_COMPOSE_PID" "$APP_WORKLOADS_PROCESS_COMPOSE_PID"
     exit $?
 }
 

@@ -22,7 +22,7 @@ The main developer documentation lives in the docs/ subdirectory. **When creatin
 
 - **`docs/app_removal_data_cleanup_audit.md`** — Audit of what app removal's `removal_delete_all_data` flag covers, and the gap: `IntegrationUserCredential` rows have no FK to `App` and are never cleaned up. Open when reworking app removal, debugging phantom reconnects after recreating an app, or auditing GDPR. Snapshot 2026-05-24.
 
-- **`docs/webapps_design.md`** — How a Hermes agent serves user-built webapps at their own hostname (`<slug>-<agent-host>`) via a Caddy sidecar, including port topology, the `webapps` CLI, and `routes.caddy` regeneration. Open when working on the webapps mechanism, debugging cross-origin or routing issues, or adding a new framework.
+- **`docs/app_workloads_design.md`** — Mental model and architecture for agent-built Web Apps and Widgets: when to use each product, shared supervision and routing, distinct sources of truth and lifecycles, security boundaries, persistence, and recovery. Open when working on either application surface or their shared runtime.
 
 - **`docs/tenant_isolation_rls_note.md`** — Personal note (Victor) about the layered defense plan for cross-tenant data leaks and the flag-gated Postgres RLS shape if it ever gets built. Not implemented. Open when revisiting tenant isolation strategy.
 

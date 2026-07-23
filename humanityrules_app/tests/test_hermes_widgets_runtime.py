@@ -39,10 +39,19 @@ def _load_module(name: str, path: pathlib.Path) -> types.ModuleType:
 
 widgets_dir = _runtime_dir() / "widgets"
 webapps_dir = _runtime_dir() / "webapps"
-for runtime_path in (str(widgets_dir), str(webapps_dir)):
+process_supervisor_dir = _runtime_dir() / "process_supervisor"
+for runtime_path in (
+    str(widgets_dir),
+    str(webapps_dir),
+    str(process_supervisor_dir),
+):
     if runtime_path not in sys.path:
         sys.path.insert(0, runtime_path)
 
+process_supervisor = _load_module(
+    name="process_supervisor",
+    path=process_supervisor_dir / "process_supervisor.py",
+)
 widgets_core = _load_module(name="widgets_core", path=widgets_dir / "widgets_core.py")
 widgets_runtime = _load_module(
     name="widgets_runtime", path=widgets_dir / "widgets_runtime.py"
@@ -54,12 +63,11 @@ webapps_cli = _load_module(name="webapps_cli_for_widgets_test", path=webapps_dir
 
 class TestHermesWidgetsRuntime(unittest.TestCase):
     def _paths(self, root: pathlib.Path) -> object:
-        process_project = webapps_lib.ProcessComposeProject(
-            config_dir=root / "config" / "process-compose" / "webapps",
+        process_project = process_supervisor.ProcessComposeProject(
+            config_dir=root / "config" / "process-compose" / "app-workloads",
             port="9957",
-            lock_name=".webapps.lock",
+            lock_name=".app-workloads.lock",
             required_dirs=(root / "config" / "caddy",),
-            route_file=root / "config" / "caddy" / "webapps.caddy",
         )
         return widgets_runtime.WidgetRuntimePaths(
             widgets_root=root / "widgets",
@@ -418,11 +426,11 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
             document = {
                 "version": "0.5",
                 "processes": {
-                    "dashboard": {
+                    "webapp.dashboard": {
                         "environment": ["WEBAPP_PORT=4000"],
                         "command": "webapp",
                     },
-                    "__admin": {
+                    "webapp.__admin": {
                         "environment": ["WEBAPP_PORT=4001"],
                         "command": "admin",
                     },
@@ -454,8 +462,14 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
         self.assertEqual(ports, {"alpha-widget": 4002, "beta-widget": 4003})
         self.assertEqual(reapplied_ports, ports)
         self.assertEqual(reapplied, reconciled)
-        self.assertEqual(processes["dashboard"], document["processes"]["dashboard"])
-        self.assertEqual(processes["__admin"], document["processes"]["__admin"])
+        self.assertEqual(
+            processes["webapp.dashboard"],
+            document["processes"]["webapp.dashboard"],
+        )
+        self.assertEqual(
+            processes["webapp.__admin"],
+            document["processes"]["webapp.__admin"],
+        )
         self.assertNotIn("widget.removed-widget", processes)
         alpha = processes["widget.alpha-widget"]
         self.assertEqual(alpha["working_dir"], str(paths.widgets_root / "alpha-widget"))
@@ -484,7 +498,7 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
         colliding_document = {
             "version": "0.5",
             "processes": {
-                "dashboard": {"environment": ["WEBAPP_PORT=4000"]},
+                "webapp.dashboard": {"environment": ["WEBAPP_PORT=4000"]},
                 "widget.alpha-widget": {"environment": ["WIDGET_PORT=4000"]},
             },
         }
@@ -498,15 +512,18 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
         exhausted_document = {
             "version": "0.5",
             "processes": {
-                f"app-{port}": {"environment": [f"WEBAPP_PORT={port}"]}
-                for port in range(webapps_lib.PORT_MIN, webapps_lib.PORT_MAX + 1)
+                f"webapp.app-{port}": {"environment": [f"WEBAPP_PORT={port}"]}
+                for port in range(
+                    process_supervisor.PORT_MIN,
+                    process_supervisor.PORT_MAX + 1,
+                )
             },
         }
 
         self.assertEqual(ports, {"alpha-widget": 4001})
         self.assertEqual(
-            webapps_lib.used_ports(
-                {
+            process_supervisor.used_ports(
+                document={
                     "processes": {
                         "webapp": {"environment": ["WEBAPP_PORT=4000"]},
                         "widget.alpha": {"environment": ["WIDGET_PORT=4001"]},
@@ -546,7 +563,7 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
                     document={
                         "version": "0.5",
                         "processes": {
-                            "dashboard": {"environment": environment},
+                            "webapp.dashboard": {"environment": environment},
                         },
                     },
                     widgets=(),
@@ -556,14 +573,14 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
 
         with self.assertRaisesRegex(
             widgets_runtime.WidgetReconciliationError,
-            "assigned to both 'dashboard' and '__admin'",
+            "assigned to both 'webapp.dashboard' and 'webapp.__admin'",
         ):
             widgets_runtime.reconcile_widget_processes(
                 document={
                     "version": "0.5",
                     "processes": {
-                        "dashboard": {"environment": ["WEBAPP_PORT=4000"]},
-                        "__admin": {"environment": ["WEBAPP_PORT=4000"]},
+                        "webapp.dashboard": {"environment": ["WEBAPP_PORT=4000"]},
+                        "webapp.__admin": {"environment": ["WEBAPP_PORT=4000"]},
                     },
                 },
                 widgets=(),
@@ -577,15 +594,15 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
             self.assertRaises(SystemExit),
         ):
             webapps_lib.next_free_port(
-                {
+                document={
                     "processes": {
-                        "dashboard": {
+                        "webapp.dashboard": {
                             "environment": ["WEBAPP_PORT=4000", "WEBAPP_PORT=4001"]
                         }
                     }
                 }
             )
-        self.assertIn("invalid shared process-compose ports", stderr.getvalue())
+        self.assertIn("multiple managed port declarations", stderr.getvalue())
 
     def test_malformed_desired_widget_port_is_rejected_but_valid_collision_heals(self) -> None:
         backend = widgets_core.WidgetManifest(
@@ -618,7 +635,7 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
             document={
                 "version": "0.5",
                 "processes": {
-                    "dashboard": {"environment": ["WEBAPP_PORT=4000"]},
+                    "webapp.dashboard": {"environment": ["WEBAPP_PORT=4000"]},
                     "widget.alpha-widget": {
                         "environment": ["WIDGET_PORT=4000"]
                     },
@@ -754,7 +771,7 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
             )
 
             with patch.object(
-                widgets_runtime.webapps_lib,
+                widgets_runtime.process_supervisor,
                 "process_compose_project_update",
             ) as project_update:
                 result = widgets_runtime.reconcile_widgets(
@@ -763,18 +780,18 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
                     update_processes=True,
                 )
 
-            runtime_document = webapps_lib.load_process_compose_yaml(
+            runtime_document = process_supervisor.load_process_compose_yaml(
                 project=paths.process_project
             )
             project_update.assert_called_once_with(project=paths.process_project)
 
             with (
                 patch.object(
-                    widgets_runtime.webapps_lib,
+                    widgets_runtime.process_supervisor,
                     "process_compose_project_update",
                 ) as bootstrap_update,
                 patch.object(
-                    widgets_runtime.webapps_lib,
+                    widgets_runtime.process_supervisor,
                     "wait_for_process_ready",
                 ) as bootstrap_wait,
             ):
@@ -799,11 +816,11 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
             )
             with (
                 patch.object(
-                    widgets_runtime.webapps_lib,
+                    widgets_runtime.process_supervisor,
                     "process_compose_project_update",
                 ) as project_update,
                 patch.object(
-                    widgets_runtime.webapps_lib,
+                    widgets_runtime.process_supervisor,
                     "wait_for_process_ready",
                     return_value={
                         "name": "widget.server-widget",
@@ -837,11 +854,11 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
             stderr = io.StringIO()
             with (
                 patch.object(
-                    widgets_runtime.webapps_lib,
+                    widgets_runtime.process_supervisor,
                     "process_compose_project_update",
                 ),
                 patch.object(
-                    widgets_runtime.webapps_lib,
+                    widgets_runtime.process_supervisor,
                     "wait_for_process_ready",
                     return_value={
                         "name": "widget.server-widget",
@@ -867,43 +884,38 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
         self.assertIn("widgets logs server-widget", stderr.getvalue())
 
     def test_readiness_wait_stops_on_terminal_state_and_reports_missing_timeout(self) -> None:
-        project = webapps_lib.ProcessComposeProject(
+        project = process_supervisor.ProcessComposeProject(
             config_dir=pathlib.Path("/tmp/widgets-readiness-test"),
             port="9957",
             lock_name=".lock",
             required_dirs=(),
-            route_file=None,
         )
         with (
             patch.object(
-                widgets_runtime.webapps_lib,
-                "process_compose_states_or_raise",
+                widgets_runtime.process_supervisor,
+                "process_compose_state_for",
                 side_effect=[
-                    [
-                        {
-                            "name": "widget.server-widget",
-                            "status": "Running",
-                            "is_ready": "Not Ready",
-                        }
-                    ],
-                    [
-                        {
-                            "name": "widget.server-widget",
-                            "status": "Error",
-                            "is_ready": "Not Ready",
-                            "exit_code": 9,
-                        }
-                    ],
+                    {
+                        "name": "widget.server-widget",
+                        "status": "Running",
+                        "is_ready": "Not Ready",
+                    },
+                    {
+                        "name": "widget.server-widget",
+                        "status": "Error",
+                        "is_ready": "Not Ready",
+                        "exit_code": 9,
+                    },
                 ],
             ),
             patch.object(
-                widgets_runtime.webapps_lib.time,
+                widgets_runtime.process_supervisor.time,
                 "monotonic",
-                side_effect=[0.0, 0.1],
+                side_effect=[0.0, 0.1, 0.2],
             ),
-            patch.object(widgets_runtime.webapps_lib.time, "sleep") as sleep,
+            patch.object(widgets_runtime.process_supervisor.time, "sleep") as sleep,
         ):
-            terminal = widgets_runtime.webapps_lib.wait_for_process_ready(
+            terminal = widgets_runtime.process_supervisor.wait_for_process_ready(
                 project=project,
                 process_name="widget.server-widget",
                 timeout=5,
@@ -915,17 +927,17 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
 
         with (
             patch.object(
-                widgets_runtime.webapps_lib,
-                "process_compose_states_or_raise",
-                return_value=[],
+                widgets_runtime.process_supervisor,
+                "process_compose_state_for",
+                return_value=None,
             ),
             patch.object(
-                widgets_runtime.webapps_lib.time,
+                widgets_runtime.process_supervisor.time,
                 "monotonic",
                 side_effect=[10.0, 11.0],
             ),
         ):
-            timed_out = widgets_runtime.webapps_lib.wait_for_process_ready(
+            timed_out = widgets_runtime.process_supervisor.wait_for_process_ready(
                 project=project,
                 process_name="widget.missing-widget",
                 timeout=1,
@@ -952,11 +964,11 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
             )
             with (
                 patch.object(
-                    widgets_runtime.webapps_lib,
+                    widgets_runtime.process_supervisor,
                     "process_compose_project_update",
                 ),
                 patch.object(
-                    widgets_runtime.webapps_lib,
+                    widgets_runtime.process_supervisor,
                     "wait_for_process_ready",
                 ) as wait_for_ready,
             ):
@@ -1042,7 +1054,7 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
 
             with (
                 patch.object(
-                    widgets_runtime.webapps_lib,
+                    widgets_runtime.process_supervisor,
                     "process_compose_project_update",
                     side_effect=reload_project,
                 ),
@@ -1258,16 +1270,16 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
                 target_slug=None,
                 update_processes=False,
             )
-            document = webapps_lib.load_process_compose_yaml(
+            document = process_supervisor.load_process_compose_yaml(
                 project=paths.process_project
             )
-            document["processes"]["dashboard"] = {
+            document["processes"]["webapp.dashboard"] = {
                 "command": "uv run dashboard.py",
                 "environment": ["WEBAPP_PORT=4001"],
             }
-            webapps_lib.save_process_compose_yaml(
+            process_supervisor.save_process_compose_yaml(
                 project=paths.process_project,
-                doc=document,
+                document=document,
             )
             log_path = paths.logs_root / "delete-backend.log"
             log_path.write_text("started\n", encoding="utf-8")
@@ -1278,15 +1290,15 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
                 confirmed=True,
                 update_processes=False,
             )
-            reconciled = webapps_lib.load_process_compose_yaml(
+            reconciled = process_supervisor.load_process_compose_yaml(
                 project=paths.process_project
             )
 
         self.assertEqual(result.widgets, ())
         self.assertNotIn("widget.delete-backend", reconciled["processes"])
         self.assertEqual(
-            reconciled["processes"]["dashboard"],
-            document["processes"]["dashboard"],
+            reconciled["processes"]["webapp.dashboard"],
+            document["processes"]["webapp.dashboard"],
         )
         self.assertFalse(log_path.exists())
 
@@ -1332,7 +1344,7 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
                     update_processes=False,
                 )
 
-            committed_document = webapps_lib.load_process_compose_yaml(
+            committed_document = process_supervisor.load_process_compose_yaml(
                 project=paths.process_project
             )
             committed_routes = paths.routes_path.read_text(encoding="utf-8")
@@ -1418,7 +1430,7 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
             )
 
             with patch.object(
-                widgets_runtime.webapps_lib,
+                widgets_runtime.process_supervisor,
                 "process_compose_project_update",
             ) as project_update:
                 retry_result = widgets_runtime.delete_widget(
@@ -1430,7 +1442,7 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
 
             reconciled_registry = paths.registry_path.read_text(encoding="utf-8")
             reconciled_routes = paths.routes_path.read_text(encoding="utf-8")
-            reconciled_processes = webapps_lib.load_process_compose_yaml(
+            reconciled_processes = process_supervisor.load_process_compose_yaml(
                 project=paths.process_project
             )["processes"]
 
@@ -1533,10 +1545,12 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
             self.assertTrue(outside.exists())
 
     def test_webapps_and_widgets_own_separate_imported_fragments(self) -> None:
-        caddyfile = (webapps_dir / "Caddyfile").read_text(encoding="utf-8")
+        caddyfile = (
+            _runtime_dir() / "http_router" / "Caddyfile"
+        ).read_text(encoding="utf-8")
 
         self.assertEqual(
-            webapps_lib.WEBAPPS_PROJECT.route_file,
+            webapps_lib.WEBAPP_ROUTES_PATH,
             pathlib.Path("/workspace/.config/caddy/webapps.caddy"),
         )
         self.assertIn("import /workspace/.config/caddy/webapps.caddy", caddyfile)
@@ -1548,16 +1562,9 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
             webapps_fragment = root / "webapps.caddy"
             widgets_fragment = root / "widgets.caddy"
             widgets_fragment.write_text("Widget routes stay intact\n", encoding="utf-8")
-            project = webapps_lib.ProcessComposeProject(
-                config_dir=root / "process-compose",
-                port="9957",
-                lock_name=".webapps.lock",
-                required_dirs=(),
-                route_file=webapps_fragment,
-            )
             document = {
                 "processes": {
-                    "dashboard": {
+                    "webapp.dashboard": {
                         "environment": ["WEBAPP_PORT=4000"],
                     },
                     "widget.private-runtime": {
@@ -1567,14 +1574,16 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
             }
 
             with (
-                patch.object(webapps_lib, "WEBAPPS_PROJECT", project),
+                patch.object(webapps_lib, "WEBAPP_ROUTES_PATH", webapps_fragment),
+                patch.object(webapps_lib, "WEBAPP_PROJECTS_DIR", root / "projects"),
+                patch.object(webapps_lib, "WEBAPP_LOGS_DIR", root / "logs"),
                 patch.dict(
                     webapps_lib.os.environ,
                     {"HUMR_PUBLIC_HOSTNAME": "agent.example.com"},
                     clear=True,
                 ),
             ):
-                webapps_lib.regenerate_routes(doc=document)
+                webapps_lib.regenerate_webapp_routes(document=document)
 
             generated_webapps = webapps_fragment.read_text(encoding="utf-8")
             preserved_widgets = widgets_fragment.read_text(encoding="utf-8")
@@ -1586,7 +1595,7 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
     def test_webapps_cli_hides_widget_processes_and_refuses_widget_names(self) -> None:
         document = {
             "processes": {
-                "dashboard": {"environment": ["WEBAPP_PORT=4000"]},
+                "webapp.dashboard": {"environment": ["WEBAPP_PORT=4000"]},
                 "widget.private-runtime": {
                     "environment": ["WIDGET_PORT=4001"]
                 },
@@ -1594,13 +1603,17 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
         }
         stdout = io.StringIO()
         with (
-            patch.object(webapps_cli, "load_process_compose_yaml", return_value=document),
             patch.object(
-                webapps_cli,
+                webapps_cli.process_supervisor,
+                "load_process_compose_yaml",
+                return_value=document,
+            ),
+            patch.object(
+                webapps_cli.process_supervisor,
                 "process_compose_states",
                 return_value=[
                     {
-                        "name": "dashboard",
+                        "name": "webapp.dashboard",
                         "status": "Running",
                         "is_ready": "Ready",
                     },
@@ -1611,7 +1624,7 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
                     },
                 ],
             ),
-            patch.object(webapps_cli, "is_routed", return_value=False),
+            patch.object(webapps_cli.webapps_lib, "is_routed", return_value=False),
             contextlib.redirect_stdout(stdout),
         ):
             webapps_cli.cmd_list(types.SimpleNamespace())
@@ -1645,9 +1658,16 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
                 self.content = content
                 self.media_type = media_type
 
+        class FakeJSONResponse:
+            def __init__(self, content: object) -> None:
+                self.content = content
+
         fastapi.FastAPI = FakeFastAPI
         fastapi.HTTPException = FakeHTTPException
+        fastapi.Request = object
+        fastapi_responses.JSONResponse = FakeJSONResponse
         fastapi_responses.PlainTextResponse = FakePlainTextResponse
+        fastapi_responses.Response = object
         with patch.dict(
             sys.modules,
             {
@@ -1662,16 +1682,24 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
 
         document = {
             "processes": {
-                "dashboard": {"environment": ["WEBAPP_PORT=4000"]},
+                "webapp.dashboard": {"environment": ["WEBAPP_PORT=4000"]},
                 "widget.private-runtime": {
                     "environment": ["WIDGET_PORT=4001"]
                 },
             }
         }
         with (
-            patch.object(admin_server, "load_process_compose_yaml", return_value=document),
-            patch.object(admin_server, "process_compose_states", return_value=[]),
-            patch.object(admin_server, "is_routed", return_value=False),
+            patch.object(
+                admin_server,
+                "_load_webapp_processes",
+                return_value=webapps_lib.webapp_processes(document=document),
+            ),
+            patch.object(
+                admin_server.process_supervisor,
+                "process_compose_states",
+                return_value=[],
+            ),
+            patch.object(admin_server.webapps_lib, "is_routed", return_value=False),
         ):
             listing = admin_server.list_webapps()
 
@@ -1679,10 +1707,18 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
             [item["slug"] for item in listing["items"]],
             ["dashboard"],
         )
-        with self.assertRaises(FakeHTTPException) as detail_error:
-            admin_server.detail("widget.private-runtime")
-        with self.assertRaises(FakeHTTPException) as logs_error:
-            admin_server.logs("widget.private-runtime")
+        with patch.object(
+            admin_server,
+            "_load_webapp_processes",
+            return_value=webapps_lib.webapp_processes(document=document),
+        ):
+            with self.assertRaises(FakeHTTPException) as detail_error:
+                admin_server.detail("widget.private-runtime")
+            with self.assertRaises(FakeHTTPException) as logs_error:
+                admin_server.logs(
+                    "widget.private-runtime",
+                    request=types.SimpleNamespace(query_params={}),
+                )
         self.assertEqual(detail_error.exception.status_code, 404)
         self.assertEqual(logs_error.exception.status_code, 404)
 
@@ -1696,6 +1732,9 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
 
         self.assertIn("widgets apply --all --bootstrap", webui_script)
         self.assertLess(webui_script.index("reconcile_widgets\n"), webui_script.index("start_system_process_compose\n"))
+        self.assertIn("start_app_workloads_compose", webui_script)
+        self.assertIn("/app-workloads/process-compose.yaml", webui_script)
+        self.assertNotIn("/webapps/process-compose.yaml", webui_script)
         self.assertIn("/workspace/.config/caddy/webapps.caddy", webui_script)
         self.assertIn("/workspace/.config/caddy/widgets.caddy", webui_script)
         self.assertIn("ln -sf /opt/humr/runtime/widgets/widgets /opt/humr/bin/widgets", dockerfile)
@@ -1704,6 +1743,14 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
         self.assertIn("/opt/humr/runtime/widgets/widgets", profile["filesystem"]["read_file"])
         self.assertIn("/opt/humr/runtime/widgets/widgets_core.py", profile["filesystem"]["read_file"])
         self.assertIn("/opt/humr/runtime/widgets/widgets_runtime.py", profile["filesystem"]["read_file"])
+        self.assertIn(
+            "/opt/humr/runtime/process_supervisor/process_supervisor.py",
+            profile["filesystem"]["read_file"],
+        )
+        self.assertIn(
+            "/opt/humr/runtime/http_router/Caddyfile",
+            profile["filesystem"]["read_file"],
+        )
         self.assertIn(
             "/opt/humr/runtime/widgets/widget-unavailable.html",
             profile["filesystem"]["read_file"],

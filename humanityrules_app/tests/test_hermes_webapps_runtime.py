@@ -1,4 +1,4 @@
-"""Tests for the Hermes webapps process-compose runtime contract."""
+"""Tests for the Hermes Web Apps runtime contract."""
 
 from __future__ import annotations
 
@@ -22,12 +22,11 @@ def _humr_runtime_dir() -> pathlib.Path:
     return _runtime_dir().parent
 
 
-def _load_runtime_module(name: str, filename: str) -> types.ModuleType:
-    webapps_dir = _runtime_dir()
-    if str(webapps_dir) not in sys.path:
-        sys.path.insert(0, str(webapps_dir))
+def _load_runtime_module(name: str, directory: pathlib.Path, filename: str) -> types.ModuleType:
+    if str(directory) not in sys.path:
+        sys.path.insert(0, str(directory))
 
-    script_path = webapps_dir / filename
+    script_path = directory / filename
     loader = importlib.machinery.SourceFileLoader(name, str(script_path))
     spec = importlib.util.spec_from_loader(name, loader)
     module = importlib.util.module_from_spec(spec)
@@ -36,14 +35,30 @@ def _load_runtime_module(name: str, filename: str) -> types.ModuleType:
     return module
 
 
-webapps_lib = _load_runtime_module(name="webapps_lib", filename="webapps_lib.py")
-webapps_cli = _load_runtime_module(name="webapps_cli_under_test", filename="webapps")
-system_process_compose_seed = _load_runtime_module(
-    name="system_process_compose_seed_under_test",
-    filename="system_process_compose_seed.py",
+process_supervisor_dir = _humr_runtime_dir() / "process_supervisor"
+process_supervisor = _load_runtime_module(
+    name="process_supervisor",
+    directory=process_supervisor_dir,
+    filename="process_supervisor.py",
+)
+webapps_lib = _load_runtime_module(
+    name="webapps_lib",
+    directory=_runtime_dir(),
+    filename="webapps_lib.py",
+)
+webapps_cli = _load_runtime_module(
+    name="webapps_cli_under_test",
+    directory=_runtime_dir(),
+    filename="webapps",
+)
+system_process_seed = _load_runtime_module(
+    name="system_process_seed_under_test",
+    directory=process_supervisor_dir,
+    filename="system_process_seed.py",
 )
 seed_example_webapps = _load_runtime_module(
     name="seed_example_webapps_under_test",
+    directory=_runtime_dir(),
     filename="seed_example_webapps.py",
 )
 
@@ -61,27 +76,32 @@ class DummyLock:
 
 class TestHermesWebappsRuntimeContract(unittest.TestCase):
 
-    def test_webapps_and_system_process_compose_paths_are_split(self) -> None:
+    def test_app_workloads_and_system_process_compose_paths_are_split(self) -> None:
         self.assertEqual(
-            str(webapps_lib.SYSTEM_PROJECT.yaml_path),
+            str(process_supervisor.SYSTEM_PROJECT.yaml_path),
             "/workspace/.config/process-compose/system/process-compose.yaml",
         )
         self.assertEqual(
-            str(webapps_lib.WEBAPPS_PROJECT.yaml_path),
-            "/workspace/.config/process-compose/webapps/process-compose.yaml",
+            str(process_supervisor.APP_WORKLOADS_PROJECT.yaml_path),
+            "/workspace/.config/process-compose/app-workloads/process-compose.yaml",
         )
         self.assertEqual(
-            str(webapps_lib.SYSTEM_PROJECT.lock_file),
+            str(process_supervisor.SYSTEM_PROJECT.lock_file),
             "/workspace/.config/process-compose/system/.system.lock",
         )
         self.assertEqual(
-            str(webapps_lib.WEBAPPS_PROJECT.lock_file),
-            "/workspace/.config/process-compose/webapps/.webapps.lock",
+            str(process_supervisor.APP_WORKLOADS_PROJECT.lock_file),
+            "/workspace/.config/process-compose/app-workloads/.app-workloads.lock",
         )
-        self.assertEqual(webapps_lib.WEBAPPS_PROJECT.port, "9957")
-        self.assertEqual(webapps_lib.SYSTEM_PROJECT.port, "9956")
+        self.assertEqual(process_supervisor.APP_WORKLOADS_PROJECT.port, "9957")
+        self.assertEqual(process_supervisor.SYSTEM_PROJECT.port, "9956")
+        self.assertFalse(hasattr(webapps_lib, "WEBAPPS_PROJECT"))
 
-    def test_webapps_runtime_does_not_export_generic_yaml_helpers(self) -> None:
+    def test_webapps_runtime_does_not_export_supervisor_helpers(self) -> None:
+        self.assertFalse(hasattr(webapps_lib, "ProcessComposeProject"))
+        self.assertFalse(hasattr(webapps_lib, "ProcessComposeLock"))
+        self.assertFalse(hasattr(webapps_lib, "SYSTEM_PROJECT"))
+        self.assertFalse(hasattr(webapps_lib, "APP_WORKLOADS_PROJECT"))
         self.assertFalse(hasattr(webapps_lib, "PROCESS_COMPOSE_YAML"))
         self.assertFalse(hasattr(webapps_lib, "PROCESS_COMPOSE_DIR"))
         self.assertFalse(hasattr(webapps_lib, "PROCESS_COMPOSE_PORT"))
@@ -125,9 +145,11 @@ class TestHermesWebappsRuntimeContract(unittest.TestCase):
 
         self.assertEqual(url, "https://my-dash-board-wolfie.humr.io/")
 
-    def test_webapps_cli_uses_webapps_daemon_for_project_update(self) -> None:
-        with patch.object(webapps_lib.subprocess, "run") as run:
-            webapps_lib.process_compose_project_update(project=webapps_lib.WEBAPPS_PROJECT)
+    def test_webapps_cli_uses_app_workloads_daemon_for_project_update(self) -> None:
+        with patch.object(process_supervisor.subprocess, "run") as run:
+            process_supervisor.process_compose_project_update(
+                project=process_supervisor.APP_WORKLOADS_PROJECT
+            )
 
         run.assert_called_once_with(
             [
@@ -139,7 +161,7 @@ class TestHermesWebappsRuntimeContract(unittest.TestCase):
                 "project",
                 "update",
                 "--config",
-                "/workspace/.config/process-compose/webapps/process-compose.yaml",
+                "/workspace/.config/process-compose/app-workloads/process-compose.yaml",
             ],
             check=True,
             capture_output=False,
@@ -150,60 +172,60 @@ class TestHermesWebappsRuntimeContract(unittest.TestCase):
         script = (_humr_runtime_dir() / "webui.sh").read_text()
 
         self.assertIn('--log-file "${PROCESS_COMPOSE_ROOT}/system/process-compose.log"', script)
-        self.assertIn('--log-file "${PROCESS_COMPOSE_ROOT}/webapps/process-compose.log"', script)
+        self.assertIn('--log-file "${PROCESS_COMPOSE_ROOT}/app-workloads/process-compose.log"', script)
         self.assertIn('--config "${PROCESS_COMPOSE_ROOT}/system/process-compose.yaml"', script)
-        self.assertIn('--config "${PROCESS_COMPOSE_ROOT}/webapps/process-compose.yaml"', script)
+        self.assertIn('--config "${PROCESS_COMPOSE_ROOT}/app-workloads/process-compose.yaml"', script)
         self.assertNotIn("SYSTEM_PROCESS_COMPOSE_YAML=", script)
-        self.assertNotIn("WEBAPPS_PROCESS_COMPOSE_YAML=", script)
+        self.assertNotIn("WEBAPPS_PROCESS_COMPOSE", script)
         self.assertNotIn("SYSTEM_PROCESS_COMPOSE_LOG=", script)
-        self.assertNotIn("WEBAPPS_PROCESS_COMPOSE_LOG=", script)
+        self.assertIn("APP_WORKLOADS_PROCESS_COMPOSE_PORT=9957", script)
 
     def test_webapps_reload_regenerates_routes_and_updates_project(self) -> None:
         doc = {
             "version": "0.5",
             "processes": {
-                "dashboard": {
+                "webapp.dashboard": {
                     "command": "uv run app",
                 },
             },
         }
 
         with (
-            patch.object(webapps_cli, "ProcessComposeLock", DummyLock),
-            patch.object(webapps_cli, "load_process_compose_yaml", return_value=doc) as load_yaml,
-            patch.object(webapps_cli, "regenerate_routes") as regenerate_routes,
-            patch.object(webapps_cli, "process_compose_project_update") as project_update,
+            patch.object(webapps_cli.process_supervisor, "ProcessComposeLock", DummyLock),
+            patch.object(webapps_cli.process_supervisor, "load_process_compose_yaml", return_value=doc) as load_yaml,
+            patch.object(webapps_cli.webapps_lib, "regenerate_webapp_routes") as regenerate_routes,
+            patch.object(webapps_cli.process_supervisor, "process_compose_project_update") as project_update,
             patch("builtins.print"),
         ):
             webapps_cli.cmd_reload(types.SimpleNamespace())
 
-        load_yaml.assert_called_once_with(project=webapps_lib.WEBAPPS_PROJECT)
-        regenerate_routes.assert_called_once_with(doc)
-        project_update.assert_called_once_with(project=webapps_lib.WEBAPPS_PROJECT)
+        load_yaml.assert_called_once_with(project=process_supervisor.APP_WORKLOADS_PROJECT)
+        regenerate_routes.assert_called_once_with(document=doc)
+        project_update.assert_called_once_with(project=process_supervisor.APP_WORKLOADS_PROJECT)
 
     def test_webapps_unregister_removes_supervision_without_deleting_artifacts(self) -> None:
         saved_calls = []
         doc = {
             "version": "0.5",
             "processes": {
-                "dashboard": {
+                "webapp.dashboard": {
                     "command": "uv run app",
                 },
-                "reports": {
+                "webapp.reports": {
                     "command": "uv run reports",
                 },
             },
         }
 
-        def save_doc(*, project: object, doc: dict) -> None:
-            saved_calls.append((project, doc))
+        def save_doc(*, project: object, document: dict) -> None:
+            saved_calls.append((project, document))
 
         with (
-            patch.object(webapps_cli, "ProcessComposeLock", DummyLock),
-            patch.object(webapps_cli, "load_process_compose_yaml", return_value=doc),
-            patch.object(webapps_cli, "save_process_compose_yaml", side_effect=save_doc) as save_yaml,
-            patch.object(webapps_cli, "regenerate_routes") as regenerate_routes,
-            patch.object(webapps_cli, "process_compose_project_update") as project_update,
+            patch.object(webapps_cli.process_supervisor, "ProcessComposeLock", DummyLock),
+            patch.object(webapps_cli.process_supervisor, "load_process_compose_yaml", return_value=doc),
+            patch.object(webapps_cli.process_supervisor, "save_process_compose_yaml", side_effect=save_doc) as save_yaml,
+            patch.object(webapps_cli.webapps_lib, "regenerate_webapp_routes") as regenerate_routes,
+            patch.object(webapps_cli.process_supervisor, "process_compose_project_update") as project_update,
             patch.object(webapps_cli.shutil, "rmtree") as rmtree,
             patch("builtins.print"),
         ):
@@ -212,17 +234,17 @@ class TestHermesWebappsRuntimeContract(unittest.TestCase):
         save_yaml.assert_called_once()
         self.assertEqual(len(saved_calls), 1)
         project, saved_doc = saved_calls[0]
-        self.assertIs(project, webapps_lib.WEBAPPS_PROJECT)
-        self.assertEqual(set(saved_doc["processes"]), {"reports"})
-        regenerate_routes.assert_called_once_with(saved_doc)
-        project_update.assert_called_once_with(project=webapps_lib.WEBAPPS_PROJECT)
+        self.assertIs(project, process_supervisor.APP_WORKLOADS_PROJECT)
+        self.assertEqual(set(saved_doc["processes"]), {"webapp.reports"})
+        regenerate_routes.assert_called_once_with(document=saved_doc)
+        project_update.assert_called_once_with(project=process_supervisor.APP_WORKLOADS_PROJECT)
         rmtree.assert_not_called()
 
     def test_webapps_create_registers_stopped_entry_with_env_without_starting(self) -> None:
         saved_calls = []
 
-        def save_doc(*, project: object, doc: dict) -> None:
-            saved_calls.append((project, doc))
+        def save_doc(*, project: object, document: dict) -> None:
+            saved_calls.append((project, document))
 
         with tempfile.TemporaryDirectory() as tmpdir:
             args = types.SimpleNamespace(
@@ -234,16 +256,16 @@ class TestHermesWebappsRuntimeContract(unittest.TestCase):
                 bootstrap_enabled=False,
             )
             with (
-                patch.object(webapps_cli, "ProcessComposeLock", DummyLock),
+                patch.object(webapps_cli.process_supervisor, "ProcessComposeLock", DummyLock),
                 patch.object(
-                    webapps_cli,
+                    webapps_cli.process_supervisor,
                     "load_process_compose_yaml",
                     return_value={"version": "0.5", "processes": {}},
                 ),
-                patch.object(webapps_cli, "save_process_compose_yaml", side_effect=save_doc) as save_yaml,
-                patch.object(webapps_cli, "regenerate_routes") as regenerate_routes,
-                patch.object(webapps_cli, "process_compose_project_update") as project_update,
-                patch.object(webapps_cli, "wait_for_ready") as wait_for_ready,
+                patch.object(webapps_cli.process_supervisor, "save_process_compose_yaml", side_effect=save_doc) as save_yaml,
+                patch.object(webapps_cli.webapps_lib, "regenerate_webapp_routes") as regenerate_routes,
+                patch.object(webapps_cli.process_supervisor, "process_compose_project_update") as project_update,
+                patch.object(webapps_cli.webapps_lib, "wait_for_ready") as wait_for_ready,
                 patch("builtins.print"),
             ):
                 webapps_cli.cmd_create(args)
@@ -251,8 +273,8 @@ class TestHermesWebappsRuntimeContract(unittest.TestCase):
         save_yaml.assert_called_once()
         self.assertEqual(len(saved_calls), 1)
         project, saved_doc = saved_calls[0]
-        self.assertIs(project, webapps_lib.WEBAPPS_PROJECT)
-        entry = saved_doc["processes"]["dashboard"]
+        self.assertIs(project, process_supervisor.APP_WORKLOADS_PROJECT)
+        entry = saved_doc["processes"]["webapp.dashboard"]
         self.assertEqual(entry["command"], "uv run app")
         self.assertTrue(entry["disabled"])
         self.assertEqual(entry["log_location"], "/workspace/webapps/logs/dashboard.log")
@@ -274,15 +296,15 @@ class TestHermesWebappsRuntimeContract(unittest.TestCase):
                 "PYTHONPATH=/workspace/lib",
             ],
         )
-        regenerate_routes.assert_called_once_with(saved_doc)
+        regenerate_routes.assert_called_once_with(document=saved_doc)
         project_update.assert_not_called()
         wait_for_ready.assert_not_called()
 
     def test_webapps_create_bootstrap_enabled_keeps_admin_enabled_without_starting(self) -> None:
         saved_calls = []
 
-        def save_doc(*, project: object, doc: dict) -> None:
-            saved_calls.append((project, doc))
+        def save_doc(*, project: object, document: dict) -> None:
+            saved_calls.append((project, document))
 
         with tempfile.TemporaryDirectory() as tmpdir:
             args = types.SimpleNamespace(
@@ -294,23 +316,23 @@ class TestHermesWebappsRuntimeContract(unittest.TestCase):
                 bootstrap_enabled=True,
             )
             with (
-                patch.object(webapps_cli, "ProcessComposeLock", DummyLock),
+                patch.object(webapps_cli.process_supervisor, "ProcessComposeLock", DummyLock),
                 patch.object(
-                    webapps_cli,
+                    webapps_cli.process_supervisor,
                     "load_process_compose_yaml",
                     return_value={"version": "0.5", "processes": {}},
                 ),
-                patch.object(webapps_cli, "save_process_compose_yaml", side_effect=save_doc),
-                patch.object(webapps_cli, "regenerate_routes"),
-                patch.object(webapps_cli, "process_compose_project_update") as project_update,
-                patch.object(webapps_cli, "wait_for_ready") as wait_for_ready,
+                patch.object(webapps_cli.process_supervisor, "save_process_compose_yaml", side_effect=save_doc),
+                patch.object(webapps_cli.webapps_lib, "regenerate_webapp_routes"),
+                patch.object(webapps_cli.process_supervisor, "process_compose_project_update") as project_update,
+                patch.object(webapps_cli.webapps_lib, "wait_for_ready") as wait_for_ready,
                 patch("builtins.print"),
             ):
                 webapps_cli.cmd_create(args)
 
         self.assertEqual(len(saved_calls), 1)
         _project, saved_doc = saved_calls[0]
-        self.assertNotIn("disabled", saved_doc["processes"]["__admin"])
+        self.assertNotIn("disabled", saved_doc["processes"]["webapp.__admin"])
         project_update.assert_not_called()
         wait_for_ready.assert_not_called()
 
@@ -319,7 +341,7 @@ class TestHermesWebappsRuntimeContract(unittest.TestCase):
         doc = {
             "version": "0.5",
             "processes": {
-                "dashboard": {
+                "webapp.dashboard": {
                     "command": "uv run app",
                     "disabled": True,
                     "environment": ["WEBAPP_PORT=4000"],
@@ -327,14 +349,14 @@ class TestHermesWebappsRuntimeContract(unittest.TestCase):
             },
         }
 
-        def save_doc(*, project: object, doc: dict) -> None:
-            saved_calls.append((project, doc))
+        def save_doc(*, project: object, document: dict) -> None:
+            saved_calls.append((project, document))
 
         with (
-            patch.object(webapps_cli, "ProcessComposeLock", DummyLock),
-            patch.object(webapps_cli, "load_process_compose_yaml", return_value=doc),
-            patch.object(webapps_cli, "save_process_compose_yaml", side_effect=save_doc),
-            patch.object(webapps_cli, "process_compose_project_update") as project_update,
+            patch.object(webapps_cli.process_supervisor, "ProcessComposeLock", DummyLock),
+            patch.object(webapps_cli.process_supervisor, "load_process_compose_yaml", return_value=doc),
+            patch.object(webapps_cli.process_supervisor, "save_process_compose_yaml", side_effect=save_doc),
+            patch.object(webapps_cli.process_supervisor, "process_compose_project_update") as project_update,
             patch("builtins.print"),
         ):
             webapps_cli.cmd_set_env(types.SimpleNamespace(slug="dashboard", kv=["HERMES_WEB_DIST=/workspace/dist"]))
@@ -342,7 +364,7 @@ class TestHermesWebappsRuntimeContract(unittest.TestCase):
         self.assertEqual(len(saved_calls), 1)
         _project, saved_doc = saved_calls[0]
         self.assertEqual(
-            saved_doc["processes"]["dashboard"]["environment"],
+            saved_doc["processes"]["webapp.dashboard"]["environment"],
             [
                 "WEBAPP_PORT=4000",
                 "HERMES_WEB_DIST=/workspace/dist",
@@ -383,21 +405,26 @@ class TestHermesWebappsRuntimeContract(unittest.TestCase):
             },
         )
 
-    def test_extensionless_webapps_cli_imports_the_split_runtime_helpers(self) -> None:
-        self.assertIs(webapps_cli.WEBAPPS_PROJECT, webapps_lib.WEBAPPS_PROJECT)
-        self.assertIs(webapps_cli.process_compose_project_update, webapps_lib.process_compose_project_update)
-        self.assertIs(webapps_cli.run_process_compose, webapps_lib.run_process_compose)
-        self.assertEqual(webapps_cli.DEFAULT_TIMEOUT_SECONDS, 75)
+    def test_extensionless_webapps_cli_imports_the_neutral_supervisor(self) -> None:
+        self.assertIs(
+            webapps_cli.process_supervisor.APP_WORKLOADS_PROJECT,
+            process_supervisor.APP_WORKLOADS_PROJECT,
+        )
+        self.assertEqual(process_supervisor.DEFAULT_TIMEOUT_SECONDS, 75)
+        self.assertEqual(
+            webapps_lib.webapp_process_name(slug="dashboard"),
+            "webapp.dashboard",
+        )
 
     def test_system_seeder_writes_only_the_system_yaml(self) -> None:
         saved_calls = []
 
-        def save_doc(*, project: object, doc: dict) -> None:
-            saved_calls.append((project, doc))
+        def save_doc(*, project: object, document: dict) -> None:
+            saved_calls.append((project, document))
 
         with tempfile.TemporaryDirectory() as tmpdir:
             argv = [
-                "system_process_compose_seed.py",
+                "system_process_seed.py",
                 "system.gateway",
                 "--command",
                 "gateway run",
@@ -407,25 +434,28 @@ class TestHermesWebappsRuntimeContract(unittest.TestCase):
                 "A=B",
             ]
             with (
-                patch.object(system_process_compose_seed, "ProcessComposeLock", DummyLock),
+                patch.object(system_process_seed.process_supervisor, "ProcessComposeLock", DummyLock),
                 patch.object(
-                    system_process_compose_seed,
+                    system_process_seed.process_supervisor,
                     "load_process_compose_yaml",
                     return_value={"version": "0.5", "processes": {}},
                 ) as load_yaml,
-                patch.object(system_process_compose_seed, "save_process_compose_yaml", side_effect=save_doc) as save_yaml,
-                patch.object(system_process_compose_seed.sys, "argv", argv),
+                patch.object(system_process_seed.process_supervisor, "save_process_compose_yaml", side_effect=save_doc) as save_yaml,
+                patch.object(system_process_seed.sys, "argv", argv),
             ):
-                system_process_compose_seed.main()
+                system_process_seed.main()
 
-        load_yaml.assert_called_once_with(project=webapps_lib.SYSTEM_PROJECT)
+        load_yaml.assert_called_once_with(project=process_supervisor.SYSTEM_PROJECT)
         save_yaml.assert_called_once()
         self.assertEqual(len(saved_calls), 1)
         project, doc = saved_calls[0]
-        self.assertIs(project, webapps_lib.SYSTEM_PROJECT)
+        self.assertIs(project, process_supervisor.SYSTEM_PROJECT)
         self.assertEqual(set(doc["processes"]), {"system.gateway"})
         self.assertEqual(doc["processes"]["system.gateway"]["command"], "gateway run")
-        self.assertEqual(doc["processes"]["system.gateway"]["log_location"], "/workspace/webapps/logs/system.gateway.log")
+        self.assertEqual(
+            doc["processes"]["system.gateway"]["log_location"],
+            "/workspace/.config/process-compose/system/logs/system.gateway.log",
+        )
         self.assertEqual(
             doc["processes"]["system.gateway"]["log_configuration"],
             {
@@ -666,9 +696,8 @@ class TestSeedExampleWebapps(unittest.TestCase):
 
     # --- wiring guards -------------------------------------------------------
 
-    def test_repo_snakes_manifest_is_valid(self) -> None:
-        hermes_agent = _humr_runtime_dir().parent
-        snakes_dir = hermes_agent / "webapps" / "examples" / "snakes"
+    def test_runtime_snakes_manifest_is_valid(self) -> None:
+        snakes_dir = _runtime_dir() / "examples" / "snakes"
         ex = seed_example_webapps.load_manifest(snakes_dir)
         self.assertIsNotNone(ex)
         self.assertEqual(ex.slug, "snakes")
@@ -684,7 +713,12 @@ class TestSeedExampleWebapps(unittest.TestCase):
 
     def test_dockerfile_bakes_example_catalog(self) -> None:
         dockerfile = (_humr_runtime_dir().parent / "Dockerfile").read_text()
-        self.assertIn("COPY webapps/examples /opt/humr/webapps/examples", dockerfile)
+        self.assertIn("COPY humr_runtime /opt/humr/runtime", dockerfile)
+        self.assertNotIn("COPY webapps/examples", dockerfile)
+        self.assertEqual(
+            seed_example_webapps.EXAMPLES_DIR,
+            pathlib.Path("/opt/humr/runtime/webapps/examples"),
+        )
 
     def test_nono_profile_allows_seed_script(self) -> None:
         profile = json.loads((_humr_runtime_dir() / "hermes-nono-profile.json").read_text())

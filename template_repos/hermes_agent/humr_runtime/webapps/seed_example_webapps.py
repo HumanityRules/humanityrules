@@ -1,16 +1,17 @@
 #!/opt/hermes/webui/venv/bin/python3
 """Seed bundled example webapps into an agent.
 
-Invoked from webui.sh *before* the webapps process-compose daemon starts (like
+Invoked from webui.sh *before* the app-workloads process-compose daemon starts (like
 the __admin bootstrap), so registration goes through
 `webapps create --bootstrap-enabled`, which writes the YAML entry + Caddy route
 directly without an RPC to the not-yet-running daemon.
 
-The catalog is image-owned, baked at /opt/humr/webapps/examples/<slug>/ with an
-example.json manifest per app. /opt/humr is re-synced from the image on every
-boot (persistent-root-runner IMAGE_OWNED_DIRS), so the catalog always reflects
-the deployed image; the installed copy under /workspace/webapps/projects/
-(persistent) is what the user sees and edits.
+The catalog is image-owned, baked at
+/opt/humr/runtime/webapps/examples/<slug>/ with an example.json manifest per
+app. /opt/humr is re-synced from the image on every boot (persistent-root-runner
+IMAGE_OWNED_DIRS), so the catalog always reflects the deployed image; the
+installed copy under /workspace/webapps/projects/ (persistent) is what the user
+sees and edits.
 
 The per-install marker at /workspace/webapps/.seeded/<slug> records both that the
 app was installed AND its update policy — the marker's contents ARE the policy.
@@ -44,7 +45,12 @@ from pathlib import Path
 sys.path.insert(0, "/opt/humr/runtime/webapps")
 from webapps_lib import SLUG_PATTERN, is_internal_slug  # noqa: E402
 
-EXAMPLES_DIR = Path(os.environ.get("HUMR_WEBAPPS_EXAMPLES_DIR", "/opt/humr/webapps/examples"))
+EXAMPLES_DIR = Path(
+    os.environ.get(
+        "HUMR_WEBAPPS_EXAMPLES_DIR",
+        "/opt/humr/runtime/webapps/examples",
+    )
+)
 PROJECTS_DIR = Path("/workspace/webapps/projects")
 SEEDED_DIR = Path("/workspace/webapps/.seeded")
 WEBAPPS_CLI = "/opt/humr/bin/webapps"
