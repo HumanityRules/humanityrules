@@ -678,9 +678,9 @@ class AppTemplate(models.Model):
     serialize_task_replacement = models.BooleanField(default=False)
 
     # When True, the ALB listener rule also matches *-<agent-host> so the
-    # agent's Caddy sidecar can route user webapps by hostname. TLS and DNS
+    # agent's Caddy sidecar can route user Web Apps by hostname. TLS and DNS
     # come from the environment's *.<zone> certificate and wildcard record.
-    # See docs/webapps_design.md.
+    # See docs/app_workloads_design.md.
     enable_webapp_hosts = models.BooleanField(default=False)
 
     # Template for the dashless default App Name shown on the deploy form. Tokens:

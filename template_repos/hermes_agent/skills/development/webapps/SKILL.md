@@ -32,10 +32,10 @@ The nono sandbox only allows **loopback listens on ports 4000–4019**. The CLI 
   logs/<slug>.log                               # plain-text stdout/stderr for this app
 
 /workspace/.config/process-compose/
-  webapps/process-compose.yaml                  # managed by CLI; reload only for resync/repair
+  app-workloads/process-compose.yaml            # shared supervisor state; managed by CLIs
 
 /workspace/.config/caddy/
-  routes.caddy                                  # generated routes — DO NOT EDIT BY HAND
+  webapps.caddy                                 # generated Web App routes — DO NOT EDIT BY HAND
 ```
 
 ## CLI reference
@@ -118,8 +118,8 @@ A frozen app is never overwritten on deploy. To resume updates, write `refresh` 
 
 ## Don'ts
 
-- **Don't edit `/workspace/.config/caddy/routes.caddy` by hand.** It is generated.
-- **Don't edit `/workspace/.config/process-compose/webapps/process-compose.yaml` by hand for normal changes.** Use the CLI. If a break-glass repair requires a direct YAML edit, run `webapps reload` immediately after.
+- **Don't edit `/workspace/.config/caddy/webapps.caddy` by hand.** It is generated.
+- **Don't edit `/workspace/.config/process-compose/app-workloads/process-compose.yaml` by hand for normal changes.** It contains namespaced Web App and Widget workloads and is shared by both CLIs. Use the owning CLI. If a break-glass Web App repair requires a direct YAML edit, run `webapps reload` immediately after.
 - **Don't pick a port manually.** Use `$WEBAPP_PORT` in `--command`. The CLI assigns ports.
 - **Don't claim success without verifying.** Run `webapps list` after `start` to confirm the app is `Ready`. If readiness times out, read the logs and check `exit_code`/`restarts` in the CLI output.
 - **Don't run `webapps delete <slug> --yes` without first telling the user what will be removed and getting explicit confirmation.** Delete is total: route, supervision, logs, AND `projects/<slug>/`.

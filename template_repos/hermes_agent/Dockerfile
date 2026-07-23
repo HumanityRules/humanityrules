@@ -333,13 +333,6 @@ RUN chmod +x /opt/humr/runtime/webapps/webapps \
     && ln -sf /opt/humr/runtime/webapps/webapps /opt/humr/bin/webapps \
     && ln -sf /opt/humr/runtime/widgets/widgets /opt/humr/bin/widgets
 
-# Bundled example webapps (the catalog). Image-owned under /opt/humr, so it's
-# re-synced from the image every boot and excluded from the EFS checkpoint —
-# always reflecting the deployed image. webui.sh's seed step installs
-# not-yet-seeded examples into /workspace/webapps/projects/ on boot. See
-# humr_runtime/webapps/seed_example_webapps.py.
-COPY webapps/examples /opt/humr/webapps/examples
-
 # Image-owned source for the HUMR WebUI extension bundle. sandbox_seed.py syncs
 # it into the WebUI-managed extension root on every boot.
 COPY webui-extension /opt/humr/webui-extension

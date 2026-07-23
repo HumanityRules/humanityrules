@@ -95,7 +95,7 @@ Providers that do not affect gateway startup keep
 *and* disconnect: connect populates the managed block, disconnect empties
 it; the gateway either picks up the platform binding or boots without it.
 
-### Process supervision: split system and webapps projects
+### Process supervision: system and app-workloads projects
 
 HUMR-supervised processes inside nono are split across two
 process-compose daemons:
@@ -104,23 +104,14 @@ process-compose daemons:
    `/workspace/.config/process-compose/system/process-compose.yaml`
    and supervises `system.gateway` plus `system.webui`.
 2. `127.0.0.1:9957` reads
-   `/workspace/.config/process-compose/webapps/process-compose.yaml`
-   and supervises `__admin` plus user webapps.
+   `/workspace/.config/process-compose/app-workloads/process-compose.yaml`
+   and supervises namespaced `webapp.<slug>` and `widget.<slug>` workloads.
 
-Generated Caddy routes live at
-`/workspace/.config/caddy/routes.caddy` and are derived only from the
-webapps YAML.
-
-Naming:
-
-- `__<slug>` — platform-internal webapps (today: `__admin`).
-- `system.<slug>` — HUMR-managed system processes (today:
-  `system.gateway`).
-- Everything else — user webapps.
-
-The `webapps` CLI rejects creating slugs starting with `system.` and
-talks only to the webapps daemon. System entries are seeded by
-`webui.sh` directly via `system_process_compose_seed.py`.
+This document cares about the split because broker-triggered gateway
+restarts target only the system project. The Web App and Widget ownership
+model is documented in `docs/app_workloads_design.md`. System entries are
+seeded by `webui.sh` through
+`process_supervisor/system_process_seed.py`.
 
 ### Failure surface
 
@@ -144,11 +135,11 @@ supervisor (root, outside nono):
   launch nono → webui.sh
 
 webui.sh (hermeswebui, inside nono):
-  bootstrap_admin_webapp        (creates webapps layout, writes __admin)
+  reconcile/register app workloads
   bootstrap_gateway_process     (creates system layout, writes system.gateway)
   bootstrap_webui_process       (writes system.webui into the system YAML)
   start system process-compose  (brings up system.gateway + system.webui)
-  start webapps process-compose (brings up __admin + user webapps)
+  start app-workloads compose   (brings up Web Apps + Widget backends)
   wait_for_webui
   start_caddy
 ```
@@ -169,9 +160,9 @@ webui.sh (hermeswebui, inside nono):
   restart signal?** Two writers to the restart trigger, ordering
   ambiguity. The broker is the only component that observes the *event*
   in real time; signaling from anywhere else means polling.
-- **Why split process-compose instances (system + webapps)?**
+- **Why split process-compose instances (system + app workloads)?**
   `process-compose project update` applies at daemon/project scope. If
-  webapp CRUD shares a project with `system.webui`, registering a webapp
-  can restart WebUI and interrupt an active chat stream. Splitting the
+  application changes share a project with `system.webui`, registering a
+  Web App can restart WebUI and interrupt an active chat stream. Splitting the
   projects keeps the existing simple YAML + `project update` workflow for
-  webapps while constraining its blast radius to `__admin` and user apps.
+  applications while constraining its blast radius to app workloads.
