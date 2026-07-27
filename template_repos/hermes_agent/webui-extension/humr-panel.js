@@ -149,7 +149,10 @@
       dataset: { panel: spec.id, tooltip: spec.title },
       onclick: activate,
     });
+    // The rail shows a permanent label beside each icon; our entries carry one
+    // too or they read as unlabelled next to the upstream tabs.
     railBtn.innerHTML = strokeIcon(spec.icon, 20, 1.5);
+    railBtn.appendChild(elem('span', { class: 'rail-label' }, [spec.title]));
 
     const navBtn = elem('button', {
       type: 'button',
