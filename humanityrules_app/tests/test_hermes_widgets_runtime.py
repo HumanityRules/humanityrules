@@ -135,7 +135,7 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
             if path.is_file()
         }
 
-    def test_static_routes_expose_only_entry_and_safe_sibling_assets(self) -> None:
+    def test_static_routes_serve_existing_files_and_fall_back_to_entry(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_dir:
             paths = self._paths(root=pathlib.Path(temporary_dir))
             widget_dir = self._write_static_widget(
@@ -161,12 +161,12 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
         self.assertIn('rewrite * "/app.html"', fragment)
         self.assertIn("path /widgets/customer-dashboard", fragment)
         self.assertIn("redir @widget_customer_dashboard_root /widgets/customer-dashboard/ 308", fragment)
-        self.assertIn("path_regexp widget_customer_dashboard_assets_path", fragment)
-        self.assertIn("(?:[^./][^/]*/)*[^./][^/]*", fragment)
+        self.assertIn("path /widgets/customer-dashboard/", fragment)
+        self.assertIn("uri strip_prefix /widgets/customer-dashboard", fragment)
+        self.assertIn('try_files {path} "/app.html"', fragment)
+        self.assertNotIn("path_regexp widget_customer_dashboard_assets_path", fragment)
         self.assertNotIn(str(widget_dir), fragment)
         self.assertNotIn("dist/site", fragment)
-        self.assertNotIn("widget.json", fragment)
-        self.assertNotIn("backend/server.py", fragment)
 
         malicious = widgets_core.WidgetManifest(
             schema_version=1,
@@ -234,17 +234,23 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
             )
             (zulu_dir / "assets").mkdir()
             (zulu_dir / "assets" / "app.js").write_text("zulu js", encoding="utf-8")
-            (alpha_dir / "public" / "assets" / "nested").mkdir(parents=True)
-            (alpha_dir / "public" / "assets" / "nested" / "app.css").write_text(
+            (zulu_dir / "contacts.json").write_text('{"contacts": []}', encoding="utf-8")
+            (alpha_dir / "public" / "styles").mkdir(parents=True)
+            (alpha_dir / "public" / "styles" / "app.css").write_text(
                 "alpha css", encoding="utf-8"
             )
+            (alpha_dir / "public" / "data").mkdir()
+            (alpha_dir / "public" / "data" / "contacts.json").write_text(
+                '{"contacts": []}', encoding="utf-8"
+            )
+            (alpha_dir / "public" / "app.js").write_text("alpha js", encoding="utf-8")
             (alpha_dir / "backend.py").write_text("secret", encoding="utf-8")
 
             result = widgets_runtime.reconcile_widgets(paths=paths, target_slug=None, update_processes=False)
             registry = json.loads(paths.registry_path.read_text(encoding="utf-8"))
             routes = paths.routes_path.read_text(encoding="utf-8")
             snapshot = self._snapshot_files(static_root=paths.static_root)
-            live_asset = alpha_dir / "public" / "assets" / "nested" / "app.css"
+            live_asset = alpha_dir / "public" / "styles" / "app.css"
             outside = pathlib.Path(temporary_dir) / "outside.css"
             outside.write_text("outside secret", encoding="utf-8")
             live_asset.unlink()
@@ -264,10 +270,17 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
         self.assertEqual(
             snapshot,
             {
-                "alpha-widget/assets/nested/app.css": b"alpha css",
+                "alpha-widget/app.js": b"alpha js",
+                "alpha-widget/data/contacts.json": b'{"contacts": []}',
                 "alpha-widget/index.html": b"<h1>Zulu title</h1>",
+                "alpha-widget/styles/app.css": b"alpha css",
                 "zulu-widget/assets/app.js": b"zulu js",
+                "zulu-widget/contacts.json": b'{"contacts": []}',
                 "zulu-widget/index.html": b"<h1>Alpha title</h1>",
+                "zulu-widget/widget.json": (
+                    b'{"schema_version": 1, "title": "Alpha title", '
+                    b'"frontend": {"mode": "static", "entry": "index.html"}}'
+                ),
             },
         )
         self.assertNotIn("backend.py", routes)
@@ -329,7 +342,7 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
         self.assertEqual([widget.slug for widget in result.widgets], ["valid-widget"])
         self.assertEqual([failure.slug for failure in result.failures], ["broken-widget"])
 
-    def test_asset_symlink_is_rejected_and_never_published(self) -> None:
+    def test_static_frontend_symlink_is_rejected_and_never_published(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_dir:
             root = pathlib.Path(temporary_dir)
             paths = self._paths(root=root)
@@ -384,7 +397,7 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
         self.assertNotIn("linked-widget", routes)
         self.assertNotIn(b"must never be public", snapshot.values())
 
-    def test_special_asset_file_is_rejected(self) -> None:
+    def test_special_static_frontend_file_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_dir:
             paths = self._paths(root=pathlib.Path(temporary_dir))
             widget_dir = self._write_static_widget(
