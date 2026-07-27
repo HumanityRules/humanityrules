@@ -71,7 +71,7 @@ For a backend-served frontend:
 
 `title` is required. `icon` is optional; omit it for the generic Widget icon. Supported host icons are `widget`, `chart-bar`, `calendar`, `code`, `globe`, `table`, and `list-check`.
 
-For static mode, keep `frontend.entry` a canonical relative path to a regular file inside the Widget directory. Put all other frontend files beneath that directory; paths escaping it are rejected.
+For static mode, keep `frontend.entry` a canonical relative path to a regular file inside the Widget directory. Its parent directory becomes the static site root, and `widgets apply` publishes that complete directory. Put the entry under a dedicated directory such as `public/` when the Widget also contains backend code or runtime data that should not be copied into the static snapshot.
 
 ## Build for the mounted path
 
@@ -81,7 +81,7 @@ Use relative browser URLs so the Widget remains under its assigned prefix:
 fetch('./api/customers');
 ```
 
-Use `./assets/app.js`, not `/assets/app.js`. Do not hard-code the agent hostname or a backend port.
+Use `./app.js` or `./data/customers.json`, not `/app.js` or `/data/customers.json`. Existing files are served at their relative paths; requests without a matching file fall back to the declared entry for client-side routing. Do not hard-code the agent hostname or a backend port.
 
 For a static frontend with a backend, requests under `/widgets/<slug>/api/*` reach the backend as `/api/*`. For backend-served mode, the entire `/widgets/<slug>` prefix is stripped before proxying.
 

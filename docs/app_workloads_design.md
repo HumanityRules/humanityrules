@@ -90,7 +90,7 @@ The directory name supplies the slug. `widget.json` declares presentation metada
 `widgets apply` discovers valid manifests and derives:
 
 - The registry consumed by the WebUI Widgets panel.
-- Safe static snapshots for static frontends.
+- Static snapshots for static frontends.
 - Widget Caddy routes.
 - `widget.<slug>` supervisor entries for Widgets with backends.
 
@@ -164,7 +164,7 @@ Every Widget has a frontend and uses one of three runtime shapes:
 2. **Static frontend with backend:** Caddy serves the snapshot and proxies `/widgets/<slug>/api/...` to `widget.<slug>`. The backend sees `/api/...`.
 3. **Backend-served frontend:** Caddy proxies the whole Widget path to `widget.<slug>` after stripping `/widgets/<slug>`. The backend sees `/` as its root.
 
-Static Widget assets must stay beneath the Widget directory and use relative browser URLs. Backend processes bind to `127.0.0.1:$WIDGET_PORT` and receive `WIDGET_SLUG` and `WIDGET_BASE_PATH` in addition to the port.
+The directory containing the declared static entry is the Widget's static site root. Reconciliation copies that complete directory into the generated snapshot. Caddy serves existing files at their relative paths and falls back to the entry only when no file matches, so ordinary paths such as `./app.js` and `./data/snapshot.json` work without a required asset layout. Put the entry under a dedicated directory such as `public/` when only part of the Widget source tree belongs in the snapshot. Backend processes bind to `127.0.0.1:$WIDGET_PORT` and receive `WIDGET_SLUG` and `WIDGET_BASE_PATH` in addition to the port.
 
 Browser code must not receive backend credentials. Widget backends can use the same sandbox integrations and loopback Hermes API available to Web Apps, but must expose only the narrow application API the frontend needs.
 
