@@ -618,83 +618,37 @@ def _snapshot_static_widget(widget: widgets_core.WidgetManifest, widgets_root: P
             slug=widget.slug,
             description="static frontend entry",
         )
-        try:
-            _copy_regular_file(
-                source_fd=entry_fd,
-                destination_path=destination_root / entry_parts[-1],
-            )
-        finally:
-            os.close(entry_fd)
+        os.close(entry_fd)
 
-        _copy_assets_if_present(
-            entry_parent_fd=entry_parent_fd,
-            destination_root=destination_root,
+        _copy_static_directory(
+            source_fd=entry_parent_fd,
+            destination_dir=destination_root,
             slug=widget.slug,
+            relative_dir=PurePosixPath("."),
         )
     finally:
         for descriptor in reversed(opened_descriptors):
             os.close(descriptor)
 
 
-def _copy_assets_if_present(entry_parent_fd: int, destination_root: Path, slug: str) -> None:
-    try:
-        asset_stat = os.stat("assets", dir_fd=entry_parent_fd, follow_symlinks=False)
-    except FileNotFoundError:
-        return
-    except OSError as exc:
-        raise widgets_core.WidgetValidationError(
-            slug=slug, message=f"cannot inspect static assets: {exc}"
-        ) from exc
-    if stat.S_ISLNK(asset_stat.st_mode):
-        raise widgets_core.WidgetValidationError(
-            slug=slug, message="static assets directory must not be a symbolic link"
-        )
-    if not stat.S_ISDIR(asset_stat.st_mode):
-        raise widgets_core.WidgetValidationError(
-            slug=slug, message="static assets must be a directory"
-        )
-
-    assets_fd = _open_directory_at(
-        parent_fd=entry_parent_fd,
-        name="assets",
-        slug=slug,
-        description="static assets directory",
-    )
-    try:
-        destination_assets = destination_root / "assets"
-        destination_assets.mkdir()
-        _copy_asset_directory(
-            source_fd=assets_fd,
-            destination_dir=destination_assets,
-            slug=slug,
-            relative_dir=PurePosixPath("assets"),
-        )
-    finally:
-        os.close(assets_fd)
-
-
-def _copy_asset_directory(source_fd: int, destination_dir: Path, slug: str, relative_dir: PurePosixPath) -> None:
+def _copy_static_directory(source_fd: int, destination_dir: Path, slug: str, relative_dir: PurePosixPath) -> None:
     try:
         names = sorted(os.listdir(source_fd))
     except OSError as exc:
         raise widgets_core.WidgetValidationError(
-            slug=slug, message=f"cannot list static asset directory {relative_dir}: {exc}"
+            slug=slug, message=f"cannot list static frontend directory {relative_dir}: {exc}"
         ) from exc
     for name in names:
         relative_path = relative_dir / name
-        if name.startswith("."):
-            raise widgets_core.WidgetValidationError(
-                slug=slug, message=f"static assets must not contain dotfile {relative_path}"
-            )
         try:
             source_stat = os.stat(name, dir_fd=source_fd, follow_symlinks=False)
         except OSError as exc:
             raise widgets_core.WidgetValidationError(
-                slug=slug, message=f"cannot inspect static asset {relative_path}: {exc}"
+                slug=slug, message=f"cannot inspect static frontend path {relative_path}: {exc}"
             ) from exc
         if stat.S_ISLNK(source_stat.st_mode):
             raise widgets_core.WidgetValidationError(
-                slug=slug, message=f"static asset {relative_path} must not be a symbolic link"
+                slug=slug, message=f"static frontend path {relative_path} must not be a symbolic link"
             )
         if stat.S_ISDIR(source_stat.st_mode):
             destination_child = destination_dir / name
@@ -703,10 +657,10 @@ def _copy_asset_directory(source_fd: int, destination_dir: Path, slug: str, rela
                 parent_fd=source_fd,
                 name=name,
                 slug=slug,
-                description=f"static asset directory {relative_path}",
+                description=f"static frontend directory {relative_path}",
             )
             try:
-                _copy_asset_directory(
+                _copy_static_directory(
                     source_fd=child_fd,
                     destination_dir=destination_child,
                     slug=slug,
@@ -717,13 +671,13 @@ def _copy_asset_directory(source_fd: int, destination_dir: Path, slug: str, rela
             continue
         if not stat.S_ISREG(source_stat.st_mode):
             raise widgets_core.WidgetValidationError(
-                slug=slug, message=f"static asset {relative_path} must be a regular file or directory"
+                slug=slug, message=f"static frontend path {relative_path} must be a regular file or directory"
             )
         source_file_fd = _open_regular_file_at(
             parent_fd=source_fd,
             name=name,
             slug=slug,
-            description=f"static asset {relative_path}",
+            description=f"static frontend file {relative_path}",
         )
         try:
             _copy_regular_file(
@@ -1044,15 +998,14 @@ def _static_widget_route_block(widget: widgets_core.WidgetManifest, static_root:
     entry_target = _caddy_quote(value=f"/{entry_name}")
     matcher = f"widget_{widget.slug.replace('-', '_')}"
     base_path = f"/widgets/{widget.slug}"
-    safe_assets_pattern = f"^{base_path}/assets/(?:[^./][^/]*/)*[^./][^/]*$"
     return (
-        f"@{matcher}_assets {{\n"
+        f"@{matcher}_entry {{\n"
         "\theader X-Forwarded-Host {$HUMR_PUBLIC_HOSTNAME}\n"
-        f"\tpath_regexp {matcher}_assets_path {safe_assets_pattern}\n"
+        f"\tpath {base_path}/\n"
         "}\n"
-        f"handle @{matcher}_assets {{\n"
-        f"\turi strip_prefix {base_path}\n"
+        f"handle @{matcher}_entry {{\n"
         f"\troot * {widget_static_root}\n"
+        f"\trewrite * {entry_target}\n"
         "\tfile_server\n"
         "}\n"
         f"@{matcher}_frontend {{\n"
@@ -1060,8 +1013,9 @@ def _static_widget_route_block(widget: widgets_core.WidgetManifest, static_root:
         f"\tpath {base_path}/*\n"
         "}\n"
         f"handle @{matcher}_frontend {{\n"
+        f"\turi strip_prefix {base_path}\n"
         f"\troot * {widget_static_root}\n"
-        f"\trewrite * {entry_target}\n"
+        f"\ttry_files {{path}} {entry_target}\n"
         "\tfile_server\n"
         "}\n"
     )
