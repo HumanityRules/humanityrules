@@ -27,12 +27,40 @@ import tls_intercept
 
 logger = logging.getLogger("control_api")
 
+# Integration-card visibility policy — the single place deciding which cards an
+# org's WebUI shows. Visibility only: credential resolution and TLS interception
+# are untouched, and the platform-owner org sees everything. Hardcoded until
+# connector gating becomes a real CP-served feature.
+_PLATFORM_OWNER_ORG_SLUG = "humanity-rules"
+_PLATFORM_ONLY_SLUGS = frozenset({"x"})
+_CODEX_SLUG = "openai-codex"
+
+
+def _card_visible(item: dict, org_slug: str) -> bool:
+    """Decide whether one integration card is shown to *org_slug*.
+
+    Platform-only slugs never show outside the platform-owner org. The Codex
+    card shows only when connected through a customer's own credential — a
+    platform-served (or disconnected) Codex card would reveal which model
+    provider backs the platform default.
+    """
+    if org_slug == _PLATFORM_OWNER_ORG_SLUG:
+        return True
+    slug = item.get("slug", "")
+    if slug in _PLATFORM_ONLY_SLUGS:
+        return False
+    if slug == _CODEX_SLUG:
+        metadata = item.get("metadata") or {}
+        return item.get("status") == tls_intercept.STATUS_CONNECTED and not metadata.get("platform_shared")
+    return True
+
 
 async def _handle_unified_status(
     mcp_aggregator: MCPAggregator,
     tls_intercept_runtime: tls_intercept.TlsInterceptRuntime,
     humr_client: HumrClient,
     env_slug: str,
+    org_slug: str,
 ) -> Response:
     """Flat list combining TLS-intercept providers and MCP-aggregator items.
 
@@ -45,6 +73,7 @@ async def _handle_unified_status(
     """
     items = await tls_intercept_runtime.status_items()
     items.extend(await mcp_aggregator.status_items())
+    items = [item for item in items if _card_visible(item=item, org_slug=org_slug)]
     return JSONResponse(content={
         "humr_control_plane_url": humr_client.control_plane_url,
         "env_slug": env_slug,
@@ -65,6 +94,7 @@ def build_control_app(
     credentials_service: CredentialsService,
     humr_client: HumrClient,
     env_slug: str,
+    org_slug: str,
 ) -> Starlette:
     """Wire the unified /__humr_broker/* router for browser-facing integration management."""
     async def status_route(request: Request) -> Response:
@@ -73,6 +103,7 @@ def build_control_app(
             tls_intercept_runtime=tls_intercept_runtime,
             humr_client=humr_client,
             env_slug=env_slug,
+            org_slug=org_slug,
         )
 
     async def refresh_all_route(request: Request) -> Response:
