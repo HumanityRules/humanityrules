@@ -20,6 +20,8 @@ The main developer documentation lives in the docs/ subdirectory. **When creatin
 
 - **`docs/app_cost_tracking_design.md`** — Design for per-day, per-app cost tracking on the app-detail page, starting with Bedrock invocation cost and built as a generic, pluggable cost subsystem (`services/cost/`). Records the locked decisions plus the non-obvious facts from AWS docs and a real log record (cache-token fields, inference-profile-ARN modelId, geo ×1.1 premium, ARN→app forward mapping). Open before implementing cost tracking or adding a new cost source.
 
+- **`docs/pricing_credits_program_context.md`** — Initial product and technical context for the pricing and credits program. Separates approved Trial → Operator → Team → Enterprise decisions from the working subscription-credit hypothesis, inventories existing usage/cost and credential infrastructure, and lists unresolved economics, metering, ledger, entitlement, payment, and enforcement questions. Open before designing pricing, subscriptions, credits, usage rating, balances, overages, or billing.
+
 - **`docs/app_removal_data_cleanup_audit.md`** — Audit of what app removal's `removal_delete_all_data` flag covers, and the gap: `IntegrationUserCredential` rows have no FK to `App` and are never cleaned up. Open when reworking app removal, debugging phantom reconnects after recreating an app, or auditing GDPR. Snapshot 2026-05-24.
 
 - **`docs/app_workloads_design.md`** — Mental model and architecture for agent-built Web Apps and Widgets: when to use each product, shared supervision and routing, distinct sources of truth and lifecycles, security boundaries, persistence, and recovery. Open when working on either application surface or their shared runtime.
