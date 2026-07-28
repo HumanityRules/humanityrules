@@ -224,14 +224,10 @@ def app_deployment_section_status(request: HttpRequest, app_slug: str) -> HttpRe
 
 @login_required
 @require_GET
-def app_card_status(request: HttpRequest, app_slug: str) -> HttpResponse:
-    """Return updated app card status pill for polling."""
-    app = get_object_or_404(
-        App,
-        slug=app_slug,
-        organization=request.user.current_organization,
-    )
-    return render(request, "humanityrules_app/partials/_app_card_status.html", {"app": app})
+def app_card(request: HttpRequest, app_slug: str) -> HttpResponse:
+    """Return the app summary card for the self-terminating poll."""
+    app = _get_app_for_user(request, app_slug)
+    return render(request, "humanityrules_app/partials/_app_card.html", {"app": app})
 
 
 @login_required

@@ -118,6 +118,7 @@ def build_environments_context(request: HttpRequest) -> dict[str, object]:
 
     context["environments"] = environment_list
     context["aws_accounts"] = aws_accounts
+    context["has_transient_environments"] = any(environment.is_transient for environment in environment_list)
     return context
 
 
