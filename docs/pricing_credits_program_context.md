@@ -114,21 +114,7 @@ It currently says only: “Manage your subscription and billing information.” 
 
 Repository searches found no product subscription implementation and no Stripe integration. The only Stripe-specific repository material is unrelated integration-candidate research.
 
-### 3.3 Control-plane `LLMUsageLog`
-
-`humanityrules_app.models.LLMUsageLog` is an append-only record described as supporting cost tracking and billing. It records:
-
-1. Organization, user, and control-plane conversation.
-2. Source, currently `agent_turn` or `title_generation`.
-3. Model alias and resolved model ID.
-4. Input and output tokens.
-5. Optional USD cost, duration, and number of turns.
-
-Current writes occur in `humanityrules_app/services/agent/agent_service.py` for the control-plane deployment agent and conversation-title generation.
-
-Important boundary: this is not a complete record of activity inside deployed Hermes personal assistants. Title-generation rows currently have token counts but no USD cost. The model also lacks cache token buckets, external API usage, idempotency keys, rating-version references, and ledger semantics. It is useful prior art or an input source, not the credit system itself.
-
-### 3.4 Per-app Bedrock cost subsystem
+### 3.3 Per-app Bedrock cost subsystem
 
 `humanityrules_app/services/cost/` is implemented and stores daily rows in `AppDailyCost`.
 
@@ -159,7 +145,7 @@ Limits for credits and enforcement:
 7. A cost-source failure is logged and skipped; a failed rolling 24-hour source can appear as zero. That resilience is appropriate for an operational panel but cannot be inherited uncritically by billing.
 8. The implementation design records live end-to-end verification against a real account as still outstanding.
 
-### 3.5 Hermes WebUI live usage telemetry
+### 3.4 Hermes WebUI live usage telemetry
 
 The vendored Hermes WebUI emits a best-effort live usage payload while an agent stream is active. It includes session input and output tokens, cache-read and cache-write tokens, estimated USD cost, context-window values, and cache-hit percentage.
 
@@ -167,7 +153,7 @@ The stream comments define an important accuracy boundary: values are exact for 
 
 This can support near-real-time balance display, warnings, estimates, or reservations. It is not currently a durable, tenant-scoped financial event stream, and its best-effort estimates should not be the sole source of settled charges.
 
-### 3.6 Hermes WebUI provider cost budget
+### 3.5 Hermes WebUI provider cost budget
 
 The vendored Hermes WebUI has an OpenRouter-specific provider cost-history and monthly-budget feature. It:
 
@@ -183,7 +169,7 @@ This is useful UX and failure-handling prior art, but it is not a HumR commercia
 3. It displays percentage used but does not provide a multi-tenant ledger or plan entitlement.
 4. It is not authoritative for billing and does not enforce HumR credits.
 
-### 3.7 Platform, organization, and personal credentials
+### 3.6 Platform, organization, and personal credentials
 
 For supported providers, credential resolution follows:
 
@@ -207,7 +193,7 @@ Additional boundaries matter for packaging and risk:
 2. Organization opt-out or disabling of an available platform connector is deferred.
 3. Shared credential secrets are currently stored as JSON in Postgres, with migration to a dedicated secret store deferred. Platform credentials therefore create a pooled-cost and larger security and abuse-risk surface.
 
-### 3.8 Tavily
+### 3.7 Tavily
 
 Tavily is implemented as a vault provider and can use a platform-wide key. Relevant facts:
 
@@ -219,7 +205,7 @@ Tavily is implemented as a vault provider and can use a platform-wide key. Relev
 
 A shared Tavily key makes upstream aggregate usage insufficient for customer attribution. Accurate per-account charging will likely require events at the HumR broker or tool boundary, reconciliation against provider usage, or both.
 
-### 3.9 X
+### 3.8 X
 
 X is implemented as a per-user OAuth integration. The HumR control plane stores the refresh token, and the environment broker injects short-lived access tokens into calls to `api.x.com`.
 
@@ -227,7 +213,7 @@ Current code handles connection, refresh, rotation, and revocation. It does not 
 
 X pricing may depend on endpoint, operation, plan, or provider-account terms. The pricing program must not assume that one HTTP request equals one fixed charge. It needs a versioned source of truth for billable units and a clear answer to who bears the upstream X cost.
 
-### 3.10 Integrations broker as a possible metering seam
+### 3.9 Integrations broker as a possible metering seam
 
 Known provider traffic from a sandbox passes through the environment's HumR integrations broker. The broker terminates the sandbox-side TLS connection, replaces placeholder authorization, and forwards the request to the provider.
 
@@ -240,17 +226,6 @@ This creates a potential point for metering API calls because the broker can obs
 5. Endpoint-specific or response-derived billable units.
 6. Behavior when the control plane is unavailable.
 7. Whether pre-call authorization is required when credits are nearly exhausted.
-
-### 3.11 Existing verification assets
-
-The repository already contains tests that can anchor the next program:
-
-1. `humanityrules_app/tests/test_cost_subsystem.py` covers Bedrock pricing, token buckets, estimates, refresh windows, freezing, idempotent aggregate updates, rolling 24-hour behavior, job coordination, and permissions.
-2. `humanityrules_app/tests/test_shared_credentials.py`, `test_platform_shared_credentials.py`, `test_integrations_tokens_batch.py`, and `test_org_shared_keys.py` cover credential authorization and resolution precedence.
-3. `humanityrules_app/tests/test_integrations_x_oauth_callback.py` covers X connection behavior, but no existing test establishes X billable usage or credit deduction.
-4. Hermes WebUI tests cover live usage estimates and OpenRouter cost history and budget display; they do not establish commercial entitlements or enforcement.
-
-No reviewed test establishes a subscription, monthly credit grant, ledger debit, balance enforcement, payment webhook, or on-demand charge.
 
 ## 4. Recommended conceptual separation
 
@@ -434,7 +409,7 @@ These are candidate workstreams, not an approved implementation sequence.
 
 ### 7.6 Migration and verification
 
-1. Decide whether existing `LLMUsageLog` or `AppDailyCost` records seed any opening usage history.
+1. Decide whether existing `AppDailyCost` records seed any opening usage history.
 2. Add invariants and concurrency tests before enabling charges.
 3. Test duplicate events, late events, reversals, plan changes, failed payments, and cross-tenant access.
 4. Shadow-rate usage before customer enforcement.
@@ -448,63 +423,9 @@ These are candidate workstreams, not an approved implementation sequence.
 4. **Synchronous hard stops with delayed usage.** Bedrock logs arrive after execution, so exact zero-balance enforcement requires reservations, estimates, grace, or another real-time signal.
 5. **Conflating provider credits, USD, and HumR credits.** These are separate units and should have explicit names and conversions.
 6. **Mutable rate logic without history.** A changed rate must not alter the explanation of a historical charge.
-7. **Double counting.** `LLMUsageLog`, Bedrock logs, provider reports, and broker observations may describe overlapping activity.
+7. **Double counting.** Bedrock logs, provider reports, Hermes live usage telemetry, and broker observations may describe overlapping activity.
 8. **Ignoring credential funding source.** Platform, organization, and personal credentials can have different economics.
 9. **Using payment-provider objects as the internal ledger.** Webhooks can be delayed or duplicated, and provider objects do not represent every HumR grant or adjustment.
 10. **Leaking sensitive activity in billing detail.** Usage explanations should avoid prompts, responses, email contents, and raw third-party payloads.
 11. **Letting a credit balance become an authorization oracle across tenants.** Every lookup and mutation must preserve organization scope.
 12. **Embedding volatile provider prices in durable documentation.** Rate sources must be refreshed and versioned at implementation time.
-
-## 9. Non-goals of this document
-
-This brief does not:
-
-1. Approve plan prices or credit quantities.
-2. Select Stripe or any other payment provider.
-3. Define the final data model or API contracts.
-4. Decide whether credits map directly to cost.
-5. Decide rollover, expiration, proration, reservations, or overage rules.
-6. Promise that every existing cost record can be used for billing.
-7. Replace a future product requirements document, economics model, architecture design, threat model, or implementation plan.
-
-## 10. Source map
-
-### 10.1 Mission wiki
-
-1. `/workspace/wikis/humanity-rules/operations/decisions/operator-team-enterprise-pricing-ladder.md`
-2. `/workspace/wikis/humanity-rules/operations/decisions/personal-plan-as-company-use-case-trial.md`
-3. `/workspace/wikis/humanity-rules/operations/suggestions/prosumer-vs-enterprise-messaging-clarity.md`
-4. `/workspace/wikis/humanity-rules/concepts/category-design/law-15-your-pricing-should-be-free-or-ultra-expensive-avoid-the-middle.md`
-
-The wiki is authoritative for founder-approved product context and historical provenance. The repository is authoritative for implementation facts.
-
-### 10.2 Prior conversations
-
-1. **2026-07-23 to 2026-07-24, Matthew McClure reflection:** surfaced the demo-credit-to-paid path, an earlier `$20/month` idea, the need to protect enterprise message clarity, and trust around deployment ownership.
-2. **2026-07-24, tier naming discussion:** proposed Trial, Operator, Team, and Enterprise; Victor approved the separate no-card trial presentation plus the three paid-plan names and the Team customer-AWS boundary.
-3. **2026-07-28, pricing and credits kickoff:** introduced the current subscription-includes-credits thesis, metering of model and paid API usage, credit deduction, and the on-demand-or-upgrade behavior at zero.
-
-The wiki pages above preserve the durable conclusions from the earlier sessions. Exact prices and detailed packaging remain unresolved.
-
-### 10.3 Repository documentation and code
-
-1. `docs/app_cost_tracking_design.md`
-2. `docs/platform_shared_credentials_design.md`
-3. `docs/integrations/integrations_broker_design.md`
-4. `docs/domain_model.md`
-5. `humanityrules_app/models.py`
-6. `humanityrules_app/services/agent/agent_service.py`
-7. `humanityrules_app/services/cost/`
-8. `humanityrules_app/views/integrations/provider_tavily.py`
-9. `humanityrules_app/views/integrations/provider_x.py`
-10. `humanityrules_app/templates/humanityrules_app/settings/billing.html`
-11. `template_repos/hermes_agent/vendor/hermes-webui/api/providers.py`
-12. `template_repos/hermes_agent/vendor/hermes-webui/api/streaming.py`
-13. `template_repos/hermes_agent/vendor/hermes-webui/api/usage.py`
-14. `template_repos/hermes_agent/vendor/hermes-webui/tests/test_streaming_live_usage_estimate.py`
-15. `template_repos/hermes_agent/vendor/hermes-webui/tests/test_provider_cost_history.py`
-16. `template_repos/hermes_agent/vendor/hermes-webui/tests/test_provider_cost_budget.py`
-
-## 11. Recommended next artifact
-
-After review of this context brief, the next useful artifact should be a focused decision document or PRD that resolves the commercial account boundary, meaning of a credit, included-versus-metered categories, and exhaustion behavior before locking a technical schema.
