@@ -57,6 +57,7 @@ def build_fleet_snapshot() -> list[EnvGroup]:
     )
     for app in apps:
         app.redeploy_skip_reason = get_redeploy_skip_reason(app=app)
+        app.remove_skip_reason = get_remove_skip_reason(app=app)
         groups[app.environment_id].apps.append(app)
 
     for group in groups.values():
@@ -228,6 +229,64 @@ def queue_redeploy_all(created_by: models.User, include_failed: bool) -> FleetRe
         skipped_counts=dict(skipped_counts),
         included_failed=include_failed,
     )
+
+
+# --- Removal ----------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class FleetRemoveResult:
+    """Outcome of queueing one fleet row's removal."""
+
+    app_slug: str
+    queued: bool
+    skip_reason: str | None
+
+
+def get_remove_skip_reason(app: models.App) -> str | None:
+    """Return why a fleet row cannot be removed, or None when eligible.
+
+    Unlike the app-detail Remove button, live infrastructure is not a blocker: the
+    fleet action queues the removal with teardown_first, so the worker tears the
+    deployment down inline before purging.
+    """
+    if app.job_status in models.App.REMOVAL_JOB_STATUSES:
+        return SKIP_APP_PENDING_REMOVAL
+    if app.job_status != models.App.JobStatus.IDLE:
+        return SKIP_APP_BUSY
+    if app.environment.status != models.Environment.Status.READY:
+        return SKIP_ENVIRONMENT_NOT_READY
+    return None
+
+
+def _refresh_remove_skip_reason(app: models.App) -> str:
+    """Reclassify an admission failure from current App and Environment state."""
+    app.refresh_from_db()
+    app.environment.refresh_from_db()
+    return get_remove_skip_reason(app=app) or SKIP_APP_BUSY
+
+
+def queue_remove(app_id: UUID, created_by: models.User) -> FleetRemoveResult:
+    """Queue one fleet row for teardown, data purge, and deletion of its App row."""
+    app = (
+        models.App.objects
+        .select_related("environment")
+        .get(id=app_id)
+    )
+    skip_reason = get_remove_skip_reason(app=app)
+    if skip_reason is None:
+        try:
+            app_job_service.queue_removal(
+                app=app,
+                created_by=created_by,
+                delete_all_data=True,
+                teardown_first=True,
+                label=None,
+            )
+        except app_job_service.AppJobAdmissionError:
+            skip_reason = _refresh_remove_skip_reason(app=app)
+
+    return FleetRemoveResult(app_slug=app.slug, queued=skip_reason is None, skip_reason=skip_reason)
 
 
 # --- Recovery ---------------------------------------------------------------

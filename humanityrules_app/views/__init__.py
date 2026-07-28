@@ -2,6 +2,8 @@ from .landing import devopshero_landing, landing
 from .dashboard import dashboard
 from .fleet import (
     fleet,
+    fleet_app_remove,
+    fleet_app_remove_confirm,
     fleet_deployment_log,
     fleet_deployment_redeploy,
     fleet_fail_unsettled_deployments,
@@ -144,6 +146,8 @@ __all__ = [
     "devopshero_landing",
     "dashboard",
     "fleet",
+    "fleet_app_remove",
+    "fleet_app_remove_confirm",
     "fleet_deployment_log",
     "fleet_deployment_redeploy",
     "fleet_fail_unsettled_deployments",
