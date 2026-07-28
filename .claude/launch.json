@@ -9,6 +9,12 @@
       "autoPort": true
     },
     {
+      "name": "hermes-webui",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "cd template_repos/hermes_agent/vendor/hermes-webui && HERMES_WEBUI_PORT=8799 HERMES_WEBUI_SKIP_ONBOARDING=1 uv run --quiet server.py"],
+      "port": 8799
+    },
+    {
       "name": "snakes",
       "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "http.server", "8100", "--bind", "127.0.0.1", "--directory", "template_repos/hermes_agent/webapps/examples/snakes"],
