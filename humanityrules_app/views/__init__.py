@@ -12,7 +12,7 @@ from .fleet import (
     fleet_redeploy_all_confirm,
 )
 from .workspaces import workspace_detail, workspace_create, workspace_remove_confirm, workspace_remove, workspace_tags_save
-from .apps import app_detail, app_deployment_teardown, app_deployment_redeploy, app_status_row, app_deployment_log, app_card_status, app_teardown_confirm, app_tags_save, app_deployment_section_status, app_remove_confirm, app_remove, app_cost_panel
+from .apps import app_detail, app_deployment_teardown, app_deployment_redeploy, app_status_row, app_deployment_log, app_card, app_teardown_confirm, app_tags_save, app_deployment_section_status, app_remove_confirm, app_remove, app_cost_panel
 from .webapp_public_access import (
     webapp_public_access_new,
     webapp_public_access_create,
@@ -172,7 +172,7 @@ __all__ = [
     "app_deployment_teardown",
     "app_deployment_redeploy",
     "app_status_row",
-    "app_card_status",
+    "app_card",
     "app_deployment_section_status",
     "app_teardown_confirm",
     "app_remove_confirm",

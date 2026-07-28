@@ -46,7 +46,8 @@ This is the simplest model to maintain:
 
 ## Current Examples
 
-- `humanityrules_app/templates/humanityrules_app/partials/_app_card_status.html`
+- `humanityrules_app/templates/humanityrules_app/partials/_app_card.html` (the whole card is the fragment: while a job is in flight it re-renders itself every 10s, so the URL row and timestamps move with the status pill)
+- `humanityrules_app/templates/humanityrules_app/environments/environments.html` (the environments index polls its own page endpoint every 10s while any listed environment is transient)
 - `humanityrules_app/templates/humanityrules_app/apps/_app_deployment_section.html` (the app page's single clock: its 10s poll OOB-swaps `_app_detail_actions.html` and `_app_deployment_history.html`; the Overview tab button refetches the same endpoint on click, which also restarts the 10s delay)
 - `humanityrules_app/templates/humanityrules_app/environments/_environment_status.html`
 - `humanityrules_app/templates/humanityrules_app/integrations/_aws_connect_poll.html` (connect modal polls until the account connects; a headless poller with no visible content, so it uses htmx's `every 30s` interval trigger and stops when the terminal response removes the element, rather than the self-replacing `load delay` fragment the visible widgets use)
