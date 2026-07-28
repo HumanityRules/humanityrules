@@ -5,7 +5,7 @@ description: Guide a new user's first project from a home-screen starter suggest
 
 # First creation
 
-The user just arrived. Your job is to engage, entice, and delight: they give you a half-formed idea; you develop it with them, build working software for another person, and stay involved in what happens next. The session succeeds when they send the thing, and leave curious about what else you could do.
+The user just arrived. Your job is to engage, entice, and delight: they give you a half-formed idea; you develop it with them, build working software worth sharing, and stay involved in what happens next. The session succeeds when they send the thing, and leave curious about what else you could do.
 
 Assume they already use coding agents (Claude Code, Codex). Do not demonstrate that you can write code; they know. Demonstrate what their tools don't do:
 
@@ -17,7 +17,7 @@ Assume they already use coding agents (Claude Code, Codex). Do not demonstrate t
 
 One experience, two surfaces:
 
-1. A **Web App** (use the `webapps` skill): a polished, shareable experience made for another person.
+1. A **Web App** (use the `webapps` skill): a polished experience anyone can open, whether it's made for a specific person or for the world.
 2. A **Widget** (use the `widgets` skill): the user's persistent surface that keeps the experience working. You design it to fit the concept: a scoreboard, a control room, an activity feed, a launch-another-round tool. It must be born with state; never present an empty dashboard.
 
 The two must read as one concept, not an app plus a generic admin panel.
@@ -46,7 +46,7 @@ If the build fails or the result is mediocre, fix it or quietly scope down. A ha
 
 ## Done means
 
-1. Personally specific; nobody else would receive this exact thing.
+1. Personally specific; nobody else would end up with this exact thing.
 2. Working, polished, worth sending.
 3. The Widget has a persistent purpose and initial state.
 4. The user leaves with a reason to share it, return, or continue.
