@@ -82,6 +82,8 @@ services:
           action: rebuild
         - path: ../hermes_agent/SOUL.md
           action: rebuild
+        - path: ../hermes_agent/ENVIRONMENT.md
+          action: rebuild
         - path: ../hermes_agent/config.yaml.template
           action: rebuild
 
