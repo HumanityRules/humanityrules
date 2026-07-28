@@ -2,8 +2,8 @@
 
 Verifies that containers needing env-bearer receive the HUMR_ENV_BEARER
 secret and the HUMR_ENV_SLUG / HUMR_CONTROL_PLANE_URL / HUMR_OWNER_USERNAME /
-HUMR_PUBLIC_HOSTNAME plain vars, and that other containers in the same task
-do not.
+HUMR_PUBLIC_HOSTNAME / HUMR_PLATFORM_CAPABILITIES plain vars, and that other
+containers in the same task do not.
 """
 
 from aws_cdk import App
@@ -27,6 +27,7 @@ def _render(
     owner_username: str | None,
     org_slug: str | None,
     shared_alb_hosted_zone: str | None,
+    platform_capabilities: list[str],
 ) -> Template:
     cdk_app = App()
     stack = deploy_app.AppStack(
@@ -41,6 +42,7 @@ def _render(
             containers=containers,
             owner_username=owner_username,
             org_slug=org_slug,
+            platform_capabilities=platform_capabilities,
         ),
         image_tags={c.template_path: "test" for c in containers},
         env_slug="staging",
@@ -94,6 +96,7 @@ class TestEnvBearerOverlay(SimpleTestCase):
             owner_username="vmendi",
             org_slug="acme",
             shared_alb_hosted_zone=None,
+            platform_capabilities=[],
         )
 
         hermes = _container_defs_by_name(template)["hermes"]
@@ -104,8 +107,32 @@ class TestEnvBearerOverlay(SimpleTestCase):
         self.assertTrue(env.get("HUMR_CONTROL_PLANE_URL", "").startswith("https://"))
         # No shared_alb_hosted_zone passed → no HUMR_PUBLIC_HOSTNAME.
         self.assertNotIn("HUMR_PUBLIC_HOSTNAME", env)
+        # Nothing granted still renders the var, so in-container gates read a
+        # missing capability as denial rather than as unconfigured.
+        self.assertEqual(env.get("HUMR_PLATFORM_CAPABILITIES"), "")
         secret_names = {s["Name"] for s in hermes.get("Secrets", [])}
         self.assertIn("HUMR_ENV_BEARER", secret_names)
+
+    def test_granted_capabilities_render_comma_separated(self) -> None:
+        template = _render(
+            containers=[
+                ContainerConfig(
+                    name="hermes",
+                    image_source=ImageSource.TEMPLATE,
+                    template_path="hermes_agent",
+                    container_port=8787,
+                    requires_env_bearer=True,
+                ),
+            ],
+            owner_username="vmendi",
+            org_slug="acme",
+            shared_alb_hosted_zone=None,
+            platform_capabilities=["bedrock-runtime", "some-future-capability"],
+        )
+
+        hermes = _container_defs_by_name(template)["hermes"]
+        env = {e["Name"]: e["Value"] for e in hermes.get("Environment", [])}
+        self.assertEqual(env.get("HUMR_PLATFORM_CAPABILITIES"), "bedrock-runtime,some-future-capability")
 
     def test_public_hostname_overlay_when_alb_hosted_zone_set(self) -> None:
         template = _render(
@@ -121,6 +148,7 @@ class TestEnvBearerOverlay(SimpleTestCase):
             owner_username="vmendi",
             org_slug="acme",
             shared_alb_hosted_zone="example.com",
+            platform_capabilities=[],
         )
 
         hermes = _container_defs_by_name(template)["hermes"]
@@ -142,6 +170,7 @@ class TestEnvBearerOverlay(SimpleTestCase):
             owner_username=None,
             org_slug=None,
             shared_alb_hosted_zone=None,
+            platform_capabilities=[],
         )
 
         container = _container_defs_by_name(template)["policy-proxy"]
@@ -173,6 +202,7 @@ class TestEnvBearerOverlay(SimpleTestCase):
             owner_username="vmendi",
             org_slug="acme",
             shared_alb_hosted_zone=None,
+            platform_capabilities=[],
         )
 
         containers = _container_defs_by_name(template)
@@ -210,6 +240,7 @@ class TestEnvBearerOverlay(SimpleTestCase):
             owner_username="vmendi",
             org_slug="acme",
             shared_alb_hosted_zone=None,
+            platform_capabilities=[],
         )
 
         dind = _container_defs_by_name(template)["docker-dind"]
@@ -217,5 +248,6 @@ class TestEnvBearerOverlay(SimpleTestCase):
         self.assertNotIn("HUMR_ENV_SLUG", env)
         self.assertNotIn("HUMR_OWNER_USERNAME", env)
         self.assertNotIn("HUMR_CONTROL_PLANE_URL", env)
+        self.assertNotIn("HUMR_PLATFORM_CAPABILITIES", env)
         secret_names = {s["Name"] for s in dind.get("Secrets", [])}
         self.assertNotIn("HUMR_ENV_BEARER", secret_names)
