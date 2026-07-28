@@ -9,6 +9,8 @@ import io
 import json
 import os
 import pathlib
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -159,9 +161,9 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
 
         self.assertIn(f'root * "{paths.static_root / "customer-dashboard"}"', fragment)
         self.assertIn('rewrite * "/app.html"', fragment)
-        self.assertIn("path /widgets/customer-dashboard", fragment)
-        self.assertIn("redir @widget_customer_dashboard_root /widgets/customer-dashboard/ 308", fragment)
-        self.assertIn("path /widgets/customer-dashboard/", fragment)
+        self.assertIn("path /widgets/customer-dashboard /widgets/customer-dashboard/*", fragment)
+        self.assertIn("redir /widgets/customer-dashboard /widgets/customer-dashboard/ 308", fragment)
+        self.assertIn("handle /widgets/customer-dashboard/ {", fragment)
         self.assertIn("uri strip_prefix /widgets/customer-dashboard", fragment)
         self.assertIn('try_files {path} "/app.html"', fragment)
         self.assertNotIn("path_regexp widget_customer_dashboard_assets_path", fragment)
@@ -266,7 +268,7 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
         )
         self.assertIn("path /widgets/__admin/registry.json", routes)
         self.assertIn('header Cache-Control "no-store"', routes)
-        self.assertLess(routes.index("widget_alpha_widget_root"), routes.index("widget_zulu_widget_root"))
+        self.assertLess(routes.index("@widget_alpha_widget "), routes.index("@widget_zulu_widget "))
         self.assertEqual(
             snapshot,
             {
@@ -699,14 +701,14 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
         unavailable_html = unavailable_path.read_text(encoding="utf-8")
 
         self.assertIn(
-            "path /widgets/static-backend/api /widgets/static-backend/api/*",
+            "@widget_static_backend_api path /widgets/static-backend/api /widgets/static-backend/api/*",
             fragment,
         )
         self.assertIn(
-            "path /widgets/server-rendered/api /widgets/server-rendered/api/*",
+            "@widget_server_rendered_api path /widgets/server-rendered/api /widgets/server-rendered/api/*",
             fragment,
         )
-        self.assertIn("path /widgets/server-rendered/*", fragment)
+        self.assertIn("path /widgets/server-rendered /widgets/server-rendered/*", fragment)
         self.assertIn("uri strip_prefix /widgets/static-backend", fragment)
         self.assertIn("uri strip_prefix /widgets/server-rendered", fragment)
         self.assertIn("reverse_proxy 127.0.0.1:4004", fragment)
@@ -738,17 +740,124 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
         self.assertNotIn("header_up Connection", fragment)
         self.assertNotIn("header_up Upgrade", fragment)
         for slug in ("static-only", "static-backend", "server-rendered"):
-            self.assertIn(f"redir @widget_{slug.replace('-', '_')}_root /widgets/{slug}/ 308", fragment)
+            self.assertIn(f"redir /widgets/{slug} /widgets/{slug}/ 308", fragment)
+            self.assertIn(f"handle @widget_{slug.replace('-', '_')} {{\n\troute {{", fragment)
         self.assertLess(
             fragment.index("handle @widget_static_backend_api"),
-            fragment.index("handle @widget_static_backend_frontend"),
+            fragment.index('try_files {path} "/app.html"'),
         )
         self.assertLess(
             fragment.index("handle @widget_server_rendered_api"),
-            fragment.index("handle @widget_server_rendered_frontend"),
+            fragment.index("@widget_server_rendered_frontend_upstream_error status 5xx"),
         )
         self.assertIn("This Widget is unavailable", unavailable_html)
         self.assertIn("Ask your agent", unavailable_html)
+
+    def test_full_router_config_adapts_with_widget_api_before_frontend(self) -> None:
+        """Adapt the assembled router config with the pinned Caddy; string-order tests cannot see adapter re-sorting."""
+        if shutil.which("docker") is None:
+            self.skipTest("docker is required for the pinned-Caddy adapt check")
+        dockerfile_text = (_runtime_dir().parent / "Dockerfile").read_text(encoding="utf-8")
+        caddy_version = re.search(r"^ARG CADDY_VERSION=(\S+)$", dockerfile_text, re.MULTILINE).group(1)
+
+        static_backend = widgets_core.WidgetManifest(
+            schema_version=1,
+            slug="static-backend",
+            title="Static Backend",
+            icon=None,
+            frontend=widgets_core.WidgetFrontend(mode="static", entry="app.html"),
+            backend=widgets_core.WidgetBackend(command="run api"),
+        )
+        backend_frontend = widgets_core.WidgetManifest(
+            schema_version=1,
+            slug="server-rendered",
+            title="Server Rendered",
+            icon=None,
+            frontend=widgets_core.WidgetFrontend(mode="backend", entry=None),
+            backend=widgets_core.WidgetBackend(command="run server"),
+        )
+        fragment = widgets_runtime.build_widgets_caddy_fragment(
+            widgets=(static_backend, backend_frontend),
+            static_root=pathlib.Path("/srv/widgets-static"),
+            registry_path=pathlib.Path("/srv/widgets-config/registry.json"),
+            backend_ports={"static-backend": 4004, "server-rendered": 4005},
+            unavailable_path=widgets_dir / "widget-unavailable.html",
+        )
+        webapps_fragment = webapps_lib.route_block_webapp_host(
+            slug="crm", port=4101, base_host="agent.test"
+        ) + webapps_lib.route_block_internal(slug="admin", port=4103, base_host="agent.test")
+        caddyfile = (
+            (_runtime_dir() / "http_router" / "Caddyfile")
+            .read_text(encoding="utf-8")
+            .replace("/workspace/.config/caddy", "/etc/caddy")
+        )
+
+        # Docker Desktop on macOS does not share the default TMPDIR; /tmp is shared everywhere.
+        with tempfile.TemporaryDirectory(dir="/tmp") as temporary_dir:
+            config_dir = pathlib.Path(temporary_dir)
+            (config_dir / "Caddyfile").write_text(caddyfile, encoding="utf-8")
+            (config_dir / "widgets.caddy").write_text(fragment, encoding="utf-8")
+            (config_dir / "webapps.caddy").write_text(webapps_fragment, encoding="utf-8")
+            completed = subprocess.run(
+                [
+                    "docker", "run", "--rm",
+                    "-v", f"{config_dir}:/etc/caddy:ro",
+                    "-e", "HUMR_PUBLIC_HOSTNAME=agent.test",
+                    f"caddy:{caddy_version}-alpine",
+                    "caddy", "adapt", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+        if completed.returncode != 0 and "Unable to find image" in completed.stderr:
+            self.skipTest(f"cannot pull caddy:{caddy_version}-alpine: {completed.stderr.strip()[:200]}")
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
+        def route_paths(route: dict) -> list[str]:
+            return [
+                path
+                for matcher in route.get("match", ())
+                if "path" in matcher
+                for path in matcher["path"]
+            ]
+
+        def inner_routes(route: dict) -> list[dict]:
+            for handler in route.get("handle", ()):
+                if handler.get("handler") == "subroute":
+                    return handler.get("routes", [])
+            return []
+
+        config = json.loads(completed.stdout)
+        routes = config["apps"]["http"]["servers"]["srv0"]["routes"]
+        bare_index = next(
+            index
+            for index, route in enumerate(routes)
+            if not route_paths(route)
+            and any(
+                matcher.get("header", {}).get("X-Forwarded-Host") == ["agent.test"]
+                for matcher in route.get("match", ())
+            )
+        )
+        for slug in ("static-backend", "server-rendered"):
+            widget_index = next(
+                index
+                for index, route in enumerate(routes)
+                if f"/widgets/{slug}" in route_paths(route)
+            )
+            self.assertLess(widget_index, bare_index)
+            ordered = inner_routes(routes[widget_index])
+            if len(ordered) == 1 and not ordered[0].get("match"):
+                ordered = inner_routes(ordered[0])
+            api_index = next(
+                index
+                for index, route in enumerate(ordered)
+                if f"/widgets/{slug}/api" in route_paths(route)
+            )
+            frontend_index = next(
+                index for index, route in enumerate(ordered) if not route.get("match")
+            )
+            self.assertLess(api_index, frontend_index)
 
     def test_apply_all_succeeds_and_reports_invalid_widgets(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_dir:

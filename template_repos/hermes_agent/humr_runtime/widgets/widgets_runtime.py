@@ -111,25 +111,14 @@ def build_widgets_caddy_fragment(
     """Render deterministic same-origin registry, static, and backend routes."""
     blocks = [_registry_route_block(registry_path=registry_path)]
     for widget in sorted(widgets, key=lambda item: item.slug):
-        port = backend_ports.get(widget.slug)
-        blocks.append(_widget_root_redirect_block(slug=widget.slug))
-        if port is not None:
-            blocks.append(
-                _widget_api_route_block(
-                    widget=widget,
-                    port=port,
-                )
+        blocks.append(
+            _widget_route_block(
+                widget=widget,
+                port=backend_ports.get(widget.slug),
+                static_root=static_root,
+                unavailable_path=unavailable_path,
             )
-        if widget.frontend.mode == "static":
-            blocks.append(_static_widget_route_block(widget=widget, static_root=static_root))
-        elif port is not None:
-            blocks.append(
-                _widget_backend_frontend_route_block(
-                    widget=widget,
-                    port=port,
-                    unavailable_path=unavailable_path,
-                )
-            )
+        )
     if backend_ports:
         blocks.append(_widget_backend_error_routes(unavailable_path=unavailable_path))
     return "\n".join(blocks)
@@ -971,19 +960,63 @@ def _registry_route_block(registry_path: Path) -> str:
     )
 
 
-def _widget_root_redirect_block(slug: str) -> str:
-    matcher = f"widget_{slug.replace('-', '_')}"
-    base_path = f"/widgets/{slug}"
+def _widget_route_block(
+    widget: widgets_core.WidgetManifest,
+    port: int | None,
+    static_root: Path,
+    unavailable_path: Path,
+) -> str:
+    """Render one Widget as a single handle whose inner route fixes API-before-frontend order.
+
+    The Caddyfile adapter re-sorts sibling top-level routes with a comparator that
+    cannot rank multi-path matchers, so relative order of overlapping same-prefix
+    routes is not preserved at the top level. Inside a `route` block the written
+    order is authoritative, so each Widget's overlapping routes live in one.
+    """
+    matcher = f"widget_{widget.slug.replace('-', '_')}"
+    base_path = f"/widgets/{widget.slug}"
+    if widget.frontend.mode != "static" and port is None:
+        return (
+            f"@{matcher}_root {{\n"
+            "\theader X-Forwarded-Host {$HUMR_PUBLIC_HOSTNAME}\n"
+            f"\tpath {base_path}\n"
+            "}\n"
+            f"redir @{matcher}_root {base_path}/ 308\n"
+        )
+    if port is not None:
+        api_route = (
+            f"\t\t@{matcher}_api path {base_path}/api {base_path}/api/*\n"
+            f"\t\thandle @{matcher}_api {{\n"
+            "\t\t\tvars humr_widget_route api\n"
+            f"\t\t\turi strip_prefix {base_path}\n"
+            f"\t\t\treverse_proxy 127.0.0.1:{port} {{\n"
+            "\t\t\t\theader_up X-Forwarded-Host {header.X-Forwarded-Host}\n"
+            f"\t\t\t\theader_up X-Forwarded-Prefix {base_path}\n"
+            "\t\t\t}\n"
+            "\t\t}\n"
+        )
+    else:
+        api_route = ""
+    if widget.frontend.mode == "static":
+        frontend_route = _static_frontend_routes(widget=widget, static_root=static_root, base_path=base_path)
+    else:
+        frontend_route = _backend_frontend_route(matcher=matcher, port=port, base_path=base_path, unavailable_path=unavailable_path)
     return (
-        f"@{matcher}_root {{\n"
+        f"@{matcher} {{\n"
         "\theader X-Forwarded-Host {$HUMR_PUBLIC_HOSTNAME}\n"
-        f"\tpath {base_path}\n"
+        f"\tpath {base_path} {base_path}/*\n"
         "}\n"
-        f"redir @{matcher}_root {base_path}/ 308\n"
+        f"handle @{matcher} {{\n"
+        "\troute {\n"
+        f"\t\tredir {base_path} {base_path}/ 308\n"
+        f"{api_route}"
+        f"{frontend_route}"
+        "\t}\n"
+        "}\n"
     )
 
 
-def _static_widget_route_block(widget: widgets_core.WidgetManifest, static_root: Path) -> str:
+def _static_frontend_routes(widget: widgets_core.WidgetManifest, static_root: Path, base_path: str) -> str:
     entry = widget.frontend.entry
     if entry is None:
         raise ValueError(f"static Widget {widget.slug!r} has no frontend entry")
@@ -996,86 +1029,42 @@ def _static_widget_route_block(widget: widgets_core.WidgetManifest, static_root:
     entry_name = entry_parts[-1]
     widget_static_root = _caddy_quote(value=str(static_root / widget.slug))
     entry_target = _caddy_quote(value=f"/{entry_name}")
-    matcher = f"widget_{widget.slug.replace('-', '_')}"
-    base_path = f"/widgets/{widget.slug}"
     return (
-        f"@{matcher}_entry {{\n"
-        "\theader X-Forwarded-Host {$HUMR_PUBLIC_HOSTNAME}\n"
-        f"\tpath {base_path}/\n"
-        "}\n"
-        f"handle @{matcher}_entry {{\n"
-        f"\troot * {widget_static_root}\n"
-        f"\trewrite * {entry_target}\n"
-        "\tfile_server\n"
-        "}\n"
-        f"@{matcher}_frontend {{\n"
-        "\theader X-Forwarded-Host {$HUMR_PUBLIC_HOSTNAME}\n"
-        f"\tpath {base_path}/*\n"
-        "}\n"
-        f"handle @{matcher}_frontend {{\n"
-        f"\turi strip_prefix {base_path}\n"
-        f"\troot * {widget_static_root}\n"
-        f"\ttry_files {{path}} {entry_target}\n"
-        "\tfile_server\n"
-        "}\n"
+        f"\t\thandle {base_path}/ {{\n"
+        f"\t\t\troot * {widget_static_root}\n"
+        f"\t\t\trewrite * {entry_target}\n"
+        "\t\t\tfile_server\n"
+        "\t\t}\n"
+        "\t\thandle {\n"
+        f"\t\t\turi strip_prefix {base_path}\n"
+        f"\t\t\troot * {widget_static_root}\n"
+        f"\t\t\ttry_files {{path}} {entry_target}\n"
+        "\t\t\tfile_server\n"
+        "\t\t}\n"
     )
 
 
-def _widget_api_route_block(
-    widget: widgets_core.WidgetManifest,
-    port: int,
-) -> str:
-    matcher = f"widget_{widget.slug.replace('-', '_')}"
-    route_matcher = f"{matcher}_api"
-    base_path = f"/widgets/{widget.slug}"
-    return (
-        f"@{route_matcher} {{\n"
-        "\theader X-Forwarded-Host {$HUMR_PUBLIC_HOSTNAME}\n"
-        f"\tpath {base_path}/api {base_path}/api/*\n"
-        "}\n"
-        f"handle @{route_matcher} {{\n"
-        "\tvars humr_widget_route api\n"
-        f"\turi strip_prefix {base_path}\n"
-        f"\treverse_proxy 127.0.0.1:{port} {{\n"
-        "\t\theader_up X-Forwarded-Host {header.X-Forwarded-Host}\n"
-        f"\t\theader_up X-Forwarded-Prefix {base_path}\n"
-        "\t}\n"
-        "}\n"
-    )
-
-
-def _widget_backend_frontend_route_block(
-    widget: widgets_core.WidgetManifest,
-    port: int,
-    unavailable_path: Path,
-) -> str:
-    matcher = f"widget_{widget.slug.replace('-', '_')}"
-    route_matcher = f"{matcher}_frontend"
-    base_path = f"/widgets/{widget.slug}"
+def _backend_frontend_route(matcher: str, port: int, base_path: str, unavailable_path: Path) -> str:
     unavailable_root = _caddy_quote(value=str(unavailable_path.parent))
     unavailable_name = _caddy_quote(value=f"/{unavailable_path.name}")
     return (
-        f"@{route_matcher} {{\n"
-        "\theader X-Forwarded-Host {$HUMR_PUBLIC_HOSTNAME}\n"
-        f"\tpath {base_path}/*\n"
-        "}\n"
-        f"handle @{route_matcher} {{\n"
-        "\tvars humr_widget_route frontend\n"
-        f"\turi strip_prefix {base_path}\n"
-        f"\treverse_proxy 127.0.0.1:{port} {{\n"
-        "\t\theader_up X-Forwarded-Host {header.X-Forwarded-Host}\n"
-        f"\t\theader_up X-Forwarded-Prefix {base_path}\n"
-        f"\t\t@{route_matcher}_upstream_error status 5xx\n"
-        f"\t\thandle_response @{route_matcher}_upstream_error {{\n"
-        f"\t\t\troot * {unavailable_root}\n"
-        f"\t\t\trewrite * {unavailable_name}\n"
-        '\t\t\theader Cache-Control "no-store"\n'
-        "\t\t\tfile_server {\n"
-        "\t\t\t\tstatus 503\n"
+        "\t\thandle {\n"
+        "\t\t\tvars humr_widget_route frontend\n"
+        f"\t\t\turi strip_prefix {base_path}\n"
+        f"\t\t\treverse_proxy 127.0.0.1:{port} {{\n"
+        "\t\t\t\theader_up X-Forwarded-Host {header.X-Forwarded-Host}\n"
+        f"\t\t\t\theader_up X-Forwarded-Prefix {base_path}\n"
+        f"\t\t\t\t@{matcher}_frontend_upstream_error status 5xx\n"
+        f"\t\t\t\thandle_response @{matcher}_frontend_upstream_error {{\n"
+        f"\t\t\t\t\troot * {unavailable_root}\n"
+        f"\t\t\t\t\trewrite * {unavailable_name}\n"
+        '\t\t\t\t\theader Cache-Control "no-store"\n'
+        "\t\t\t\t\tfile_server {\n"
+        "\t\t\t\t\t\tstatus 503\n"
+        "\t\t\t\t\t}\n"
+        "\t\t\t\t}\n"
         "\t\t\t}\n"
         "\t\t}\n"
-        "\t}\n"
-        "}\n"
     )
 
 
