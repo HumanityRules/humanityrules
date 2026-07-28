@@ -1,7 +1,11 @@
 {% comment %} Deployment hero + details card. Rendered inline from app_detail.html and re-rendered
 by the self-terminating status poll (app_deployment_section_status), which swaps the innerHTML of
 #deployment-section-{{ app.id }}. Alpine state (configOpen, copied) lives on a wrapper OUTSIDE that
-target in app_detail.html so it survives the swap. {% endcomment %}
+target in app_detail.html so it survives the swap.
+
+This is the app page's single live clock: poll responses also OOB-swap the header actions and the
+History section, the other two regions that move when a job settles. with_oob is set only on those
+responses, never on the initial include (where both regions render in place). {% endcomment %}
 {% partialdef deployment_section %}
 <div {% if app.job_in_flight %}
      hx-get="{% url 'app_deployment_section_status' app_slug=app.slug %}"
@@ -151,4 +155,8 @@ target in app_detail.html so it survives the swap. {% endcomment %}
     <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">Created {{ app.created_at|date:"M j, Y" }} by {{ app.created_by.email|default:"—" }}</p>
     {% endif %}
 </div>
+{% if with_oob %}
+{% include "humanityrules_app/apps/_app_detail_actions.html" with oob=True %}
+{% include "humanityrules_app/apps/_app_deployment_history.html" with oob=True %}
+{% endif %}
 {% endpartialdef %}
