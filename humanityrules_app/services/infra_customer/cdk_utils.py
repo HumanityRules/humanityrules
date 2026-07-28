@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import threading
 import time
 from uuid import uuid4
 
@@ -24,6 +25,14 @@ CDK_OUT_DIR = Path(__file__).parent / "cdk.out"
 # the next synth instead of a try/finally so an operator can still inspect
 # the assembly of a just-finished (or failed) deployment.
 _STALE_SYNTH_DIR_SECONDS = 24 * 3600
+
+# Every CDK construct call and synth in this process round-trips through one
+# shared jsii kernel (a node subprocess) whose stdio protocol has no framing
+# per caller: concurrent threads consume each other's responses and fail with
+# garbage like "argument of type 'ObjRef' is not a container or iterable".
+# Hold this lock from App() construction through synth_cdk_app(). Deploys read
+# the assembly from disk in their own subprocess and must run outside it.
+jsii_synth_lock = threading.Lock()
 
 logger = logging.getLogger(__name__)
 
@@ -129,9 +138,3 @@ def deploy_from_assembly(assembly_dir: str, session: boto3.Session, stack_names:
 
     logger.info("CDK deployment complete")
     return True
-
-
-def deploy_cdk_stacks(app: App, session: boto3.Session) -> bool:
-    """Synthesize and deploy all CDK stacks in one shot."""
-    assembly_dir = synth_cdk_app(app)
-    return deploy_from_assembly(assembly_dir=assembly_dir, session=session, stack_names=None)
