@@ -198,6 +198,7 @@ def build_app_config_from_app(app: App) -> AppConfig:
         efs_config=efs_config,
         platform_capabilities=list(template.platform_capabilities or []),
         owner_username=owner_username,
+        org_slug=app.organization.slug,
         serialize_task_replacement=template.serialize_task_replacement,
         enable_webapp_hosts=template.enable_webapp_hosts,
     )
