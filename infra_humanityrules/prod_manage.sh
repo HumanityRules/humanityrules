@@ -25,7 +25,7 @@ set -e
 # Commands that must run on the operator's local machine but need target
 # metadata (account_id, external_id, region, env_slug) sourced from prod's DB.
 # Add more as their use cases arise.
-LOCAL_EXEC_COMMANDS=("humr_build_prebuilt_image")
+LOCAL_EXEC_COMMANDS=("humr_build_prebuilt_image" "humr_efs_browse")
 
 is_local_exec() {
     local cmd="$1"

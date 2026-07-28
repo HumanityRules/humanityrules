@@ -7,7 +7,6 @@ Manager secrets in the app's environment, then deletes the App row (FK cascades
 handle records, logs, permissions, tags).
 """
 
-import json
 import logging
 import time
 
@@ -18,6 +17,7 @@ from django.db import transaction
 from humanityrules_app import models
 from humanityrules_app.services import sandbox_service
 from humanityrules_app.services.infra_customer import cloudformation_utils
+from humanityrules_app.services.infra_customer import ephemeral_task_role
 from humanityrules_app.services.infra_customer import iam_utils
 from humanityrules_app.services.infra_customer import secrets_utils
 
@@ -49,6 +49,9 @@ CLEANUP_EFS_MOUNT_PATH = "/mnt/efs"
 # Wait up to 15 minutes for the Fargate task to finish rm -rf
 CLEANUP_MAX_WAIT_ITERATIONS = 180
 CLEANUP_POLL_INTERVAL_SECONDS = 5
+# RunTask rejects a role IAM has not propagated yet; retry rather than pre-sleeping.
+CLEANUP_TASK_ATTEMPTS = 6
+ROLE_PROPAGATION_RETRY_SECONDS = 3
 
 
 def _get_env_session(environment: models.Environment):
@@ -226,7 +229,7 @@ def _run_efs_cleanup_task(env: models.Environment, app_slug: str) -> tuple[bool,
 
     account_id = env.aws_account.aws_account_id
     region = env.aws_region
-    role_name = f"humr-{env.slug}-efs-remover-role"
+    role_name = ephemeral_task_role.unique_role_name(prefix=f"humr-{env.slug}-efs-remover")
     task_family = f"humr-{env.slug}-app-efs-remove"
     cluster_name = f"humr-{env.slug}-cluster"
     efs_filesystem_arn = (
@@ -238,15 +241,22 @@ def _run_efs_cleanup_task(env: models.Environment, app_slug: str) -> tuple[bool,
     log_group = f"/humr/{env.slug}/ecs"
 
     task_def_arn = None
-    task_arn = None
+    role_created = False
     try:
-        task_role_arn = _ensure_remover_role(
+        task_role_arn = ephemeral_task_role.create_role(
             iam_client=iam_client,
             role_name=role_name,
-            efs_filesystem_arn=efs_filesystem_arn,
+            description="One-shot EFS cleanup task role",
+            purpose="efs-remove",
+            inline_policies={
+                # Root access so rm -rf can descend into the per-app access-point subtree
+                "efs-access": ephemeral_task_role.efs_access_policy(
+                    efs_filesystem_arn=efs_filesystem_arn,
+                    allow_write=True,
+                ),
+            },
         )
-        # IAM role propagation — matches the sleep in humr_efs_browse
-        time.sleep(10)
+        role_created = True
 
         task_def_arn = _register_remover_task_definition(
             ecs_client=ecs_client,
@@ -259,28 +269,12 @@ def _run_efs_cleanup_task(env: models.Environment, app_slug: str) -> tuple[bool,
             app_slug=app_slug,
         )
 
-        resp = ecs_client.run_task(
-            cluster=cluster_name,
-            taskDefinition=task_def_arn,
-            launchType="FARGATE",
-            enableExecuteCommand=False,
-            platformVersion="LATEST",
-            networkConfiguration={
-                "awsvpcConfiguration": {
-                    "subnets": [infra["subnet_1"], infra["subnet_2"]],
-                    "securityGroups": [infra["default_sg"], infra["efs_sg"]],
-                    "assignPublicIp": "DISABLED",
-                },
-            },
+        return _run_cleanup_task(
+            ecs_client=ecs_client,
+            cluster_name=cluster_name,
+            task_def_arn=task_def_arn,
+            infra=infra,
         )
-        failures = resp.get("failures", [])
-        if failures:
-            reasons = ", ".join(f["reason"] for f in failures)
-            return False, f"run_task failed: {reasons}"
-        task_arn = resp["tasks"][0]["taskArn"]
-        logger.info("EFS cleanup task started: %s", task_arn)
-
-        return _wait_for_stopped(ecs_client=ecs_client, cluster=cluster_name, task_arn=task_arn)
     except ClientError as e:
         logger.exception("EFS cleanup task error")
         return False, str(e)
@@ -291,6 +285,45 @@ def _run_efs_cleanup_task(env: models.Environment, app_slug: str) -> tuple[bool,
                 ecs_client.delete_task_definitions(taskDefinitions=[task_def_arn])
             except ClientError:
                 pass
+        if role_created:
+            ephemeral_task_role.delete_role(iam_client=iam_client, role_name=role_name)
+
+
+def _run_cleanup_task(ecs_client, cluster_name: str, task_def_arn: str, infra: dict[str, str]) -> tuple[bool, str]:
+    """Run the rm -rf task to completion, retrying while IAM has not yet propagated the role."""
+    for attempt in range(CLEANUP_TASK_ATTEMPTS):
+        try:
+            resp = ecs_client.run_task(
+                cluster=cluster_name,
+                taskDefinition=task_def_arn,
+                launchType="FARGATE",
+                enableExecuteCommand=False,
+                platformVersion="LATEST",
+                networkConfiguration={
+                    "awsvpcConfiguration": {
+                        "subnets": [infra["subnet_1"], infra["subnet_2"]],
+                        "securityGroups": [infra["default_sg"], infra["efs_sg"]],
+                        "assignPublicIp": "DISABLED",
+                    },
+                },
+            )
+        except ClientError as e:
+            if not ephemeral_task_role.is_assume_role_failure(stopped_reason=str(e)):
+                raise
+            logger.info("Cleanup task role not usable yet (attempt %d), retrying", attempt + 1)
+            time.sleep(ROLE_PROPAGATION_RETRY_SECONDS)
+            continue
+
+        failures = resp.get("failures", [])
+        if failures:
+            reasons = ", ".join(f["reason"] for f in failures)
+            return False, f"run_task failed: {reasons}"
+        task_arn = resp["tasks"][0]["taskArn"]
+        logger.info("EFS cleanup task started: %s", task_arn)
+
+        return _wait_for_stopped(ecs_client=ecs_client, cluster=cluster_name, task_arn=task_arn)
+
+    return False, f"Task role was still not assumable after {CLEANUP_TASK_ATTEMPTS} attempts"
 
 
 def _get_infra_info(cf_client, env_slug: str) -> dict[str, str]:
@@ -310,44 +343,6 @@ def _get_infra_info(cf_client, env_slug: str) -> dict[str, str]:
             raise RuntimeError(f"Missing CloudFormation output {output_key} on stack {stack}")
         result[key] = value
     return result
-
-
-def _ensure_remover_role(iam_client, role_name: str, efs_filesystem_arn: str) -> str:
-    trust_policy = json.dumps({
-        "Version": "2012-10-17",
-        "Statement": [{
-            "Effect": "Allow",
-            "Principal": {"Service": "ecs-tasks.amazonaws.com"},
-            "Action": "sts:AssumeRole",
-        }],
-    })
-    try:
-        resp = iam_client.get_role(RoleName=role_name)
-        role_arn = resp["Role"]["Arn"]
-    except iam_client.exceptions.NoSuchEntityException:
-        resp = iam_client.create_role(
-            RoleName=role_name,
-            AssumeRolePolicyDocument=trust_policy,
-            Description="One-shot EFS cleanup task role",
-            Tags=[{"Key": "humr:purpose", "Value": "efs-remove"}],
-        )
-        role_arn = resp["Role"]["Arn"]
-
-    # Grant root EFS access so rm -rf can descend into the per-app access-point subtree
-    efs_policy = json.dumps({
-        "Version": "2012-10-17",
-        "Statement": [{
-            "Effect": "Allow",
-            "Action": [
-                "elasticfilesystem:ClientMount",
-                "elasticfilesystem:ClientWrite",
-                "elasticfilesystem:ClientRootAccess",
-            ],
-            "Resource": efs_filesystem_arn,
-        }],
-    })
-    iam_client.put_role_policy(RoleName=role_name, PolicyName="efs-root-access", PolicyDocument=efs_policy)
-    return role_arn
 
 
 def _register_remover_task_definition(
