@@ -34,7 +34,6 @@ research/llm-wiki
 research/polymarket
 software-development/plan
 software-development/requesting-code-review
-software-development/subagent-driven-development
 software-development/systematic-debugging
 software-development/test-driven-development
 EOF
