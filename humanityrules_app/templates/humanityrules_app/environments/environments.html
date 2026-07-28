@@ -1,4 +1,15 @@
-<div class="max-w-4xl">
+{% comment %}
+Self-terminating poll: while any listed environment is transient (provisioning or tearing down)
+the page re-fetches itself every 10s, so the status pills follow the background jobs. Once every
+environment has settled the polling attributes are omitted and polling stops.
+{% endcomment %}
+<div class="max-w-4xl"
+     {% if has_transient_environments %}
+     hx-get="{% url 'environments' %}"
+     hx-trigger="load delay:10s"
+     hx-target="#main-content"
+     hx-swap="innerHTML"
+     {% endif %}>
     <div class="flex items-center justify-between mb-6">
         <div>
             <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Environments</h1>
