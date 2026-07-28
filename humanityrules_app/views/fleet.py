@@ -97,6 +97,37 @@ def fleet_deployment_redeploy(request: HttpRequest, app_id: UUID) -> HttpRespons
 
 
 @_staff_or_404
+@require_GET
+def fleet_app_remove_confirm(request: HttpRequest, app_id: UUID) -> HttpResponse:
+    """Return the confirmation modal for tearing down and deleting one HA."""
+    app = get_object_or_404(
+        models.App.objects.select_related("organization", "environment", "environment__aws_account", "source_template"),
+        id=app_id,
+    )
+    context = {
+        "app": app,
+        "skip_reason": fleet_service.get_remove_skip_reason(app=app),
+    }
+    return render(request, "humanityrules_app/fleet/_fleet_remove_confirm.html", context=context)
+
+
+@_staff_or_404
+@require_POST
+def fleet_app_remove(request: HttpRequest, app_id: UUID) -> HttpResponse:
+    """Queue teardown, data purge, and deletion for one HA row on the fleet page."""
+    app = get_object_or_404(models.App.objects.only("id"), id=app_id)
+    remove_result = fleet_service.queue_remove(
+        app_id=app.id,
+        created_by=request.user,
+    )
+    context = {
+        "env_groups": fleet_service.build_fleet_snapshot(),
+        "remove_result": remove_result,
+    }
+    return render(request, "humanityrules_app/fleet/fleet.html#fleet_list", context=context)
+
+
+@_staff_or_404
 def fleet_deployment_log(request: HttpRequest, app_id: str) -> HttpResponse:
     app = get_object_or_404(models.App.objects.select_related("environment"), id=app_id)
     # Fetch newest-first so the cap keeps the tail, then reverse to chronological for display.

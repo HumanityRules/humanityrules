@@ -49,6 +49,20 @@
             </p>
         </div>
         {% endif %}
+        {% if remove_result %}
+        <div class="mb-4 rounded-lg border px-4 py-3 text-sm
+                    {% if remove_result.queued %}border-green-200 bg-green-50 text-green-800 dark:border-green-500/30 dark:bg-green-500/10 dark:text-green-300
+                    {% else %}border-yellow-200 bg-yellow-50 text-yellow-800 dark:border-yellow-500/30 dark:bg-yellow-500/10 dark:text-yellow-300{% endif %}"
+             role="status">
+            <p class="font-medium">
+                {% if remove_result.queued %}
+                Queued removal of {{ remove_result.app_slug }}. The worker tears it down, purges its data, then deletes it.
+                {% else %}
+                Did not remove {{ remove_result.app_slug }}: {{ remove_result.skip_reason }}.
+                {% endif %}
+            </p>
+        </div>
+        {% endif %}
         {% if redeploy_result %}
         <div class="mb-4 rounded-lg border px-4 py-3 text-sm
                     {% if redeploy_result.queued_count %}border-green-200 bg-green-50 text-green-800 dark:border-green-500/30 dark:bg-green-500/10 dark:text-green-300
@@ -128,6 +142,13 @@
                                             hx-target="#fleet-list"
                                             hx-swap="innerHTML"
                                             class="text-xs font-medium text-indigo-600 hover:underline dark:text-indigo-400">Redeploy</button>
+                                    {% endif %}
+                                    {% if not app.remove_skip_reason %}
+                                    <button type="button"
+                                            hx-get="{% url 'fleet_app_remove_confirm' app_id=app.id %}"
+                                            hx-target="#modal-container"
+                                            hx-swap="innerHTML"
+                                            class="text-xs font-medium text-red-600 hover:underline dark:text-red-400">Remove</button>
                                     {% endif %}
                                     <button type="button"
                                             hx-get="{% url 'fleet_deployment_log' app_id=app.id %}"
