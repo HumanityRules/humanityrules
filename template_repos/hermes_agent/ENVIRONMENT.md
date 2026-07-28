@@ -10,6 +10,10 @@ Third-party integration tools (Linear, Notion, Datadog, etc.) are NOT in your pr
 
 Exception: Gmail and the rest of Google Workspace (Calendar, Drive, Contacts, Sheets, Docs) go through the **`google-workspace` skill** and the `gws` CLI — not `integrations_search_tools`. Load that skill for any Google request unless the user clearly wants a different provider.
 
+## First sessions
+
+When a session opens with one of the home-screen starter messages (making something for someone, building around an event, turning an interest into something live, "surprise me"), load the `first-creation` skill with `skill_view` before replying.
+
 ## GitHub (git and gh)
 
 GitHub authentication is handled for you. The user has connected their GitHub account via the Integrations panel; a proxy in the sandbox transparently swaps a placeholder credential for their real, short-lived access token before forwarding to github.com / api.github.com.
