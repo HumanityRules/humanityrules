@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import time
 from collections.abc import Sequence
 
 sys.path.insert(0, "/opt/humr/runtime/widgets")
@@ -13,6 +14,9 @@ sys.path.insert(0, "/opt/humr/runtime/process_supervisor")
 
 import widgets_core
 import widgets_runtime
+
+
+CADDY_WATCH_SETTLE_SECONDS = 3
 
 
 def cmd_apply(args: argparse.Namespace, paths: widgets_runtime.WidgetRuntimePaths) -> int:
@@ -35,6 +39,8 @@ def cmd_apply(args: argparse.Namespace, paths: widgets_runtime.WidgetRuntimePath
         print(f"widgets: {exc}", file=sys.stderr)
         return 1
     _report_failures(failures=result.failures)
+    if not args.bootstrap:
+        time.sleep(CADDY_WATCH_SETTLE_SECONDS)
     if target_slug is not None and not args.bootstrap:
         target_widget = next(
             (widget for widget in result.widgets if widget.slug == target_slug),

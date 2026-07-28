@@ -14,7 +14,7 @@ import sys
 import tempfile
 import types
 import unittest
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 
 def _runtime_dir() -> pathlib.Path:
@@ -807,6 +807,7 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
                     widgets_runtime.process_supervisor,
                     "wait_for_process_ready",
                 ) as bootstrap_wait,
+                patch.object(widgets_cli.time, "sleep") as bootstrap_sleep,
             ):
                 exit_code = widgets_cli.main(
                     argv=["apply", "--all", "--bootstrap"], paths=paths
@@ -817,6 +818,7 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         bootstrap_update.assert_not_called()
         bootstrap_wait.assert_not_called()
+        bootstrap_sleep.assert_not_called()
 
     def test_targeted_backend_apply_waits_for_namespaced_readiness(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_dir:
@@ -841,6 +843,7 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
                         "is_ready": "Ready",
                     },
                 ) as wait_for_ready,
+                patch.object(widgets_cli.time, "sleep") as settle_sleep,
             ):
                 exit_code = widgets_cli.main(
                     argv=["apply", "server-widget", "--timeout", "9"],
@@ -849,6 +852,7 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         project_update.assert_called_once_with(project=paths.process_project)
+        settle_sleep.assert_called_once_with(3)
         wait_for_ready.assert_called_once_with(
             project=paths.process_project,
             process_name="widget.server-widget",
@@ -881,6 +885,7 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
                         "restarts": 5,
                     },
                 ),
+                patch.object(widgets_cli.time, "sleep") as settle_sleep,
                 contextlib.redirect_stderr(stderr),
             ):
                 exit_code = widgets_cli.main(
@@ -889,6 +894,7 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
                 )
 
         self.assertEqual(exit_code, 1)
+        settle_sleep.assert_called_once_with(3)
         self.assertIn("did not become ready within 3s", stderr.getvalue())
         self.assertIn("status=Error", stderr.getvalue())
         self.assertIn("is_ready=Not Ready", stderr.getvalue())
@@ -984,6 +990,7 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
                     widgets_runtime.process_supervisor,
                     "wait_for_process_ready",
                 ) as wait_for_ready,
+                patch.object(widgets_cli.time, "sleep") as settle_sleep,
             ):
                 static_exit = widgets_cli.main(
                     argv=["apply", "static-widget"],
@@ -996,6 +1003,7 @@ class TestHermesWidgetsRuntime(unittest.TestCase):
 
         self.assertEqual(static_exit, 0)
         self.assertEqual(all_exit, 0)
+        self.assertEqual(settle_sleep.call_args_list, [call(3), call(3)])
         wait_for_ready.assert_not_called()
         parsed = widgets_cli.build_parser().parse_args(["apply", "static-widget"])
         self.assertEqual(
