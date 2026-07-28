@@ -134,7 +134,14 @@ def _humr_query(model: str, fields: list[str], filters: list[str]) -> list[dict]
     for f in filters:
         cmd.extend(["--filter", f])
 
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    # stdin=DEVNULL, not inherited: this resolution query ECS-execs into prod, and
+    # `aws ecs execute-command --interactive` pipes whatever stdin it is given into
+    # the SSM data channel. Handed the operator's terminal it consumes their
+    # keystrokes and leaves the TTY in raw mode, which breaks the interactive
+    # session the dispatched command opens moments later. Closing stdin also sends
+    # prod_manage.sh down its `[ -t 0 ]` false branch, so the query runs on its own
+    # PTY via script(1) and never touches the operator's terminal.
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False, stdin=subprocess.DEVNULL)
     if result.returncode != 0:
         raise SystemExit(
             f"[prod_dispatch] prod_manage.sh exited {result.returncode}\n"

@@ -182,7 +182,7 @@ class Command(BaseCommand):
     help = "Open an interactive shell in a customer app container (ECS Exec / SSM)"
 
     def add_arguments(self, parser):
-        add_aws_target_args(parser=parser, env_default="default")
+        add_aws_target_args(parser=parser, env_default=None)
         parser.add_argument("--app", required=True, help="App slug (same as ECS container name)")
         parser.add_argument(
             "--container",
