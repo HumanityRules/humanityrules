@@ -108,13 +108,12 @@ def _container_dependency_condition(cond: str) -> ecs.ContainerDependencyConditi
 
 
 def _grants_bedrock_runtime(app_config: appconfig.AppConfig) -> bool:
-    """Return True when the template declares the bedrock-runtime platform capability.
+    """Return True when this deploy carries the bedrock-runtime platform capability.
 
-    Granted unconditionally for any such template regardless of the org's LLM
-    preset — the Hermes WebUI model dropdown always offers Bedrock models
-    (the sandbox's AWS SDK config points at the local signing proxy, which
-    signs with the task role), so a Codex-preset deploy still needs the IAM
-    grant for a user to pick a Bedrock model.
+    The capability comes from the owning org's entitlement, independent of its
+    LLM preset: a Codex-preset deploy in a granted org still needs the IAM so a
+    user can pick a Bedrock model from the WebUI dropdown (the sandbox's AWS SDK
+    config points at the local signing proxy, which signs with the task role).
     """
     return PLATFORM_CAPABILITY_BEDROCK_RUNTIME in app_config.platform_capabilities
 
@@ -406,6 +405,9 @@ class AppStack(Stack):
                 "HUMR_ENV_SLUG": env_slug,
                 "HUMR_CONTROL_PLANE_URL": _resolve_control_plane_url(),
                 "HUMR_APP_SLUG": app_config.app_name,
+                # Always present (empty when nothing is granted) so in-container
+                # gates read an absent capability as denial, not as missing config.
+                "HUMR_PLATFORM_CAPABILITIES": ",".join(app_config.platform_capabilities),
             }
             if app_config.owner_username:
                 env_bearer_environment_overlay["HUMR_OWNER_USERNAME"] = app_config.owner_username

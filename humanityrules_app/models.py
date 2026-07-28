@@ -101,6 +101,12 @@ class Organization(models.Model):
             "Codex; set to Bedrock per-customer in admin for the demo."
         ),
     )
+    # Platform-owned infrastructure capabilities this org is entitled to, e.g.
+    # ["bedrock-runtime"]. The grant lives here, on the tenant; the deploy path
+    # resolves it into AppConfig.platform_capabilities, which CDK turns into
+    # ECS task-role grants and the container reads as HUMR_PLATFORM_CAPABILITIES.
+    # Not user-managed app permissions.
+    platform_capabilities = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -664,11 +670,6 @@ class AppTemplate(models.Model):
     # List of {key, value}. Used by the deploy flow to write ResourceTag rows
     # at app creation time — e.g. [{"key": "app-type", "value": "personal-assistant"}].
     default_tags = models.JSONField(default=list, blank=True)
-
-    # Platform-owned infrastructure capabilities needed by apps from this
-    # template. CDK interprets these into task-role grants and other platform
-    # wiring; they are not user-managed app permissions.
-    platform_capabilities = models.JSONField(default=list, blank=True)
 
     # When True, the ECS service runs at max_healthy_percent=100, which forces
     # ECS to fully stop the old task before starting the replacement. Set for

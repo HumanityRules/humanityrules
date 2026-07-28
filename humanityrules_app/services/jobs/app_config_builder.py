@@ -5,8 +5,9 @@ Converts a Django App model (with related Workspace, Environment)
 into an appconfig.AppConfig suitable for CDK deployment.
 """
 
-from humanityrules_app.models import App, AppTemplate, ResourceTag
+from humanityrules_app.models import App, AppTemplate, Organization, ResourceTag
 from humanityrules_app.services import infra_customer
+from humanityrules_app.services import llm_preset_service
 from humanityrules_app.services import template_deploy_service
 from humanityrules_app.services.infra_customer.appconfig import (
     AppConfig,
@@ -45,6 +46,29 @@ def _merge_container_environment(
 
 class ContainerSecretCollision(ValueError):
     """Two containers declared the same secret field name with different values."""
+
+
+class PlatformCapabilityNotGranted(ValueError):
+    """The app's configuration needs a platform capability its org was never granted."""
+
+
+def effective_platform_capabilities(organization: Organization) -> list[str]:
+    """Resolve the platform capabilities a deploy for *organization* carries.
+
+    The one calculation point: the org's grants are the whole answer, and both
+    the ECS task-role grants and the container's HUMR_PLATFORM_CAPABILITIES come
+    from this list, so the IAM and the in-container gates cannot disagree.
+    """
+    capabilities = list(organization.platform_capabilities or [])
+    preset = llm_preset_service.resolve_preset_name(organization=organization)
+    bedrock_runtime = infra_customer.deploy_app.PLATFORM_CAPABILITY_BEDROCK_RUNTIME
+    if preset == Organization.LlmPreset.BEDROCK.value and bedrock_runtime not in capabilities:
+        raise PlatformCapabilityNotGranted(
+            f"Organization '{organization.slug}' defaults its assistants to Bedrock but was not "
+            f"granted the '{bedrock_runtime}' platform capability; the deployed agent would have "
+            "no IAM behind its default model. Grant it on the organization, or change the LLM preset."
+        )
+    return capabilities
 
 
 def _union_app_secrets(containers: list[ContainerConfig]) -> dict[str, str | None]:
@@ -196,7 +220,7 @@ def build_app_config_from_app(app: App) -> AppConfig:
         alb_target_container=template.alb_target_container,
         app_secrets=app_secrets_union or None,
         efs_config=efs_config,
-        platform_capabilities=list(template.platform_capabilities or []),
+        platform_capabilities=effective_platform_capabilities(organization=app.organization),
         owner_username=owner_username,
         org_slug=app.organization.slug,
         serialize_task_replacement=template.serialize_task_replacement,
