@@ -58,13 +58,17 @@ def _get_app_for_user(request: HttpRequest, app_slug: str) -> App:
     )
 
 
+def _app_live_region_context(app: App, can_edit: bool) -> dict[str, Any]:
+    """Context for the regions the status poll re-renders out of band: header actions and History."""
+    return {
+        "deployment_records": DeploymentRecord.objects.filter(app=app).select_related("created_by")[:MAX_DEPLOYMENT_RECORDS],
+        "can_remove": can_edit and not app.is_pending_removal and _app_removable(app),
+    }
+
+
 def build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
     """Build the shared context dict for app detail rendering."""
     context = base.get_app_shell_context(request=request, current_page="dashboard")
-
-    deployment_records = (
-        DeploymentRecord.objects.filter(app=app).select_related("created_by")[:MAX_DEPLOYMENT_RECORDS]
-    )
 
     # Tags
     direct_tags = ResourceTag.objects.filter(app=app).order_by("key", "value")
@@ -73,7 +77,7 @@ def build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
     can_admin = abac_service.check_action(request.user.current_organization, request.user, app.workspace, "workspace", "workspace:admin")
 
     context["app"] = app
-    context["deployment_records"] = deployment_records
+    context.update(_app_live_region_context(app=app, can_edit=can_edit))
     # Deployment Log tab: enabled once there's something to show (any logged attempt, or one
     # currently in flight). When a job is in flight we open that tab by default, so a
     # freshly started deploy lands straight on its live log instead of the Overview.
@@ -93,7 +97,6 @@ def build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
     context["can_edit"] = can_edit
     context["can_admin"] = can_admin
     context["is_pending_removal"] = app.is_pending_removal
-    context["can_remove"] = can_edit and not app.is_pending_removal and _app_removable(app)
     context["url_base"] = f"/apps/{app.slug}/tags/"
     context["suggested_keys"], context["suggested_values"] = abac_service.get_resource_tag_suggestions(org, "app")
     context.update(webapp_public_access.build_public_access_context(request=request, app=app))
@@ -202,14 +205,16 @@ def app_deployment_log(request: HttpRequest, app_slug: str) -> HttpResponse:
 @login_required
 @require_GET
 def app_deployment_section_status(request: HttpRequest, app_slug: str) -> HttpResponse:
-    """Return updated deployment section inner HTML for self-terminating polling."""
+    """Return the deployment section for the self-terminating poll, plus its OOB companions."""
     app = _get_app_for_user(request, app_slug)
 
     denied = abac_view_checks.check_abac(request, app.workspace, "workspace", "workspace:view")
     if denied:
         return denied
 
-    context = {"app": app}
+    can_edit = abac_service.check_action(request.user.current_organization, request.user, app.workspace, "workspace", "workspace:edit")
+    context = {"app": app, "with_oob": True}
+    context.update(_app_live_region_context(app=app, can_edit=can_edit))
     return render(
         request,
         "humanityrules_app/apps/_app_deployment_section.html#deployment_section",

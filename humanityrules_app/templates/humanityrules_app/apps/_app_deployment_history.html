@@ -1,0 +1,49 @@
+{% comment %}
+History section for app detail: append-only DeploymentRecord events, newest first. Rendered in
+place on full load; re-rendered out-of-band (oob=True) by the deployment-section status poll so
+the events a running job emits ("Deploy Succeeded", "Torn Down") show up without a reload.
+See docs/ui_live_update_contract.md.
+{% endcomment %}
+<div id="deployment-history"{% if oob %} hx-swap-oob="true"{% endif %}>
+    <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">History</h2>
+    {% if deployment_records %}
+    <div class="overflow-x-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
+        <table class="min-w-full table-auto">
+            <colgroup>
+                <col class="w-full">
+                <col>
+                <col>
+            </colgroup>
+            <thead class="sr-only">
+                <tr>
+                    <th class="px-4 py-3 text-left">Event</th>
+                    <th class="px-4 py-3 text-center">By</th>
+                    <th class="px-4 py-3 text-center">When</th>
+                </tr>
+            </thead>
+            <tbody class="[&_tr:not(:last-child)>td]:border-b [&_tr:not(:last-child)>td]:border-gray-200 dark:[&_tr:not(:last-child)>td]:border-gray-700">
+                {% for record in deployment_records %}
+                <tr>
+                    <td class="w-full px-4 py-3 align-middle">
+                        <span class="text-sm font-medium text-gray-900 dark:text-white">{{ record.get_event_type_display }}</span>
+                        {% if record.error %}
+                        <p class="mt-1 max-w-xl truncate text-xs text-red-700 dark:text-red-400" title="{{ record.error }}">{{ record.error }}</p>
+                        {% endif %}
+                    </td>
+                    <td class="px-4 py-3 text-center align-middle whitespace-nowrap">
+                        <span class="text-xs text-gray-500 dark:text-gray-400">{{ record.created_by.email|default:"—" }}</span>
+                    </td>
+                    <td class="px-4 py-3 text-center align-middle">
+                        <span class="text-xs leading-4 whitespace-nowrap text-gray-500 dark:text-gray-400" title="{{ record.created_at|date:'c' }}">{{ record.created_at|timesince }} ago</span>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 border-dashed rounded-lg p-6 text-center">
+        <p class="text-sm text-gray-500 dark:text-gray-400">No deployments for this app yet.</p>
+    </div>
+    {% endif %}
+</div>
