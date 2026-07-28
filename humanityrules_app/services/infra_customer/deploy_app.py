@@ -879,20 +879,21 @@ def deploy(
     image_hashes = {template_images.image_name(tp): tag for tp, tag in image_tags.items()}
 
     # Phase 2: Deploy the App stack (images exist, so ECS can start tasks immediately).
-    cdk_app = App(outdir=str(cdk_utils.create_synth_dir(name=resource_prefix)))
-    AppStack(
-        scope=cdk_app,
-        construct_id=f"{resource_prefix}-app",
-        app_config=app_config,
-        image_tags=image_tags,
-        env_slug=env_slug,
-        resource_prefix=resource_prefix,
-        subdomain=subdomain,
-        shared_alb_hosted_zone=shared_alb_hosted_zone,
-        env_bearer_shared_secrets_arn=env_bearer_shared_secrets_arn,
-        auth_base_url=policy_proxy_auth_base_url,
-    )
-    assembly_dir = cdk_utils.synth_cdk_app(cdk_app)
+    with cdk_utils.jsii_synth_lock:
+        cdk_app = App(outdir=str(cdk_utils.create_synth_dir(name=resource_prefix)))
+        AppStack(
+            scope=cdk_app,
+            construct_id=f"{resource_prefix}-app",
+            app_config=app_config,
+            image_tags=image_tags,
+            env_slug=env_slug,
+            resource_prefix=resource_prefix,
+            subdomain=subdomain,
+            shared_alb_hosted_zone=shared_alb_hosted_zone,
+            env_bearer_shared_secrets_arn=env_bearer_shared_secrets_arn,
+            auth_base_url=policy_proxy_auth_base_url,
+        )
+        assembly_dir = cdk_utils.synth_cdk_app(cdk_app)
 
     if synth_only:
         return DeployResult(success=True, error="", service_url="", alb_dns="", image_hashes=image_hashes)

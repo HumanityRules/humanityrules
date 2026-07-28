@@ -128,9 +128,10 @@ def _deploy_ecr_stack(session: boto3.Session, env_slug: str, template_path: str)
     stack_name = ecr_stack_name(env_slug=env_slug, template_path=template_path)
     cloudformation_utils.cleanup_rollback_complete_stacks(session.client("cloudformation"), [stack_name])
 
-    cdk_app = App(outdir=str(cdk_utils.create_synth_dir(name=stack_name)))
-    TemplateImageEcrStack(cdk_app, stack_name, env_slug=env_slug, template_path=template_path)
-    assembly_dir = cdk_utils.synth_cdk_app(cdk_app)
+    with cdk_utils.jsii_synth_lock:
+        cdk_app = App(outdir=str(cdk_utils.create_synth_dir(name=stack_name)))
+        TemplateImageEcrStack(cdk_app, stack_name, env_slug=env_slug, template_path=template_path)
+        assembly_dir = cdk_utils.synth_cdk_app(cdk_app)
 
     if not cdk_utils.deploy_from_assembly(assembly_dir=assembly_dir, session=session, stack_names=[stack_name]):
         raise TemplateImageBuildError(f"ECR stack deployment failed: {stack_name}")

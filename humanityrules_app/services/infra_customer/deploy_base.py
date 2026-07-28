@@ -759,35 +759,36 @@ def deploy(
             logger.error("Could not find hosted zone '%(hosted_zone)s', HTTPS will not be configured", {"hosted_zone": shared_alb_hosted_zone})
             shared_alb_hosted_zone = None  # Fall back to HTTP-only
 
-    cdk_app = App(outdir=str(cdk_utils.create_synth_dir(name=f"humr-{env_slug}-base")))
+    with cdk_utils.jsii_synth_lock:
+        cdk_app = App(outdir=str(cdk_utils.create_synth_dir(name=f"humr-{env_slug}-base")))
 
-    vpc_stack = VpcStack(cdk_app, vpc_stack_name, env_slug=env_slug, vpc_cidr=vpc_cidr)
+        vpc_stack = VpcStack(cdk_app, vpc_stack_name, env_slug=env_slug, vpc_cidr=vpc_cidr)
 
-    builder_stack = BuilderStack(cdk_app, builder_stack_name, env_slug=env_slug, vpc=vpc_stack.vpc)
-    builder_stack.add_dependency(vpc_stack)
+        builder_stack = BuilderStack(cdk_app, builder_stack_name, env_slug=env_slug, vpc=vpc_stack.vpc)
+        builder_stack.add_dependency(vpc_stack)
 
-    node_profile = node_packing.profile_for(eni_trunking_enabled=eni_trunking_enabled)
-    ecs_cluster_stack = EcsClusterStack(
-        cdk_app,
-        cluster_stack_name,
-        env_slug=env_slug,
-        vpc=vpc_stack.vpc,
-        container_instance_type=ec2.InstanceType(node_profile.instance_type),
-        shared_hosted_zone_name=shared_alb_hosted_zone,
-        shared_hosted_zone_id=shared_hosted_zone_id,
-        existing_certificate_arn=existing_certificate_arn,
-    )
-    ecs_cluster_stack.add_dependency(vpc_stack)
+        node_profile = node_packing.profile_for(eni_trunking_enabled=eni_trunking_enabled)
+        ecs_cluster_stack = EcsClusterStack(
+            cdk_app,
+            cluster_stack_name,
+            env_slug=env_slug,
+            vpc=vpc_stack.vpc,
+            container_instance_type=ec2.InstanceType(node_profile.instance_type),
+            shared_hosted_zone_name=shared_alb_hosted_zone,
+            shared_hosted_zone_id=shared_hosted_zone_id,
+            existing_certificate_arn=existing_certificate_arn,
+        )
+        ecs_cluster_stack.add_dependency(vpc_stack)
 
-    efs_stack = EfsStack(cdk_app, efs_stack_name, env_slug=env_slug, vpc=vpc_stack.vpc, vpc_cidr=vpc_cidr)
-    efs_stack.add_dependency(vpc_stack)
+        efs_stack = EfsStack(cdk_app, efs_stack_name, env_slug=env_slug, vpc=vpc_stack.vpc, vpc_cidr=vpc_cidr)
+        efs_stack.add_dependency(vpc_stack)
+
+        assembly_dir = cdk_utils.synth_cdk_app(cdk_app)
 
     if synth_only:
-        cloud_assembly = cdk_app.synth()
-        logger.info("CDK templates synthesized to: %(directory)s", {"directory": cloud_assembly.directory})
         return True
 
-    success = cdk_utils.deploy_cdk_stacks(cdk_app, session)
+    success = cdk_utils.deploy_from_assembly(assembly_dir=assembly_dir, session=session, stack_names=None)
 
     if success:
         # Account+Region-scoped and idempotent: shared across environments, reasserted each deploy.
