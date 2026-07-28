@@ -32,7 +32,7 @@ This session optimizes time-to-live, not engineering rigor. Your normal thorough
 
 1. Single-file Python, stdlib-first. No npm installs.
 2. No tests, no venv, no git, no README, no scaffolding.
-3. Verification is opening the thing yourself and clicking through it once before presenting. Nothing more, but never less.
+3. Verify minimally: fetch the live URL once and check the response is what you intended to ship. You have no browser, so never claim to have clicked through anything.
 
 ## While building
 
