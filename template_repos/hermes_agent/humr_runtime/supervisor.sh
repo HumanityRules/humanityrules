@@ -148,6 +148,16 @@ start_humr_broker() {
     wait_for_port "$MCP_AGGREGATOR_PORT" "$INTEGRATIONS_BROKER_PID" "mcp-aggregator"
 }
 
+has_platform_capability() {
+    # HUMR_PLATFORM_CAPABILITIES is the comma-separated grant CP resolved from
+    # the owning org and injected alongside the env-bearer identity. Unset means
+    # nothing is granted.
+    case ",${HUMR_PLATFORM_CAPABILITIES:-}," in
+        *",$1,"*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 render_hermes_config() {
     local humr_llm_base_url="${HUMR_LLM_BASE_URL:-}"
     local humr_aux_provider="${HUMR_AUX_PROVIDER:-$HUMR_LLM_PROVIDER}"
@@ -161,12 +171,14 @@ render_hermes_config() {
 
     mkdir -p "$HERMES_HOME"
 
-    # Bedrock is always IAM-granted for this template (see deploy_app.py's
-    # PLATFORM_CAPABILITY_BEDROCK_RUNTIME gate), so the curated Bedrock model
-    # list is offered in the WebUI dropdown regardless of which provider is
-    # the org's default.
+    # The curated Bedrock model list appears in the WebUI dropdown exactly when
+    # the org holds the bedrock-runtime capability — the same grant that puts
+    # Bedrock actions on the ECS task role, so a listed model is always callable.
+    # Without it the placeholder line is dropped and Hermes keeps its own
+    # provider defaults.
     providers_block_file=$(mktemp)
-    cat > "$providers_block_file" <<'EOF'
+    if has_platform_capability "bedrock-runtime"; then
+        cat > "$providers_block_file" <<'EOF'
 providers:
   only_configured: false
   bedrock:
@@ -175,6 +187,7 @@ providers:
       'global.anthropic.claude-opus-4-8': "Opus 4.8"
       'global.anthropic.claude-haiku-4-5-20251001-v1:0': "Haiku 4.5"
 EOF
+    fi
 
     sed \
         -e "s|__CONFIG_PROVIDER__|${HUMR_LLM_PROVIDER}|g" \
@@ -188,11 +201,15 @@ EOF
         "$HERMES_CONFIG_TEMPLATE" > "$HERMES_HOME/config.yaml"
     rm -f "$providers_block_file"
 
-    cat >> "$HERMES_HOME/config.yaml" <<EOF
+    # Pins the region for Bedrock calls; Hermes's own defaults cover the key
+    # when it is absent, so it rides along with the capability.
+    if has_platform_capability "bedrock-runtime"; then
+        cat >> "$HERMES_HOME/config.yaml" <<EOF
 
 bedrock:
   region: ${AWS_DEFAULT_REGION}
 EOF
+    fi
 }
 
 ensure_workspace_ownership() {

@@ -218,8 +218,10 @@ class AppConfig:
     # ContainerConfig.efs_mounts referencing entries by name.
     efs_config: EfsConfig | None = None
 
-    # Platform-owned capabilities requested by the source template. CDK maps
-    # these to infrastructure grants on the ECS task role.
+    # Platform-owned capabilities this deploy is entitled to, resolved from the
+    # owning organization's grants. CDK maps them to infrastructure grants on the
+    # ECS task role and mirrors them into env-bearer containers as
+    # HUMR_PLATFORM_CAPABILITIES, so in-container features gate on the same fact.
     platform_capabilities: list[str] = field(default_factory=list)
 
     # When True, the ECS service is configured with max_healthy_percent=100 so

@@ -67,7 +67,7 @@ class OrganizationAdmin(admin.ModelAdmin):
 
     fieldsets = (
         (None, {
-            "fields": ("name", "slug", "default_org_role", "bootstrap_admin_email", "llm_preset"),
+            "fields": ("name", "slug", "default_org_role", "bootstrap_admin_email", "llm_preset", "platform_capabilities"),
         }),
         ("Authentication", {
             "fields": ("auth_provider", "oidc_issuer_url", "oidc_client_id", "oidc_client_secret"),
