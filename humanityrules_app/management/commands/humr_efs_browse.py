@@ -2,13 +2,21 @@
 Browse EFS filesystem in a customer environment via ECS Exec.
 
 Usage:
-    uv run manage.py humr_efs_browse --account "Humanity Rules Sandbox"
-    uv run manage.py humr_efs_browse --account "Humanity Rules Sandbox" --env prod
-    uv run manage.py humr_efs_browse --account "Humanity Rules Sandbox" --org "Humanity Rules"
+    uv run manage.py humr_efs_browse --account "Humanity Rules Sandbox" --env sandbox
+    uv run manage.py humr_efs_browse --account "Humanity Rules Sandbox" --env sandbox --org "Humanity Rules"
+    uv run manage.py humr_efs_browse --account "Humanity Rules Sandbox" --env sandbox --writable
+
+    ./prod_manage.sh humr_efs_browse --account "Humanity Rules Sandbox" --env sandbox --org humanity-rules
 
 Spins up a temporary Fargate task with the root EFS volume mounted (no access
 point, so you see all app data), then opens an interactive bash shell via ECS
-Exec (SSM Session Manager). On exit, the task is stopped and cleaned up.
+Exec (SSM Session Manager). On exit, the task, its task definition, and its IAM
+role are all deleted.
+
+The mount is read-only unless --writable is passed: the root of this filesystem
+holds every agent's checkpoint, and a stray rm in that shell is unrecoverable.
+--writable also adds elasticfilesystem:ClientWrite to the task role, so a
+read-only session cannot write even if the mount were remounted.
 
 The EFS root contains /deployments/<app-name>/ directories — one per deployed
 app that uses the fargate_web_efs stack profile.
@@ -19,7 +27,6 @@ Requires:
     - HUMR_AWS_ACCESS_KEY and HUMR_AWS_SECRET_KEY in .env
 """
 
-import json
 import os
 import subprocess
 import time
@@ -28,6 +35,7 @@ from botocore.exceptions import ClientError
 from django.core.management.base import BaseCommand, CommandError
 
 from humanityrules_app.services.infra_customer import cloudformation_utils
+from humanityrules_app.services.infra_customer import ephemeral_task_role
 
 from ._aws_account_resolver import add_aws_target_args, resolve_aws_target
 
@@ -36,21 +44,29 @@ CONTAINER_NAME = "efs-browser"
 CONTAINER_IMAGE = "public.ecr.aws/amazonlinux/amazonlinux:2023"
 EFS_MOUNT_PATH = "/efs"
 
+# RunTask rejects a role IAM has not propagated yet; retry rather than pre-sleeping.
+TASK_START_ATTEMPTS = 6
+ROLE_PROPAGATION_RETRY_SECONDS = 3
+
 
 class Command(BaseCommand):
     help = "Browse EFS filesystem via ECS Exec (interactive shell)"
 
     def add_arguments(self, parser):
-        add_aws_target_args(parser=parser, env_default="default")
+        add_aws_target_args(parser=parser, env_default=None)
+        parser.add_argument(
+            "--writable",
+            action="store_true",
+            help="Mount the filesystem read-write (default: read-only)",
+        )
 
     def handle(self, *args, **options):
         target = resolve_aws_target(options=options)
-        if target.aws_account is None:
-            raise CommandError("humr_efs_browse requires DB mode (--account/--env); raw mode is not supported.")
-        aws_account = target.aws_account
         session = target.session
         env_slug = target.env_slug
         region = target.aws_region
+        account_id = target.aws_account_id
+        writable = options["writable"]
 
         cf_client = session.client("cloudformation")
         ecs_client = session.client("ecs")
@@ -59,24 +75,31 @@ class Command(BaseCommand):
         infra = _get_infra_info(cf_client=cf_client, env_slug=env_slug, stdout=self.stdout)
 
         cluster_name = f"humr-{env_slug}-cluster"
-        role_name = f"humr-{env_slug}-efs-browser-role"
+        role_name = ephemeral_task_role.unique_role_name(prefix=f"humr-{env_slug}-efs-browser")
         task_family = f"humr-{env_slug}-efs-browser"
 
         task_arn = None
         task_def_arn = None
+        role_created = False
 
         try:
-            task_role_arn = _ensure_task_role(
+            self.stdout.write(f"Creating task role: {role_name}")
+            task_role_arn = ephemeral_task_role.create_role(
                 iam_client=iam_client,
                 role_name=role_name,
-                efs_filesystem_arn=f"arn:aws:elasticfilesystem:{region}:{aws_account.aws_account_id}:file-system/{infra['efs_fs_id']}",
-                stdout=self.stdout,
+                description="EFS browser task role for ECS Exec",
+                purpose="efs-browser",
+                inline_policies={
+                    "ecs-exec-ssm": ephemeral_task_role.ecs_exec_ssm_policy(),
+                    "efs-access": ephemeral_task_role.efs_access_policy(
+                        efs_filesystem_arn=f"arn:aws:elasticfilesystem:{region}:{account_id}:file-system/{infra['efs_fs_id']}",
+                        allow_write=writable,
+                    ),
+                },
             )
+            role_created = True
 
-            self.stdout.write("Waiting for IAM role propagation...")
-            time.sleep(10)
-
-            exec_role_arn = f"arn:aws:iam::{aws_account.aws_account_id}:role/humr-{env_slug}-task-execution-role"
+            exec_role_arn = f"arn:aws:iam::{account_id}:role/humr-{env_slug}-task-execution-role"
             task_def_arn = _register_task_definition(
                 ecs_client=ecs_client,
                 family=task_family,
@@ -85,10 +108,11 @@ class Command(BaseCommand):
                 efs_fs_id=infra["efs_fs_id"],
                 log_group=f"/humr/{env_slug}/ecs",
                 region=region,
+                writable=writable,
                 stdout=self.stdout,
             )
 
-            task_arn = _run_task(
+            task_arn = _start_task(
                 ecs_client=ecs_client,
                 cluster=cluster_name,
                 task_def_arn=task_def_arn,
@@ -97,10 +121,10 @@ class Command(BaseCommand):
                 stdout=self.stdout,
             )
 
-            _wait_for_running(ecs_client=ecs_client, cluster=cluster_name, task_arn=task_arn, stdout=self.stdout)
             _wait_for_exec_agent(ecs_client=ecs_client, cluster=cluster_name, task_arn=task_arn, stdout=self.stdout)
 
-            self.stdout.write(self.style.SUCCESS(f"\nEFS mounted at {EFS_MOUNT_PATH}"))
+            mode = "read-write" if writable else "read-only"
+            self.stdout.write(self.style.SUCCESS(f"\nEFS mounted at {EFS_MOUNT_PATH} ({mode})"))
             self.stdout.write("App data lives under /efs/deployments/<app-name>/")
             self.stdout.write("Type 'exit' to disconnect and stop the task.\n")
 
@@ -114,6 +138,9 @@ class Command(BaseCommand):
                 _stop_task(ecs_client=ecs_client, cluster=cluster_name, task_arn=task_arn, stdout=self.stdout)
             if task_def_arn:
                 _deregister_task_def(ecs_client=ecs_client, task_def_arn=task_def_arn)
+            if role_created:
+                ephemeral_task_role.delete_role(iam_client=iam_client, role_name=role_name)
+                self.stdout.write(f"Deleted task role: {role_name}")
 
 
 # ---------------------------------------------------------------------------
@@ -145,66 +172,7 @@ def _get_infra_info(cf_client, env_slug: str, stdout) -> dict[str, str]:
     return result
 
 
-def _ensure_task_role(iam_client, role_name: str, efs_filesystem_arn: str, stdout) -> str:
-    """Create or update the EFS browser task role with SSM and EFS permissions."""
-    trust_policy = json.dumps({
-        "Version": "2012-10-17",
-        "Statement": [{
-            "Effect": "Allow",
-            "Principal": {"Service": "ecs-tasks.amazonaws.com"},
-            "Action": "sts:AssumeRole",
-        }],
-    })
-
-    try:
-        resp = iam_client.get_role(RoleName=role_name)
-        role_arn = resp["Role"]["Arn"]
-        stdout.write(f"Reusing task role: {role_name}")
-    except iam_client.exceptions.NoSuchEntityException:
-        stdout.write(f"Creating task role: {role_name}")
-        resp = iam_client.create_role(
-            RoleName=role_name,
-            AssumeRolePolicyDocument=trust_policy,
-            Description="EFS browser task role for ECS Exec",
-            Tags=[{"Key": "humr:purpose", "Value": "efs-browser"}],
-        )
-        role_arn = resp["Role"]["Arn"]
-
-    # SSM permissions required by ECS Exec
-    ssm_policy = json.dumps({
-        "Version": "2012-10-17",
-        "Statement": [{
-            "Effect": "Allow",
-            "Action": [
-                "ssmmessages:CreateControlChannel",
-                "ssmmessages:CreateDataChannel",
-                "ssmmessages:OpenControlChannel",
-                "ssmmessages:OpenDataChannel",
-            ],
-            "Resource": "*",
-        }],
-    })
-    iam_client.put_role_policy(RoleName=role_name, PolicyName="ecs-exec-ssm", PolicyDocument=ssm_policy)
-
-    # EFS root access (no access point restriction — see the entire filesystem)
-    efs_policy = json.dumps({
-        "Version": "2012-10-17",
-        "Statement": [{
-            "Effect": "Allow",
-            "Action": [
-                "elasticfilesystem:ClientMount",
-                "elasticfilesystem:ClientWrite",
-                "elasticfilesystem:ClientRootAccess",
-            ],
-            "Resource": efs_filesystem_arn,
-        }],
-    })
-    iam_client.put_role_policy(RoleName=role_name, PolicyName="efs-root-access", PolicyDocument=efs_policy)
-
-    return role_arn
-
-
-def _register_task_definition(ecs_client, family: str, task_role_arn: str, execution_role_arn: str, efs_fs_id: str, log_group: str, region: str, stdout) -> str:
+def _register_task_definition(ecs_client, family: str, task_role_arn: str, execution_role_arn: str, efs_fs_id: str, log_group: str, region: str, writable: bool, stdout) -> str:
     """Register a Fargate task definition with the root EFS volume."""
     resp = ecs_client.register_task_definition(
         family=family,
@@ -235,7 +203,7 @@ def _register_task_definition(ecs_client, family: str, task_role_arn: str, execu
             "mountPoints": [{
                 "containerPath": EFS_MOUNT_PATH,
                 "sourceVolume": "efs-root",
-                "readOnly": False,
+                "readOnly": not writable,
             }],
             "logConfiguration": {
                 "logDriver": "awslogs",
@@ -251,6 +219,33 @@ def _register_task_definition(ecs_client, family: str, task_role_arn: str, execu
     arn = resp["taskDefinition"]["taskDefinitionArn"]
     stdout.write(f"Registered task definition: {family}")
     return arn
+
+
+def _start_task(ecs_client, cluster: str, task_def_arn: str, subnets: list[str], security_groups: list[str], stdout) -> str:
+    """Start the task, retrying while IAM has not yet propagated the new task role."""
+    for attempt in range(TASK_START_ATTEMPTS):
+        try:
+            task_arn = _run_task(
+                ecs_client=ecs_client,
+                cluster=cluster,
+                task_def_arn=task_def_arn,
+                subnets=subnets,
+                security_groups=security_groups,
+                stdout=stdout,
+            )
+        except ClientError as e:
+            if not ephemeral_task_role.is_assume_role_failure(stopped_reason=str(e)):
+                raise
+            stdout.write(f"Task role not usable yet (attempt {attempt + 1}/{TASK_START_ATTEMPTS}), retrying...")
+            time.sleep(ROLE_PROPAGATION_RETRY_SECONDS)
+            continue
+
+        stopped_reason = _wait_for_running(ecs_client=ecs_client, cluster=cluster, task_arn=task_arn, stdout=stdout)
+        if stopped_reason is None:
+            return task_arn
+        raise CommandError(f"Task stopped before reaching RUNNING: {stopped_reason}")
+
+    raise CommandError(f"Task role was still not assumable after {TASK_START_ATTEMPTS} attempts")
 
 
 def _run_task(ecs_client, cluster: str, task_def_arn: str, subnets: list[str], security_groups: list[str], stdout) -> str:
@@ -280,8 +275,8 @@ def _run_task(ecs_client, cluster: str, task_def_arn: str, subnets: list[str], s
     return task_arn
 
 
-def _wait_for_running(ecs_client, cluster: str, task_arn: str, stdout) -> None:
-    """Poll until the task reaches RUNNING state."""
+def _wait_for_running(ecs_client, cluster: str, task_arn: str, stdout) -> str | None:
+    """Poll until the task reaches RUNNING. Returns None on success, else the stopped reason."""
     stdout.write("Waiting for task to start (pulling image, mounting EFS)...")
     for i in range(60):
         resp = ecs_client.describe_tasks(cluster=cluster, tasks=[task_arn])
@@ -290,11 +285,10 @@ def _wait_for_running(ecs_client, cluster: str, task_arn: str, stdout) -> None:
 
         if status == "RUNNING":
             stdout.write("Task is running.")
-            return
+            return None
 
         if status in ("STOPPED", "DEPROVISIONING"):
-            reason = task.get("stoppedReason", "Unknown")
-            raise CommandError(f"Task stopped before reaching RUNNING: {reason}")
+            return task.get("stoppedReason", "Unknown")
 
         if i % 6 == 0:
             stdout.write(f"  Status: {status}")

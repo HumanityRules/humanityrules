@@ -132,7 +132,7 @@ class Command(BaseCommand):
     help = "Fetch CloudWatch logs for a customer app (works for running and crashed tasks)"
 
     def add_arguments(self, parser):
-        add_aws_target_args(parser=parser, env_default="default")
+        add_aws_target_args(parser=parser, env_default=None)
         parser.add_argument("--app", required=True, help="App slug")
         parser.add_argument(
             "--container",

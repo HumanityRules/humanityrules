@@ -152,7 +152,7 @@ class Command(BaseCommand):
     help = "Open an interactive shell on a customer EC2 container instance (SSM Session Manager)"
 
     def add_arguments(self, parser):
-        add_aws_target_args(parser=parser, env_default="default")
+        add_aws_target_args(parser=parser, env_default=None)
         parser.add_argument(
             "--app",
             help="Open the shell on the EC2 instance currently hosting this app's RUNNING task (DB mode only).",

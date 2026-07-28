@@ -172,7 +172,7 @@ class Command(BaseCommand):
     help = "Run a bash script in a customer app container and return exit_code/stdout/stderr (non-interactive)"
 
     def add_arguments(self, parser: argparse.ArgumentParser) -> None:
-        _aws_account_resolver.add_aws_target_args(parser=parser, env_default="default")
+        _aws_account_resolver.add_aws_target_args(parser=parser, env_default=None)
         parser.add_argument("--app", required=True, help="App slug")
         parser.add_argument(
             "--container",
