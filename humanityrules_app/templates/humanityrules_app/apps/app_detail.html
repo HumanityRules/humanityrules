@@ -6,17 +6,7 @@
             {% url 'workspace_detail' workspace_slug=app.workspace.slug as workspace_url %}
             {% include "humanityrules_app/partials/_breadcrumb.html" with p1_label="Dashboard" p1_url=dashboard_url p2_label=app.workspace.name p2_url=workspace_url current=app.name %}
         </div>
-        {% if can_edit and not is_pending_removal %}
-        <div class="shrink-0 flex items-center gap-2">
-            {% if can_remove %}
-            <button type="button"
-                    hx-get="{% url 'app_remove_confirm' app_slug=app.slug %}"
-                    hx-target="#modal-container"
-                    hx-swap="innerHTML"
-                    class="rounded-lg bg-white dark:bg-gray-800 px-3 py-1.5 text-sm font-medium text-red-700 dark:text-red-400 ring-1 ring-inset ring-red-300 dark:ring-red-500/30 hover:bg-red-50 dark:hover:bg-red-500/10">Remove App</button>
-            {% endif %}
-        </div>
-        {% endif %}
+        {% include "humanityrules_app/apps/_app_detail_actions.html" %}
     </div>
     {% if is_pending_removal %}
     <div class="mb-6 rounded-lg border border-amber-300 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
@@ -24,19 +14,20 @@
         Cleanup is in progress.
     </div>
     {% endif %}
-    {% if redeploy_error %}
-    <div class="mb-6 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-500 dark:bg-red-500/10 dark:text-red-200" role="alert">
-        {{ redeploy_error }}
-    </div>
-    {% endif %}
 
     <div x-data="{ tab: '{{ initial_tab }}' }">
         {% comment %} Tabs: Overview + the live deployment log. The log tab is disabled until there's
-        something to show, and opens by default ({{ initial_tab }}) while a deployment is in progress. {% endcomment %}
+        something to show, and opens by default ({{ initial_tab }}) while a deployment is in progress.
+        Clicking Overview refetches the deployment section (which OOB-swaps the actions and History
+        too), so the panel is current the instant it's shown instead of up to a poll-interval stale.
+        The refetch also replaces the polling element, restarting its 10s delay from the click. {% endcomment %}
         <div class="mb-6 border-b border-gray-200 dark:border-gray-700">
             <nav class="-mb-px flex gap-6" aria-label="Tabs">
                 <button type="button"
                         @click="tab = 'content'"
+                        hx-get="{% url 'app_deployment_section_status' app_slug=app.slug %}"
+                        hx-target="#deployment-section-{{ app.id }}"
+                        hx-swap="innerHTML"
                         :class="tab === 'content' ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'"
                         class="whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium">Overview</button>
                 {% if log_tab_enabled %}
@@ -75,50 +66,7 @@
     {# Cost section — self-loads via HTMX; build_app_detail_context stays untouched #}
     {% include "humanityrules_app/apps/_app_cost_panel.html" %}
 
-    {# History section: append-only DeploymentRecord events, newest first #}
-    <div>
-        <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">History</h2>
-        {% if deployment_records %}
-        <div id="deployment-history" class="overflow-x-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
-            <table class="min-w-full table-auto">
-                <colgroup>
-                    <col class="w-full">
-                    <col>
-                    <col>
-                </colgroup>
-                <thead class="sr-only">
-                    <tr>
-                        <th class="px-4 py-3 text-left">Event</th>
-                        <th class="px-4 py-3 text-center">By</th>
-                        <th class="px-4 py-3 text-center">When</th>
-                    </tr>
-                </thead>
-                <tbody class="[&_tr:not(:last-child)>td]:border-b [&_tr:not(:last-child)>td]:border-gray-200 dark:[&_tr:not(:last-child)>td]:border-gray-700">
-                    {% for record in deployment_records %}
-                    <tr>
-                        <td class="w-full px-4 py-3 align-middle">
-                            <span class="text-sm font-medium text-gray-900 dark:text-white">{{ record.get_event_type_display }}</span>
-                            {% if record.error %}
-                            <p class="mt-1 max-w-xl truncate text-xs text-red-700 dark:text-red-400" title="{{ record.error }}">{{ record.error }}</p>
-                            {% endif %}
-                        </td>
-                        <td class="px-4 py-3 text-center align-middle whitespace-nowrap">
-                            <span class="text-xs text-gray-500 dark:text-gray-400">{{ record.created_by.email|default:"—" }}</span>
-                        </td>
-                        <td class="px-4 py-3 text-center align-middle">
-                            <span class="text-xs leading-4 whitespace-nowrap text-gray-500 dark:text-gray-400" title="{{ record.created_at|date:'c' }}">{{ record.created_at|timesince }} ago</span>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% else %}
-        <div class="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 border-dashed rounded-lg p-6 text-center">
-            <p class="text-sm text-gray-500 dark:text-gray-400">No deployments for this app yet.</p>
-        </div>
-        {% endif %}
-    </div>
+    {% include "humanityrules_app/apps/_app_deployment_history.html" %}
         </div>{# end Overview panel #}
 
         <div x-show="tab === 'logs'"{% if initial_tab != 'logs' %} style="display: none"{% endif %}>
