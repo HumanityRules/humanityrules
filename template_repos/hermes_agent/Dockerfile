@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-ARG WEBUI_BASE_VERSION=0.51.819
+ARG WEBUI_BASE_VERSION=0.52.76
 
 # ============================================================================
 # Erlang/OTP + Elixir builder stage.
