@@ -122,6 +122,7 @@ async def _run(
     owner_username = _require_env(name="HUMR_OWNER_USERNAME")
     app_slug = _require_env(name="HUMR_APP_SLUG")
     env_slug = os.environ.get("HUMR_ENV_SLUG", "")
+    org_slug = os.environ.get("HUMR_ORG_SLUG", "")
     merge_enabled = _env_flag_enabled(name="HUMR_MERGE_INTEGRATION_ENABLED", default=True)
     webui_python = Path(_require_env(name="HERMES_WEBUI_PYTHON"))
     runtime_dir = Path(_require_env(name="HUMR_RUNTIME_DIR"))
@@ -194,6 +195,7 @@ async def _run(
         credentials_service=credentials_service,
         humr_client=humr_client,
         env_slug=env_slug,
+        org_slug=org_slug,
     )
     control_uvicorn_config = uvicorn.Config(
         app=control_app, host="127.0.0.1", port=control_port, log_level="warning", access_log=False,

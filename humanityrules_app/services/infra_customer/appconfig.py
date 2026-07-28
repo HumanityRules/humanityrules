@@ -235,6 +235,11 @@ class AppConfig:
     # user. None for apps without an owner tag (typical multi-user apps).
     owner_username: str | None = None
 
+    # Slug of the organization that owns the App. Injected into env-bearer
+    # containers as HUMR_ORG_SLUG so env-resident components can key
+    # org-dependent behavior (e.g. the broker's integration-card visibility).
+    org_slug: str | None = None
+
     # When True, the ALB listener rule also matches *-<agent-host> so Caddy
     # can route user Web Apps by hostname. TLS and DNS come from the
     # environment's *.<zone> certificate and wildcard record. See

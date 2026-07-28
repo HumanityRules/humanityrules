@@ -94,7 +94,10 @@ class Command(BaseCommand):
         )
         raw = options["bearer"]
         self._mint_bearer(env=env, raw=raw)
-        self._print_summary(env=env, app_slug=app_slug, owner_username=options["owner_username"], raw=raw)
+        self._print_summary(
+            env=env, app_slug=app_slug, owner_username=options["owner_username"],
+            org_slug=aws_account.organization.slug, raw=raw,
+        )
 
     def _resolve_aws_account(self, name: str, org: str | None) -> AWSAccount:
         """Return the AWSAccount by name (scoped to --org when the name is shared)."""
@@ -253,7 +256,7 @@ class Command(BaseCommand):
         action = "minted" if created else "rotated"
         self.stdout.write(self.style.SUCCESS(f"{action} EnvironmentBearerToken for env={env.slug!r}"))
 
-    def _print_summary(self, env: Environment, app_slug: str, owner_username: str, raw: str) -> None:
+    def _print_summary(self, env: Environment, app_slug: str, owner_username: str, org_slug: str, raw: str) -> None:
         """Print the exact compose env block to paste into .env."""
         self.stdout.write("")
         self.stdout.write("Set these in template_repos/hermes_agent_local/.env:")
@@ -262,5 +265,6 @@ class Command(BaseCommand):
         self.stdout.write(f"  HUMR_ENV_BEARER={raw}")
         self.stdout.write(f"  HUMR_OWNER_USERNAME={owner_username}")
         self.stdout.write(f"  HUMR_APP_SLUG={app_slug}")
+        self.stdout.write(f"  HUMR_ORG_SLUG={org_slug}")
         self.stdout.write("")
         self.stdout.write("Then: cd template_repos/hermes_agent_local && docker compose up --build")

@@ -409,6 +409,8 @@ class AppStack(Stack):
             }
             if app_config.owner_username:
                 env_bearer_environment_overlay["HUMR_OWNER_USERNAME"] = app_config.owner_username
+            if app_config.org_slug:
+                env_bearer_environment_overlay["HUMR_ORG_SLUG"] = app_config.org_slug
             if shared_alb_hosted_zone:
                 env_bearer_environment_overlay["HUMR_PUBLIC_HOSTNAME"] = f"{subdomain}.{shared_alb_hosted_zone}"
             env_bearer_secret_overlay = {

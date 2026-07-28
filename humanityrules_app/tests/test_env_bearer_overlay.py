@@ -25,6 +25,7 @@ SHARED_SECRETS_ARN = "arn:aws:secretsmanager:us-east-1:123456789012:secret:humr/
 def _render(
     containers: list[ContainerConfig],
     owner_username: str | None,
+    org_slug: str | None,
     shared_alb_hosted_zone: str | None,
 ) -> Template:
     cdk_app = App()
@@ -39,6 +40,7 @@ def _render(
             alb_target_container=containers[0].name,
             containers=containers,
             owner_username=owner_username,
+            org_slug=org_slug,
         ),
         image_tags={c.template_path: "test" for c in containers},
         env_slug="staging",
@@ -90,6 +92,7 @@ class TestEnvBearerOverlay(SimpleTestCase):
                 ),
             ],
             owner_username="vmendi",
+            org_slug="acme",
             shared_alb_hosted_zone=None,
         )
 
@@ -97,6 +100,7 @@ class TestEnvBearerOverlay(SimpleTestCase):
         env = {e["Name"]: e["Value"] for e in hermes.get("Environment", [])}
         self.assertEqual(env.get("HUMR_ENV_SLUG"), "staging")
         self.assertEqual(env.get("HUMR_OWNER_USERNAME"), "vmendi")
+        self.assertEqual(env.get("HUMR_ORG_SLUG"), "acme")
         self.assertTrue(env.get("HUMR_CONTROL_PLANE_URL", "").startswith("https://"))
         # No shared_alb_hosted_zone passed → no HUMR_PUBLIC_HOSTNAME.
         self.assertNotIn("HUMR_PUBLIC_HOSTNAME", env)
@@ -115,6 +119,7 @@ class TestEnvBearerOverlay(SimpleTestCase):
                 ),
             ],
             owner_username="vmendi",
+            org_slug="acme",
             shared_alb_hosted_zone="example.com",
         )
 
@@ -135,6 +140,7 @@ class TestEnvBearerOverlay(SimpleTestCase):
                 ),
             ],
             owner_username=None,
+            org_slug=None,
             shared_alb_hosted_zone=None,
         )
 
@@ -142,6 +148,7 @@ class TestEnvBearerOverlay(SimpleTestCase):
         env = {e["Name"]: e["Value"] for e in container.get("Environment", [])}
         self.assertEqual(env.get("HUMR_ENV_SLUG"), "staging")
         self.assertNotIn("HUMR_OWNER_USERNAME", env)
+        self.assertNotIn("HUMR_ORG_SLUG", env)
         secret_names = {s["Name"] for s in container.get("Secrets", [])}
         self.assertIn("HUMR_ENV_BEARER", secret_names)
 
@@ -164,6 +171,7 @@ class TestEnvBearerOverlay(SimpleTestCase):
                 ),
             ],
             owner_username="vmendi",
+            org_slug="acme",
             shared_alb_hosted_zone=None,
         )
 
@@ -200,6 +208,7 @@ class TestEnvBearerOverlay(SimpleTestCase):
                 ),
             ],
             owner_username="vmendi",
+            org_slug="acme",
             shared_alb_hosted_zone=None,
         )
 

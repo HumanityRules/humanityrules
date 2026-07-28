@@ -1535,6 +1535,7 @@ def _make_control_parts(
     aggregator: _StubAggregator,
     gateway_env_path: pathlib.Path,
     webui_state_dir: pathlib.Path,
+    org_slug: str,
 ) -> types.SimpleNamespace:
     """Wire a control app + CredentialsService the way the broker does at startup."""
     client = _make_humr_client()
@@ -1558,6 +1559,7 @@ def _make_control_parts(
         credentials_service=service,
         humr_client=client,
         env_slug="default",
+        org_slug=org_slug,
     )
     return types.SimpleNamespace(app=app, service=service, humr_client=client, device_flow=device_stub)
 
@@ -1593,19 +1595,20 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         self.gateway_env_path = root / "hermes.env"
         self.webui_state_dir = root / "webui-state"
 
-    def _control_parts(self, aggregator: _StubAggregator) -> types.SimpleNamespace:
+    def _control_parts(self, aggregator: _StubAggregator, org_slug: str) -> types.SimpleNamespace:
         return _make_control_parts(
             tls_intercept_runtime=self.tls_intercept_runtime,
             aggregator=aggregator,
             gateway_env_path=self.gateway_env_path,
             webui_state_dir=self.webui_state_dir,
+            org_slug=org_slug,
         )
 
     async def test_get_integrations_reads_cache_without_calling_humr(self) -> None:
         """Status reads never call HUMR; connected items come from the pre-warmed cache."""
         from starlette.testclient import TestClient
 
-        app = self._control_parts(aggregator=_ready_stub_aggregator()).app
+        app = self._control_parts(aggregator=_ready_stub_aggregator(), org_slug="humanity-rules").app
 
         with patch.object(
             broker.tls_intercept,
@@ -1639,6 +1642,76 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
             await self.tls_intercept_runtime._token_store.token_for_host(host="gmail.googleapis.com"),
             "fresh-token",
         )
+
+    async def test_customer_org_hides_x_and_platform_served_codex(self) -> None:
+        """Customer orgs never see the x card, and codex hides when the platform credential serves it."""
+        from starlette.testclient import TestClient
+
+        app = self._control_parts(aggregator=_ready_stub_aggregator(), org_slug="acme").app
+
+        with TestClient(app) as client:
+            before_by_slug = {item["slug"]: item for item in client.get("/integrations").json()["items"]}
+        # Disconnected codex is hidden too: the card name alone would leak the platform default.
+        self.assertNotIn("openai-codex", before_by_slug)
+        self.assertNotIn("x", before_by_slug)
+
+        with patch.object(
+            broker.tls_intercept,
+            "fetch_provider_tokens_batch",
+            return_value=_batched(slug="openai-codex", result=broker.tls_intercept.RefreshResult(
+                outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
+                secrets={"access_token": "platform-token"},
+                expires_in=3600,
+                config={},
+                metadata={"platform_shared": True},
+            )),
+        ):
+            await self.tls_intercept_runtime.refresh_slug(slug="openai-codex")
+        with TestClient(app) as client:
+            items_by_slug = {item["slug"]: item for item in client.get("/integrations").json()["items"]}
+
+        self.assertNotIn("openai-codex", items_by_slug)
+        self.assertNotIn("x", items_by_slug)
+        # Everything else, including the BYOK model-provider cards, stays visible.
+        self.assertIn("google", items_by_slug)
+        self.assertIn("openai-api", items_by_slug)
+        self.assertIn("anthropic", items_by_slug)
+
+    async def test_customer_org_sees_codex_connected_via_own_credential(self) -> None:
+        """Codex shows for a customer org when their own (org-shared or personal) credential backs it."""
+        from starlette.testclient import TestClient
+
+        app = self._control_parts(aggregator=_ready_stub_aggregator(), org_slug="acme").app
+
+        with patch.object(
+            broker.tls_intercept,
+            "fetch_provider_tokens_batch",
+            return_value=_batched(slug="openai-codex", result=broker.tls_intercept.RefreshResult(
+                outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
+                secrets={"access_token": "customer-token"},
+                expires_in=3600,
+                config={},
+                metadata={"org_shared": True, "org_shared_scope": "everyone"},
+            )),
+        ):
+            await self.tls_intercept_runtime.refresh_slug(slug="openai-codex")
+        with TestClient(app) as client:
+            items_by_slug = {item["slug"]: item for item in client.get("/integrations").json()["items"]}
+
+        self.assertEqual(items_by_slug["openai-codex"]["status"], "connected")
+        self.assertNotIn("x", items_by_slug)
+
+    async def test_platform_owner_org_sees_every_card(self) -> None:
+        """The platform-owner org bypasses the visibility policy entirely."""
+        from starlette.testclient import TestClient
+
+        app = self._control_parts(aggregator=_ready_stub_aggregator(), org_slug="humanity-rules").app
+
+        with TestClient(app) as client:
+            items_by_slug = {item["slug"]: item for item in client.get("/integrations").json()["items"]}
+
+        self.assertIn("x", items_by_slug)
+        self.assertIn("openai-codex", items_by_slug)
 
     async def test_model_provider_status_marks_model_picker_affecting_items(self) -> None:
         """The WebUI extension refreshes model dropdowns only for LLM providers."""
@@ -2048,7 +2121,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         from starlette.testclient import TestClient
 
         aggregator = _StubAggregator(refresh_payload={"ok": True, "tools": 12, "connectors": 3})
-        parts = self._control_parts(aggregator=aggregator)
+        parts = self._control_parts(aggregator=aggregator, org_slug="humanity-rules")
 
         google_connected = _batched(slug="google", result=broker.tls_intercept.RefreshResult(
             outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
@@ -2098,7 +2171,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         from starlette.testclient import TestClient
 
         aggregator = _StubAggregator(refresh_payload={"ok": True, "tools": 0, "connectors": 0})
-        parts = self._control_parts(aggregator=aggregator)
+        parts = self._control_parts(aggregator=aggregator, org_slug="humanity-rules")
         # 13s into the 30s cooldown window ⇒ int(30 - 13.x) + 1 = 17s left.
         parts.service._last_refresh_all_ts = time.time() - 13
 
@@ -2120,7 +2193,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         from starlette.testclient import TestClient
 
         aggregator = _StubAggregator(refresh_payload={"ok": True, "tools": 1, "connectors": 1})
-        parts = self._control_parts(aggregator=aggregator)
+        parts = self._control_parts(aggregator=aggregator, org_slug="humanity-rules")
 
         with patch.object(
             parts.service,
@@ -2140,7 +2213,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         """POST /integrations/tls_intercept/{provider}/invalidate evicts one provider."""
         from starlette.testclient import TestClient
 
-        parts = self._control_parts(aggregator=_ready_stub_aggregator())
+        parts = self._control_parts(aggregator=_ready_stub_aggregator(), org_slug="humanity-rules")
 
         with patch.object(parts.service, "credentials_invalidate", new_callable=AsyncMock) as invalidate_mock:
             with patch.object(
@@ -2160,7 +2233,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         """Device start/status/cancel routes dispatch by provider slug."""
         from starlette.testclient import TestClient
 
-        parts = self._control_parts(aggregator=_ready_stub_aggregator())
+        parts = self._control_parts(aggregator=_ready_stub_aggregator(), org_slug="humanity-rules")
         device_stub = parts.device_flow
         app = parts.app
 
@@ -2185,7 +2258,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         """
         from starlette.testclient import TestClient
 
-        parts = self._control_parts(aggregator=_ready_stub_aggregator())
+        parts = self._control_parts(aggregator=_ready_stub_aggregator(), org_slug="humanity-rules")
 
         with patch.object(
             parts.humr_client,
@@ -2210,7 +2283,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         """POST /integrations/tls_intercept/{provider}/disconnect evicts only that provider (vault)."""
         from starlette.testclient import TestClient
 
-        parts = self._control_parts(aggregator=_ready_stub_aggregator())
+        parts = self._control_parts(aggregator=_ready_stub_aggregator(), org_slug="humanity-rules")
 
         with patch.object(parts.humr_client, "post_json", return_value=(200, {"ok": True})) as post_mock:
             with patch.object(parts.service, "credentials_invalidate", new_callable=AsyncMock) as invalidate_mock:
@@ -2235,7 +2308,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         """POST /integrations/tls_intercept/{provider}/disconnect evicts only that provider (OAuth)."""
         from starlette.testclient import TestClient
 
-        parts = self._control_parts(aggregator=_ready_stub_aggregator())
+        parts = self._control_parts(aggregator=_ready_stub_aggregator(), org_slug="humanity-rules")
 
         with patch.object(parts.humr_client, "post_json", return_value=(200, {"ok": True})) as post_mock:
             with patch.object(parts.service, "credentials_invalidate", new_callable=AsyncMock) as invalidate_mock:
