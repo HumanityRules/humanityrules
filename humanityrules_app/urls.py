@@ -221,5 +221,7 @@ urlpatterns = [
     path("platform/fleet/redeploy-all/confirm/", views.fleet_redeploy_all_confirm, name="fleet_redeploy_all_confirm"),
     path("platform/fleet/redeploy-all/", views.fleet_redeploy_all, name="fleet_redeploy_all"),
     path("platform/fleet/app/<uuid:app_id>/redeploy/", views.fleet_deployment_redeploy, name="fleet_deployment_redeploy"),
+    path("platform/fleet/app/<uuid:app_id>/remove/confirm/", views.fleet_app_remove_confirm, name="fleet_app_remove_confirm"),
+    path("platform/fleet/app/<uuid:app_id>/remove/", views.fleet_app_remove, name="fleet_app_remove"),
     path("platform/fleet/app/<uuid:app_id>/log/", views.fleet_deployment_log, name="fleet_deployment_log"),
 ]
