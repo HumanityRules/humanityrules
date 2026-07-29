@@ -1,7 +1,7 @@
 """Tests for the org-granted bedrock-runtime capability: task-role IAM, container env, config.yaml."""
 
-import os
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -21,8 +21,7 @@ from humanityrules_app.tests.app_test_factories import make_source_template
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 HERMES_RUNTIME_DIR = PROJECT_ROOT / "template_repos/hermes_agent/humr_runtime"
-HERMES_SUPERVISOR_PATH = HERMES_RUNTIME_DIR / "supervisor.sh"
-HERMES_LLM_PRESET_PATH = HERMES_RUNTIME_DIR / "llm_preset.sh"
+HERMES_CONFIG_RENDERER_PATH = HERMES_RUNTIME_DIR / "render_hermes_config.py"
 HERMES_CONFIG_TEMPLATE_PATH = PROJECT_ROOT / "template_repos/hermes_agent/config.yaml.template"
 
 
@@ -76,36 +75,17 @@ def _bedrock_actions_from_stack(app_config: AppConfig) -> list[str]:
     return sorted(actions)
 
 
-def _supervisor_config_functions() -> str:
-    """Slice the capability gate and the config renderer out of supervisor.sh.
-
-    The script ends in `main "$@"` and asserts a container's worth of env vars,
-    so it cannot be sourced; the two functions under test are lifted instead.
-    """
-    text = HERMES_SUPERVISOR_PATH.read_text(encoding="utf-8")
-    return text[text.index("has_platform_capability() {"):text.index("ensure_workspace_ownership() {")]
-
-
 def _render_hermes_config(preset: str, platform_capabilities: str) -> dict:
     """Run the container's real config renderer and return the parsed config.yaml."""
     with tempfile.TemporaryDirectory() as tmp:
-        functions_path = Path(tmp) / "supervisor_config_functions.sh"
-        functions_path.write_text(_supervisor_config_functions(), encoding="utf-8")
         hermes_home = Path(tmp) / "hermes-home"
-        script = """
-set -eu
-source "$1"
-source "$2"
-resolve_humr_llm_preset "$3"
-render_hermes_config
-"""
         result = subprocess.run(
-            ["bash", "-c", script, "bash", str(HERMES_LLM_PRESET_PATH), str(functions_path), preset],
+            [sys.executable, str(HERMES_CONFIG_RENDERER_PATH)],
             env={
-                "PATH": os.environ["PATH"],
                 "HERMES_CONFIG_TEMPLATE": str(HERMES_CONFIG_TEMPLATE_PATH),
                 "HERMES_HOME": str(hermes_home),
                 "AWS_DEFAULT_REGION": "us-east-1",
+                "HUMR_LLM_PRESET": preset,
                 "HUMR_PLATFORM_CAPABILITIES": platform_capabilities,
             },
             capture_output=True,

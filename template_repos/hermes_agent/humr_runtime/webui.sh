@@ -12,6 +12,8 @@ set -euo pipefail
 # If a direct child exits, we kill the others and exit.
 
 : "${HUMR_RUNTIME_DIR:?HUMR_RUNTIME_DIR must be set}"
+: "${HUMR_LLM_PRESET:?HUMR_LLM_PRESET must be set}"
+: "${HERMES_CONFIG_TEMPLATE:?HERMES_CONFIG_TEMPLATE must be set}"
 : "${HERMES_HOME:?HERMES_HOME must be set}"
 : "${AWS_DEFAULT_REGION:?AWS_DEFAULT_REGION must be set}"
 : "${HERMES_WEBUI_AGENT_DIR:?HERMES_WEBUI_AGENT_DIR must be set}"
@@ -63,6 +65,14 @@ cleanup() {
 }
 
 trap cleanup EXIT INT TERM
+
+render_hermes_config() {
+    # Renders ${HERMES_CONFIG_TEMPLATE} into ${HERMES_HOME}/config.yaml from
+    # HUMR_LLM_PRESET / HUMR_PLATFORM_CAPABILITIES. Must run before the system
+    # processes start: both the WebUI and the gateway read config.yaml on boot.
+    "$HERMES_WEBUI_PYTHON" "${HUMR_RUNTIME_DIR}/render_hermes_config.py" \
+        || die "failed to render Hermes config.yaml"
+}
 
 sandbox_seed() {
     "$HERMES_WEBUI_PYTHON" "${HUMR_RUNTIME_DIR}/sandbox_seed.py" \
@@ -204,6 +214,7 @@ wait_for_webui() {
 }
 
 main() {
+    render_hermes_config
     reconcile_platform_skills
     sandbox_seed
     ensure_caddy_fragments
