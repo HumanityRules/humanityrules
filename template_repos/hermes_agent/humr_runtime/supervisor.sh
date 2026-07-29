@@ -36,7 +36,6 @@ export AWS_EC2_METADATA_DISABLED=true
 : "${HUMR_ROOT:?HUMR_ROOT must be set}"
 : "${HUMR_RUN_DIR:?HUMR_RUN_DIR must be set}"
 : "${HUMR_RUNTIME_DIR:?HUMR_RUNTIME_DIR must be set}"
-: "${HERMES_CONFIG_TEMPLATE:?HERMES_CONFIG_TEMPLATE must be set}"
 : "${HERMES_HOME:?HERMES_HOME must be set}"
 : "${HERMES_WEBUI_AGENT_DIR:?HERMES_WEBUI_AGENT_DIR must be set}"
 : "${HERMES_WEBUI_DEFAULT_WORKSPACE:?HERMES_WEBUI_DEFAULT_WORKSPACE must be set}"
@@ -45,8 +44,6 @@ export AWS_EC2_METADATA_DISABLED=true
 : "${HERMES_WEBUI_SKIP_ONBOARDING:?HERMES_WEBUI_SKIP_ONBOARDING must be set}"
 : "${HERMES_WEBUI_STATE_DIR:?HERMES_WEBUI_STATE_DIR must be set}"
 : "${HOMEBREW_PREFIX:?HOMEBREW_PREFIX must be set}"
-
-. "${HUMR_RUNTIME_DIR}/llm_preset.sh"
 
 INTEGRATIONS_BROKER_CA_DIR="${HUMR_RUN_DIR}/integrations-broker/ca"
 INTEGRATIONS_BROKER_PRIVATE_DIR="${HUMR_RUN_DIR}/integrations-broker/private"
@@ -72,15 +69,6 @@ cleanup() {
 }
 
 trap cleanup EXIT INT TERM
-
-require_llm_config() {
-    if [ -z "${HUMR_LLM_PRESET:-}" ]; then
-        die "HUMR_LLM_PRESET must be set (supported: codex, bedrock)"
-    fi
-    if ! resolve_humr_llm_preset "$HUMR_LLM_PRESET"; then
-        die "Unsupported HUMR_LLM_PRESET '$HUMR_LLM_PRESET' (supported: codex, bedrock)"
-    fi
-}
 
 require_aws_region() {
     if [ -z "${AWS_DEFAULT_REGION:-}" ]; then
@@ -148,73 +136,7 @@ start_humr_broker() {
     wait_for_port "$MCP_AGGREGATOR_PORT" "$INTEGRATIONS_BROKER_PID" "mcp-aggregator"
 }
 
-has_platform_capability() {
-    # HUMR_PLATFORM_CAPABILITIES is the comma-separated grant CP resolved from
-    # the owning org and injected alongside the env-bearer identity. Unset means
-    # nothing is granted.
-    case ",${HUMR_PLATFORM_CAPABILITIES:-}," in
-        *",$1,"*) return 0 ;;
-        *) return 1 ;;
-    esac
-}
-
-render_hermes_config() {
-    local humr_llm_base_url="${HUMR_LLM_BASE_URL:-}"
-    local humr_aux_provider="${HUMR_AUX_PROVIDER:-$HUMR_LLM_PROVIDER}"
-    local humr_aux_model="${HUMR_AUX_MODEL:-$HUMR_LLM_MODEL}"
-    local humr_aux_base_url="${HUMR_AUX_BASE_URL:-}"
-    local providers_block_file
-
-    if [ "$HUMR_LLM_PROVIDER" = "bedrock" ]; then
-        humr_llm_base_url="https://bedrock-runtime.${AWS_DEFAULT_REGION}.amazonaws.com"
-    fi
-
-    mkdir -p "$HERMES_HOME"
-
-    # The curated Bedrock model list appears in the WebUI dropdown exactly when
-    # the org holds the bedrock-runtime capability — the same grant that puts
-    # Bedrock actions on the ECS task role, so a listed model is always callable.
-    # Without it the placeholder line is dropped and Hermes keeps its own
-    # provider defaults.
-    providers_block_file=$(mktemp)
-    if has_platform_capability "bedrock-runtime"; then
-        cat > "$providers_block_file" <<'EOF'
-providers:
-  only_configured: false
-  bedrock:
-    models:
-      'global.anthropic.claude-sonnet-5': "Sonnet 5"
-      'global.anthropic.claude-opus-4-8': "Opus 4.8"
-      'global.anthropic.claude-haiku-4-5-20251001-v1:0': "Haiku 4.5"
-EOF
-    fi
-
-    sed \
-        -e "s|__CONFIG_PROVIDER__|${HUMR_LLM_PROVIDER}|g" \
-        -e "s|__MODEL__|${HUMR_LLM_MODEL}|g" \
-        -e "s|__BASE_URL__|${humr_llm_base_url}|g" \
-        -e "s|__AUX_PROVIDER__|${humr_aux_provider}|g" \
-        -e "s|__AUX_MODEL__|${humr_aux_model}|g" \
-        -e "s|__AUX_BASE_URL__|${humr_aux_base_url}|g" \
-        -e "/__PROVIDERS_BLOCK__/r ${providers_block_file}" \
-        -e "/__PROVIDERS_BLOCK__/d" \
-        "$HERMES_CONFIG_TEMPLATE" > "$HERMES_HOME/config.yaml"
-    rm -f "$providers_block_file"
-
-    # Pins the region for Bedrock calls; Hermes's own defaults cover the key
-    # when it is absent, so it rides along with the capability.
-    if has_platform_capability "bedrock-runtime"; then
-        cat >> "$HERMES_HOME/config.yaml" <<EOF
-
-bedrock:
-  region: ${AWS_DEFAULT_REGION}
-EOF
-    fi
-}
-
 ensure_workspace_ownership() {
-    # Root renders config.yaml and may bootstrap broker-managed .env before
-    # sandbox entry; keep /workspace as the hermeswebui-owned mutable surface.
     chown -R hermeswebui:hermeswebui "$HERMES_WEBUI_DEFAULT_WORKSPACE"
 }
 
@@ -279,13 +201,15 @@ run_in_nono() {
 }
 
 main() {
-    require_llm_config
     require_aws_region
 
-    # === Stage 1: root setup. Render deployment config and start the
-    # credential-holding daemons (aws_signer, integrations_broker) — these stay
-    # root so the LLM can never read their /proc/<pid>/environ.
-    render_hermes_config
+    # === Stage 1: root setup. Start the credential-holding daemons
+    # (aws_signer, integrations_broker). These stay root so the LLM can
+    # never read their /proc/<pid>/environ. HERMES_HOME must exist before
+    # the broker (which writes .env into it as root) and before
+    # ensure_workspace_ownership (which hands workspace ownership to the
+    # hermeswebui user).
+    mkdir -p "$HERMES_HOME"
     start_aws_signer
     start_humr_broker
     ensure_workspace_ownership
