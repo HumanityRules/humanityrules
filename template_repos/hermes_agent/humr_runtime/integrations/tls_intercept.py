@@ -1,491 +1,58 @@
-"""TLS-intercept proxy runtime for platform-managed provider tokens.
+"""TLS-intercept proxy for platform-managed provider credentials — the subsystem's front door.
 
-The provider catalog (credential-method dataclasses, `TlsProviderSpec`, and
-the per-provider specs) lives in `tls_providers`; this module is the
-mechanism that consumes it: the MITM proxy, the token store, and the cert
-minter, composed by `TlsInterceptRuntime`.
+The sandbox gets HTTPS_PROXY pointed at this proxy and SSL_CERT_FILE pointed at
+our CA bundle, so every outbound HTTPS request arrives here as a CONNECT. A host
+no provider claims falls through to an opaque tunnel — the agent reaches the rest
+of the internet without this proxy reading it. A host in the catalog gets
+terminated with a minted leaf cert, its credential swapped for the real secret,
+and each request replayed upstream.
+
+That flow is this file. Each part it composes is one module:
+
+- `tls_provider_catalog` — which hosts are intercepted and how each provider's
+  credential works. Static data; the only file a new provider needs.
+- `tls_certificate_authority` — the CA and the per-host leaf certs that let us
+  terminate TLS as the upstream.
+- `tls_token_store` — the real secret for a host, refreshed from HUMR, plus the
+  durable connection state the WebUI cards and gateway env read.
+- `tls_credential_injection` — whether a request is asking for HUMR's credential,
+  and where the secret is written into it.
+- `tls_http_message_relay` — provider-agnostic HTTP/1.1: parse, frame, replay
+  upstream, stream the response back.
+
+Pure mechanism: invalidate/refresh only touch the token cache. The choreography
+that follows a *credential change* (env re-render, process restarts, auth
+markers) lives in `credentials_service`, which calls down into this runtime —
+never the other way around.
 """
 
 import asyncio
-import base64
 import contextlib
-import datetime as dt
-import ipaddress
-import json
 import logging
-import os
-import random
 import ssl
-import re
-import time
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
-
-from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
 
 from humr_client import HumrClient
-import tls_providers
+import tls_certificate_authority
+import tls_credential_injection
+import tls_http_message_relay
+import tls_provider_catalog
+import tls_token_store
 
 
 logger = logging.getLogger("tls_intercept")
 
 
-REFRESH_LEAD_SECONDS = 300
-
-# Browser-facing status strings rendered by the WebUI extension.
-STATUS_CONNECTED = "connected"
-STATUS_NOT_CONNECTED = "not_connected"
-
-
-# Internal tags from HUMR's refresh endpoint (distinct from browser
-# STATUS_* strings). For each requested slug, HUMR returns one of:
-# - has_token:  a fresh secrets map (with expiry/config/metadata).
-# - absent:     user not connected, or HUMR just deleted the row after
-#               the upstream provider revoked the refresh_token.
-# - transient:  network error or other failure that must not overwrite
-#               a working cache entry.
-RefreshOutcome = Literal["has_token", "absent", "transient"]
-
-REFRESH_OUTCOME_HAS_TOKEN = "has_token"
-REFRESH_OUTCOME_ABSENT = "absent"
-REFRESH_OUTCOME_TRANSIENT = "transient"
-
-
-def _primary_secret(secrets: dict[str, str]) -> str:
-    """Return the sole secret for a single-secret provider.
-
-    Single-secret methods (OAuthHeader, VaultUrlRewrite) carry exactly one
-    secret, so the primary is unambiguous. Multi-secret providers (Slack)
-    select per request in `_rewrite_request_for_provider` and don't use this.
-    """
-    return next(iter(secrets.values()))
-
-
-@dataclass(frozen=True)
-class RefreshResult:
-    """Outcome for one provider in a HUMR refresh response.
-
-    `secrets` is a name→value map (e.g. `{"access_token": "ya29…"}`), so a
-    provider can carry more than one credential (Slack's bot + app token).
-    `None` for the absent/transient outcomes, which have nothing to cache.
-    """
-
-    outcome: RefreshOutcome
-    secrets: dict[str, str] | None
-    expires_in: int | None
-    config: dict
-    metadata: dict
-
-
-@dataclass
-class _TokenCacheEntry:
-    """One provider's usable secrets for the proxy injection hot path.
-
-    `secrets` is a name→value map; single-secret providers carry one entry.
-    This cache holds only the short-lived access token to inject upstream and is
-    pruned by expiry on the injection path. Durable connection state — what the
-    status cards and gateway env render read — lives in `_ConnState`, so cache
-    presence no longer means "connected". `config`/`metadata`/`last_refreshed_at`
-    are carried here so `_apply_locked` can project them into `_ConnState` from
-    the same has_token result.
-    """
-
-    secrets: dict[str, str]
-    expires_at: float
-    last_refreshed_at: str
-    config: dict
-    metadata: dict
-
-    def is_fresh(self, now: float, refresh_lead_seconds: int) -> bool:
-        """Return true when the token has enough life left to skip refresh."""
-        return self.expires_at - now > refresh_lead_seconds
-
-    def is_usable(self, now: float) -> bool:
-        """Return true when the token has not yet expired.
-
-        Distinct from `is_fresh`: a token can be unfresh (inside the lead
-        window, so we'd prefer to refresh) yet still usable (expires_at is
-        in the future). The proxy hot path serves usable tokens when a
-        refresh-ahead transiently failed — better than failing the
-        sandbox's request because HUMR had a hiccup.
-        """
-        return self.expires_at > now
-
-
-@dataclass(frozen=True)
-class _ConnState:
-    """Durable connection state for one provider — what the status cards + gateway env read.
-
-    Decoupled from `_TokenCacheEntry`: the access-token cache expires on its own
-    (1–8h) and is pruned on the injection path, but connection state changes only
-    on a refresh OUTCOME (has_token/absent) or an explicit disconnect. `config`/
-    `metadata` are the last-known-good values from the most recent has_token, so a
-    card or env binding survives token expiry; they refresh on the next successful
-    refresh of the slug (connect/disconnect/vault-save always trigger one).
-    """
-
-    connected: bool
-    last_refreshed_at: str | None
-    config: dict
-    metadata: dict
-
-
-async def fetch_provider_tokens_batch(humr_client: HumrClient, slugs: list[str]) -> dict[str, RefreshResult]:
-    """Refresh many provider tokens in one POST to HUMR; returns a slug→RefreshResult map.
-
-    HUMR's `/api/integrations/tokens` is the broker's only refresh path —
-    both Refresh-all/bootstrap and single-slug refresh (after a
-    connect/disconnect) call this with the appropriate slug list. The
-    endpoint returns `absent` as a normal entry rather than HTTP 404.
-
-    Any transport-level error, unparseable response, or slug missing
-    from the response map surfaces as TRANSIENT for that slug, so the
-    cache stays intact.
-    """
-    # In-VPC JSON POST to our own control plane; healthy P99 is tens
-    # of ms. HUMR processes the providers in parallel server-side, so
-    # wall-clock = max(per-provider upstream exchange) + DB / JSON
-    # overhead. Each helper's upstream timeout is 5s, so the ceiling
-    # here is ~5s + a small slack budget for marshalling — 7s. Still
-    # well inside supervisor's 10s wait_for_port budget on broker
-    # bootstrap.
-    status, payload = await humr_client.post_json(
-        path="/api/integrations/tokens",
-        payload={"providers": list(slugs)},
-        timeout_seconds=7,
-    )
-    if not (200 <= status < 300):
-        logger.error("refresh against HUMR failed (http %d)", status)
-        return {slug: _transient_result() for slug in slugs}
-
-    results_payload = payload.get("results")
-    if not isinstance(results_payload, dict):
-        logger.error("refresh response missing/malformed 'results' map")
-        return {slug: _transient_result() for slug in slugs}
-    return {slug: _refresh_result_from_entry(entry=results_payload.get(slug)) for slug in slugs}
-
-
-def _refresh_result_from_entry(entry: object) -> RefreshResult:
-    """Translate one slug's entry in the HUMR response into a RefreshResult."""
-    if not isinstance(entry, dict):
-        return _transient_result()
-    outcome = entry.get("outcome")
-    if outcome == REFRESH_OUTCOME_HAS_TOKEN:
-        secrets = entry.get("secrets")
-        if not isinstance(secrets, dict) or not secrets:
-            logger.error("refresh has_token entry missing non-empty 'secrets' map")
-            return _transient_result()
-        # Reject (don't coerce) malformed entries: a non-string/empty value
-        # would otherwise be cached and sent upstream as a literal bearer
-        # token (e.g. str(None) == "None"). Degrade to a cache-preserving
-        # transient instead, exactly like a network failure.
-        if not all(
-            isinstance(name, str) and name and isinstance(value, str) and value
-            for name, value in secrets.items()
-        ):
-            logger.error("refresh has_token entry has non-string/empty secret name or value")
-            return _transient_result()
-        # config/metadata flow into _ConnState and out to the WebUI card;
-        # coerce non-dict values (a malformed CP response) to {} rather than
-        # letting them poison the durable connection state.
-        config = entry.get("config", {})
-        metadata = entry.get("metadata", {})
-        return RefreshResult(
-            outcome=REFRESH_OUTCOME_HAS_TOKEN,
-            secrets=dict(secrets),
-            expires_in=int(entry.get("expires_in", 0)),
-            config=config if isinstance(config, dict) else {},
-            metadata=metadata if isinstance(metadata, dict) else {},
-        )
-    if outcome == REFRESH_OUTCOME_ABSENT:
-        return RefreshResult(outcome=REFRESH_OUTCOME_ABSENT, secrets=None, expires_in=None, config={}, metadata={})
-    return _transient_result()
-
-
-def _transient_result() -> RefreshResult:
-    """Build a transient-outcome RefreshResult sentinel for cache-preserving failures."""
-    return RefreshResult(outcome=REFRESH_OUTCOME_TRANSIENT, secrets=None, expires_in=None, config={}, metadata={})
-
-
-def _cache_entry_from_connected_result(result: RefreshResult, now: float) -> _TokenCacheEntry:
-    """Build a cache entry from a connected refresh result.
-
-    Caller is responsible for only invoking this on `REFRESH_OUTCOME_HAS_TOKEN`
-    results — absent/transient outcomes don't have a token to cache.
-    """
-    if result.expires_in is None:
-        raise ValueError("connected refresh result must carry expires_in")
-    if not result.secrets:
-        raise ValueError("connected refresh result must carry secrets")
-    return _TokenCacheEntry(
-        secrets=result.secrets,
-        expires_at=now + result.expires_in,
-        last_refreshed_at=dt.datetime.now(dt.timezone.utc).isoformat(),
-        config=result.config,
-        metadata=result.metadata,
-    )
-
-
-def _status_item_for_provider(provider: tls_providers.TlsProviderSpec, state: _ConnState | None) -> dict:
-    """Serialize one TLS-intercept provider for the unified integrations payload.
-
-    Connected = a durable `_ConnState` says so; not_connected = it doesn't, or
-    there's no state yet. Independent of the access-token cache: a connected
-    provider whose injection token has expired (and been pruned) still renders
-    connected until a refresh outcome or disconnect says otherwise.
-    """
-    method = provider.credential_method
-    is_connected = state is not None and state.connected
-    return {
-        "kind": "tls_intercept",
-        "category": provider.category,
-        "slug": provider.slug,
-        "label": provider.label,
-        "logo_url": provider.logo_url,
-        "status": STATUS_CONNECTED if is_connected else STATUS_NOT_CONNECTED,
-        "last_refreshed_at": state.last_refreshed_at if is_connected else None,
-        "config": state.config if is_connected else {},
-        "metadata": state.metadata if is_connected else {},
-        "connect_mode": method.connect_mode,
-        "restart_required_after_save": provider.restart_gateway_after_save or provider.restart_webui_after_save,
-        "affects_model_picker": provider.affects_model_picker,
-    }
-
-
-class _TokenStore:
-    """Token cache + refresh coordinator for TLS-intercept providers.
-
-    A single `asyncio.Lock` serializes every cache mutation and every
-    read that needs an internally-consistent view (status render,
-    gateway env snapshot, proxy hot-path single-flight refresh).
-    Replaces the older per-slug `_refresh_locks` + `_cache_lock` pair —
-    the additional cross-slug parallelism that bought us doesn't matter
-    in this broker (3 providers, low concurrent traffic, in-VPC HUMR),
-    and a single lock makes "a parked fetch wrote past an invalidate"
-    structurally impossible: fetch and apply always run under the same
-    lock together.
-    """
-
-    def __init__(self, providers: dict[str, tls_providers.TlsProviderSpec], humr_client: HumrClient, refresh_lead_seconds: int) -> None:
-        self._providers = providers
-        self._host_to_provider = tls_providers.build_host_to_provider(providers=providers)
-        self._humr_client = humr_client
-        self._refresh_lead_seconds = refresh_lead_seconds
-        self._lock = asyncio.Lock()
-        self._cache: dict[str, _TokenCacheEntry] = {}
-        self._conn: dict[str, _ConnState] = {}
-
-    def provider_for_host(self, host: str) -> tls_providers.TlsProviderSpec | None:
-        """Lock-free: reads the immutable host→provider map built at init."""
-        slug = self._host_to_provider.get(tls_providers.normalize_connect_host(host=host))
-        if slug is None:
-            return None
-        return self._providers[slug]
-
-    async def secrets_for_host(self, host: str) -> dict[str, str] | None:
-        """Return the fresh secrets map for an upstream host, or None when disconnected.
-
-        Multi-secret providers (Slack) need the whole map so the request
-        rewrite can pick the right secret per call; single-secret providers
-        get a one-entry map.
-        """
-        provider = self.provider_for_host(host=host)
-        if provider is None:
-            return None
-        async with self._lock:
-            entry = await self._ensure_fresh_locked(provider=provider)
-        if entry is None:
-            return None
-        return entry.secrets
-
-    async def token_for_host(self, host: str) -> str | None:
-        """Return a single fresh token for an upstream host, or None when disconnected.
-
-        Convenience wrapper over `secrets_for_host` for single-secret providers.
-        """
-        secrets = await self.secrets_for_host(host=host)
-        if secrets is None:
-            return None
-        return _primary_secret(secrets)
-
-    async def invalidate(self, slug: str) -> None:
-        """Drop the cached token for a provider."""
-        async with self._lock:
-            self._cache.pop(slug, None)
-
-    async def invalidate_all(self) -> None:
-        """Drop every cached token entry."""
-        async with self._lock:
-            self._cache.clear()
-
-    async def mark_disconnected(self, slug: str) -> None:
-        """Authoritatively mark a provider disconnected after a confirmed disconnect.
-
-        Mirrors an `absent` apply (drop the cache entry, set `_conn` not-connected)
-        but driven by a known disconnect rather than a refresh outcome. The
-        disconnect handler holds HUMR's authoritative row-deletion, so applying it
-        directly here keeps a transient follow-up refresh — which leaves `_conn`
-        untouched — from leaving the card connected after the user just disconnected.
-        Unlike `invalidate` (used for connect-of-another-slug and the 401 evict,
-        where truth is only known after the next refresh), the disconnect outcome
-        is already known, so it's safe to flip `_conn` here.
-        """
-        if slug not in self._providers:
-            return
-        async with self._lock:
-            self._cache.pop(slug, None)
-            self._conn[slug] = _ConnState(connected=False, last_refreshed_at=None, config={}, metadata={})
-
-    async def refresh(self, slug: str) -> bool:
-        """Refetch one provider from HUMR even when the cache is fresh; False on transient HUMR failure."""
-        if slug not in self._providers:
-            return True
-        async with self._lock:
-            return await self._refresh_locked(slugs=[slug])
-
-    async def refresh_all(self) -> bool:
-        """Refetch every provider in one batched HUMR round-trip; False on transient HUMR failure."""
-        async with self._lock:
-            return await self._refresh_locked(slugs=list(self._providers))
-
-    async def status_items(self) -> list[dict]:
-        """Render integration cards from the durable connection state; never calls HUMR.
-
-        A pure projection of `_conn`, which `_apply_locked` updates from refresh
-        outcomes (boot bootstrap, the proxy hot path, explicit invalidate/refresh)
-        and `mark_disconnected` updates on an explicit disconnect. Deliberately
-        does NOT prune by token expiry: an idle provider whose injection token
-        lapsed is still connected — expiry-pruning belongs only on the injection
-        path, so a card answers "does HUMR hold a usable credential", not "is a
-        warm token cached".
-        """
-        async with self._lock:
-            return [
-                _status_item_for_provider(provider=provider, state=self._conn.get(provider.slug))
-                for provider in self._providers.values()
-            ]
-
-    async def gateway_env_snapshot(self) -> list[tuple[tls_providers.TlsProviderSpec, dict]]:
-        """Pair every connected provider with its last-known config for env rendering.
-
-        Projects `_conn` (durable connection state), not the access-token cache, so
-        a connected vault provider's env bindings survive token expiry — otherwise
-        an idle provider past its cache TTL would be stripped from the managed block
-        and trigger a spurious gateway restart while its card still showed connected.
-        The broker calls `refresh_all()` first when it wants `_conn` aligned with
-        HUMR state.
-        """
-        async with self._lock:
-            return [
-                (self._providers[slug], state.config)
-                for slug, state in self._conn.items()
-                if state.connected
-            ]
-
-    async def _ensure_fresh_locked(self, provider: tls_providers.TlsProviderSpec) -> _TokenCacheEntry | None:
-        """Single-flight refresh when the cached token is missing or near expiry. Caller holds `_lock`.
-
-        Returns the cache entry to use for this request, or None when the
-        provider is genuinely unavailable. Two cases to keep separate:
-
-        - **Refresh succeeded** (has_token/absent): the cache reflects HUMR
-          truth, so we return whatever's now in the cache.
-        - **Refresh transient-failed**: the cache is untouched. If we had a
-          prior entry that's still un-expired, hand it back — the proxy
-          can use it for the rest of its expires_at window rather than
-          surfacing "not connected" to the sandbox because HUMR hiccuped.
-          Only return None when even the prior token is past expiry.
-        """
-        now = time.monotonic()
-        self._prune_expired_locked(now=now)
-        entry = self._cache.get(provider.slug)
-        if entry is not None and entry.is_fresh(now=now, refresh_lead_seconds=self._refresh_lead_seconds):
-            return entry
-        await self._refresh_locked(slugs=[provider.slug])
-        return self._cache.get(provider.slug)
-
-    async def _refresh_locked(self, slugs: list[str]) -> bool:
-        """Fetch the slugs in one HUMR POST and apply each result. Caller holds `_lock`.
-
-        Holding the lock across both fetch and apply (rather than
-        dropping it during the network call) is what prevents a parked
-        fetch from overwriting a concurrent invalidate. The cost is
-        small in practice: ~tens of ms per refresh, and at most one
-        refresh per provider per token lifetime hits this path.
-
-        Returns False when *every* slug came back transient — the
-        signature of a failed HUMR round-trip — so callers can avoid
-        deriving state (e.g. the gateway env file) from a cache that
-        does not reflect HUMR truth.
-        """
-        if not slugs:
-            return True
-        results = await fetch_provider_tokens_batch(humr_client=self._humr_client, slugs=slugs)
-        for slug in slugs:
-            self._apply_locked(provider=self._providers[slug], result=results[slug])
-        return any(result.outcome != REFRESH_OUTCOME_TRANSIENT for result in results.values())
-
-    def _apply_locked(self, provider: tls_providers.TlsProviderSpec, result: RefreshResult) -> None:
-        """Apply one refresh outcome to the injection cache and the durable connection state. Caller holds `_lock`.
-
-        - has_token → write the injection entry AND mark `_conn` connected.
-        - absent → drop any prior entry AND mark `_conn` not-connected (idempotent).
-        - transient → leave BOTH untouched (don't replace a working token with a
-          sentinel, and don't flip a card on a network blip; the prior state, if
-          any, stays available).
-
-        Every refresh caller flows through here — bootstrap, explicit refresh, and
-        the proxy hot path (`_ensure_fresh_locked`) — so a card self-heals on the
-        first real request after an idle token expiry, exactly as the cache does.
-        """
-        if result.outcome == REFRESH_OUTCOME_HAS_TOKEN:
-            entry = _cache_entry_from_connected_result(result=result, now=time.monotonic())
-            self._cache[provider.slug] = entry
-            self._conn[provider.slug] = _ConnState(
-                connected=True,
-                last_refreshed_at=entry.last_refreshed_at,
-                config=result.config,
-                metadata=result.metadata,
-            )
-            logger.info("refreshed %s: connected", provider.slug)
-            return
-        if result.outcome == REFRESH_OUTCOME_ABSENT:
-            self._cache.pop(provider.slug, None)
-            self._conn[provider.slug] = _ConnState(connected=False, last_refreshed_at=None, config={}, metadata={})
-            logger.info("refreshed %s: not_connected", provider.slug)
-            return
-        logger.info("refreshed %s: transient error (cache + connection state untouched)", provider.slug)
-
-    def _prune_expired_locked(self, now: float) -> None:
-        """Drop expired cache entries. Caller holds `_lock`."""
-        expired_slugs = [
-            slug
-            for slug, entry in self._cache.items()
-            if not entry.is_usable(now=now)
-        ]
-        for slug in expired_slugs:
-            self._cache.pop(slug, None)
-
-
 class TlsInterceptRuntime:
-    """TLS-intercept subsystem: proxy transport, token refresh, and status cards.
+    """TLS-intercept subsystem: proxy transport, token refresh, and status cards."""
 
-    Pure mechanism: invalidate/refresh only touch the token cache. The
-    choreography that follows a *credential change* (env re-render, process
-    restarts, auth markers) lives in `credentials_service`, which calls down
-    into this runtime — never the other way around.
-    """
-
-    def __init__(self, providers: dict[str, tls_providers.TlsProviderSpec], humr_client: HumrClient, refresh_lead_seconds: int, ca_dir: Path, private_dir: Path) -> None:
-        self._token_store = _TokenStore(
+    def __init__(self, providers: dict[str, tls_provider_catalog.TlsProviderSpec], humr_client: HumrClient, refresh_lead_seconds: int, ca_dir: Path, private_dir: Path) -> None:
+        self._token_store = tls_token_store.TokenStore(
             providers=providers,
             humr_client=humr_client,
             refresh_lead_seconds=refresh_lead_seconds,
         )
-        self._cert_minter = _CertMinter(ca_dir=ca_dir, private_dir=private_dir)
+        self._cert_minter = tls_certificate_authority.CertMinter(ca_dir=ca_dir, private_dir=private_dir)
         self._cert_minter.bootstrap()
 
     async def start_proxy_server(self, host: str, port: int) -> asyncio.Server:
@@ -524,141 +91,16 @@ class TlsInterceptRuntime:
         """Force a refetch of every provider in one HUMR round-trip; False on transient failure."""
         return await self._token_store.refresh_all()
 
-    async def gateway_env_snapshot(self) -> list[tuple[tls_providers.TlsProviderSpec, dict]]:
+    async def gateway_env_snapshot(self) -> list[tuple[tls_provider_catalog.TlsProviderSpec, dict]]:
         """Pair every connected provider with its last-known config (durable connection state) for env rendering."""
         return await self._token_store.gateway_env_snapshot()
-
-
-class _CertMinter:
-    """Boot-generated CA that mints leaf certs on demand, one per SNI hostname."""
-
-    def __init__(self, ca_dir: Path, private_dir: Path) -> None:
-        self._ca_dir = ca_dir
-        self._private_dir = private_dir
-        self._ca_key: rsa.RSAPrivateKey | None = None
-        self._ca_cert: x509.Certificate | None = None
-        self._leaf_cache: dict[str, ssl.SSLContext] = {}
-
-    def bootstrap(self) -> None:
-        """Generate the CA and write bundle.pem. Called once at broker startup."""
-        self._ca_key = rsa.generate_private_key(public_exponent=65537, key_size=4096)
-        subject = issuer = x509.Name([
-            x509.NameAttribute(x509.NameOID.COMMON_NAME, "HUMR Integrations Broker CA"),
-        ])
-        now = dt.datetime.now(dt.timezone.utc)
-        ca_ski = x509.SubjectKeyIdentifier.from_public_key(self._ca_key.public_key())
-        self._ca_cert = (
-            x509.CertificateBuilder()
-            .subject_name(subject)
-            .issuer_name(issuer)
-            .public_key(self._ca_key.public_key())
-            .serial_number(x509.random_serial_number())
-            .not_valid_before(now - dt.timedelta(minutes=5))
-            .not_valid_after(now + dt.timedelta(days=365 * 5))
-            .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
-            .add_extension(
-                x509.KeyUsage(
-                    digital_signature=True, key_cert_sign=True, crl_sign=True,
-                    key_encipherment=False, content_commitment=False, data_encipherment=False,
-                    key_agreement=False,
-                    encipher_only=False, decipher_only=False,
-                ),
-                critical=True,
-            )
-            .add_extension(ca_ski, critical=False)
-            .sign(private_key=self._ca_key, algorithm=hashes.SHA256())
-        )
-        self._write_bundle()
-
-    def _write_bundle(self) -> None:
-        """Write the CA cert + system roots into bundle.pem for SSL_CERT_FILE."""
-        self._ca_dir.mkdir(parents=True, exist_ok=True)
-        self._private_dir.mkdir(parents=True, exist_ok=True)
-        os.chmod(self._private_dir, 0o700)
-        our_pem = self._ca_cert.public_bytes(serialization.Encoding.PEM)
-        system_roots = b""
-        for candidate in (Path("/etc/ssl/certs/ca-certificates.crt"), Path("/etc/pki/tls/certs/ca-bundle.crt")):
-            if candidate.exists():
-                system_roots = candidate.read_bytes()
-                break
-        if not system_roots:
-            logger.error("no system root bundle found; broker-trusted bundle will be HUMR-only")
-        bundle_path = self._ca_dir / "bundle.pem"
-        bundle_path.write_bytes(our_pem + b"\n" + system_roots)
-        os.chmod(bundle_path, 0o644)
-        logger.info("wrote CA bundle to %s (system roots included: %s)", bundle_path, bool(system_roots))
-
-    def context_for(self, hostname: str) -> ssl.SSLContext:
-        """Return an SSLContext presenting a leaf cert valid for hostname."""
-        if hostname in self._leaf_cache:
-            return self._leaf_cache[hostname]
-        leaf_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-        now = dt.datetime.now(dt.timezone.utc)
-        san_entries: list[x509.GeneralName] = []
-        try:
-            san_entries.append(x509.IPAddress(ipaddress.ip_address(hostname)))
-        except ValueError:
-            san_entries.append(x509.DNSName(hostname))
-        leaf_cert = (
-            x509.CertificateBuilder()
-            .subject_name(x509.Name([x509.NameAttribute(x509.NameOID.COMMON_NAME, hostname)]))
-            .issuer_name(self._ca_cert.subject)
-            .public_key(leaf_key.public_key())
-            .serial_number(x509.random_serial_number())
-            .not_valid_before(now - dt.timedelta(minutes=5))
-            .not_valid_after(now + dt.timedelta(days=365 * 2))
-            .add_extension(x509.SubjectAlternativeName(san_entries), critical=False)
-            .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
-            .add_extension(
-                x509.KeyUsage(
-                    digital_signature=True, key_encipherment=True,
-                    content_commitment=False, data_encipherment=False,
-                    key_agreement=False, key_cert_sign=False, crl_sign=False,
-                    encipher_only=False, decipher_only=False,
-                ),
-                critical=True,
-            )
-            .add_extension(
-                x509.ExtendedKeyUsage([x509.ExtendedKeyUsageOID.SERVER_AUTH]),
-                critical=False,
-            )
-            .add_extension(x509.SubjectKeyIdentifier.from_public_key(leaf_key.public_key()), critical=False)
-            .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(self._ca_key.public_key()), critical=False)
-            .sign(private_key=self._ca_key, algorithm=hashes.SHA256())
-        )
-        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        cert_path = self._pem_bytes_to_private_tmp(pem=leaf_cert.public_bytes(serialization.Encoding.PEM))
-        key_path = self._pem_bytes_to_private_tmp(
-            pem=leaf_key.private_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PrivateFormat.TraditionalOpenSSL,
-                encryption_algorithm=serialization.NoEncryption(),
-            )
-        )
-        try:
-            ctx.load_cert_chain(certfile=cert_path, keyfile=key_path)
-        finally:
-            for path in (cert_path, key_path):
-                with contextlib.suppress(FileNotFoundError):
-                    Path(path).unlink()
-        ctx.set_alpn_protocols(["http/1.1"])
-        self._leaf_cache[hostname] = ctx
-        logger.info("minted leaf cert for %s", hostname)
-        return ctx
-
-    def _pem_bytes_to_private_tmp(self, pem: bytes) -> str:
-        """Write PEM to a broker-private tmpfile and return its path."""
-        target = self._private_dir / f".leaf-{random.randbytes(8).hex()}.pem"
-        target.write_bytes(pem)
-        os.chmod(target, 0o600)
-        return str(target)
 
 
 async def _handle_proxy_conn(
     reader: asyncio.StreamReader,
     writer: asyncio.StreamWriter,
-    minter: _CertMinter,
-    token_store: _TokenStore,
+    minter: tls_certificate_authority.CertMinter,
+    token_store: tls_token_store.TokenStore,
 ) -> None:
     """Accept a CONNECT, then either intercept known hosts or tunnel."""
     peer = writer.get_extra_info("peername")
@@ -669,17 +111,17 @@ async def _handle_proxy_conn(
         try:
             method, target, _ = request_line.decode("iso-8859-1").strip().split(" ", 2)
         except ValueError:
-            await _send_raw(writer=writer, status=400, body=b"bad request line")
+            await tls_http_message_relay.send_raw(writer=writer, status=400, body=b"bad request line")
             return
         while True:
             header_line = await reader.readline()
             if header_line in (b"\r\n", b"\n", b""):
                 break
         if method.upper() != "CONNECT":
-            await _send_raw(writer=writer, status=405, body=b"only CONNECT is supported")
+            await tls_http_message_relay.send_raw(writer=writer, status=405, body=b"only CONNECT is supported")
             return
         raw_host, _, port_str = target.partition(":")
-        host = tls_providers.normalize_connect_host(host=raw_host)
+        host = tls_provider_catalog.normalize_connect_host(host=raw_host)
         port = int(port_str) if port_str else 443
         provider = token_store.provider_for_host(host=host)
         if provider is None:
@@ -709,11 +151,11 @@ async def _tunnel_opaque(client_reader: asyncio.StreamReader, client_writer: asy
     try:
         upstream_reader, upstream_writer = await asyncio.open_connection(host=host, port=port)
     except OSError as exc:
-        await _send_raw(writer=client_writer, status=502, body=f"upstream connect failed: {exc}".encode())
+        await tls_http_message_relay.send_raw(writer=client_writer, status=502, body=f"upstream connect failed: {exc}".encode())
         return
     client_writer.write(b"HTTP/1.1 200 Connection established\r\n\r\n")
     await client_writer.drain()
-    await _pump_both_ways(a_reader=client_reader, a_writer=client_writer, b_reader=upstream_reader, b_writer=upstream_writer)
+    await tls_http_message_relay.pump_both_ways(a_reader=client_reader, a_writer=client_writer, b_reader=upstream_reader, b_writer=upstream_writer)
 
 
 async def _intercept_and_forward(
@@ -721,9 +163,9 @@ async def _intercept_and_forward(
     client_writer: asyncio.StreamWriter,
     host: str,
     port: int,
-    provider: tls_providers.TlsProviderSpec,
-    minter: _CertMinter,
-    token_store: _TokenStore,
+    provider: tls_provider_catalog.TlsProviderSpec,
+    minter: tls_certificate_authority.CertMinter,
+    token_store: tls_token_store.TokenStore,
 ) -> None:
     """TLS-terminate with a minted leaf, swap Authorization, and forward."""
     client_writer.write(b"HTTP/1.1 200 Connection established\r\n\r\n")
@@ -755,56 +197,56 @@ async def _intercept_and_forward(
                 headers_raw.append(line)
                 if line in (b"\r\n", b"\n", b""):
                     break
-            headers = _parse_headers(lines=headers_raw)
+            headers = tls_http_message_relay.parse_headers(lines=headers_raw)
             path_with_query = request_line.decode("iso-8859-1").split(" ", 2)[1]
             try:
-                body = await _read_body(reader=tls_reader, headers=headers)
+                body = await tls_http_message_relay.read_body(reader=tls_reader, headers=headers)
             except ValueError as exc:
                 # Unparseable framing: whatever follows on the socket can't
                 # be delimited, so answer 400 and close rather than read
                 # body bytes as the next request line.
-                await _send_json_error(writer=tls_writer, status=400, message=f"bad request framing: {exc}")
+                await tls_http_message_relay.send_json_error(writer=tls_writer, status=400, message=f"bad request framing: {exc}")
                 return
             try:
-                addresses_humr_credential = _request_addresses_humr_credential(
+                injected_humr_credential = tls_credential_injection.needs_injection(
                     headers=headers,
                     path_with_query=path_with_query,
                     provider=provider,
                 )
-            except _SecretSelectionError as exc:
+            except tls_credential_injection.SecretSelectionError as exc:
                 logger.error("%s secret selection failed: %s", provider.slug, exc)
-                await _send_json_error(
+                await tls_http_message_relay.send_json_error(
                     writer=tls_writer,
                     status=400,
                     message=f"{provider.slug}: {exc}",
                 )
                 return
-            if addresses_humr_credential:
+            if injected_humr_credential:
                 secrets = await token_store.secrets_for_host(host=host)
                 if secrets is None:
                     await _send_provider_not_connected(writer=tls_writer, provider=provider)
                     return
                 try:
-                    forward_headers, forward_path = _rewrite_request_for_provider(
+                    forward_headers, forward_path = tls_credential_injection.rewrite_request_for_provider(
                         headers=headers,
                         path_with_query=path_with_query,
                         secrets=secrets,
                         provider=provider,
                         upstream_host=host,
                     )
-                except _SecretSelectionError as exc:
+                except tls_credential_injection.SecretSelectionError as exc:
                     logger.error("%s secret selection failed: %s", provider.slug, exc)
-                    await _send_json_error(
+                    await tls_http_message_relay.send_json_error(
                         writer=tls_writer,
                         status=400,
                         message=f"{provider.slug}: {exc}",
                     )
                     return
             else:
-                forward_headers = _strip_proxy_headers_and_set_host(headers=headers, upstream_host=host)
+                forward_headers = tls_http_message_relay.strip_proxy_headers_and_set_host(headers=headers, upstream_host=host)
                 forward_path = path_with_query
             try:
-                upstream_status, keep_alive = await _forward_to_upstream(
+                upstream_status, keep_alive = await tls_http_message_relay.forward_to_upstream(
                     host=host,
                     port=port,
                     method=request_line.decode("iso-8859-1").split(" ", 1)[0],
@@ -815,7 +257,7 @@ async def _intercept_and_forward(
                 )
             except Exception as exc:
                 logger.exception("forward to %s failed", host)
-                await _send_json_error(writer=tls_writer, status=502, message=f"broker upstream error: {exc}")
+                await tls_http_message_relay.send_json_error(writer=tls_writer, status=502, message=f"broker upstream error: {exc}")
                 return
             # Treat upstream 401 as "the cached token is no longer valid":
             # evict it so the next request refetches from HUMR. Covers both
@@ -824,14 +266,14 @@ async def _intercept_and_forward(
             # request through the proxy hits the refreshed token. Anonymous
             # pass-through 401s must not evict: they never used our token,
             # so the cached entry is not implicated.
-            if upstream_status == 401 and addresses_humr_credential:
+            if upstream_status == 401 and injected_humr_credential:
                 await token_store.invalidate(slug=provider.slug)
                 logger.info("evicted %s token cache after upstream 401 from %s", provider.slug, host)
             if not keep_alive:
                 return
             # The client asked to close after this exchange; don't sit in
             # readline() waiting for a request that will never come.
-            if _connection_close_requested(headers=headers):
+            if tls_http_message_relay.connection_close_requested(headers=headers):
                 return
     finally:
         with contextlib.suppress(Exception):
@@ -839,698 +281,10 @@ async def _intercept_and_forward(
             await tls_writer.wait_closed()
 
 
-async def _send_provider_not_connected(writer: asyncio.StreamWriter, provider: tls_providers.TlsProviderSpec) -> None:
+async def _send_provider_not_connected(writer: asyncio.StreamWriter, provider: tls_provider_catalog.TlsProviderSpec) -> None:
     """Return a Google-API-shaped not-connected error to the sandbox client."""
-    await _send_json_error(
+    await tls_http_message_relay.send_json_error(
         writer=writer,
         status=503,
         message=f"{provider.slug} integration not connected in HUMR — connect it from the Integrations pane.",
     )
-
-
-async def _send_json_error(writer: asyncio.StreamWriter, status: int, message: str) -> None:
-    """Write a small JSON error response and drain it."""
-    body = json.dumps({"error": {"code": status, "message": message}}).encode()
-    writer.write(
-        b"HTTP/1.1 " + str(status).encode() + b" " + _http_reason(status=status).encode() + b"\r\n"
-        b"Content-Type: application/json\r\n"
-        b"Content-Length: " + str(len(body)).encode() + b"\r\n"
-        b"Connection: close\r\n\r\n" + body
-    )
-    await writer.drain()
-
-
-async def _pump_both_ways(
-    a_reader: asyncio.StreamReader,
-    a_writer: asyncio.StreamWriter,
-    b_reader: asyncio.StreamReader,
-    b_writer: asyncio.StreamWriter,
-) -> None:
-    async def _copy(src: asyncio.StreamReader, dst: asyncio.StreamWriter) -> None:
-        try:
-            while True:
-                chunk = await src.read(65536)
-                if not chunk:
-                    break
-                dst.write(chunk)
-                await dst.drain()
-        except (ConnectionResetError, BrokenPipeError):
-            pass
-        finally:
-            with contextlib.suppress(Exception):
-                dst.close()
-    await asyncio.gather(_copy(src=a_reader, dst=b_writer), _copy(src=b_reader, dst=a_writer))
-
-
-def _parse_headers(lines: list[bytes]) -> list[tuple[bytes, bytes]]:
-    headers: list[tuple[bytes, bytes]] = []
-    for line in lines:
-        if line in (b"\r\n", b"\n", b""):
-            break
-        if b":" not in line:
-            continue
-        name, _, value = line.partition(b":")
-        headers.append((name.strip().lower(), value.strip().rstrip(b"\r\n")))
-    return headers
-
-
-def _header_value(headers: list[tuple[bytes, bytes]], name: bytes) -> bytes | None:
-    normalized_name = name.lower()
-    for n, v in headers:
-        if n.lower() == normalized_name:
-            return v.lower()
-    return None
-
-
-def _header_values(headers: list[tuple[bytes, bytes]], name: bytes) -> list[bytes]:
-    """Return every value for one header name, preserving field order."""
-    normalized_name = name.lower()
-    return [value.lower() for field_name, value in headers if field_name.lower() == normalized_name]
-
-
-async def _read_body(reader: asyncio.StreamReader, headers: list[tuple[bytes, bytes]]) -> bytes:
-    """Read a request body per Content-Length / Transfer-Encoding.
-
-    Transfer-Encoding takes precedence over Content-Length, mirroring the
-    response-side rule — reading by CL when TE is present would leave chunk
-    framing bytes on the socket to be parsed as the next request. Chunked is
-    the only transfer coding the broker can decode; other or repeated codings
-    and malformed CL values are rejected as ValueError, which the request loop
-    answers with a 400.
-    """
-    transfer_encoding_values = _header_values(headers=headers, name=b"transfer-encoding")
-    if transfer_encoding_values:
-        encodings = [token.strip() for value in transfer_encoding_values for token in value.split(b",")]
-        # Dechunking is the only request transfer coding the broker implements.
-        # Accepting a preceding coding (for example gzip, chunked) and then
-        # stripping Transfer-Encoding upstream would silently change semantics.
-        if encodings != [b"chunked"]:
-            raise ValueError(f"unsupported request Transfer-Encoding: {b', '.join(encodings)!r}")
-        return await _read_chunked(reader=reader)
-
-    content_length_values = [token.strip() for value in _header_values(headers=headers, name=b"content-length") for token in value.split(b",")]
-    if not content_length_values:
-        return b""
-    if any(not _CONTENT_LENGTH_RE.fullmatch(value) for value in content_length_values):
-        raise ValueError(f"invalid request Content-Length: {b', '.join(content_length_values)!r}")
-    if len(set(content_length_values)) != 1:
-        raise ValueError(f"conflicting request Content-Length values: {content_length_values!r}")
-    remaining = int(content_length_values[0])
-    if remaining == 0:
-        return b""
-    try:
-        return await reader.readexactly(remaining)
-    except asyncio.IncompleteReadError as exc:
-        raise ValueError(f"request body ended after {len(exc.partial)} of {remaining} bytes") from exc
-
-
-async def _read_chunked(reader: asyncio.StreamReader) -> bytes:
-    chunks: list[bytes] = []
-    while True:
-        size_line = await reader.readline()
-        if not size_line:
-            raise ValueError("request chunked body ended before a chunk size")
-        if not size_line.endswith(b"\r\n"):
-            raise ValueError("request chunk size line did not end with CRLF")
-        size_token = size_line[:-2].split(b";", 1)[0].strip()
-        if not _CHUNK_SIZE_RE.fullmatch(size_token):
-            raise ValueError(f"invalid request chunk size: {size_token!r}")
-        size = int(size_token, 16)
-        if size == 0:
-            while True:
-                trailer_line = await reader.readline()
-                if not trailer_line:
-                    raise ValueError("request chunked body ended inside trailers")
-                if trailer_line == b"\r\n":
-                    return b"".join(chunks)
-                if not trailer_line.endswith(b"\r\n"):
-                    raise ValueError("request trailer line did not end with CRLF")
-        try:
-            chunks.append(await reader.readexactly(size))
-            delimiter = await reader.readexactly(2)
-        except asyncio.IncompleteReadError as exc:
-            raise ValueError("request chunk payload ended before its declared boundary") from exc
-        if delimiter != b"\r\n":
-            raise ValueError("request chunk payload was not followed by CRLF")
-
-
-def _build_authorization_value(token: str, auth_format: str) -> bytes:
-    """Encode the upstream Authorization header for a given provider's auth format."""
-    if auth_format == tls_providers.AUTH_FORMAT_BEARER:
-        return b"Bearer " + token.encode()
-    if auth_format == tls_providers.AUTH_FORMAT_BASIC_X_ACCESS_TOKEN:
-        creds = b"x-access-token:" + token.encode()
-        return b"Basic " + base64.b64encode(creds)
-    raise ValueError(f"unknown auth_format: {auth_format!r}")
-
-
-class _SecretSelectionError(Exception):
-    """A request didn't carry a recognizable placeholder, or a required secret is missing from the cache.
-
-    Raised by `_rewrite_request_for_provider`; the proxy loop maps it to a 400
-    so an un-rewritten credential is never forwarded upstream.
-    """
-
-
-def _strip_bearer_prefix(value: bytes) -> str:
-    """Return the token from a `Bearer <token>` header value (case-insensitive prefix)."""
-    text = value.decode("iso-8859-1").strip()
-    if text[:7].lower() == "bearer ":
-        return text[7:].strip()
-    return text
-
-
-def _request_addresses_humr_credential(headers: list[tuple[bytes, bytes]], path_with_query: str, provider: tls_providers.TlsProviderSpec) -> bool:
-    """Decide whether a request asks for HUMR's credential or is anonymous public traffic.
-
-    True routes through the token store + rewrite path. OAuth-style methods
-    (OAuthHeader, OAuthHeaderMultiInject) are always True: their convention is
-    inverted — the sandbox sends no marker and the proxy injects
-    unconditionally, so every request implicitly asks for HUMR's credential.
-
-    Vault-style methods mark HUMR's slot with an explicit placeholder. False
-    means every credential slot is empty — anonymous public traffic (e.g.
-    OpenRouter's unauthenticated /api/v1/models) the proxy forwards as-is,
-    without consulting the token store, so a disconnected provider does not
-    cost one HUMR refresh per request. A credential that is neither empty nor
-    a recognized placeholder raises `_SecretSelectionError` (→ 400): BYO keys
-    are neither injected-over nor silently forwarded.
-    """
-    method = provider.credential_method
-    if isinstance(method, (tls_providers.OAuthHeader, tls_providers.OAuthHeaderMultiInject)):
-        return True
-    if isinstance(method, tls_providers.VaultUrlRewrite):
-        # Every Telegram Bot API path embeds a token, so this host has no
-        # anonymous surface: a path without the placeholder carries an
-        # un-rewritable credential, never public traffic.
-        if method.placeholder not in path_with_query:
-            raise _SecretSelectionError("request URL must contain the HUMR placeholder")
-        return True
-    if isinstance(method, tls_providers.VaultHeaderInject):
-        incoming = next((v for n, v in headers if n.lower() == b"authorization"), None)
-        if incoming is None:
-            return False
-        if method.secret_for_placeholder(_strip_bearer_prefix(incoming)) is None:
-            raise _SecretSelectionError("request Authorization did not carry a known HUMR placeholder")
-        return True
-    if isinstance(method, tls_providers.VaultApiKeyHeader):
-        header_lower = method.header_name.lower().encode()
-        incoming = next((v for n, v in headers if n.lower() == header_lower), None)
-        if incoming is not None:
-            if incoming.decode("iso-8859-1").strip() != method.placeholder:
-                raise _SecretSelectionError(f"request {method.header_name} did not carry the HUMR placeholder")
-            return True
-        # No api-key slot, but an Authorization header (e.g. a BYO OAuth
-        # bearer) still counts as credentialed — refuse rather than forward.
-        if any(n.lower() == b"authorization" for n, _v in headers):
-            raise _SecretSelectionError(f"request carried Authorization instead of the {method.header_name} HUMR placeholder")
-        return False
-    raise ValueError(f"unknown credential_method: {method!r}")
-
-
-def _rewrite_authorization(headers: list[tuple[bytes, bytes]], token: str, auth_format: str, upstream_host: str) -> list[tuple[bytes, bytes]]:
-    auth_value = _build_authorization_value(token=token, auth_format=auth_format)
-    host_override = upstream_host.encode()
-    rewritten: list[tuple[bytes, bytes]] = []
-    seen_auth = False
-    for name, value in headers:
-        if name == b"authorization":
-            rewritten.append((b"Authorization", auth_value))
-            seen_auth = True
-            continue
-        if name == b"host":
-            rewritten.append((b"Host", host_override))
-            continue
-        if name in (b"proxy-connection", b"proxy-authorization"):
-            continue
-        rewritten.append((name, value))
-    if not seen_auth:
-        rewritten.append((b"Authorization", auth_value))
-    return rewritten
-
-
-def _inject_headers(headers: list[tuple[bytes, bytes]], extra: dict[bytes, bytes]) -> list[tuple[bytes, bytes]]:
-    """Force `extra` header values, replacing any the client sent (case-insensitive).
-
-    Used after `_rewrite_authorization` to add broker-owned headers (e.g.
-    `ChatGPT-Account-ID`) whose values come from HUMR, not the sandbox. A header
-    the sandbox sent under the same name is dropped so the sandbox can't spoof
-    it; every other client header (Codex's Cloudflare `originator`/`User-Agent`)
-    is left as-is.
-    """
-    lowered = {name.lower() for name in extra}
-    kept = [(name, value) for name, value in headers if name.lower() not in lowered]
-    return kept + list(extra.items())
-
-
-def _strip_proxy_headers_and_set_host(headers: list[tuple[bytes, bytes]], upstream_host: str) -> list[tuple[bytes, bytes]]:
-    """Remove proxy-only headers and force Host to the upstream hostname."""
-    host_override = upstream_host.encode()
-    rewritten: list[tuple[bytes, bytes]] = []
-    seen_host = False
-    for name, value in headers:
-        if name == b"host":
-            rewritten.append((b"Host", host_override))
-            seen_host = True
-            continue
-        if name in (b"proxy-connection", b"proxy-authorization", b"authorization"):
-            continue
-        rewritten.append((name, value))
-    if not seen_host:
-        rewritten.append((b"Host", host_override))
-    return rewritten
-
-
-def _normalize_forward_headers(headers: list[tuple[bytes, bytes]], body_length: int) -> list[tuple[bytes, bytes]]:
-    """Strip stale client-side framing before replaying the request upstream."""
-    headers_to_strip = frozenset({
-        b"connection",
-        b"content-length",
-        b"keep-alive",
-        b"proxy-authenticate",
-        b"proxy-authorization",
-        b"proxy-connection",
-        b"te",
-        b"trailer",
-        b"transfer-encoding",
-        b"upgrade",
-    })
-    normalized: list[tuple[bytes, bytes]] = []
-    body_was_framed = False
-    for name, value in headers:
-        lowered_name = name.lower()
-        if lowered_name in (b"content-length", b"transfer-encoding"):
-            body_was_framed = True
-        if lowered_name in headers_to_strip:
-            continue
-        normalized.append((name, value))
-    if body_length > 0 or body_was_framed:
-        normalized.append((b"Content-Length", str(body_length).encode()))
-    return normalized
-
-
-def _rewrite_request_for_provider(
-    headers: list[tuple[bytes, bytes]],
-    path_with_query: str,
-    secrets: dict[str, str],
-    provider: tls_providers.TlsProviderSpec,
-    upstream_host: str,
-) -> tuple[list[tuple[bytes, bytes]], str]:
-    """Rewrite credentials for the provider-specific upstream API shape.
-
-    Single-secret methods (OAuthHeader, VaultUrlRewrite) use the sole secret.
-    OAuthHeaderMultiInject swaps the bearer and injects its extra header(s)
-    from named secrets, leaving other client headers intact. VaultHeaderInject
-    selects per request by reverse-mapping the incoming placeholder bearer to
-    its secret name. Raises `_SecretSelectionError` when a required secret is
-    missing or the request doesn't carry a recognizable placeholder.
-    """
-    method = provider.credential_method
-    if isinstance(method, tls_providers.OAuthHeader):
-        return (
-            _rewrite_authorization(
-                headers=headers,
-                token=_primary_secret(secrets),
-                auth_format=method.auth_format,
-                upstream_host=upstream_host,
-            ),
-            path_with_query,
-        )
-    if isinstance(method, tls_providers.OAuthHeaderMultiInject):
-        bearer = secrets.get(method.bearer_secret)
-        if not bearer:
-            raise _SecretSelectionError(f"no cached secret for {method.bearer_secret!r}")
-        rewritten = _rewrite_authorization(
-            headers=headers,
-            token=bearer,
-            auth_format=method.auth_format,
-            upstream_host=upstream_host,
-        )
-        extra: dict[bytes, bytes] = {}
-        for secret_name, header_name in method.header_secrets.items():
-            value = secrets.get(secret_name)
-            if not value:
-                raise _SecretSelectionError(f"no cached secret for {secret_name!r}")
-            extra[header_name.encode()] = value.encode()
-        return (_inject_headers(headers=rewritten, extra=extra), path_with_query)
-    if isinstance(method, tls_providers.VaultUrlRewrite):
-        token = _primary_secret(secrets)
-        if method.placeholder not in path_with_query:
-            raise _SecretSelectionError("request URL must contain the HUMR placeholder")
-        return (
-            _strip_proxy_headers_and_set_host(headers=headers, upstream_host=upstream_host),
-            path_with_query.replace(method.placeholder, token),
-        )
-    if isinstance(method, tls_providers.VaultHeaderInject):
-        # Read the raw (case-preserving) Authorization value — _header_value
-        # lowercases, which would mangle a mixed-case placeholder token.
-        incoming = next((v for n, v in headers if n.lower() == b"authorization"), None)
-        bearer = _strip_bearer_prefix(incoming) if incoming is not None else None
-        secret_name = method.secret_for_placeholder(bearer) if bearer is not None else None
-        if secret_name is None:
-            raise _SecretSelectionError("request Authorization did not carry a known HUMR placeholder")
-        token = secrets.get(secret_name)
-        if not token:
-            raise _SecretSelectionError(f"no cached secret for {secret_name!r}")
-        return (
-            _rewrite_authorization(
-                headers=headers,
-                token=token,
-                auth_format=method.auth_format,
-                upstream_host=upstream_host,
-            ),
-            path_with_query,
-        )
-    if isinstance(method, tls_providers.VaultApiKeyHeader):
-        # Confirm the request carries our placeholder in the named auth header
-        # (case-preserving read), then swap in the real key. Other headers — incl.
-        # Anthropic's required anthropic-version — pass through untouched.
-        header_lower = method.header_name.lower().encode()
-        incoming = next((v for n, v in headers if n.lower() == header_lower), None)
-        incoming_value = incoming.decode("iso-8859-1").strip() if incoming is not None else None
-        if incoming_value != method.placeholder:
-            raise _SecretSelectionError(f"request {method.header_name} did not carry the HUMR placeholder")
-        token = _primary_secret(secrets)
-        stripped = _strip_proxy_headers_and_set_host(headers=headers, upstream_host=upstream_host)
-        return (
-            _inject_headers(headers=stripped, extra={method.header_name.encode(): token.encode()}),
-            path_with_query,
-        )
-    raise ValueError(f"unknown credential_method: {method!r}")
-
-
-_upstream_ssl_context: ssl.SSLContext | None = None
-
-
-def _get_upstream_ssl_context() -> ssl.SSLContext:
-    """Return the shared upstream client SSLContext, creating it on first use.
-
-    A context is safe to share across connections, and creating one per
-    request re-parses the entire system CA store — measurable allocator churn
-    under concurrent proxy traffic.
-    """
-    global _upstream_ssl_context
-    if _upstream_ssl_context is None:
-        _upstream_ssl_context = ssl.create_default_context()
-    return _upstream_ssl_context
-
-
-async def _forward_to_upstream(
-    host: str,
-    port: int,
-    method: str,
-    path_with_query: str,
-    headers: list[tuple[bytes, bytes]],
-    body: bytes,
-    client_writer: asyncio.StreamWriter,
-) -> tuple[int, bool]:
-    """Replay the request to the real upstream and relay the response to the client.
-
-    The response head is forwarded verbatim and the body is relayed chunk by
-    chunk in its upstream framing — never buffered whole. Streaming keeps SSE
-    deltas live for the sandbox client AND caps broker memory at one relay
-    chunk per in-flight response; buffering entire bodies made broker RSS
-    track the largest response ever proxied (git clone packs through
-    github.com reached multi-GB peaks). Returns ``(status, keep_alive)``;
-    ``keep_alive`` is False when the client connection must be torn down
-    after this exchange.
-    """
-    ctx = _get_upstream_ssl_context()
-    upstream_reader, upstream_writer = await asyncio.open_connection(host=host, port=port, ssl=ctx, server_hostname=host)
-    try:
-        normalized_headers = _normalize_forward_headers(headers=headers, body_length=len(body))
-        request = method.encode() + b" " + path_with_query.encode() + b" HTTP/1.1\r\n"
-        for name, value in normalized_headers:
-            request += name + b": " + value + b"\r\n"
-        request += b"\r\n"
-        upstream_writer.write(request)
-        if body:
-            upstream_writer.write(body)
-        await upstream_writer.drain()
-        # Interim (1xx) responses precede the final one on the same
-        # connection: relay each interim head verbatim and keep reading, so
-        # an interim 100/103 doesn't desync the stream and the final status
-        # (which drives keep-alive and the 401 evict) is the one acted on.
-        # (The proxy reads the full request body before forwarding, so a
-        # client waiting on 100-continue waits out its expect timeout first —
-        # pre-existing behavior.) 101 is the exception: it has no following
-        # response — the connection switches protocols. Upgrades aren't
-        # supported (the request normalizer strips `Upgrade`/`Connection`),
-        # so a stray 101 is final and force-closes.
-        while True:
-            status, response_headers = await _read_response_head(reader=upstream_reader)
-            if not (100 <= status < 200) or status == 101:
-                break
-            client_writer.write(_render_response_head(status=status, headers=response_headers))
-            await client_writer.drain()
-        connection_keep_alive = status != 101 and not _connection_close_requested(headers=response_headers)
-
-        # Statuses that cannot carry a body (HEAD, 1xx, 204, 304) stop at
-        # the head even when framing headers are present (a 304 echoes
-        # the would-be body's Content-Length) — the relay would otherwise
-        # wait on body bytes that never come and hang a valid response.
-        response_can_have_body = not (method.upper() == "HEAD" or 100 <= status < 200 or status in (204, 304))
-        if response_can_have_body:
-            # Parsing (and validating) the framing BEFORE the head is written
-            # keeps invalid-framing failures on the clean-502 path below.
-            framing, forward_headers = _parse_response_framing(headers=response_headers)
-        else:
-            framing, forward_headers = None, response_headers
-
-        client_writer.write(_render_response_head(status=status, headers=forward_headers))
-        await client_writer.drain()
-
-        # Past this point the head is committed to the client: an error can
-        # no longer be reported as an HTTP response without corrupting the
-        # byte stream (the client would read it as body data). On failure,
-        # tear the connection down instead — truncation is detectable from
-        # the framing; an injected 502 mid-body is silent corruption.
-        try:
-            if not response_can_have_body:
-                return status, connection_keep_alive
-            framed = await _relay_response_body(
-                upstream_reader=upstream_reader,
-                client_writer=client_writer,
-                framing=framing,
-            )
-            return status, connection_keep_alive and framed
-        except Exception:
-            logger.exception("relay from %s failed after response head was sent", host)
-            return status, False
-    finally:
-        with contextlib.suppress(Exception):
-            upstream_writer.close()
-            await upstream_writer.wait_closed()
-
-
-async def _read_response_head(reader: asyncio.StreamReader) -> tuple[int, list[tuple[bytes, bytes]]]:
-    """Read one response status line + header block from the upstream."""
-    status_line = await reader.readline()
-    try:
-        status = int(status_line.split(b" ", 2)[1])
-    except (IndexError, ValueError):
-        raise RuntimeError(f"bad upstream status line: {status_line!r}")
-    headers: list[tuple[bytes, bytes]] = []
-    while True:
-        line = await reader.readline()
-        if line in (b"\r\n", b"\n", b""):
-            break
-        if b":" not in line:
-            continue
-        name, _, value = line.partition(b":")
-        headers.append((name.strip(), value.strip().rstrip(b"\r\n")))
-    return status, headers
-
-
-def _connection_close_requested(headers: list[tuple[bytes, bytes]]) -> bool:
-    """True when any Connection field carries a `close` token.
-
-    Connection is a comma-separated token list AND may legally appear as
-    multiple field lines — every occurrence is scanned, not just the first.
-    """
-    for name, value in headers:
-        if name.lower() != b"connection":
-            continue
-        if b"close" in {token.strip() for token in value.lower().split(b",")}:
-            return True
-    return False
-
-
-@dataclass(frozen=True)
-class _BodyFraming:
-    """How one upstream response body is delimited on the wire."""
-
-    kind: Literal["chunked", "content_length", "eof"]
-    content_length: int | None
-
-
-_CONTENT_LENGTH_RE = re.compile(rb"^\d+$")
-_CHUNK_SIZE_RE = re.compile(rb"^[0-9A-Fa-f]+$")
-
-
-def _parse_response_framing(headers: list[tuple[bytes, bytes]]) -> tuple[_BodyFraming, list[tuple[bytes, bytes]]]:
-    """Decide the response body framing and the headers to forward with it.
-
-    Transfer-Encoding takes precedence over Content-Length (RFC 9112 §6.3):
-    following CL when TE is present would let the next response's bytes be
-    read as body data, and an intermediary must not forward both — CL is
-    stripped from the forwarded head so the downstream parser can't pick the
-    other one. TE is a comma-separated coding list; the body is chunked-framed
-    only when chunked is the FINAL coding, otherwise it is close-delimited.
-    Raises RuntimeError on a malformed Content-Length (a response the client
-    must never see as-is — callers turn it into a clean 502).
-    """
-    transfer_encoding = None
-    content_length_value = None
-    for name, value in headers:
-        lowered = name.lower()
-        if lowered == b"transfer-encoding":
-            transfer_encoding = value.lower()
-        elif lowered == b"content-length":
-            content_length_value = value
-    if transfer_encoding is not None:
-        forward_headers = [(name, value) for name, value in headers if name.lower() != b"content-length"]
-        encodings = [token.strip() for token in transfer_encoding.split(b",")]
-        kind = "chunked" if encodings and encodings[-1] == b"chunked" else "eof"
-        return _BodyFraming(kind=kind, content_length=None), forward_headers
-    if content_length_value is not None:
-        if not _CONTENT_LENGTH_RE.fullmatch(content_length_value):
-            raise RuntimeError(f"invalid upstream Content-Length: {content_length_value!r}")
-        return _BodyFraming(kind="content_length", content_length=int(content_length_value)), headers
-    return _BodyFraming(kind="eof", content_length=None), headers
-
-
-def _render_response_head(status: int, headers: list[tuple[bytes, bytes]]) -> bytes:
-    """Render the response status line + headers verbatim for the client."""
-    head = b"HTTP/1.1 " + str(status).encode() + b" " + _http_reason(status=status).encode() + b"\r\n"
-    for name, value in headers:
-        head += name + b": " + value + b"\r\n"
-    return head + b"\r\n"
-
-
-async def _relay_response_body(
-    upstream_reader: asyncio.StreamReader,
-    client_writer: asyncio.StreamWriter,
-    framing: _BodyFraming,
-) -> bool:
-    """Relay a response body to the client chunk by chunk, flushing per chunk.
-
-    The head already told the client how the body is delimited (framing was
-    parsed and validated by `_parse_response_framing` before the head was
-    committed). Per-chunk flushing keeps SSE deltas live and holds at most
-    one relay chunk in memory regardless of body size. Returns whether the
-    client connection may be reused: False whenever the body didn't terminate
-    cleanly (connection-close framing, a short ``Content-Length``, or a
-    chunked body without its terminating 0-chunk), since the client's parser
-    can't find a clean boundary and would misframe or hang on the next
-    response sent over the same socket.
-    """
-    if framing.kind == "chunked":
-        return await _relay_chunked_stream(upstream_reader=upstream_reader, client_writer=client_writer)
-    if framing.kind == "content_length":
-        remaining = framing.content_length
-        while remaining > 0:
-            chunk = await upstream_reader.read(min(65536, remaining))
-            if not chunk:
-                # Upstream EOF before the advertised length — the client is
-                # still waiting on the unfulfilled Content-Length, so the
-                # socket can't carry another response.
-                return False
-            remaining -= len(chunk)
-            client_writer.write(chunk)
-            await client_writer.drain()
-        return True
-    # No explicit framing: relay until upstream EOF — the client learns the
-    # body ended only when we close the connection, so it can't be reused.
-    while True:
-        chunk = await upstream_reader.read(65536)
-        if not chunk:
-            break
-        client_writer.write(chunk)
-        await client_writer.drain()
-    return False
-
-
-async def _relay_chunked_stream(upstream_reader: asyncio.StreamReader, client_writer: asyncio.StreamWriter) -> bool:
-    """Relay a chunked upstream body to the client one chunk at a time, flushing each.
-
-    The chunk framing is forwarded verbatim (size line, payload, trailing CRLF,
-    final 0-chunk + trailers) so the client's chunked decoder sees each SSE
-    frame the instant it arrives. Returns True only when the stream closed
-    cleanly with its terminating 0-chunk; a premature EOF, malformed size line,
-    or truncated payload returns False so the caller tears the client
-    connection down rather than reuse a socket the client can't reframe.
-    """
-    while True:
-        size_line = await upstream_reader.readline()
-        if not size_line:
-            return False
-        # Validate the size token as strict hex (RFC 9112 §7.1) before
-        # converting: int(x, 16) also accepts forms like `-1`/`+1` that a
-        # client parser would reject or, worse, interpret differently.
-        size_token = size_line.strip().split(b";")[0].strip()
-        if not _CHUNK_SIZE_RE.fullmatch(size_token):
-            return False
-        size = int(size_token, 16)
-        client_writer.write(size_line)
-        if size == 0:
-            # Forward the trailer section up to its terminating blank line,
-            # flushing per line — trailer size is sender-controlled, and an
-            # undrained loop would buffer it without backpressure. A bare EOF
-            # (b"") before the blank line means the chunked terminator
-            # (0-chunk + trailers + CRLF) never completed, so the client
-            # can't reframe — relay the partial bytes but report non-reuse.
-            while True:
-                trailer_line = await upstream_reader.readline()
-                if trailer_line == b"":
-                    await client_writer.drain()
-                    return False
-                client_writer.write(trailer_line)
-                await client_writer.drain()
-                if trailer_line in (b"\r\n", b"\n"):
-                    break
-            return True
-        # Relay the payload in bounded sub-reads: the chunk size is
-        # sender-controlled, and reading a whole chunk at once would let one
-        # huge chunk re-create the buffered-body memory blowup. A short read
-        # (EOF mid-payload) has already forwarded the partial bytes, but the
-        # chunk is short of its declared size — the client's decoder can't
-        # trust the framing from here on.
-        remaining = size
-        while remaining > 0:
-            payload = await upstream_reader.read(min(65536, remaining))
-            if not payload:
-                return False
-            remaining -= len(payload)
-            client_writer.write(payload)
-            await client_writer.drain()
-        crlf = await upstream_reader.readline()
-        client_writer.write(crlf)
-        await client_writer.drain()
-        if crlf != b"\r\n":
-            # The chunk delimiter is missing or malformed (strict CRLF per
-            # RFC 9112): whatever follows can't be framed as a size line, so
-            # stop relaying and report the connection unusable rather than
-            # emit garbage framing a stricter client parser would reject.
-            return False
-
-
-def _http_reason(status: int) -> str:
-    return {
-        100: "Continue", 101: "Switching Protocols", 103: "Early Hints",
-        200: "OK", 201: "Created", 204: "No Content", 301: "Moved Permanently",
-        302: "Found", 304: "Not Modified", 400: "Bad Request", 401: "Unauthorized",
-        403: "Forbidden", 404: "Not Found", 409: "Conflict", 410: "Gone",
-        429: "Too Many Requests", 500: "Internal Server Error", 502: "Bad Gateway",
-        503: "Service Unavailable",
-    }.get(status, "OK")
-
-
-async def _send_raw(writer: asyncio.StreamWriter, status: int, body: bytes) -> None:
-    writer.write(
-        b"HTTP/1.1 " + str(status).encode() + b" " + _http_reason(status=status).encode() + b"\r\n"
-        b"Content-Length: " + str(len(body)).encode() + b"\r\n"
-        b"Connection: close\r\n\r\n" + body
-    )
-    with contextlib.suppress(Exception):
-        await writer.drain()
