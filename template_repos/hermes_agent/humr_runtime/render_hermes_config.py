@@ -36,6 +36,9 @@ providers:
 
 PROVIDERS_BLOCK_PLACEHOLDER = "__PROVIDERS_BLOCK__"
 
+# Image-owned template, shipped by the same Dockerfile that ships this script.
+CONFIG_TEMPLATE_PATH = Path("/opt/hermes/config.yaml.template")
+
 
 def has_platform_capability(granted: str, capability: str) -> bool:
     """True when `capability` is in the comma-separated grant list."""
@@ -88,8 +91,8 @@ def _required_env(name: str) -> str:
 
 
 def main() -> None:
-    """Render $HERMES_CONFIG_TEMPLATE into $HERMES_HOME/config.yaml."""
-    template_text = Path(_required_env(name="HERMES_CONFIG_TEMPLATE")).read_text(encoding="utf-8")
+    """Render the image config template into $HERMES_HOME/config.yaml."""
+    template_text = CONFIG_TEMPLATE_PATH.read_text(encoding="utf-8")
     hermes_home = Path(_required_env(name="HERMES_HOME")).expanduser()
     rendered = render_config(
         template_text=template_text,

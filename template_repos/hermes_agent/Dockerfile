@@ -76,8 +76,6 @@ ENV HUMR_ROOT=/opt/humr
 ENV HUMR_BIN_DIR=/opt/humr/bin
 ENV HUMR_RUNTIME_DIR=/opt/humr/runtime
 ENV HUMR_RUN_DIR=/run/humr
-ENV HERMES_ROOT=/opt/hermes
-ENV HERMES_CONFIG_TEMPLATE=/opt/hermes/config.yaml.template
 ENV HERMES_WEBUI_DIR=/opt/hermes/webui
 ENV HERMES_WEBUI_AGENT_DIR=/opt/hermes/agent
 ENV HERMES_WEBUI_PYTHON=/opt/hermes/webui/venv/bin/python
@@ -89,9 +87,6 @@ ENV HERMES_WEBUI_TRUST_FORWARDED_HOST=1
 ENV HERMES_PERSISTENT_ROOT=/hermes-persistent-root
 ENV HERMES_CHECKPOINT_ROOT=/hermes-checkpoint
 ENV HOMEBREW_PREFIX=/home/linuxbrew/.linuxbrew
-ENV HOMEBREW_NO_ANALYTICS=1
-ENV HOMEBREW_NO_AUTO_UPDATE=1
-ENV HOMEBREW_INSTALL_FROM_API=1
 ENV PATH=${HUMR_BIN_DIR}:${PATH}
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -203,12 +198,24 @@ WORKDIR /
 RUN mkdir -p /uv_cache "$HERMES_WEBUI_DIR" "$HERMES_HOME" "$HERMES_WEBUI_DEFAULT_WORKSPACE" "$HERMES_PERSISTENT_ROOT" "$HERMES_CHECKPOINT_ROOT" "$HUMR_RUN_DIR" \
     && rsync -a /apptoo/ "$HERMES_WEBUI_DIR/" \
     && rm -rf /app /apptoo \
-    && chown -R hermeswebui:hermeswebui /uv_cache "$HERMES_ROOT" "$HERMES_HOME" "$HERMES_WEBUI_DEFAULT_WORKSPACE"
+    && chown -R hermeswebui:hermeswebui /uv_cache /opt/hermes "$HERMES_HOME" "$HERMES_WEBUI_DEFAULT_WORKSPACE"
 
 # /home is preserved by persistent-root-runner.sh's full-rootfs rsync and
 # tar checkpoint, so brew installs under $HOMEBREW_PREFIX survive
 # redeploys without any extra plumbing.
 RUN mkdir -p /home/linuxbrew && chown hermeswebui:hermeswebui /home/linuxbrew
+
+# Every brew invocation — the build-time bootstrap below and the agent's
+# in-sandbox installs alike — reads Homebrew's system-wide env file, so brew
+# defaults live here instead of as container-wide ENV.
+# HOMEBREW_INSTALL_FROM_API skips cloning the multi-GB homebrew-core tap;
+# brew fetches formula JSON on demand.
+RUN mkdir -p /etc/homebrew \
+    && printf '%s\n' \
+        'HOMEBREW_NO_ANALYTICS=1' \
+        'HOMEBREW_NO_AUTO_UPDATE=1' \
+        'HOMEBREW_INSTALL_FROM_API=1' \
+        > /etc/homebrew/brew.env
 
 USER hermeswebui
 
@@ -239,8 +246,6 @@ RUN uv venv --seed --python /usr/local/bin/python3 "${HERMES_WEBUI_DEFAULT_WORKS
 # Linuxbrew bootstrap. Bottles are RPATH-locked to HOMEBREW_PREFIX, so we
 # install at the canonical prefix and let the persistent-root rsync preserve
 # the tree across redeploys (including the agent's `brew install`s).
-# HOMEBREW_INSTALL_FROM_API skips cloning the multi-GB homebrew-core tap;
-# brew fetches formula JSON on demand.
 RUN mkdir -p "${HOMEBREW_PREFIX}/bin" \
     && git clone --depth=1 https://github.com/Homebrew/brew "${HOMEBREW_PREFIX}/Homebrew" \
     && ln -s ../Homebrew/bin/brew "${HOMEBREW_PREFIX}/bin/brew" \
