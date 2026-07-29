@@ -56,7 +56,8 @@ import device_flow
 from humr_client import HumrClient
 from mcp_aggregator import MCPAggregator
 import tls_intercept
-import tls_providers
+import tls_provider_catalog
+import tls_token_store
 
 
 DEFAULT_PROXY_PORT = 9950
@@ -139,9 +140,9 @@ async def _run(
         app_slug=app_slug,
     )
     tls_intercept_runtime = tls_intercept.TlsInterceptRuntime(
-        providers=tls_providers.TLS_INTERCEPT_PROVIDERS,
+        providers=tls_provider_catalog.TLS_INTERCEPT_PROVIDERS,
         humr_client=humr_client,
-        refresh_lead_seconds=tls_intercept.REFRESH_LEAD_SECONDS,
+        refresh_lead_seconds=tls_token_store.REFRESH_LEAD_SECONDS,
         ca_dir=ca_dir,
         private_dir=private_dir,
     )
@@ -163,7 +164,7 @@ async def _run(
         humr_client=humr_client,
         tls_intercept_runtime=tls_intercept_runtime,
         mcp_aggregator=mcp_aggregator,
-        providers=tls_providers.TLS_INTERCEPT_PROVIDERS,
+        providers=tls_provider_catalog.TLS_INTERCEPT_PROVIDERS,
         gateway_env_path=gateway_env_path,
         webui_state_dir=webui_state_dir,
         process_compose_url=process_compose_url,

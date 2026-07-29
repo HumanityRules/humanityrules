@@ -84,7 +84,11 @@ broker = _load_broker_module()
 # sibling modules; bind the ones the tests patch/construct directly.
 import credentials_service  # noqa: E402
 import humr_client  # noqa: E402
-import tls_providers  # noqa: E402
+import tls_certificate_authority  # noqa: E402
+import tls_credential_injection  # noqa: E402
+import tls_http_message_relay  # noqa: E402
+import tls_provider_catalog  # noqa: E402
+import tls_token_store  # noqa: E402
 
 
 def _make_humr_client() -> humr_client.HumrClient:
@@ -113,21 +117,21 @@ class TestEnvironmentFlags(unittest.TestCase):
             self.assertTrue(broker._env_flag_enabled(name="HUMR_MERGE_INTEGRATION_ENABLED", default=True))
 
 
-def _make_token_store() -> broker.tls_intercept._TokenStore:
+def _make_token_store() -> tls_token_store.TokenStore:
     """Create a fresh TLS token store for isolated broker tests."""
-    return broker.tls_intercept._TokenStore(
-        providers=tls_providers.TLS_INTERCEPT_PROVIDERS,
+    return tls_token_store.TokenStore(
+        providers=tls_provider_catalog.TLS_INTERCEPT_PROVIDERS,
         humr_client=_make_humr_client(),
-        refresh_lead_seconds=broker.tls_intercept.REFRESH_LEAD_SECONDS,
+        refresh_lead_seconds=tls_token_store.REFRESH_LEAD_SECONDS,
     )
 
 
 def _make_tls_intercept_runtime(ca_dir: pathlib.Path, private_dir: pathlib.Path) -> broker.tls_intercept.TlsInterceptRuntime:
     """Create a fresh TLS-intercept runtime for control-app tests."""
     return broker.tls_intercept.TlsInterceptRuntime(
-        providers=tls_providers.TLS_INTERCEPT_PROVIDERS,
+        providers=tls_provider_catalog.TLS_INTERCEPT_PROVIDERS,
         humr_client=_make_humr_client(),
-        refresh_lead_seconds=broker.tls_intercept.REFRESH_LEAD_SECONDS,
+        refresh_lead_seconds=tls_token_store.REFRESH_LEAD_SECONDS,
         ca_dir=ca_dir,
         private_dir=private_dir,
     )
@@ -136,11 +140,11 @@ def _make_tls_intercept_runtime(ca_dir: pathlib.Path, private_dir: pathlib.Path)
 class TestHostToProviderRouting(unittest.TestCase):
 
     def test_all_google_hosts_route_to_google(self) -> None:
-        for host in tls_providers.TLS_INTERCEPT_PROVIDERS["google"].hosts:
-            self.assertEqual(tls_providers.HOST_TO_TLS_PROVIDER[host], "google")
+        for host in tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["google"].hosts:
+            self.assertEqual(tls_provider_catalog.HOST_TO_TLS_PROVIDER[host], "google")
 
     def test_tavily_host_routes_to_tavily(self) -> None:
-        self.assertEqual(tls_providers.HOST_TO_TLS_PROVIDER["api.tavily.com"], "tavily")
+        self.assertEqual(tls_provider_catalog.HOST_TO_TLS_PROVIDER["api.tavily.com"], "tavily")
 
     def test_unknown_host_returns_none(self) -> None:
         store = _make_token_store()
@@ -173,9 +177,9 @@ class TestRewriteAuthorization(unittest.TestCase):
 
     def test_existing_authorization_is_replaced(self) -> None:
         hdrs = [(b"authorization", b"Bearer SANDBOX-DUMMY"), (b"content-type", b"application/json")]
-        out = broker.tls_intercept._rewrite_authorization(
+        out = tls_credential_injection._rewrite_authorization(
             headers=hdrs, token="REAL-TOKEN",
-            auth_format=tls_providers.AUTH_FORMAT_BEARER,
+            auth_format=tls_provider_catalog.AUTH_FORMAT_BEARER,
             upstream_host="gmail.googleapis.com",
         )
         auth = dict([(n.lower(), v) for n, v in out])[b"authorization"]
@@ -183,9 +187,9 @@ class TestRewriteAuthorization(unittest.TestCase):
 
     def test_missing_authorization_gets_injected(self) -> None:
         hdrs = [(b"content-type", b"application/json")]
-        out = broker.tls_intercept._rewrite_authorization(
+        out = tls_credential_injection._rewrite_authorization(
             headers=hdrs, token="T",
-            auth_format=tls_providers.AUTH_FORMAT_BEARER,
+            auth_format=tls_provider_catalog.AUTH_FORMAT_BEARER,
             upstream_host="gmail.googleapis.com",
         )
         auth = dict([(n.lower(), v) for n, v in out])[b"authorization"]
@@ -193,9 +197,9 @@ class TestRewriteAuthorization(unittest.TestCase):
 
     def test_host_is_set_to_upstream(self) -> None:
         hdrs = [(b"host", b"whatever"), (b"authorization", b"Bearer x")]
-        out = broker.tls_intercept._rewrite_authorization(
+        out = tls_credential_injection._rewrite_authorization(
             headers=hdrs, token="T",
-            auth_format=tls_providers.AUTH_FORMAT_BEARER,
+            auth_format=tls_provider_catalog.AUTH_FORMAT_BEARER,
             upstream_host="gmail.googleapis.com",
         )
         host = dict([(n.lower(), v) for n, v in out])[b"host"]
@@ -207,9 +211,9 @@ class TestRewriteAuthorization(unittest.TestCase):
             (b"proxy-connection", b"keep-alive"),
             (b"proxy-authorization", b"Basic xxx"),
         ]
-        out = broker.tls_intercept._rewrite_authorization(
+        out = tls_credential_injection._rewrite_authorization(
             headers=hdrs, token="T",
-            auth_format=tls_providers.AUTH_FORMAT_BEARER,
+            auth_format=tls_provider_catalog.AUTH_FORMAT_BEARER,
             upstream_host="gmail.googleapis.com",
         )
         names = [n.lower() for n, _ in out]
@@ -219,9 +223,9 @@ class TestRewriteAuthorization(unittest.TestCase):
     def test_basic_x_access_token_format_for_github(self) -> None:
         import base64
         hdrs = [(b"authorization", b"Basic SANDBOX-PLACEHOLDER")]
-        out = broker.tls_intercept._rewrite_authorization(
+        out = tls_credential_injection._rewrite_authorization(
             headers=hdrs, token="ghs_real_token",
-            auth_format=tls_providers.AUTH_FORMAT_BASIC_X_ACCESS_TOKEN,
+            auth_format=tls_provider_catalog.AUTH_FORMAT_BASIC_X_ACCESS_TOKEN,
             upstream_host="github.com",
         )
         auth = dict([(n.lower(), v) for n, v in out])[b"authorization"]
@@ -229,8 +233,8 @@ class TestRewriteAuthorization(unittest.TestCase):
         self.assertEqual(auth, expected)
 
     def test_telegram_path_token_is_rewritten_without_authorization_header(self) -> None:
-        provider = tls_providers.TLS_INTERCEPT_PROVIDERS["telegram"]
-        headers, path = broker.tls_intercept._rewrite_request_for_provider(
+        provider = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["telegram"]
+        headers, path = tls_credential_injection.rewrite_request_for_provider(
             headers=[
                 (b"host", b"api.telegram.org"),
                 (b"authorization", b"Bearer placeholder"),
@@ -247,8 +251,8 @@ class TestRewriteAuthorization(unittest.TestCase):
         self.assertEqual(dict((name.lower(), value) for name, value in headers)[b"host"], b"api.telegram.org")
 
     def test_telegram_file_path_token_is_rewritten(self) -> None:
-        provider = tls_providers.TLS_INTERCEPT_PROVIDERS["telegram"]
-        _headers, path = broker.tls_intercept._rewrite_request_for_provider(
+        provider = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["telegram"]
+        _headers, path = tls_credential_injection.rewrite_request_for_provider(
             headers=[(b"host", b"api.telegram.org")],
             path_with_query="/file/bot000000:HUMR_PLACEHOLDER/documents/file.txt",
             secrets={"bot_token": "123456:REAL"},
@@ -263,10 +267,10 @@ class TestRewriteAuthorization(unittest.TestCase):
         Url-encoded placeholders (e.g. `%3A` instead of `:`) don't substring-match
         and must be rejected so we never forward an un-rewritten URL upstream.
         """
-        provider = tls_providers.TLS_INTERCEPT_PROVIDERS["telegram"]
+        provider = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["telegram"]
 
-        with self.assertRaisesRegex(broker.tls_intercept._SecretSelectionError, "placeholder"):
-            broker.tls_intercept._rewrite_request_for_provider(
+        with self.assertRaisesRegex(tls_credential_injection.SecretSelectionError, "placeholder"):
+            tls_credential_injection.rewrite_request_for_provider(
                 headers=[(b"host", b"api.telegram.org")],
                 path_with_query="/bot000000%3AHUMR_PLACEHOLDER/sendMessage",
                 secrets={"bot_token": "123456:REAL"},
@@ -276,8 +280,8 @@ class TestRewriteAuthorization(unittest.TestCase):
 
     def test_slack_app_token_placeholder_selects_app_token(self) -> None:
         """A request bearing the app-token placeholder gets the real app token."""
-        provider = tls_providers.TLS_INTERCEPT_PROVIDERS["slack"]
-        headers, path = broker.tls_intercept._rewrite_request_for_provider(
+        provider = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["slack"]
+        headers, path = tls_credential_injection.rewrite_request_for_provider(
             headers=[(b"host", b"slack.com"), (b"authorization", b"Bearer xapp-HUMR_PLACEHOLDER")],
             path_with_query="/api/apps.connections.open",
             secrets={"app_token": "xapp-REAL", "bot_token": "xoxb-REAL"},
@@ -289,8 +293,8 @@ class TestRewriteAuthorization(unittest.TestCase):
 
     def test_slack_bot_token_placeholder_selects_bot_token(self) -> None:
         """A request bearing the bot-token placeholder gets the real bot token."""
-        provider = tls_providers.TLS_INTERCEPT_PROVIDERS["slack"]
-        headers, _path = broker.tls_intercept._rewrite_request_for_provider(
+        provider = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["slack"]
+        headers, _path = tls_credential_injection.rewrite_request_for_provider(
             headers=[(b"host", b"slack.com"), (b"authorization", b"Bearer xoxb-HUMR_PLACEHOLDER")],
             path_with_query="/api/chat.postMessage",
             secrets={"app_token": "xapp-REAL", "bot_token": "xoxb-REAL"},
@@ -301,9 +305,9 @@ class TestRewriteAuthorization(unittest.TestCase):
 
     def test_slack_unknown_placeholder_fails_closed(self) -> None:
         """An unrecognized bearer must raise rather than forward an un-swapped token."""
-        provider = tls_providers.TLS_INTERCEPT_PROVIDERS["slack"]
-        with self.assertRaises(broker.tls_intercept._SecretSelectionError):
-            broker.tls_intercept._rewrite_request_for_provider(
+        provider = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["slack"]
+        with self.assertRaises(tls_credential_injection.SecretSelectionError):
+            tls_credential_injection.rewrite_request_for_provider(
                 headers=[(b"host", b"slack.com"), (b"authorization", b"Bearer xoxb-NOT-OURS")],
                 path_with_query="/api/chat.postMessage",
                 secrets={"app_token": "xapp-REAL", "bot_token": "xoxb-REAL"},
@@ -312,8 +316,8 @@ class TestRewriteAuthorization(unittest.TestCase):
             )
 
     def test_openrouter_placeholder_bearer_is_rewritten(self) -> None:
-        provider = tls_providers.TLS_INTERCEPT_PROVIDERS["openrouter"]
-        headers, path = broker.tls_intercept._rewrite_request_for_provider(
+        provider = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["openrouter"]
+        headers, path = tls_credential_injection.rewrite_request_for_provider(
             headers=[(b"host", b"openrouter.ai"), (b"authorization", b"Bearer HUMR_PLACEHOLDER")],
             path_with_query="/api/v1/chat/completions",
             secrets={"api_key": "sk-or-v1-real"},
@@ -324,8 +328,8 @@ class TestRewriteAuthorization(unittest.TestCase):
         self.assertEqual(dict((n.lower(), v) for n, v in headers)[b"authorization"], b"Bearer sk-or-v1-real")
 
     def test_nous_placeholder_bearer_is_rewritten(self) -> None:
-        provider = tls_providers.TLS_INTERCEPT_PROVIDERS["nous"]
-        headers, path = broker.tls_intercept._rewrite_request_for_provider(
+        provider = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["nous"]
+        headers, path = tls_credential_injection.rewrite_request_for_provider(
             headers=[(b"host", b"inference-api.nousresearch.com"), (b"authorization", b"Bearer HUMR_PLACEHOLDER")],
             path_with_query="/v1/chat/completions",
             secrets={"access_token": "nous-access"},
@@ -336,8 +340,8 @@ class TestRewriteAuthorization(unittest.TestCase):
         self.assertEqual(dict((n.lower(), v) for n, v in headers)[b"authorization"], b"Bearer nous-access")
 
     def test_openai_placeholder_bearer_is_rewritten(self) -> None:
-        provider = tls_providers.TLS_INTERCEPT_PROVIDERS["openai-api"]
-        headers, path = broker.tls_intercept._rewrite_request_for_provider(
+        provider = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["openai-api"]
+        headers, path = tls_credential_injection.rewrite_request_for_provider(
             headers=[(b"host", b"api.openai.com"), (b"authorization", b"Bearer HUMR_PLACEHOLDER")],
             path_with_query="/v1/chat/completions",
             secrets={"api_key": "sk-real"},
@@ -348,8 +352,8 @@ class TestRewriteAuthorization(unittest.TestCase):
         self.assertEqual(dict((n.lower(), v) for n, v in headers)[b"authorization"], b"Bearer sk-real")
 
     def test_anthropic_placeholder_x_api_key_is_rewritten(self) -> None:
-        provider = tls_providers.TLS_INTERCEPT_PROVIDERS["anthropic"]
-        headers, path = broker.tls_intercept._rewrite_request_for_provider(
+        provider = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["anthropic"]
+        headers, path = tls_credential_injection.rewrite_request_for_provider(
             headers=[
                 (b"host", b"api.anthropic.com"),
                 (b"x-api-key", b"HUMR_PLACEHOLDER"),
@@ -368,9 +372,9 @@ class TestRewriteAuthorization(unittest.TestCase):
         self.assertNotIn(b"authorization", by_name)
 
     def test_anthropic_request_without_placeholder_is_rejected(self) -> None:
-        provider = tls_providers.TLS_INTERCEPT_PROVIDERS["anthropic"]
-        with self.assertRaises(broker.tls_intercept._SecretSelectionError):
-            broker.tls_intercept._rewrite_request_for_provider(
+        provider = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["anthropic"]
+        with self.assertRaises(tls_credential_injection.SecretSelectionError):
+            tls_credential_injection.rewrite_request_for_provider(
                 headers=[(b"host", b"api.anthropic.com"), (b"x-api-key", b"sk-ant-NOT-OURS")],
                 path_with_query="/v1/messages",
                 secrets={"api_key": "sk-ant-real"},
@@ -389,10 +393,10 @@ class TestAnonymousRequestClassification(unittest.TestCase):
     """
 
     def _classify(self, *, slug: str, headers: list[tuple[bytes, bytes]], path: str) -> bool:
-        return broker.tls_intercept._request_addresses_humr_credential(
+        return tls_credential_injection.needs_injection(
             headers=headers,
             path_with_query=path,
-            provider=tls_providers.TLS_INTERCEPT_PROVIDERS[slug],
+            provider=tls_provider_catalog.TLS_INTERCEPT_PROVIDERS[slug],
         )
 
     def test_openrouter_request_without_authorization_is_anonymous(self) -> None:
@@ -403,7 +407,7 @@ class TestAnonymousRequestClassification(unittest.TestCase):
             path="/api/v1/models",
         ))
 
-    def test_openrouter_placeholder_bearer_addresses_humr_credential(self) -> None:
+    def test_openrouter_placeholder_bearer_needs_injection(self) -> None:
         self.assertTrue(self._classify(
             slug="openrouter",
             headers=[(b"authorization", b"Bearer HUMR_PLACEHOLDER")],
@@ -411,7 +415,7 @@ class TestAnonymousRequestClassification(unittest.TestCase):
         ))
 
     def test_openrouter_unknown_bearer_is_rejected(self) -> None:
-        with self.assertRaises(broker.tls_intercept._SecretSelectionError):
+        with self.assertRaises(tls_credential_injection.SecretSelectionError):
             self._classify(
                 slug="openrouter",
                 headers=[(b"authorization", b"Bearer sk-or-v1-byo-key")],
@@ -432,7 +436,7 @@ class TestAnonymousRequestClassification(unittest.TestCase):
             path="/v1/models",
         ))
 
-    def test_anthropic_placeholder_x_api_key_addresses_humr_credential(self) -> None:
+    def test_anthropic_placeholder_x_api_key_needs_injection(self) -> None:
         self.assertTrue(self._classify(
             slug="anthropic",
             headers=[(b"x-api-key", b"HUMR_PLACEHOLDER")],
@@ -440,7 +444,7 @@ class TestAnonymousRequestClassification(unittest.TestCase):
         ))
 
     def test_anthropic_foreign_x_api_key_is_rejected(self) -> None:
-        with self.assertRaises(broker.tls_intercept._SecretSelectionError):
+        with self.assertRaises(tls_credential_injection.SecretSelectionError):
             self._classify(
                 slug="anthropic",
                 headers=[(b"x-api-key", b"sk-ant-byo-key")],
@@ -449,14 +453,14 @@ class TestAnonymousRequestClassification(unittest.TestCase):
 
     def test_anthropic_byo_authorization_bearer_is_rejected(self) -> None:
         """No x-api-key but an Authorization header (e.g. BYO OAuth bearer) must not pass through."""
-        with self.assertRaises(broker.tls_intercept._SecretSelectionError):
+        with self.assertRaises(tls_credential_injection.SecretSelectionError):
             self._classify(
                 slug="anthropic",
                 headers=[(b"authorization", b"Bearer byo-oauth-token")],
                 path="/v1/messages",
             )
 
-    def test_oauth_providers_address_humr_credential_even_without_authorization(self) -> None:
+    def test_oauth_providers_need_injection_even_without_authorization(self) -> None:
         """OAuth-style requests are implicitly ours — the proxy injects unconditionally."""
         for slug in ("google", "github", "nous", "openai-codex"):
             self.assertTrue(self._classify(
@@ -465,7 +469,7 @@ class TestAnonymousRequestClassification(unittest.TestCase):
                 path="/anything",
             ))
 
-    def test_telegram_placeholder_path_addresses_humr_credential(self) -> None:
+    def test_telegram_placeholder_path_needs_injection(self) -> None:
         self.assertTrue(self._classify(
             slug="telegram",
             headers=[(b"host", b"api.telegram.org")],
@@ -474,7 +478,7 @@ class TestAnonymousRequestClassification(unittest.TestCase):
 
     def test_telegram_path_without_placeholder_is_rejected(self) -> None:
         """Every Bot API path embeds a token, so telegram has no anonymous surface."""
-        with self.assertRaises(broker.tls_intercept._SecretSelectionError):
+        with self.assertRaises(tls_credential_injection.SecretSelectionError):
             self._classify(
                 slug="telegram",
                 headers=[(b"host", b"api.telegram.org")],
@@ -485,7 +489,7 @@ class TestAnonymousRequestClassification(unittest.TestCase):
 class TestForwardHeaderNormalization(unittest.TestCase):
 
     def test_dechunked_request_gets_content_length_and_no_transfer_encoding(self) -> None:
-        out = broker.tls_intercept._normalize_forward_headers(
+        out = tls_http_message_relay._normalize_forward_headers(
             headers=[
                 (b"Host", b"github.com"),
                 (b"Transfer-Encoding", b"chunked"),
@@ -502,7 +506,7 @@ class TestForwardHeaderNormalization(unittest.TestCase):
         self.assertEqual(by_name[b"host"], b"github.com")
 
     def test_existing_content_length_is_replaced(self) -> None:
-        out = broker.tls_intercept._normalize_forward_headers(
+        out = tls_http_message_relay._normalize_forward_headers(
             headers=[
                 (b"Host", b"api.telegram.org"),
                 (b"Content-Length", b"999"),
@@ -519,7 +523,7 @@ class TestHttpParsing(unittest.IsolatedAsyncioTestCase):
     async def test_read_body_reads_content_length(self) -> None:
         reader = _feed_upstream(b"helloNEXT")
 
-        body = await broker.tls_intercept._read_body(
+        body = await tls_http_message_relay.read_body(
             reader=reader,
             headers=[(b"Content-Length", b"5")],
         )
@@ -530,7 +534,7 @@ class TestHttpParsing(unittest.IsolatedAsyncioTestCase):
     async def test_read_body_prefers_chunked_over_content_length(self) -> None:
         reader = _feed_upstream(b"5\r\nhello\r\n0\r\n\r\nNEXT")
 
-        body = await broker.tls_intercept._read_body(
+        body = await tls_http_message_relay.read_body(
             reader=reader,
             headers=[
                 (b"Transfer-Encoding", b"chunked"),
@@ -544,7 +548,7 @@ class TestHttpParsing(unittest.IsolatedAsyncioTestCase):
     async def test_read_body_accepts_repeated_identical_content_length(self) -> None:
         reader = _feed_upstream(b"test")
 
-        body = await broker.tls_intercept._read_body(
+        body = await tls_http_message_relay.read_body(
             reader=reader,
             headers=[
                 (b"Content-Length", b"4"),
@@ -558,7 +562,7 @@ class TestHttpParsing(unittest.IsolatedAsyncioTestCase):
         reader = _feed_upstream(b"hello")
 
         with self.assertRaisesRegex(ValueError, "conflicting request Content-Length"):
-            await broker.tls_intercept._read_body(
+            await tls_http_message_relay.read_body(
                 reader=reader,
                 headers=[
                     (b"Content-Length", b"4"),
@@ -570,7 +574,7 @@ class TestHttpParsing(unittest.IsolatedAsyncioTestCase):
         reader = _feed_upstream(b"")
 
         with self.assertRaisesRegex(ValueError, "invalid request Content-Length"):
-            await broker.tls_intercept._read_body(
+            await tls_http_message_relay.read_body(
                 reader=reader,
                 headers=[(b"Content-Length", b"-1")],
             )
@@ -579,7 +583,7 @@ class TestHttpParsing(unittest.IsolatedAsyncioTestCase):
         reader = _feed_upstream(b"0\r\n\r\n")
 
         with self.assertRaisesRegex(ValueError, "unsupported request Transfer-Encoding"):
-            await broker.tls_intercept._read_body(
+            await tls_http_message_relay.read_body(
                 reader=reader,
                 headers=[
                     (b"Transfer-Encoding", b"chunked"),
@@ -591,7 +595,7 @@ class TestHttpParsing(unittest.IsolatedAsyncioTestCase):
         reader = _feed_upstream(b"short")
 
         with self.assertRaisesRegex(ValueError, "ended after 5 of 10 bytes"):
-            await broker.tls_intercept._read_body(
+            await tls_http_message_relay.read_body(
                 reader=reader,
                 headers=[(b"Content-Length", b"10")],
             )
@@ -600,7 +604,7 @@ class TestHttpParsing(unittest.IsolatedAsyncioTestCase):
         reader = asyncio.StreamReader()
         reader.feed_data(b"4\r\ntest\r\n0\r\nX-Trailer: one\r\nAnother: two\r\n\r\nNEXT")
 
-        body = await broker.tls_intercept._read_chunked(reader=reader)
+        body = await tls_http_message_relay._read_chunked(reader=reader)
 
         self.assertEqual(body, b"test")
         self.assertEqual(await reader.readexactly(4), b"NEXT")
@@ -609,25 +613,25 @@ class TestHttpParsing(unittest.IsolatedAsyncioTestCase):
         reader = _feed_upstream(b"a\r\nshort")
 
         with self.assertRaisesRegex(ValueError, "payload ended before"):
-            await broker.tls_intercept._read_chunked(reader=reader)
+            await tls_http_message_relay._read_chunked(reader=reader)
 
     async def test_read_chunked_rejects_malformed_size(self) -> None:
         reader = _feed_upstream(b"-1\r\n")
 
         with self.assertRaisesRegex(ValueError, "invalid request chunk size"):
-            await broker.tls_intercept._read_chunked(reader=reader)
+            await tls_http_message_relay._read_chunked(reader=reader)
 
     async def test_read_chunked_rejects_malformed_payload_delimiter(self) -> None:
         reader = _feed_upstream(b"4\r\ntestXX0\r\n\r\n")
 
         with self.assertRaisesRegex(ValueError, "not followed by CRLF"):
-            await broker.tls_intercept._read_chunked(reader=reader)
+            await tls_http_message_relay._read_chunked(reader=reader)
 
     async def test_read_chunked_rejects_eof_inside_trailers(self) -> None:
         reader = _feed_upstream(b"0\r\nX-Trailer: incomplete\r\n")
 
         with self.assertRaisesRegex(ValueError, "ended inside trailers"):
-            await broker.tls_intercept._read_chunked(reader=reader)
+            await tls_http_message_relay._read_chunked(reader=reader)
 
 
 class _RecordingWriter:
@@ -688,7 +692,7 @@ def _chunk(payload: bytes) -> bytes:
 
 
 class _StubUpstreamWriter:
-    """Minimal writer for the upstream side of _forward_to_upstream."""
+    """Minimal writer for the upstream side of forward_to_upstream."""
 
     def __init__(self) -> None:
         self.chunks: list[bytes] = []
@@ -752,13 +756,13 @@ class _StubCertMinter:
 
 class _StubProxyTokenStore:
 
-    def __init__(self, provider: tls_providers.TlsProviderSpec, secrets: dict[str, str] | None) -> None:
+    def __init__(self, provider: tls_provider_catalog.TlsProviderSpec, secrets: dict[str, str] | None) -> None:
         self.provider = provider
         self.secrets = secrets
         self.invalidated_slugs: list[str] = []
         self.secret_hosts: list[str] = []
 
-    def provider_for_host(self, host: str) -> tls_providers.TlsProviderSpec | None:
+    def provider_for_host(self, host: str) -> tls_provider_catalog.TlsProviderSpec | None:
         if host in self.provider.hosts:
             return self.provider
         return None
@@ -772,7 +776,7 @@ class _StubProxyTokenStore:
 
 
 class TestStreamingRelay(unittest.IsolatedAsyncioTestCase):
-    """_forward_to_upstream streams every response body live in its upstream framing."""
+    """forward_to_upstream streams every response body live in its upstream framing."""
 
     async def _forward(self, upstream_response: bytes, *, host: str) -> tuple[int, bool, _RecordingWriter]:
         client_writer = _RecordingWriter()
@@ -781,8 +785,8 @@ class TestStreamingRelay(unittest.IsolatedAsyncioTestCase):
         async def _fake_open_connection(**kwargs) -> tuple[asyncio.StreamReader, _StubUpstreamWriter]:
             return upstream_reader, _StubUpstreamWriter()
 
-        with patch.object(broker.tls_intercept.asyncio, "open_connection", _fake_open_connection):
-            status, keep_alive = await broker.tls_intercept._forward_to_upstream(
+        with patch.object(tls_http_message_relay.asyncio, "open_connection", _fake_open_connection):
+            status, keep_alive = await tls_http_message_relay.forward_to_upstream(
                 host=host,
                 port=443,
                 method="POST",
@@ -804,8 +808,8 @@ class TestStreamingRelay(unittest.IsolatedAsyncioTestCase):
         async def _fake_open_connection(**kwargs: object) -> tuple[asyncio.StreamReader, _StubUpstreamWriter]:
             return upstream_reader, upstream_writer
 
-        with patch.object(broker.tls_intercept.asyncio, "open_connection", _fake_open_connection):
-            return await broker.tls_intercept._forward_to_upstream(
+        with patch.object(tls_http_message_relay.asyncio, "open_connection", _fake_open_connection):
+            return await tls_http_message_relay.forward_to_upstream(
                 host=host,
                 port=443,
                 method="POST",
@@ -1060,9 +1064,9 @@ class TestStreamingRelay(unittest.IsolatedAsyncioTestCase):
         async def _fake_open_connection(**kwargs) -> tuple[asyncio.StreamReader, _StubUpstreamWriter]:
             return upstream_reader, _StubUpstreamWriter()
 
-        with patch.object(broker.tls_intercept.asyncio, "open_connection", _fake_open_connection):
+        with patch.object(tls_http_message_relay.asyncio, "open_connection", _fake_open_connection):
             with self.assertRaises(RuntimeError):
-                await broker.tls_intercept._forward_to_upstream(
+                await tls_http_message_relay.forward_to_upstream(
                     host="api.anthropic.com",
                     port=443,
                     method="GET",
@@ -1257,7 +1261,7 @@ class TestProxyConnectionStateMachine(unittest.IsolatedAsyncioTestCase):
         secrets: dict[str, str] | None,
         feed_client_eof: bool,
     ) -> tuple[_TlsRecordingWriter, list[_StubUpstreamWriter], _StubProxyTokenStore]:
-        provider = tls_providers.TLS_INTERCEPT_PROVIDERS["openrouter"]
+        provider = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["openrouter"]
         token_store = _StubProxyTokenStore(provider=provider, secrets=secrets)
         minter = _StubCertMinter()
         client_reader = asyncio.StreamReader()
@@ -1278,7 +1282,7 @@ class TestProxyConnectionStateMachine(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(loop, "start_tls", start_tls),
             patch.object(broker.tls_intercept.asyncio, "StreamWriter", return_value=client_writer),
-            patch.object(broker.tls_intercept.asyncio, "open_connection", _fake_open_connection),
+            patch.object(tls_http_message_relay.asyncio, "open_connection", _fake_open_connection),
         ):
             await asyncio.wait_for(
                 broker.tls_intercept._intercept_and_forward(
@@ -1298,7 +1302,7 @@ class TestProxyConnectionStateMachine(unittest.IsolatedAsyncioTestCase):
         return client_writer, upstream_writers, token_store
 
     async def test_connect_routes_known_host_to_tls_interceptor(self) -> None:
-        provider = tls_providers.TLS_INTERCEPT_PROVIDERS["openrouter"]
+        provider = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["openrouter"]
         token_store = _StubProxyTokenStore(provider=provider, secrets={"api_key": "real-key"})
         minter = _StubCertMinter()
         client_reader = _feed_upstream(
@@ -1462,7 +1466,7 @@ class TestCertMinter(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             ca_dir = pathlib.Path(tmp) / "ca"
             private_dir = pathlib.Path(tmp) / "private"
-            minter = broker.tls_intercept._CertMinter(ca_dir=ca_dir, private_dir=private_dir)
+            minter = tls_certificate_authority.CertMinter(ca_dir=ca_dir, private_dir=private_dir)
             minter.bootstrap()
             bundle = ca_dir / "bundle.pem"
             self.assertTrue(bundle.exists())
@@ -1481,7 +1485,7 @@ class TestCertMinter(unittest.TestCase):
     def test_private_dir_is_owner_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             private_dir = pathlib.Path(tmp) / "private"
-            minter = broker.tls_intercept._CertMinter(ca_dir=pathlib.Path(tmp) / "ca", private_dir=private_dir)
+            minter = tls_certificate_authority.CertMinter(ca_dir=pathlib.Path(tmp) / "ca", private_dir=private_dir)
             minter.bootstrap()
             self.assertEqual(private_dir.stat().st_mode & 0o777, 0o700)
 
@@ -1543,7 +1547,7 @@ def _make_control_parts(
         humr_client=client,
         tls_intercept_runtime=tls_intercept_runtime,
         mcp_aggregator=aggregator,
-        providers=tls_providers.TLS_INTERCEPT_PROVIDERS,
+        providers=tls_provider_catalog.TLS_INTERCEPT_PROVIDERS,
         gateway_env_path=gateway_env_path,
         webui_state_dir=webui_state_dir,
         process_compose_url="http://127.0.0.1:9999",
@@ -1574,7 +1578,7 @@ def _make_credentials_service(
         humr_client=_make_humr_client(),
         tls_intercept_runtime=tls_intercept_runtime,
         mcp_aggregator=_ready_stub_aggregator(),
-        providers=tls_providers.TLS_INTERCEPT_PROVIDERS,
+        providers=tls_provider_catalog.TLS_INTERCEPT_PROVIDERS,
         gateway_env_path=gateway_env_path,
         webui_state_dir=webui_state_dir,
         process_compose_url="http://127.0.0.1:9999",
@@ -1611,10 +1615,10 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         app = self._control_parts(aggregator=_ready_stub_aggregator(), org_slug="humanity-rules").app
 
         with patch.object(
-            broker.tls_intercept,
+            tls_token_store,
             "fetch_provider_tokens_batch",
-            return_value=_batched(slug="google", result=broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
+            return_value=_batched(slug="google", result=tls_token_store.RefreshResult(
+                outcome=tls_token_store.REFRESH_OUTCOME_HAS_TOKEN,
                 secrets={"access_token": "fresh-token"},
                 expires_in=3600,
                 config={},
@@ -1639,8 +1643,8 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resp2.json(), resp.json())
         self.assertEqual(resp3.json(), resp.json())
         self.assertEqual(
-            await self.tls_intercept_runtime._token_store.token_for_host(host="gmail.googleapis.com"),
-            "fresh-token",
+            await self.tls_intercept_runtime._token_store.secrets_for_host(host="gmail.googleapis.com"),
+            {"access_token": "fresh-token"},
         )
 
     async def test_customer_org_hides_x_and_platform_served_codex(self) -> None:
@@ -1656,10 +1660,10 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("x", before_by_slug)
 
         with patch.object(
-            broker.tls_intercept,
+            tls_token_store,
             "fetch_provider_tokens_batch",
-            return_value=_batched(slug="openai-codex", result=broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
+            return_value=_batched(slug="openai-codex", result=tls_token_store.RefreshResult(
+                outcome=tls_token_store.REFRESH_OUTCOME_HAS_TOKEN,
                 secrets={"access_token": "platform-token"},
                 expires_in=3600,
                 config={},
@@ -1684,10 +1688,10 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         app = self._control_parts(aggregator=_ready_stub_aggregator(), org_slug="acme").app
 
         with patch.object(
-            broker.tls_intercept,
+            tls_token_store,
             "fetch_provider_tokens_batch",
-            return_value=_batched(slug="openai-codex", result=broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
+            return_value=_batched(slug="openai-codex", result=tls_token_store.RefreshResult(
+                outcome=tls_token_store.REFRESH_OUTCOME_HAS_TOKEN,
                 secrets={"access_token": "customer-token"},
                 expires_in=3600,
                 config={},
@@ -1730,10 +1734,10 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
     async def test_absent_provider_is_not_cached(self) -> None:
         """An `absent` outcome from HUMR must remove (not store) the cache entry."""
         with patch.object(
-            broker.tls_intercept,
+            tls_token_store,
             "fetch_provider_tokens_batch",
-            return_value=_batched(slug="google", result=broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
+            return_value=_batched(slug="google", result=tls_token_store.RefreshResult(
+                outcome=tls_token_store.REFRESH_OUTCOME_ABSENT,
                 secrets=None,
                 expires_in=None,
                 config={},
@@ -1749,16 +1753,16 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
     async def test_refresh_slug_refetches_even_when_cache_is_fresh(self) -> None:
         """Explicit refresh must hit HUMR even when the cached token is still fresh."""
         responses = [
-            _batched(slug="google", result=broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
+            _batched(slug="google", result=tls_token_store.RefreshResult(
+                outcome=tls_token_store.REFRESH_OUTCOME_HAS_TOKEN,
                 secrets={"access_token": "T1"}, expires_in=3600, config={}, metadata={},
             )),
-            _batched(slug="google", result=broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
+            _batched(slug="google", result=tls_token_store.RefreshResult(
+                outcome=tls_token_store.REFRESH_OUTCOME_HAS_TOKEN,
                 secrets={"access_token": "T2"}, expires_in=3600, config={}, metadata={},
             )),
         ]
-        with patch.object(broker.tls_intercept, "fetch_provider_tokens_batch", side_effect=responses) as fetch_mock:
+        with patch.object(tls_token_store, "fetch_provider_tokens_batch", side_effect=responses) as fetch_mock:
             await self.tls_intercept_runtime.refresh_slug(slug="google")
             await self.tls_intercept_runtime.refresh_slug(slug="google")
 
@@ -1768,16 +1772,16 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
     async def test_transient_after_eviction_does_not_fabricate_entry(self) -> None:
         """A transient refresh outcome must not write a sentinel into an empty cache."""
         responses = [
-            _batched(slug="google", result=broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
+            _batched(slug="google", result=tls_token_store.RefreshResult(
+                outcome=tls_token_store.REFRESH_OUTCOME_HAS_TOKEN,
                 secrets={"access_token": "T1"}, expires_in=3600, config={}, metadata={},
             )),
-            _batched(slug="google", result=broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_TRANSIENT,
+            _batched(slug="google", result=tls_token_store.RefreshResult(
+                outcome=tls_token_store.REFRESH_OUTCOME_TRANSIENT,
                 secrets=None, expires_in=None, config={}, metadata={},
             )),
         ]
-        with patch.object(broker.tls_intercept, "fetch_provider_tokens_batch", side_effect=responses):
+        with patch.object(tls_token_store, "fetch_provider_tokens_batch", side_effect=responses):
             await self.tls_intercept_runtime.refresh_slug(slug="google")
             await self.tls_intercept_runtime._token_store.invalidate(slug="google")
             await self.tls_intercept_runtime.refresh_slug(slug="google")
@@ -1796,23 +1800,23 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         import time
         store = self.tls_intercept_runtime._token_store
         # Seed an entry inside the lead window (lead is 300s; this has 120s left).
-        store._cache["google"] = broker.tls_intercept._TokenCacheEntry(
+        store._cache["google"] = tls_token_store._TokenCacheEntry(
             secrets={"access_token": "STILL-VALID"},
             expires_at=time.monotonic() + 120,
             last_refreshed_at="2026-05-25T22:00:00+00:00",
             config={}, metadata={},
         )
         with patch.object(
-            broker.tls_intercept,
+            tls_token_store,
             "fetch_provider_tokens_batch",
-            return_value=_batched(slug="google", result=broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_TRANSIENT,
+            return_value=_batched(slug="google", result=tls_token_store.RefreshResult(
+                outcome=tls_token_store.REFRESH_OUTCOME_TRANSIENT,
                 secrets=None, expires_in=None, config={}, metadata={},
             )),
         ):
-            token = await store.token_for_host(host="gmail.googleapis.com")
+            secrets = await store.secrets_for_host(host="gmail.googleapis.com")
 
-        self.assertEqual(token, "STILL-VALID")
+        self.assertEqual(secrets, {"access_token": "STILL-VALID"})
         # And the cache entry survives the failed refresh-ahead.
         self.assertEqual(store._cache["google"].secrets, {"access_token": "STILL-VALID"})
 
@@ -1842,16 +1846,16 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
             fetch_calls.append("first")
             started.set()
             await asyncio.wait_for(delayed.wait(), timeout=5)
-            return _batched(slug="google", result=broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
+            return _batched(slug="google", result=tls_token_store.RefreshResult(
+                outcome=tls_token_store.REFRESH_OUTCOME_HAS_TOKEN,
                 secrets={"access_token": "STALE-IN-FLIGHT"}, expires_in=3600,
                 config={}, metadata={},
             ))
 
         async def second_absent(humr_client: object, slugs: list[str]) -> object:
             fetch_calls.append("second")
-            return _batched(slug="google", result=broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
+            return _batched(slug="google", result=tls_token_store.RefreshResult(
+                outcome=tls_token_store.REFRESH_OUTCOME_ABSENT,
                 secrets=None, expires_in=None, config={}, metadata={},
             ))
 
@@ -1864,8 +1868,8 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
             return await fn(*args, **kwargs)
 
         store = self.tls_intercept_runtime._token_store
-        with patch.object(broker.tls_intercept, "fetch_provider_tokens_batch", side_effect=dispatch):
-            proxy_task = asyncio.create_task(store.token_for_host(host="gmail.googleapis.com"))
+        with patch.object(tls_token_store, "fetch_provider_tokens_batch", side_effect=dispatch):
+            proxy_task = asyncio.create_task(store.secrets_for_host(host="gmail.googleapis.com"))
             await asyncio.wait_for(started.wait(), timeout=5)
             invalidate_task = asyncio.create_task(store.invalidate(slug="google"))
             await asyncio.sleep(0)  # let invalidate queue on the store lock
@@ -1903,8 +1907,8 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
             started.set()
             await asyncio.wait_for(delayed.wait(), timeout=5)
             return {
-                slug: broker.tls_intercept.RefreshResult(
-                    outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
+                slug: tls_token_store.RefreshResult(
+                    outcome=tls_token_store.REFRESH_OUTCOME_HAS_TOKEN,
                     secrets={"access_token": f"STALE-{slug}"}, expires_in=3600,
                     config={}, metadata={},
                 )
@@ -1912,7 +1916,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
             }
 
         store = self.tls_intercept_runtime._token_store
-        with patch.object(broker.tls_intercept, "fetch_provider_tokens_batch", side_effect=parked_has_token):
+        with patch.object(tls_token_store, "fetch_provider_tokens_batch", side_effect=parked_has_token):
             refresh_all_task = asyncio.create_task(store.refresh_all())
             await asyncio.wait_for(started.wait(), timeout=5)
             invalidate_task = asyncio.create_task(store.invalidate(slug="google"))
@@ -1935,23 +1939,23 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         """
         import time
         store = self.tls_intercept_runtime._token_store
-        store._cache["google"] = broker.tls_intercept._TokenCacheEntry(
+        store._cache["google"] = tls_token_store._TokenCacheEntry(
             secrets={"access_token": "EXPIRED"},
             expires_at=time.monotonic() - 10,
             last_refreshed_at="2026-05-25T22:00:00+00:00",
             config={}, metadata={},
         )
         with patch.object(
-            broker.tls_intercept,
+            tls_token_store,
             "fetch_provider_tokens_batch",
-            return_value=_batched(slug="google", result=broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_TRANSIENT,
+            return_value=_batched(slug="google", result=tls_token_store.RefreshResult(
+                outcome=tls_token_store.REFRESH_OUTCOME_TRANSIENT,
                 secrets=None, expires_in=None, config={}, metadata={},
             )),
         ):
-            token = await store.token_for_host(host="gmail.googleapis.com")
+            secrets = await store.secrets_for_host(host="gmail.googleapis.com")
 
-        self.assertIsNone(token)
+        self.assertIsNone(secrets)
 
     async def test_status_items_reflect_connection_state_not_token_expiry(self) -> None:
         """A connected provider whose injection token expired still renders connected.
@@ -1963,14 +1967,14 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         import time
         store = self.tls_intercept_runtime._token_store
         # An expired injection-cache entry (would be pruned on the injection path)...
-        store._cache["google"] = broker.tls_intercept._TokenCacheEntry(
+        store._cache["google"] = tls_token_store._TokenCacheEntry(
             secrets={"access_token": "EXPIRED"},
             expires_at=time.monotonic() - 10,
             last_refreshed_at="2026-05-25T22:00:00+00:00",
             config={}, metadata={},
         )
         # ...but durable connection state says connected.
-        store._conn["google"] = broker.tls_intercept._ConnState(
+        store._conn["google"] = tls_token_store._ConnState(
             connected=True,
             last_refreshed_at="2026-05-25T22:00:00+00:00",
             config={}, metadata={},
@@ -1992,21 +1996,21 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         import time
         store = self.tls_intercept_runtime._token_store
         # Token cache expired, but connection state is connected with config.
-        store._cache["telegram"] = broker.tls_intercept._TokenCacheEntry(
+        store._cache["telegram"] = tls_token_store._TokenCacheEntry(
             secrets={"access_token": "EXPIRED"},
             expires_at=time.monotonic() - 10,
             last_refreshed_at="2026-05-25T22:00:00+00:00",
             config={"allowed_users": ["123"]},
             metadata={},
         )
-        store._conn["telegram"] = broker.tls_intercept._ConnState(
+        store._conn["telegram"] = tls_token_store._ConnState(
             connected=True,
             last_refreshed_at="2026-05-25T22:00:00+00:00",
             config={"allowed_users": ["123"]},
             metadata={},
         )
         # A disconnected provider must be excluded.
-        store._conn["slack"] = broker.tls_intercept._ConnState(
+        store._conn["slack"] = tls_token_store._ConnState(
             connected=False, last_refreshed_at=None, config={}, metadata={},
         )
 
@@ -2019,7 +2023,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         """Transient refresh on an expired entry must leave the cache empty."""
         import time
         store = self.tls_intercept_runtime._token_store
-        store._cache["google"] = broker.tls_intercept._TokenCacheEntry(
+        store._cache["google"] = tls_token_store._TokenCacheEntry(
             secrets={"access_token": "EXPIRED"},
             expires_at=time.monotonic() - 10,
             last_refreshed_at="2026-05-25T22:00:00+00:00",
@@ -2027,16 +2031,16 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch.object(
-            broker.tls_intercept,
+            tls_token_store,
             "fetch_provider_tokens_batch",
-            return_value=_batched(slug="google", result=broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_TRANSIENT,
+            return_value=_batched(slug="google", result=tls_token_store.RefreshResult(
+                outcome=tls_token_store.REFRESH_OUTCOME_TRANSIENT,
                 secrets=None, expires_in=None, config={}, metadata={},
             )),
         ):
-            token = await store.token_for_host(host="gmail.googleapis.com")
+            secrets = await store.secrets_for_host(host="gmail.googleapis.com")
 
-        self.assertIsNone(token)
+        self.assertIsNone(secrets)
         self.assertNotIn("google", store._cache)
 
     async def test_hot_path_has_token_marks_connection_connected(self) -> None:
@@ -2047,16 +2051,16 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         """
         store = self.tls_intercept_runtime._token_store
         with patch.object(
-            broker.tls_intercept,
+            tls_token_store,
             "fetch_provider_tokens_batch",
-            return_value=_batched(slug="google", result=broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
+            return_value=_batched(slug="google", result=tls_token_store.RefreshResult(
+                outcome=tls_token_store.REFRESH_OUTCOME_HAS_TOKEN,
                 secrets={"access_token": "fresh"}, expires_in=3600, config={}, metadata={},
             )),
         ):
-            token = await store.token_for_host(host="gmail.googleapis.com")
+            secrets = await store.secrets_for_host(host="gmail.googleapis.com")
 
-        self.assertEqual(token, "fresh")
+        self.assertEqual(secrets, {"access_token": "fresh"})
         items_by_slug = {item["slug"]: item for item in await store.status_items()}
         self.assertEqual(items_by_slug["google"]["status"], "connected")
 
@@ -2067,20 +2071,20 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         moment the proxy next tries to use it.
         """
         store = self.tls_intercept_runtime._token_store
-        store._conn["google"] = broker.tls_intercept._ConnState(
+        store._conn["google"] = tls_token_store._ConnState(
             connected=True, last_refreshed_at="2026-05-25T22:00:00+00:00", config={}, metadata={},
         )
         with patch.object(
-            broker.tls_intercept,
+            tls_token_store,
             "fetch_provider_tokens_batch",
-            return_value=_batched(slug="google", result=broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
+            return_value=_batched(slug="google", result=tls_token_store.RefreshResult(
+                outcome=tls_token_store.REFRESH_OUTCOME_ABSENT,
                 secrets=None, expires_in=None, config={}, metadata={},
             )),
         ):
-            token = await store.token_for_host(host="gmail.googleapis.com")
+            secrets = await store.secrets_for_host(host="gmail.googleapis.com")
 
-        self.assertIsNone(token)
+        self.assertIsNone(secrets)
         items_by_slug = {item["slug"]: item for item in await store.status_items()}
         self.assertEqual(items_by_slug["google"]["status"], "not_connected")
 
@@ -2094,10 +2098,10 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         """
         store = self.tls_intercept_runtime._token_store
         with patch.object(
-            broker.tls_intercept,
+            tls_token_store,
             "fetch_provider_tokens_batch",
-            return_value=_batched(slug="google", result=broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
+            return_value=_batched(slug="google", result=tls_token_store.RefreshResult(
+                outcome=tls_token_store.REFRESH_OUTCOME_HAS_TOKEN,
                 secrets={"access_token": "T1"}, expires_in=3600, config={}, metadata={},
             )),
         ):
@@ -2106,13 +2110,13 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         await store.invalidate(slug="google")
         # ...and the next refresh fails transiently.
         with patch.object(
-            broker.tls_intercept,
+            tls_token_store,
             "fetch_provider_tokens_batch",
-            return_value=_batched(slug="google", result=broker.tls_intercept._transient_result()),
+            return_value=_batched(slug="google", result=tls_token_store._transient_result()),
         ):
-            token = await store.token_for_host(host="gmail.googleapis.com")
+            secrets = await store.secrets_for_host(host="gmail.googleapis.com")
 
-        self.assertIsNone(token)  # a proxy request would 503
+        self.assertIsNone(secrets)  # a proxy request would 503
         items_by_slug = {item["slug"]: item for item in await store.status_items()}
         self.assertEqual(items_by_slug["google"]["status"], "connected")  # card still connected
 
@@ -2123,24 +2127,24 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         aggregator = _StubAggregator(refresh_payload={"ok": True, "tools": 12, "connectors": 3})
         parts = self._control_parts(aggregator=aggregator, org_slug="humanity-rules")
 
-        google_connected = _batched(slug="google", result=broker.tls_intercept.RefreshResult(
-            outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
+        google_connected = _batched(slug="google", result=tls_token_store.RefreshResult(
+            outcome=tls_token_store.REFRESH_OUTCOME_HAS_TOKEN,
             secrets={"access_token": "fresh-token"},
             expires_in=3600,
             config={},
             metadata={},
         ))
         absent_for_every_slug = {
-            slug: broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
+            slug: tls_token_store.RefreshResult(
+                outcome=tls_token_store.REFRESH_OUTCOME_ABSENT,
                 secrets=None, expires_in=None, config={}, metadata={},
             )
-            for slug in tls_providers.TLS_INTERCEPT_PROVIDERS
+            for slug in tls_provider_catalog.TLS_INTERCEPT_PROVIDERS
         }
         # First call pre-warms google; the route's invalidate-all then refreshes
         # every provider from HUMR, which reports them all disconnected.
         with patch.object(
-            broker.tls_intercept,
+            tls_token_store,
             "fetch_provider_tokens_batch",
             side_effect=[google_connected, absent_for_every_slug],
         ), patch.object(
@@ -2335,62 +2339,62 @@ class TestLazyTokenForHost(unittest.IsolatedAsyncioTestCase):
 
     async def test_first_call_fetches_subsequent_calls_use_cache(self) -> None:
         with patch.object(
-            broker.tls_intercept,
+            tls_token_store,
             "fetch_provider_tokens_batch",
-            return_value=_batched(slug="google", result=broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
+            return_value=_batched(slug="google", result=tls_token_store.RefreshResult(
+                outcome=tls_token_store.REFRESH_OUTCOME_HAS_TOKEN,
                 secrets={"access_token": "T1"},
                 expires_in=3600,
                 config={},
                 metadata={},
             )),
         ) as fetch_mock:
-            self.assertEqual(await self.token_store.token_for_host(host="gmail.googleapis.com"), "T1")
-            self.assertEqual(await self.token_store.token_for_host(host="drive.googleapis.com"), "T1")
+            self.assertEqual(await self.token_store.secrets_for_host(host="gmail.googleapis.com"), {"access_token": "T1"})
+            self.assertEqual(await self.token_store.secrets_for_host(host="drive.googleapis.com"), {"access_token": "T1"})
             fetch_mock.assert_called_once()
 
     async def test_refresh_when_within_lead_window(self) -> None:
         responses = [
-            _batched(slug="google", result=broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
+            _batched(slug="google", result=tls_token_store.RefreshResult(
+                outcome=tls_token_store.REFRESH_OUTCOME_HAS_TOKEN,
                 secrets={"access_token": "T1"},
                 expires_in=3600,
                 config={},
                 metadata={},
             )),
-            _batched(slug="google", result=broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
+            _batched(slug="google", result=tls_token_store.RefreshResult(
+                outcome=tls_token_store.REFRESH_OUTCOME_HAS_TOKEN,
                 secrets={"access_token": "T2"},
                 expires_in=3600,
                 config={},
                 metadata={},
             )),
         ]
-        with patch.object(broker.tls_intercept, "fetch_provider_tokens_batch", side_effect=responses):
-            self.assertEqual(await self.token_store.token_for_host(host="gmail.googleapis.com"), "T1")
+        with patch.object(tls_token_store, "fetch_provider_tokens_batch", side_effect=responses):
+            self.assertEqual(await self.token_store.secrets_for_host(host="gmail.googleapis.com"), {"access_token": "T1"})
             # Backdate the cached entry past the lead window to force a refresh.
             self.token_store._cache["google"].expires_at = self.token_store._cache["google"].expires_at - 3600
-            self.assertEqual(await self.token_store.token_for_host(host="gmail.googleapis.com"), "T2")
+            self.assertEqual(await self.token_store.secrets_for_host(host="gmail.googleapis.com"), {"access_token": "T2"})
 
     async def test_unknown_host_returns_none_without_fetching(self) -> None:
-        with patch.object(broker.tls_intercept, "fetch_provider_tokens_batch") as fetch_mock:
-            self.assertIsNone(await self.token_store.token_for_host(host="api.notaprovider.com"))
+        with patch.object(tls_token_store, "fetch_provider_tokens_batch") as fetch_mock:
+            self.assertIsNone(await self.token_store.secrets_for_host(host="api.notaprovider.com"))
             fetch_mock.assert_not_called()
 
     async def test_absent_outcome_leaves_cache_empty(self) -> None:
         """An `absent` outcome from HUMR yields no cache entry — disconnected = absent, not a sentinel."""
         with patch.object(
-            broker.tls_intercept,
+            tls_token_store,
             "fetch_provider_tokens_batch",
-            return_value=_batched(slug="google", result=broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
+            return_value=_batched(slug="google", result=tls_token_store.RefreshResult(
+                outcome=tls_token_store.REFRESH_OUTCOME_ABSENT,
                 secrets=None,
                 expires_in=None,
                 config={},
                 metadata={},
             )),
         ):
-            self.assertIsNone(await self.token_store.token_for_host(host="gmail.googleapis.com"))
+            self.assertIsNone(await self.token_store.secrets_for_host(host="gmail.googleapis.com"))
         self.assertNotIn("google", self.token_store._cache)
 
 
@@ -2476,7 +2480,7 @@ class TestFetchProviderTokensBatch(unittest.IsolatedAsyncioTestCase):
             return httpx.Response(status_code=200, json=payload)
 
         with _patched_humr_httpx_client(handler=handler, timeouts=[]):
-            return await broker.tls_intercept.fetch_provider_tokens_batch(
+            return await tls_token_store.fetch_provider_tokens_batch(
                 humr_client=_make_humr_client(),
                 slugs=["google", "github", "telegram"],
             )
@@ -2496,11 +2500,11 @@ class TestFetchProviderTokensBatch(unittest.IsolatedAsyncioTestCase):
             },
         })
 
-        self.assertEqual(results["google"].outcome, broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN)
+        self.assertEqual(results["google"].outcome, tls_token_store.REFRESH_OUTCOME_HAS_TOKEN)
         self.assertEqual(results["google"].secrets, {"access_token": "g-abc"})
         self.assertEqual(results["google"].expires_in, 3600)
-        self.assertEqual(results["github"].outcome, broker.tls_intercept.REFRESH_OUTCOME_ABSENT)
-        self.assertEqual(results["telegram"].outcome, broker.tls_intercept.REFRESH_OUTCOME_TRANSIENT)
+        self.assertEqual(results["github"].outcome, tls_token_store.REFRESH_OUTCOME_ABSENT)
+        self.assertEqual(results["telegram"].outcome, tls_token_store.REFRESH_OUTCOME_TRANSIENT)
 
     async def test_telegram_config_and_metadata_pass_through(self) -> None:
         results = await self._run_with_response(payload={
@@ -2534,7 +2538,7 @@ class TestFetchProviderTokensBatch(unittest.IsolatedAsyncioTestCase):
                 "telegram": {"outcome": "absent"},
             },
         })
-        self.assertEqual(results["google"].outcome, broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN)
+        self.assertEqual(results["google"].outcome, tls_token_store.REFRESH_OUTCOME_HAS_TOKEN)
         self.assertEqual(results["google"].config, {})
         self.assertEqual(results["google"].metadata, {})
 
@@ -2558,8 +2562,8 @@ class TestFetchProviderTokensBatch(unittest.IsolatedAsyncioTestCase):
     async def test_slug_missing_from_response_is_transient(self) -> None:
         """A partial server response must NOT clear the broker's cache for the missing slug."""
         results = await self._run_with_response(payload={"results": {"google": {"outcome": "absent"}}})
-        self.assertEqual(results["github"].outcome, broker.tls_intercept.REFRESH_OUTCOME_TRANSIENT)
-        self.assertEqual(results["telegram"].outcome, broker.tls_intercept.REFRESH_OUTCOME_TRANSIENT)
+        self.assertEqual(results["github"].outcome, tls_token_store.REFRESH_OUTCOME_TRANSIENT)
+        self.assertEqual(results["telegram"].outcome, tls_token_store.REFRESH_OUTCOME_TRANSIENT)
 
     async def test_has_token_with_missing_or_malformed_secrets_is_transient(self) -> None:
         """A has_token entry without a usable secrets map must degrade to transient,
@@ -2575,7 +2579,7 @@ class TestFetchProviderTokensBatch(unittest.IsolatedAsyncioTestCase):
             })
             self.assertEqual(
                 results["google"].outcome,
-                broker.tls_intercept.REFRESH_OUTCOME_TRANSIENT,
+                tls_token_store.REFRESH_OUTCOME_TRANSIENT,
                 msg=f"bad_secrets={bad_secrets!r} should be transient",
             )
             self.assertIsNone(results["google"].secrets)
@@ -2586,41 +2590,41 @@ class TestFetchProviderTokensBatch(unittest.IsolatedAsyncioTestCase):
             raise httpx.ConnectError("connection refused")
 
         with _patched_humr_httpx_client(handler=handler, timeouts=[]):
-            results = await broker.tls_intercept.fetch_provider_tokens_batch(
+            results = await tls_token_store.fetch_provider_tokens_batch(
                 humr_client=_make_humr_client(),
                 slugs=["google", "github", "telegram"],
             )
         for slug in ("google", "github", "telegram"):
-            self.assertEqual(results[slug].outcome, broker.tls_intercept.REFRESH_OUTCOME_TRANSIENT)
+            self.assertEqual(results[slug].outcome, tls_token_store.REFRESH_OUTCOME_TRANSIENT)
 
     async def test_http_error_returns_transient_for_every_slug(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(status_code=500, content=b"x")
 
         with _patched_humr_httpx_client(handler=handler, timeouts=[]):
-            results = await broker.tls_intercept.fetch_provider_tokens_batch(
+            results = await tls_token_store.fetch_provider_tokens_batch(
                 humr_client=_make_humr_client(),
                 slugs=["google", "github"],
             )
-        self.assertEqual(results["google"].outcome, broker.tls_intercept.REFRESH_OUTCOME_TRANSIENT)
-        self.assertEqual(results["github"].outcome, broker.tls_intercept.REFRESH_OUTCOME_TRANSIENT)
+        self.assertEqual(results["google"].outcome, tls_token_store.REFRESH_OUTCOME_TRANSIENT)
+        self.assertEqual(results["github"].outcome, tls_token_store.REFRESH_OUTCOME_TRANSIENT)
 
 
 class TestRefreshAllBatchedApply(unittest.IsolatedAsyncioTestCase):
-    """`_TokenStore.refresh_all` must apply batched results under per-slug refresh_locks."""
+    """`TokenStore.refresh_all` must apply batched results under per-slug refresh_locks."""
 
     async def test_has_token_writes_absent_drops_transient_leaves(self) -> None:
         """One batched call covers all three apply paths, for both the cache and the durable connection state."""
         import time
         store = _make_token_store()
-        store._cache["github"] = broker.tls_intercept._TokenCacheEntry(
+        store._cache["github"] = tls_token_store._TokenCacheEntry(
             secrets={"access_token": "PRIOR-GITHUB"},
             expires_at=time.monotonic() + 600,
             last_refreshed_at="2026-05-25T22:00:00+00:00",
             config={}, metadata={},
         )
         # GitHub is the transient slug: its prior connected state must survive.
-        store._conn["github"] = broker.tls_intercept._ConnState(
+        store._conn["github"] = tls_token_store._ConnState(
             connected=True, last_refreshed_at="2026-05-25T22:00:00+00:00", config={}, metadata={},
         )
 
@@ -2629,22 +2633,22 @@ class TestRefreshAllBatchedApply(unittest.IsolatedAsyncioTestCase):
         # override the three the test actually exercises. Building from the
         # registry keeps this robust when new TLS-intercept providers are added.
         batched_results = {
-            slug: broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
+            slug: tls_token_store.RefreshResult(
+                outcome=tls_token_store.REFRESH_OUTCOME_ABSENT,
                 secrets=None, expires_in=None, config={}, metadata={},
             )
-            for slug in tls_providers.TLS_INTERCEPT_PROVIDERS
+            for slug in tls_provider_catalog.TLS_INTERCEPT_PROVIDERS
         }
-        batched_results["google"] = broker.tls_intercept.RefreshResult(
-            outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
+        batched_results["google"] = tls_token_store.RefreshResult(
+            outcome=tls_token_store.REFRESH_OUTCOME_HAS_TOKEN,
             secrets={"access_token": "G"}, expires_in=3600, config={}, metadata={},
         )
-        batched_results["github"] = broker.tls_intercept.RefreshResult(
-            outcome=broker.tls_intercept.REFRESH_OUTCOME_TRANSIENT,
+        batched_results["github"] = tls_token_store.RefreshResult(
+            outcome=tls_token_store.REFRESH_OUTCOME_TRANSIENT,
             secrets=None, expires_in=None, config={}, metadata={},
         )
         with patch.object(
-            broker.tls_intercept,
+            tls_token_store,
             "fetch_provider_tokens_batch",
             return_value=batched_results,
         ) as batch_mock:
@@ -2664,26 +2668,26 @@ class TestRefreshAllBatchedApply(unittest.IsolatedAsyncioTestCase):
 class TestGatewayEnvRender(unittest.TestCase):
     """Render the HUMR-managed block from a token-store snapshot."""
 
-    def _telegram_provider(self) -> "tls_providers.TlsProviderSpec":
-        return tls_providers.TLS_INTERCEPT_PROVIDERS["telegram"]
+    def _telegram_provider(self) -> "tls_provider_catalog.TlsProviderSpec":
+        return tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["telegram"]
 
-    def _google_provider(self) -> "tls_providers.TlsProviderSpec":
-        return tls_providers.TLS_INTERCEPT_PROVIDERS["google"]
+    def _google_provider(self) -> "tls_provider_catalog.TlsProviderSpec":
+        return tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["google"]
 
-    def _github_provider(self) -> "tls_providers.TlsProviderSpec":
-        return tls_providers.TLS_INTERCEPT_PROVIDERS["github"]
+    def _github_provider(self) -> "tls_provider_catalog.TlsProviderSpec":
+        return tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["github"]
 
-    def _slack_provider(self) -> "tls_providers.TlsProviderSpec":
-        return tls_providers.TLS_INTERCEPT_PROVIDERS["slack"]
+    def _slack_provider(self) -> "tls_provider_catalog.TlsProviderSpec":
+        return tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["slack"]
 
-    def _openrouter_provider(self) -> "tls_providers.TlsProviderSpec":
-        return tls_providers.TLS_INTERCEPT_PROVIDERS["openrouter"]
+    def _openrouter_provider(self) -> "tls_provider_catalog.TlsProviderSpec":
+        return tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["openrouter"]
 
-    def _openai_provider(self) -> "tls_providers.TlsProviderSpec":
-        return tls_providers.TLS_INTERCEPT_PROVIDERS["openai-api"]
+    def _openai_provider(self) -> "tls_provider_catalog.TlsProviderSpec":
+        return tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["openai-api"]
 
-    def _anthropic_provider(self) -> "tls_providers.TlsProviderSpec":
-        return tls_providers.TLS_INTERCEPT_PROVIDERS["anthropic"]
+    def _anthropic_provider(self) -> "tls_provider_catalog.TlsProviderSpec":
+        return tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["anthropic"]
 
     def test_slack_vault_header_provider_renders_both_placeholders(self) -> None:
         """Env bindings render static placeholders plus list config."""
@@ -2840,7 +2844,7 @@ class TestCredentialsServiceChoreography(unittest.IsolatedAsyncioTestCase):
         trigger a gateway restart.
         """
         runtime = self._make_runtime()
-        with patch.object(broker.tls_intercept, "fetch_provider_tokens_batch") as fetch_mock:
+        with patch.object(tls_token_store, "fetch_provider_tokens_batch") as fetch_mock:
             await runtime.invalidate(slug="telegram")
             await runtime.invalidate_all()
             await runtime._token_store.invalidate(slug="telegram")
@@ -2872,10 +2876,10 @@ class TestCredentialsServiceChoreography(unittest.IsolatedAsyncioTestCase):
         service = self._make_service()
 
         with patch.object(
-            broker.tls_intercept,
+            tls_token_store,
             "fetch_provider_tokens_batch",
-            return_value=_batched(slug="google", result=broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
+            return_value=_batched(slug="google", result=tls_token_store.RefreshResult(
+                outcome=tls_token_store.REFRESH_OUTCOME_HAS_TOKEN,
                 secrets={"access_token": "t"}, expires_in=3600, config={}, metadata={},
             )),
         ) as fetch_mock:
@@ -2893,10 +2897,10 @@ class TestCredentialsServiceChoreography(unittest.IsolatedAsyncioTestCase):
         models_cache.write_text("stale", encoding="utf-8")
 
         with patch.object(
-            broker.tls_intercept,
+            tls_token_store,
             "fetch_provider_tokens_batch",
-            return_value=_batched(slug="github", result=broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
+            return_value=_batched(slug="github", result=tls_token_store.RefreshResult(
+                outcome=tls_token_store.REFRESH_OUTCOME_HAS_TOKEN,
                 secrets={"access_token": "ghu_token"}, expires_in=3600, config={}, metadata={},
             )),
         ), patch.object(
@@ -2923,10 +2927,10 @@ class TestCredentialsServiceChoreography(unittest.IsolatedAsyncioTestCase):
         models_cache.write_text("stale", encoding="utf-8")
 
         with patch.object(
-            broker.tls_intercept,
+            tls_token_store,
             "fetch_provider_tokens_batch",
-            return_value=_batched(slug="openrouter", result=broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
+            return_value=_batched(slug="openrouter", result=tls_token_store.RefreshResult(
+                outcome=tls_token_store.REFRESH_OUTCOME_HAS_TOKEN,
                 secrets={"api_key": "sk-or-v1-real"}, expires_in=3600, config={}, metadata={},
             )),
         ), patch.object(
@@ -2952,10 +2956,10 @@ class TestCredentialsServiceChoreography(unittest.IsolatedAsyncioTestCase):
         models_cache.write_text("stale", encoding="utf-8")
 
         with patch.object(
-            broker.tls_intercept,
+            tls_token_store,
             "fetch_provider_tokens_batch",
-            return_value=_batched(slug="openai-codex", result=broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
+            return_value=_batched(slug="openai-codex", result=tls_token_store.RefreshResult(
+                outcome=tls_token_store.REFRESH_OUTCOME_HAS_TOKEN,
                 secrets={"access_token": "codex-access", "chatgpt_account_id": "account-id"},
                 expires_in=3600,
                 config={},
@@ -2990,10 +2994,10 @@ class TestCredentialsServiceChoreography(unittest.IsolatedAsyncioTestCase):
         models_cache.write_text("stale", encoding="utf-8")
 
         with patch.object(
-            broker.tls_intercept,
+            tls_token_store,
             "fetch_provider_tokens_batch",
-            return_value=_batched(slug="openai-codex", result=broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
+            return_value=_batched(slug="openai-codex", result=tls_token_store.RefreshResult(
+                outcome=tls_token_store.REFRESH_OUTCOME_ABSENT,
                 secrets=None,
                 expires_in=None,
                 config={},
@@ -3034,15 +3038,15 @@ class TestCredentialsServiceChoreography(unittest.IsolatedAsyncioTestCase):
             webui_state_dir=self.webui_state_dir,
         )
         # Telegram starts connected.
-        runtime._token_store._conn["telegram"] = broker.tls_intercept._ConnState(
+        runtime._token_store._conn["telegram"] = tls_token_store._ConnState(
             connected=True, last_refreshed_at="2026-05-25T22:00:00+00:00",
             config={"allowed_users": ["123"]}, metadata={},
         )
 
         with patch.object(service._humr_client, "post_json", return_value=(200, {"ok": True})), patch.object(
-            broker.tls_intercept,
+            tls_token_store,
             "fetch_provider_tokens_batch",
-            return_value=_batched(slug="telegram", result=broker.tls_intercept._transient_result()),
+            return_value=_batched(slug="telegram", result=tls_token_store._transient_result()),
         ):
             status, _payload = await service.credentials_disconnect(provider="telegram")
 
@@ -3063,20 +3067,20 @@ class TestCredentialsServiceChoreography(unittest.IsolatedAsyncioTestCase):
             webui_state_dir=self.webui_state_dir,
         )
         # Telegram starts connected, with its managed env block already on disk.
-        runtime._token_store._conn["telegram"] = broker.tls_intercept._ConnState(
+        runtime._token_store._conn["telegram"] = tls_token_store._ConnState(
             connected=True, last_refreshed_at="2026-05-25T22:00:00+00:00",
             config={"allowed_users": ["123"]}, metadata={},
         )
-        spec = tls_providers.TLS_INTERCEPT_PROVIDERS["telegram"]
+        spec = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["telegram"]
         seeded = credentials_service._render_managed_block(snapshot=[(spec, {"allowed_users": ["123"]})])
         credentials_service._write_gateway_env_file(env_path=self.env_path, managed_block=seeded)
         self.assertIn("TELEGRAM_BOT_TOKEN", self.env_path.read_text(encoding="utf-8"))
 
         with patch.object(service._humr_client, "post_json", return_value=(200, {"ok": True})), patch.object(
-            broker.tls_intercept,
+            tls_token_store,
             "fetch_provider_tokens_batch",
-            return_value=_batched(slug="telegram", result=broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
+            return_value=_batched(slug="telegram", result=tls_token_store.RefreshResult(
+                outcome=tls_token_store.REFRESH_OUTCOME_ABSENT,
                 secrets=None, expires_in=None, config={}, metadata={},
             )),
         ), patch.object(
@@ -3106,15 +3110,15 @@ class TestCredentialsServiceChoreography(unittest.IsolatedAsyncioTestCase):
         service = self._make_service()
 
         absent_for_every_slug = {
-            slug: broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
+            slug: tls_token_store.RefreshResult(
+                outcome=tls_token_store.REFRESH_OUTCOME_ABSENT,
                 secrets=None, expires_in=None, config={}, metadata={},
             )
-            for slug in tls_providers.TLS_INTERCEPT_PROVIDERS
+            for slug in tls_provider_catalog.TLS_INTERCEPT_PROVIDERS
         }
 
         with patch.object(
-            broker.tls_intercept,
+            tls_token_store,
             "fetch_provider_tokens_batch",
             return_value=absent_for_every_slug,
         ) as batch_mock, patch.object(
@@ -3130,7 +3134,7 @@ class TestCredentialsServiceChoreography(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(batch_mock.call_count, 1)
         called_slugs = batch_mock.call_args.kwargs["slugs"]
-        self.assertEqual(set(called_slugs), set(tls_providers.TLS_INTERCEPT_PROVIDERS))
+        self.assertEqual(set(called_slugs), set(tls_provider_catalog.TLS_INTERCEPT_PROVIDERS))
         self.assertEqual(
             auth_marker_mock.call_args_list,
             [
@@ -3180,29 +3184,29 @@ class TestTransientRefreshGuards(unittest.IsolatedAsyncioTestCase):
 
     def _seed_telegram_env_block(self) -> str:
         """Write a managed block for a connected Telegram bot; returns the file text."""
-        spec = tls_providers.TLS_INTERCEPT_PROVIDERS["telegram"]
+        spec = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["telegram"]
         block = credentials_service._render_managed_block(snapshot=[(spec, {"allowed_users": ["123"]})])
         credentials_service._write_gateway_env_file(env_path=self.env_path, managed_block=block)
         return self.env_path.read_text(encoding="utf-8")
 
     def _transient_for_every_slug(self) -> dict:
         return {
-            slug: broker.tls_intercept._transient_result()
-            for slug in tls_providers.TLS_INTERCEPT_PROVIDERS
+            slug: tls_token_store._transient_result()
+            for slug in tls_provider_catalog.TLS_INTERCEPT_PROVIDERS
         }
 
     async def test_refresh_all_reports_humr_reachability(self) -> None:
         tls_intercept_runtime = self._make_runtime()
-        with patch.object(broker.tls_intercept, "fetch_provider_tokens_batch", return_value=self._transient_for_every_slug()):
+        with patch.object(tls_token_store, "fetch_provider_tokens_batch", return_value=self._transient_for_every_slug()):
             self.assertFalse(await tls_intercept_runtime.refresh_all())
         absent_for_every_slug = {
-            slug: broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
+            slug: tls_token_store.RefreshResult(
+                outcome=tls_token_store.REFRESH_OUTCOME_ABSENT,
                 secrets=None, expires_in=None, config={}, metadata={},
             )
-            for slug in tls_providers.TLS_INTERCEPT_PROVIDERS
+            for slug in tls_provider_catalog.TLS_INTERCEPT_PROVIDERS
         }
-        with patch.object(broker.tls_intercept, "fetch_provider_tokens_batch", return_value=absent_for_every_slug):
+        with patch.object(tls_token_store, "fetch_provider_tokens_batch", return_value=absent_for_every_slug):
             self.assertTrue(await tls_intercept_runtime.refresh_all())
 
     async def test_transient_invalidate_keeps_env_file_and_skips_restart(self) -> None:
@@ -3210,9 +3214,9 @@ class TestTransientRefreshGuards(unittest.IsolatedAsyncioTestCase):
         service = self._make_service()
 
         with patch.object(
-            broker.tls_intercept,
+            tls_token_store,
             "fetch_provider_tokens_batch",
-            return_value=_batched(slug="telegram", result=broker.tls_intercept._transient_result()),
+            return_value=_batched(slug="telegram", result=tls_token_store._transient_result()),
         ), patch.object(
             credentials_service,
             "_post_process_compose_restart",
@@ -3229,7 +3233,7 @@ class TestTransientRefreshGuards(unittest.IsolatedAsyncioTestCase):
         service = self._make_service()
 
         with patch.object(
-            broker.tls_intercept,
+            tls_token_store,
             "fetch_provider_tokens_batch",
             return_value=self._transient_for_every_slug(),
         ):
@@ -3243,19 +3247,19 @@ class TestTransientRefreshGuards(unittest.IsolatedAsyncioTestCase):
         self.env_path.write_text("", encoding="utf-8")
         service = self._make_service()
         refreshed_results = {
-            slug: broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
+            slug: tls_token_store.RefreshResult(
+                outcome=tls_token_store.REFRESH_OUTCOME_ABSENT,
                 secrets=None, expires_in=None, config={}, metadata={},
             )
-            for slug in tls_providers.TLS_INTERCEPT_PROVIDERS
+            for slug in tls_provider_catalog.TLS_INTERCEPT_PROVIDERS
         }
-        refreshed_results["telegram"] = broker.tls_intercept.RefreshResult(
-            outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
+        refreshed_results["telegram"] = tls_token_store.RefreshResult(
+            outcome=tls_token_store.REFRESH_OUTCOME_HAS_TOKEN,
             secrets={"bot_token": "123:abc"}, expires_in=3600, config={"allowed_users": ["123"]}, metadata={},
         )
 
         with patch.object(
-            broker.tls_intercept,
+            tls_token_store,
             "fetch_provider_tokens_batch",
             return_value=refreshed_results,
         ), patch.object(
@@ -3273,14 +3277,14 @@ class TestTransientRefreshGuards(unittest.IsolatedAsyncioTestCase):
         """A pre-existing HUMR-side Codex connection must appear in WebUI's picker after boot."""
         service = self._make_service()
         refreshed_results = {
-            slug: broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
+            slug: tls_token_store.RefreshResult(
+                outcome=tls_token_store.REFRESH_OUTCOME_ABSENT,
                 secrets=None, expires_in=None, config={}, metadata={},
             )
-            for slug in tls_providers.TLS_INTERCEPT_PROVIDERS
+            for slug in tls_provider_catalog.TLS_INTERCEPT_PROVIDERS
         }
-        refreshed_results["openai-codex"] = broker.tls_intercept.RefreshResult(
-            outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
+        refreshed_results["openai-codex"] = tls_token_store.RefreshResult(
+            outcome=tls_token_store.REFRESH_OUTCOME_HAS_TOKEN,
             secrets={"access_token": "codex-access", "chatgpt_account_id": "account-id"},
             expires_in=3600,
             config={},
@@ -3288,7 +3292,7 @@ class TestTransientRefreshGuards(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch.object(
-            broker.tls_intercept,
+            tls_token_store,
             "fetch_provider_tokens_batch",
             return_value=refreshed_results,
         ), patch.object(
