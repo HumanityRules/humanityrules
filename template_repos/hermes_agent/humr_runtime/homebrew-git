@@ -1,0 +1,10 @@
+#!/bin/bash
+set -euo pipefail
+
+BROKER_CA_BUNDLE=/run/humr/integrations-broker/ca/bundle.pem
+
+if [ -r "$BROKER_CA_BUNDLE" ]; then
+    export GIT_SSL_CAINFO="$BROKER_CA_BUNDLE"
+fi
+
+exec /usr/bin/git "$@"

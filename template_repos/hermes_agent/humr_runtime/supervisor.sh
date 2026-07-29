@@ -162,6 +162,9 @@ run_in_nono() {
             # browser tool then falls back to a (missing) local browser.
             "REQUESTS_CA_BUNDLE=${INTEGRATIONS_BROKER_CA_DIR}/bundle.pem"
             "CURL_CA_BUNDLE=${INTEGRATIONS_BROKER_CA_DIR}/bundle.pem"
+            # brew rebuilds its environment from an allowlist that excludes
+            # Git's CA variables but preserves HOMEBREW_* variables.
+            "HOMEBREW_GIT_PATH=${HUMR_RUNTIME_DIR}/homebrew-git"
         )
     fi
 
