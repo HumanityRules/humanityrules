@@ -108,6 +108,12 @@ auxiliary:
     base_url: '__AUX_BASE_URL__'
     api_key: ''
     timeout: 30
+  memory_query_rewrite:
+    provider: __AUX_PROVIDER__
+    model: __AUX_MODEL__
+    base_url: '__AUX_BASE_URL__'
+    api_key: ''
+    timeout: 8
   tts_audio_tags:
     provider: __AUX_PROVIDER__
     model: __AUX_MODEL__
