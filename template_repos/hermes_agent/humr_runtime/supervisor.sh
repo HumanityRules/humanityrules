@@ -33,20 +33,16 @@ fi
 export AWS_EC2_METADATA_DISABLED=true
 
 : "${HUMR_BIN_DIR:?HUMR_BIN_DIR must be set}"
-: "${HUMR_ROOT:?HUMR_ROOT must be set}"
-: "${HUMR_RUN_DIR:?HUMR_RUN_DIR must be set}"
 : "${HUMR_RUNTIME_DIR:?HUMR_RUNTIME_DIR must be set}"
 : "${HERMES_HOME:?HERMES_HOME must be set}"
-: "${HERMES_WEBUI_AGENT_DIR:?HERMES_WEBUI_AGENT_DIR must be set}"
 : "${HERMES_WEBUI_DEFAULT_WORKSPACE:?HERMES_WEBUI_DEFAULT_WORKSPACE must be set}"
 : "${HERMES_WEBUI_DIR:?HERMES_WEBUI_DIR must be set}"
 : "${HERMES_WEBUI_PYTHON:?HERMES_WEBUI_PYTHON must be set}"
-: "${HERMES_WEBUI_SKIP_ONBOARDING:?HERMES_WEBUI_SKIP_ONBOARDING must be set}"
-: "${HERMES_WEBUI_STATE_DIR:?HERMES_WEBUI_STATE_DIR must be set}"
 : "${HOMEBREW_PREFIX:?HOMEBREW_PREFIX must be set}"
 
-INTEGRATIONS_BROKER_CA_DIR="${HUMR_RUN_DIR}/integrations-broker/ca"
-INTEGRATIONS_BROKER_PRIVATE_DIR="${HUMR_RUN_DIR}/integrations-broker/private"
+# Ephemeral runtime state inside the task; created on demand below.
+INTEGRATIONS_BROKER_CA_DIR=/run/humr/integrations-broker/ca
+INTEGRATIONS_BROKER_PRIVATE_DIR=/run/humr/integrations-broker/private
 INTEGRATIONS_BROKER_PROXY_PORT=9950
 INTEGRATIONS_BROKER_CONTROL_PORT=9951
 MCP_AGGREGATOR_PORT=9952
@@ -184,6 +180,12 @@ run_in_nono() {
     # when picking the child interpreter. The Hermes WebUI venv follows so
     # its console scripts (`hermes`, `hermes-agent`) are also reachable.
     #
+    # The MIX_/ELIXIR_/RELEASE_/ERL_ vars are Erlang/Elixir defaults for
+    # in-sandbox mix and releases: nono blocks loopback binds outside
+    # 4000-4019, which otherwise makes mix's build lock (Mix.Sync.Lock) and
+    # Erlang release EPMD registration fail fatally; +fnu covers the image's
+    # latin1 locale.
+    #
     # Only env vars set/transformed here go through /usr/bin/env. Plain
     # pass-throughs (AWS_DEFAULT_REGION, AWS_EC2_METADATA_DISABLED,
     # HERMES_WEBUI_HOST, HERMES_WEBUI_PORT, HUMR_CONTROL_PLANE_URL, ...)
@@ -196,6 +198,10 @@ run_in_nono() {
         HUMR_LOGIN_PATH="$humr_login_path" \
         PATH="$humr_login_path" \
         NO_PROXY=127.0.0.1,localhost \
+        MIX_OS_CONCURRENCY_LOCK=0 \
+        ELIXIR_ERL_OPTIONS=+fnu \
+        RELEASE_DISTRIBUTION=none \
+        ERL_EPMD_PORT=-1 \
         "${broker_env[@]}" \
         "$@"
 }
@@ -205,11 +211,7 @@ main() {
 
     # === Stage 1: root setup. Start the credential-holding daemons
     # (aws_signer, integrations_broker). These stay root so the LLM can
-    # never read their /proc/<pid>/environ. HERMES_HOME must exist before
-    # the broker (which writes .env into it as root) and before
-    # ensure_workspace_ownership (which hands workspace ownership to the
-    # hermeswebui user).
-    mkdir -p "$HERMES_HOME"
+    # never read their /proc/<pid>/environ.
     start_aws_signer
     start_humr_broker
     ensure_workspace_ownership
