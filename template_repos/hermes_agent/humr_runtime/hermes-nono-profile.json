@@ -19,8 +19,6 @@
       "HUMR_LOGIN_PATH",
       "HUMR_PLATFORM_CAPABILITIES",
       "HUMR_PUBLIC_HOSTNAME",
-      "HUMR_ROOT",
-      "HUMR_RUN_DIR",
       "HUMR_RUNTIME_DIR",
       "HOMEBREW_PREFIX",
       "HERMES_HOME",
@@ -39,11 +37,7 @@
       "LANG",
       "LC_*",
       "TERM",
-      "USER",
-      "MIX_OS_CONCURRENCY_LOCK",
-      "ELIXIR_ERL_OPTIONS",
-      "RELEASE_DISTRIBUTION",
-      "ERL_EPMD_PORT"
+      "USER"
     ]
   },
   "filesystem": {

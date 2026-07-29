@@ -72,10 +72,10 @@ ARG HERMES_AGENT_EXTRAS=messaging,matrix,cron,cli,dev,tts-premium,slack,pty,honc
 # Runtime layout: /opt/humr and /opt/hermes are image-owned and refreshed into
 # the persistent root on every start. /workspace is user-owned persistent state;
 # /run/humr is ephemeral runtime state inside the task.
-ENV HUMR_ROOT=/opt/humr
+# Build-time only: no runtime script reads HUMR_ROOT.
+ARG HUMR_ROOT=/opt/humr
 ENV HUMR_BIN_DIR=/opt/humr/bin
 ENV HUMR_RUNTIME_DIR=/opt/humr/runtime
-ENV HUMR_RUN_DIR=/run/humr
 ENV HERMES_WEBUI_DIR=/opt/hermes/webui
 ENV HERMES_WEBUI_AGENT_DIR=/opt/hermes/agent
 ENV HERMES_WEBUI_PYTHON=/opt/hermes/webui/venv/bin/python
@@ -195,7 +195,7 @@ EOF
 
 WORKDIR /
 
-RUN mkdir -p /uv_cache "$HERMES_WEBUI_DIR" "$HERMES_HOME" "$HERMES_WEBUI_DEFAULT_WORKSPACE" "$HERMES_PERSISTENT_ROOT" "$HERMES_CHECKPOINT_ROOT" "$HUMR_RUN_DIR" \
+RUN mkdir -p /uv_cache "$HERMES_WEBUI_DIR" "$HERMES_HOME" "$HERMES_WEBUI_DEFAULT_WORKSPACE" "$HERMES_PERSISTENT_ROOT" "$HERMES_CHECKPOINT_ROOT" \
     && rsync -a /apptoo/ "$HERMES_WEBUI_DIR/" \
     && rm -rf /app /apptoo \
     && chown -R hermeswebui:hermeswebui /uv_cache /opt/hermes "$HERMES_HOME" "$HERMES_WEBUI_DEFAULT_WORKSPACE"
@@ -311,16 +311,6 @@ RUN ln -sf /opt/humr/erlang/bin/erl     "$HUMR_BIN_DIR/erl" \
     && ln -sf /opt/humr/elixir/bin/iex     "$HUMR_BIN_DIR/iex" \
     && erl -noshell -eval 'ok = crypto:start(), halt().' \
     && elixir --version
-
-# Elixir sandbox config. nono blocks loopback binds outside 4000-4019, which
-# otherwise makes mix's build lock (Mix.Sync.Lock) and Erlang release EPMD
-# registration fail fatally; +fnu covers the image's latin1 locale. Set here
-# with the runtime and threaded into the sandbox via the nono profile's
-# allow_vars (hermes-nono-profile.json). They only affect Erlang/Elixir.
-ENV MIX_OS_CONCURRENCY_LOCK=0 \
-    ELIXIR_ERL_OPTIONS=+fnu \
-    RELEASE_DISTRIBUTION=none \
-    ERL_EPMD_PORT=-1
 
 # HUMR-owned source below this line. Keep these COPY layers last so edits to
 # humr_runtime/, webui-extension/, and skills/ reuse the cached dependency
