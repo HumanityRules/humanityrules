@@ -6,7 +6,7 @@ that hides the model vars, and the field default flowing through onboarding.
 """
 
 import ast
-import subprocess
+import importlib.util
 from pathlib import Path
 
 import yaml
@@ -23,8 +23,7 @@ BEDROCK_MODEL = "global.anthropic.claude-sonnet-5"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 HERMES_CONFIG_TEMPLATE_PATH = PROJECT_ROOT / "template_repos/hermes_agent/config.yaml.template"
 HERMES_CONFIG_SOURCE_PATH = PROJECT_ROOT / "template_repos/hermes_agent/vendor/hermes-agent/hermes_cli/config.py"
-HERMES_SUPERVISOR_PATH = PROJECT_ROOT / "template_repos/hermes_agent/humr_runtime/supervisor.sh"
-HERMES_LLM_PRESET_RESOLVER_PATH = PROJECT_ROOT / "template_repos/hermes_agent/humr_runtime/llm_preset.sh"
+HERMES_CONFIG_RENDERER_PATH = PROJECT_ROOT / "template_repos/hermes_agent/humr_runtime/render_hermes_config.py"
 LEGACY_LLM_ENV_VARS = {
     "HUMR_LLM_PROVIDER",
     "HUMR_LLM_MODEL",
@@ -73,33 +72,15 @@ def _hermes_default_auxiliary_slots() -> set[str]:
     raise AssertionError("Could not find DEFAULT_CONFIG['auxiliary'] in vendored Hermes")
 
 
-def _run_container_preset_resolver(preset: str) -> subprocess.CompletedProcess[str]:
-    """Run the container's shell resolver and return its captured result."""
-    script = """
-source "$1"
-resolve_humr_llm_preset "$2" || exit $?
-printf '%s\n' \
-  "HUMR_LLM_PROVIDER=$HUMR_LLM_PROVIDER" \
-  "HUMR_LLM_MODEL=$HUMR_LLM_MODEL" \
-  "HUMR_LLM_BASE_URL=$HUMR_LLM_BASE_URL" \
-  "HUMR_AUX_PROVIDER=$HUMR_AUX_PROVIDER" \
-  "HUMR_AUX_MODEL=$HUMR_AUX_MODEL" \
-  "HUMR_AUX_BASE_URL=$HUMR_AUX_BASE_URL"
-"""
-    return subprocess.run(
-        ["bash", "-c", script, "bash", str(HERMES_LLM_PRESET_RESOLVER_PATH), preset],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+def _load_container_config_renderer():
+    """Import the container's render_hermes_config.py (stdlib-only) from the template repo."""
+    spec = importlib.util.spec_from_file_location("render_hermes_config", HERMES_CONFIG_RENDERER_PATH)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
-def _resolve_container_preset(preset: str) -> dict[str, str]:
-    """Return the concrete environment produced by the container resolver."""
-    result = _run_container_preset_resolver(preset=preset)
-    if result.returncode != 0:
-        raise AssertionError(result.stderr or f"Preset resolver failed with exit {result.returncode}")
-    return dict(line.split("=", 1) for line in result.stdout.splitlines())
+render_hermes_config = _load_container_config_renderer()
 
 
 class LlmPresetResolutionTests(SimpleTestCase):
@@ -168,47 +149,41 @@ class LlmPresetDeployApplicationTests(SimpleTestCase):
 
 class HermesPresetResolverTests(SimpleTestCase):
 
-    def test_codex_resolves_main_and_auxiliary_to_gpt_5_5(self) -> None:
-        resolved = _resolve_container_preset(preset="codex")
+    def test_codex_resolves_to_gpt_5_5(self) -> None:
+        resolved = render_hermes_config.LLM_PRESETS["codex"]
 
-        self.assertEqual(resolved["HUMR_LLM_PROVIDER"], "openai-codex")
-        self.assertEqual(resolved["HUMR_LLM_MODEL"], CODEX_MAIN_MODEL)
-        self.assertEqual(resolved["HUMR_AUX_PROVIDER"], "openai-codex")
-        self.assertEqual(resolved["HUMR_AUX_MODEL"], CODEX_MAIN_MODEL)
+        self.assertEqual(resolved["provider"], "openai-codex")
+        self.assertEqual(resolved["model"], CODEX_MAIN_MODEL)
 
-    def test_bedrock_resolves_main_and_auxiliary_to_sonnet(self) -> None:
-        resolved = _resolve_container_preset(preset="bedrock")
+    def test_bedrock_resolves_to_sonnet(self) -> None:
+        resolved = render_hermes_config.LLM_PRESETS["bedrock"]
 
-        self.assertEqual(resolved["HUMR_LLM_PROVIDER"], "bedrock")
-        self.assertEqual(resolved["HUMR_LLM_MODEL"], BEDROCK_MODEL)
-        self.assertEqual(resolved["HUMR_AUX_PROVIDER"], "bedrock")
-        self.assertEqual(resolved["HUMR_AUX_MODEL"], BEDROCK_MODEL)
+        self.assertEqual(resolved["provider"], "bedrock")
+        self.assertEqual(resolved["model"], BEDROCK_MODEL)
 
     def test_resolver_supports_every_control_plane_preset(self) -> None:
         for preset in models.Organization.LlmPreset.values:
             with self.subTest(preset=preset):
-                result = _run_container_preset_resolver(preset=preset)
-                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(preset, render_hermes_config.LLM_PRESETS)
 
     def test_unknown_preset_is_rejected(self) -> None:
-        result = _run_container_preset_resolver(preset="gemini")
-
-        self.assertNotEqual(result.returncode, 0)
+        with self.assertRaisesMessage(ValueError, "Unsupported HUMR_LLM_PRESET 'gemini'"):
+            render_hermes_config.render_config(
+                template_text=HERMES_CONFIG_TEMPLATE_PATH.read_text(encoding="utf-8"),
+                preset="gemini",
+                aws_region="us-east-1",
+                platform_capabilities="",
+            )
 
 
 class HermesAuxiliaryConfigTemplateTests(SimpleTestCase):
 
     def test_template_pins_every_auxiliary_slot(self) -> None:
-        template = HERMES_CONFIG_TEMPLATE_PATH.read_text(encoding="utf-8")
-        resolved = _resolve_container_preset(preset="codex")
-        rendered = (
-            template.replace("__CONFIG_PROVIDER__", resolved["HUMR_LLM_PROVIDER"])
-            .replace("__MODEL__", resolved["HUMR_LLM_MODEL"])
-            .replace("__BASE_URL__", resolved["HUMR_LLM_BASE_URL"])
-            .replace("__AUX_PROVIDER__", resolved["HUMR_AUX_PROVIDER"])
-            .replace("__AUX_MODEL__", resolved["HUMR_AUX_MODEL"])
-            .replace("__AUX_BASE_URL__", resolved["HUMR_AUX_BASE_URL"])
-            .replace("__PROVIDERS_BLOCK__", "providers: {}")
+        rendered = render_hermes_config.render_config(
+            template_text=HERMES_CONFIG_TEMPLATE_PATH.read_text(encoding="utf-8"),
+            preset="codex",
+            aws_region="us-east-1",
+            platform_capabilities="",
         )
         config = yaml.safe_load(rendered)
         auxiliary = config["auxiliary"]
@@ -224,9 +199,7 @@ class HermesAuxiliaryConfigTemplateTests(SimpleTestCase):
 class HermesModelCatalogTests(SimpleTestCase):
 
     def test_sonnet_5_is_the_only_curated_sonnet_model(self) -> None:
-        supervisor = HERMES_SUPERVISOR_PATH.read_text(encoding="utf-8")
-        render_config = supervisor.partition("providers_block_file=$(mktemp)")[2]
-        curated_models = render_config.partition("cat > \"$providers_block_file\" <<'EOF'\n")[2].partition("\nEOF")[0]
+        curated_models = render_hermes_config.BEDROCK_PROVIDERS_BLOCK
         sonnet_lines = [line.strip() for line in curated_models.splitlines() if "sonnet" in line.lower()]
 
         self.assertEqual(sonnet_lines, [f"'{BEDROCK_MODEL}': \"Sonnet 5\""])
