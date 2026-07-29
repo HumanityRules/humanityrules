@@ -26,7 +26,8 @@ from pathlib import Path
 from humr_client import HumrClient
 from mcp_aggregator import MCPAggregator
 import tls_intercept
-import tls_providers
+import tls_provider_catalog
+import tls_token_store
 
 
 GATEWAY_PROCESS_NAME = "system.gateway"
@@ -53,7 +54,7 @@ class CredentialsService:
         humr_client: HumrClient,
         tls_intercept_runtime: tls_intercept.TlsInterceptRuntime,
         mcp_aggregator: MCPAggregator,
-        providers: dict[str, tls_providers.TlsProviderSpec],
+        providers: dict[str, tls_provider_catalog.TlsProviderSpec],
         gateway_env_path: Path,
         webui_state_dir: Path,
         process_compose_url: str,
@@ -245,7 +246,7 @@ class CredentialsService:
                 )
             logger.info("%s restart kicked off after invalidate(slug=%s)", process_name, slug)
 
-    async def _sync_auth_markers(self, specs_in_scope: tuple[tls_providers.TlsProviderSpec, ...]) -> None:
+    async def _sync_auth_markers(self, specs_in_scope: tuple[tls_provider_catalog.TlsProviderSpec, ...]) -> None:
         """Mirror broker-connected state into local marker auth stores."""
         marker_slugs = {spec.slug for spec in specs_in_scope if spec.slug in AUTH_MARKER_PROVIDERS}
         if not marker_slugs:
@@ -254,7 +255,7 @@ class CredentialsService:
         connected_slugs = {
             str(item.get("slug"))
             for item in status_items
-            if item.get("status") == tls_intercept.STATUS_CONNECTED
+            if item.get("status") == tls_token_store.STATUS_CONNECTED
         }
         for provider in sorted(marker_slugs):
             action = "connect" if provider in connected_slugs else "disconnect"
@@ -275,7 +276,7 @@ class CredentialsService:
             logger.info("managed env unchanged at %s", self._gateway_env_path)
         return changed
 
-    def _specs_in_scope(self, slug: str | None) -> tuple[tls_providers.TlsProviderSpec, ...]:
+    def _specs_in_scope(self, slug: str | None) -> tuple[tls_provider_catalog.TlsProviderSpec, ...]:
         """Return the provider specs a state change touches: one for a slug, all for None."""
         if slug is None:
             return tuple(self._providers.values())
@@ -308,7 +309,7 @@ class CredentialsService:
         )
 
 
-def _render_env_lines(provider: tls_providers.TlsProviderSpec, config: dict) -> list[str]:
+def _render_env_lines(provider: tls_provider_catalog.TlsProviderSpec, config: dict) -> list[str]:
     """Project one connected provider's env bindings into KEY=VALUE lines."""
     lines: list[str] = []
     for binding in provider.env_bindings:
@@ -334,7 +335,7 @@ def _render_env_lines(provider: tls_providers.TlsProviderSpec, config: dict) -> 
     return lines
 
 
-def _render_managed_block(snapshot: list[tuple[tls_providers.TlsProviderSpec, dict]]) -> str:
+def _render_managed_block(snapshot: list[tuple[tls_provider_catalog.TlsProviderSpec, dict]]) -> str:
     """Render the profile env managed block from a token-store snapshot.
 
     The snapshot lists only connected providers (by the token-store's durable
