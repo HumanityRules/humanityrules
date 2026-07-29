@@ -1,8 +1,6 @@
 """Tests for the org-granted bedrock-runtime capability: task-role IAM, container env, config.yaml."""
 
-import subprocess
-import sys
-import tempfile
+import importlib.util
 from pathlib import Path
 
 import yaml
@@ -75,26 +73,26 @@ def _bedrock_actions_from_stack(app_config: AppConfig) -> list[str]:
     return sorted(actions)
 
 
+def _load_container_config_renderer():
+    """Import the container's render_hermes_config.py (stdlib-only) from the template repo."""
+    spec = importlib.util.spec_from_file_location("render_hermes_config", HERMES_CONFIG_RENDERER_PATH)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+render_hermes_config = _load_container_config_renderer()
+
+
 def _render_hermes_config(preset: str, platform_capabilities: str) -> dict:
-    """Run the container's real config renderer and return the parsed config.yaml."""
-    with tempfile.TemporaryDirectory() as tmp:
-        hermes_home = Path(tmp) / "hermes-home"
-        result = subprocess.run(
-            [sys.executable, str(HERMES_CONFIG_RENDERER_PATH)],
-            env={
-                "HERMES_CONFIG_TEMPLATE": str(HERMES_CONFIG_TEMPLATE_PATH),
-                "HERMES_HOME": str(hermes_home),
-                "AWS_DEFAULT_REGION": "us-east-1",
-                "HUMR_LLM_PRESET": preset,
-                "HUMR_PLATFORM_CAPABILITIES": platform_capabilities,
-            },
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            raise AssertionError(result.stderr or f"render_hermes_config exited {result.returncode}")
-        return yaml.safe_load((hermes_home / "config.yaml").read_text(encoding="utf-8"))
+    """Render config.yaml with the container's real renderer and return it parsed."""
+    rendered = render_hermes_config.render_config(
+        template_text=HERMES_CONFIG_TEMPLATE_PATH.read_text(encoding="utf-8"),
+        preset=preset,
+        aws_region="us-east-1",
+        platform_capabilities=platform_capabilities,
+    )
+    return yaml.safe_load(rendered)
 
 
 class BedrockPlatformCapabilityTests(SimpleTestCase):
