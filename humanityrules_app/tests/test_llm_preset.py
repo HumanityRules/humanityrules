@@ -42,7 +42,7 @@ MAIN_MODEL_AUXILIARY_SLOTS = (
 
 
 def _hermes_default_auxiliary_slots() -> set[str]:
-    """Read the vendored DEFAULT_CONFIG auxiliary keys without importing Hermes."""
+    """Read the vendored DEFAULT_CONFIG auxiliary model slots without importing Hermes."""
     config_module = ast.parse(HERMES_CONFIG_SOURCE_PATH.read_text(encoding="utf-8"))
     for statement in config_module.body:
         if not isinstance(statement, ast.Assign):
@@ -53,11 +53,22 @@ def _hermes_default_auxiliary_slots() -> set[str]:
             break
         for key, value in zip(statement.value.keys, statement.value.values, strict=True):
             if isinstance(key, ast.Constant) and key.value == "auxiliary" and isinstance(value, ast.Dict):
-                return {
-                    slot.value
-                    for slot in value.keys
-                    if isinstance(slot, ast.Constant) and isinstance(slot.value, str)
-                }
+                slots: set[str] = set()
+                for slot, slot_config in zip(value.keys, value.values, strict=True):
+                    if not (
+                        isinstance(slot, ast.Constant)
+                        and isinstance(slot.value, str)
+                        and isinstance(slot_config, ast.Dict)
+                    ):
+                        continue
+                    config_keys = {
+                        config_key.value
+                        for config_key in slot_config.keys
+                        if isinstance(config_key, ast.Constant) and isinstance(config_key.value, str)
+                    }
+                    if {"provider", "model"}.issubset(config_keys):
+                        slots.add(slot.value)
+                return slots
         break
     raise AssertionError("Could not find DEFAULT_CONFIG['auxiliary'] in vendored Hermes")
 
