@@ -15,8 +15,8 @@ That flow is this file. Each part it composes is one module:
   terminate the sandbox's TLS connection.
 - `tls_token_store` — the real secrets and cache-independent connection state
   for a provider slug, refreshed from HUMR.
-- `tls_credential_injection` — whether a request is asking for HUMR's credential,
-  and where the secret is written into it.
+- `tls_credential_injection` — plans credential handling from the sandbox
+  request, then applies that plan after the token lookup.
 - `tls_http_message_relay` — provider-agnostic HTTP/1.1: parse, frame, replay
   to the provider, stream the response back to the sandbox.
 - `tls_usage_metering` — billing usage metering. Owns the decision of which
@@ -73,7 +73,6 @@ def _status_item_for_provider(
     state: tls_token_store.ProviderConnectionState | None,
 ) -> dict:
     """Join a static provider spec with its dynamic state for the integrations payload."""
-    method = provider.credential_method
     is_connected = state is not None and state.connected
     return {
         "kind": "tls_intercept",
@@ -85,7 +84,7 @@ def _status_item_for_provider(
         "last_refreshed_at": state.last_refreshed_at if is_connected else None,
         "config": state.config if is_connected else {},
         "metadata": state.metadata if is_connected else {},
-        "connect_mode": method.connect_mode,
+        "connect_mode": provider.connect_mode,
         "restart_required_after_save": provider.restart_gateway_after_save or provider.restart_webui_after_save,
         "affects_model_picker": provider.affects_model_picker,
     }
@@ -361,12 +360,12 @@ async def _build_provider_request(
     credential_state_store: tls_token_store.CredentialStateStore,
 ) -> tuple[tls_http_message_relay.ProviderRequest, ProviderCredentialSource]:
     """Build the request that should reach the provider."""
-    should_use_managed_credential = tls_credential_injection.needs_injection(
+    injection_plan = tls_credential_injection.plan_injection(
         headers=sandbox_request.headers,
         path_with_query=sandbox_request.path_with_query,
-        provider=provider,
+        behavior=provider.credential_wire_behavior,
     )
-    if not should_use_managed_credential:
+    if injection_plan is None:
         return (
             tls_http_message_relay.ProviderRequest(
                 method=sandbox_request.method,
@@ -380,11 +379,11 @@ async def _build_provider_request(
     credential = await credential_state_store.credential_for_slug(slug=provider.slug)
     if credential is None:
         raise _ProviderNotConnected
-    provider_headers, provider_path = tls_credential_injection.rewrite_request_for_provider(
+    provider_headers, provider_path = tls_credential_injection.apply_injection_plan(
         headers=sandbox_request.headers,
         path_with_query=sandbox_request.path_with_query,
         secrets=credential.secrets,
-        provider=provider,
+        plan=injection_plan,
     )
     return (
         tls_http_message_relay.ProviderRequest(

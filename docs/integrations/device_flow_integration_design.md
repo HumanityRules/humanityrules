@@ -50,8 +50,8 @@ Device flow is OpenAI's bespoke `deviceauth` JSON API, **not** RFC 8628 / `oauth
 ## Broker (`humr_runtime/`)
 
 - `device_flow.py`: provider-keyed device handshakes + minutes-long polling as background asyncio tasks. Codex is one adapter in the registry; Nous Portal is another. Exposed on the 9951 control API as `{provider}/device/{start,status,cancel}`. On success POSTs the token payload to HUMR (`{provider}/device-complete`) and drops that provider's TLS cache.
-- `tls_provider_catalog.py`: the `OAuthHeaderMultiInject` credential method (`connect_mode="device"`) and `TlsProviderSpec(slug="openai-codex", hosts=("chatgpt.com",))`.
-- `tls_credential_injection.py`: the injection branch for that method — swaps the bearer via `_rewrite_authorization`, then forces the named extra headers via `_inject_headers` (which can't be spoofed: it drops any same-named header the client sent). Cloudflare headers pass through untouched; the rewrite only ever touches Authorization/Host/proxy + the named headers.
+- `tls_provider_catalog.py`: `TlsProviderSpec(slug="openai-codex", connect_mode="device", hosts=("chatgpt.com",))` with `AlwaysInject` header injections for `access_token` → bearer `Authorization` and `chatgpt_account_id` → raw `ChatGPT-Account-ID`.
+- `tls_credential_injection.py`: `plan_injection` records both named header injections before the token lookup; `apply_injection_plan` forces those broker-owned values afterward. Cloudflare headers pass through untouched, while any client-supplied Authorization or ChatGPT-Account-ID is replaced.
 - WebUI `humr-integrations-connection-flows.js`: `connect_mode === 'device'` → `startDeviceConnect` (a code+link dialog that polls the provider-keyed status route). Disconnect reuses the unified TLS path.
 
 ## Dropdown visibility (secondary-provider case)

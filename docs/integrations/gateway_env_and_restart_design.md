@@ -53,8 +53,10 @@ and trigger a spurious gateway restart while its card still read
 connected. Telegram:
 
 ```python
-credential_method=VaultUrlRewrite(
+connect_mode="vault",
+credential_wire_behavior=PathPlaceholder(
     placeholder="000000:HUMR_PLACEHOLDER",
+    secret_name="bot_token",
 ),
 env_bindings=(
     EnvBinding(env_var="TELEGRAM_BOT_TOKEN", value="000000:HUMR_PLACEHOLDER"),
