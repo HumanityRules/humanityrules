@@ -159,6 +159,7 @@ class TlsProviderSpec:
     logo_url: str
     credential_method: CredentialMethod
     env_bindings: tuple[EnvBinding, ...]
+    sync_auth_marker: bool
     restart_gateway_after_save: bool
     restart_webui_after_save: bool
     category: Category
@@ -191,6 +192,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         logo_url="/extensions/humr/google-workspace.svg",
         credential_method=OAuthHeader(auth_format=AUTH_FORMAT_BEARER),
         env_bindings=(),
+        sync_auth_marker=False,
         restart_gateway_after_save=False,
         restart_webui_after_save=False,
         category="connector",
@@ -212,6 +214,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         env_bindings=(
             EnvBinding(env_var="GITHUB_TOKEN", value=HUMR_PLACEHOLDER_VALUE),
         ),
+        sync_auth_marker=False,
         restart_gateway_after_save=False,
         restart_webui_after_save=True,
         category="connector",
@@ -228,6 +231,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
             EnvBinding(env_var="TELEGRAM_BOT_TOKEN", value="000000:HUMR_PLACEHOLDER"),
             EnvBinding(env_var="TELEGRAM_ALLOWED_USERS", config_key="allowed_users", list_separator=","),
         ),
+        sync_auth_marker=False,
         restart_gateway_after_save=True,
         restart_webui_after_save=False,
         category="connector",
@@ -258,6 +262,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
             EnvBinding(env_var="SLACK_ALLOWED_USERS", config_key="allowed_users", list_separator=","),
             EnvBinding(env_var="SLACK_HOME_CHANNEL", config_key="home_channel"),
         ),
+        sync_auth_marker=False,
         restart_gateway_after_save=True,
         restart_webui_after_save=False,
         category="connector",
@@ -274,6 +279,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
             header_secrets={"chatgpt_account_id": "ChatGPT-Account-ID"},
         ),
         env_bindings=(),
+        sync_auth_marker=True,
         restart_gateway_after_save=False,
         restart_webui_after_save=False,
         category="model_provider",
@@ -285,6 +291,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         logo_url="/extensions/humr/nous.svg",
         credential_method=OAuthHeader(auth_format=AUTH_FORMAT_BEARER, connect_mode="device"),
         env_bindings=(),
+        sync_auth_marker=True,
         restart_gateway_after_save=False,
         restart_webui_after_save=False,
         category="model_provider",
@@ -300,6 +307,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         env_bindings=(
             EnvBinding(env_var="OPENROUTER_API_KEY", value=HUMR_PLACEHOLDER_VALUE),
         ),
+        sync_auth_marker=False,
         restart_gateway_after_save=True,
         restart_webui_after_save=True,
         category="model_provider",
@@ -317,6 +325,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         env_bindings=(
             EnvBinding(env_var="OPENAI_API_KEY", value=HUMR_PLACEHOLDER_VALUE),
         ),
+        sync_auth_marker=False,
         restart_gateway_after_save=True,
         restart_webui_after_save=True,
         category="model_provider",
@@ -334,6 +343,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         env_bindings=(
             EnvBinding(env_var="ANTHROPIC_API_KEY", value=HUMR_PLACEHOLDER_VALUE),
         ),
+        sync_auth_marker=False,
         restart_gateway_after_save=True,
         restart_webui_after_save=True,
         category="model_provider",
@@ -355,6 +365,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         env_bindings=(
             EnvBinding(env_var="BROWSER_USE_API_KEY", value=HUMR_PLACEHOLDER_VALUE),
         ),
+        sync_auth_marker=False,
         # The agent reads BROWSER_USE_API_KEY at call time and the browser tool
         # runs in agent turns served by either process (gateway for cron/platform
         # turns, webui for in-process chat), so both must reload to pick up the
@@ -374,6 +385,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         logo_url="/extensions/humr/x.svg",
         credential_method=OAuthHeader(auth_format=AUTH_FORMAT_BEARER),
         env_bindings=(),
+        sync_auth_marker=False,
         restart_gateway_after_save=False,
         restart_webui_after_save=False,
         category="connector",
@@ -393,6 +405,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         env_bindings=(
             EnvBinding(env_var="TAVILY_API_KEY", value="tvly-HUMR_PLACEHOLDER"),
         ),
+        sync_auth_marker=False,
         # web_search/web_extract read TAVILY_API_KEY at call time in agent turns
         # served by either process (gateway for cron/platform turns, webui for
         # chat), so both must reload to pick up the placeholder. Connector, not a
