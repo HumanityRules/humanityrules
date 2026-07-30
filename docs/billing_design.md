@@ -94,10 +94,12 @@ Versions are stamped on the entries they influenced, at write time. No ledger-wi
 
 The metering fact, separate from money. Rating turns one event into charge amounts; the FK from ledger entries is the audit trail.
 
-1. **`organization`**, **`app`**, **`owner_username`** — attribution as reported by the broker. Session-level attribution inside the agent is deliberately not captured.
+Source-agnostic, on the AppDailyCost pattern: the billable units live in a per-source `quantities` JSON, never as columns. No consumer aggregates quantities in SQL — rating reads events row by row, and every aggregate view (billing page, balance) reads the ledger — so a new source adds a validator entry, not a migration.
+
+1. **`organization`**, **`app_id`** + **`app_slug`**, **`owner_username`** — attribution as reported by the broker. App attribution is a snapshot (plain id + slug columns, no FK): app removal and environment teardown delete App rows, and billing history must outlive them — including rating's `charge:{org_id}:{app_id}:{date}` key for events rated after the app is gone. Session-level attribution inside the agent is deliberately not captured.
 2. **`source`** — `llm` for now; `tavily`, `x`, `bedrock` reserved.
-3. **`model`** — provider model id as observed.
-4. Token buckets: `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, `reasoning_tokens`.
+3. **`subkey`** — source-specific sub-dimension; for `llm`, the provider model id as observed.
+4. **`quantities`** — JSON dict of the source's billable units, schema-validated per source at ingest (exact key set, non-negative ints). For `llm`: `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, `reasoning_tokens` — disjoint buckets (input excludes cache reads; reasoning is informational, already inside output).
 5. **`occurred_at`** — event time at the broker; rating selects the rate card active at this time.
 6. **`idempotency_key`** — unique, minted by the broker at event creation.
 7. **`rated_at`** — null until rating has charged it; unpriced events stay visibly unrated (§6.3).
@@ -149,7 +151,7 @@ Environment reporting is trusted. Operator runs on HumR infra; Team/Enterprise (
 
 1. Events post directly to a CP endpoint — async, batched (every N events or T seconds), never blocking the relay. Transport and auth already exist: `humr_client.py` (`HUMR_ENV_BEARER` to `HUMR_CONTROL_PLANE_URL`), with the policy proxy's `activity_reporter.py` as the flush-loop precedent.
 2. No spool. CP unreachable = drop the batch with a log line. The failure mode is undercharging, acceptable while inference cost is flat. Idempotency keys are minted at event creation anyway, so a spool can be added later without double-charge risk.
-3. Attribution: the environment is per-app, and the broker already knows `owner_username` + `app_slug` — every event carries org, app, and owning user.
+3. Attribution: the broker is a per-app sidecar (an environment hosts many agent apps, each with its own broker), and it already knows `owner_username` + `app_slug` — every event carries org, app, and owning user. The env bearer names only the environment, which is why the payload must carry the app identity.
 4. The CP endpoint validates the env bearer, resolves the org, and inserts BillingUsageEvents (duplicate keys ignored). Rating runs as a periodic job over unrated events.
 
 ### 6.4 Sources outside the broker
@@ -169,7 +171,7 @@ Environment reporting is trusted. Operator runs on HumR infra; Team/Enterprise (
 ### 7.2 User experience
 
 1. The agent surfaces the 402 error text naturally in conversation, so even with zero UI work the user learns why calls fail.
-2. The broker exposes its cached snapshot same-origin to the WebUI: `GET /__humr_broker/billing` on the existing control API (`/__humr_broker/*` Caddy route, same pattern as the integrations cards). One poller per environment; enforcement and display read the same state and cannot disagree.
+2. The broker exposes its cached snapshot same-origin to the WebUI: `GET /__humr_broker/billing` on the existing control API (`/__humr_broker/*` Caddy route, same pattern as the integrations cards). One poller per agent app (each app's WebUI polls its own broker); enforcement and display read the same state and cannot disagree.
 3. The webui-extension renders a credits card in the bottom-left sidebar area (Lovable-style): a quiet meter normally, "running low — upgrade" below a warning threshold (~20% remaining), "out of credits — upgrade or renews on {date}" at exhaustion. Same component, three states. Upgrade links to the CP billing page.
 
 ## 8. Stripe and plan lifecycle
@@ -202,7 +204,7 @@ Named so nothing sneaks up. The ledger and UsageEvent survive all of it; these a
 6. **Reconciliation** — tap vs. provider invoices with a conflict policy; relevant after the per-token provider switch.
 7. **Team mechanics** — seats, per-member visibility, multiple cost centers.
 8. **Non-LLM metering** — per-provider billable-unit catalogs at the broker (X prices per endpoint, not per request).
-9. **Spool + flush** — durable event delivery from environments.
+9. **Spool + flush** — durable event delivery from the per-app brokers.
 10. **Trial abuse controls** — eligibility rules, rate limits independent of balance.
 11. **Fraud-resistant reporting** — required before untrusted customer-cloud tiers meter themselves.
 

@@ -19,6 +19,10 @@ That flow is this file. Each part it composes is one module:
   and where the secret is written into it.
 - `tls_http_message_relay` — provider-agnostic HTTP/1.1: parse, frame, replay
   upstream, stream the response back.
+- `tls_usage_metering` — billing usage metering. Owns the decision of which
+  requests are metered (HUMR-funded credential + parseable dialect), observes
+  the response relay through the relay's observer seam, and reports token
+  usage to HUMR. Absent (None reporter) the proxy behaves identically.
 
 Pure mechanism: cache invalidation and refresh do not perform credential-change
 choreography. The env re-render, process restarts, and auth-marker updates that
@@ -38,6 +42,7 @@ import tls_credential_injection
 import tls_http_message_relay
 import tls_provider_catalog
 import tls_token_store
+import tls_usage_metering
 
 
 logger = logging.getLogger("tls_intercept")
@@ -83,7 +88,9 @@ class TlsInterceptRuntime:
         refresh_lead_seconds: int,
         ca_dir: Path,
         private_dir: Path,
+        usage_reporter: tls_usage_metering.UsageReporter | None,
     ) -> None:
+        self._usage_reporter = usage_reporter
         self._providers = dict(providers)
         self._host_to_provider = tls_provider_catalog.build_host_to_provider(providers=self._providers)
         self._credential_state_store = tls_token_store.CredentialStateStore(
@@ -104,6 +111,7 @@ class TlsInterceptRuntime:
                 providers=self._providers,
                 host_to_provider=self._host_to_provider,
                 credential_state_store=self._credential_state_store,
+                usage_reporter=self._usage_reporter,
             )
 
         return await asyncio.start_server(client_connected_cb=handle_conn, host=host, port=port)
@@ -159,6 +167,7 @@ async def _handle_proxy_conn(
     providers: dict[str, tls_provider_catalog.TlsProviderSpec],
     host_to_provider: dict[str, str],
     credential_state_store: tls_token_store.CredentialStateStore,
+    usage_reporter: tls_usage_metering.UsageReporter | None,
 ) -> None:
     """Accept a CONNECT, then either intercept known hosts or tunnel."""
     peer = writer.get_extra_info("peername")
@@ -194,6 +203,7 @@ async def _handle_proxy_conn(
             provider=provider,
             minter=minter,
             credential_state_store=credential_state_store,
+            usage_reporter=usage_reporter,
         )
     except (ConnectionResetError, BrokenPipeError):
         return
@@ -225,6 +235,7 @@ async def _intercept_and_forward(
     provider: tls_provider_catalog.TlsProviderSpec,
     minter: tls_certificate_authority.CertMinter,
     credential_state_store: tls_token_store.CredentialStateStore,
+    usage_reporter: tls_usage_metering.UsageReporter | None,
 ) -> None:
     """TLS-terminate with a minted leaf, swap Authorization, and forward."""
     client_writer.write(b"HTTP/1.1 200 Connection established\r\n\r\n")
@@ -280,16 +291,17 @@ async def _intercept_and_forward(
                     message=f"{provider.slug}: {exc}",
                 )
                 return
+            credential = None
             if injected_humr_credential:
-                secrets = await credential_state_store.secrets_for_slug(slug=provider.slug)
-                if secrets is None:
+                credential = await credential_state_store.credential_for_slug(slug=provider.slug)
+                if credential is None:
                     await _send_provider_not_connected(writer=tls_writer, provider=provider)
                     return
                 try:
                     forward_headers, forward_path = tls_credential_injection.rewrite_request_for_provider(
                         headers=headers,
                         path_with_query=path_with_query,
-                        secrets=secrets,
+                        secrets=credential.secrets,
                         provider=provider,
                     )
                 except tls_credential_injection.SecretSelectionError as exc:
@@ -303,6 +315,19 @@ async def _intercept_and_forward(
             else:
                 forward_headers = headers
                 forward_path = path_with_query
+            usage_tap = None
+            if credential is not None and usage_reporter is not None:
+                usage_tap = tls_usage_metering.tap_for_request(
+                    provider_slug=provider.slug,
+                    platform_shared=credential.platform_shared,
+                    record_usage=usage_reporter.record,
+                )
+            if usage_tap is not None:
+                # Usage must stay readable in the response: drop the client's
+                # Accept-Encoding so the upstream can't compress. Observe-only
+                # past this point — a tap failure logs "unmetered" and the
+                # relay never notices.
+                forward_headers = [(name, value) for name, value in forward_headers if name.lower() != b"accept-encoding"]
             try:
                 upstream_status, keep_alive = await tls_http_message_relay.forward_to_upstream(
                     host=host,
@@ -312,6 +337,7 @@ async def _intercept_and_forward(
                     headers=forward_headers,
                     body=body,
                     client_writer=tls_writer,
+                    response_body_observer=usage_tap,
                 )
             except Exception as exc:
                 logger.exception("forward to %s failed", host)

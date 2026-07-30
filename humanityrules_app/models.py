@@ -1744,6 +1744,65 @@ class CostRefreshJob(models.Model):
         return f"CostRefreshJob {self.id} app={self.app_id} {self.status}"
 
 
+class BillingUsageEvent(models.Model):
+    """One metered usage fact reported by an agent app's broker.
+
+    The metering fact, separate from money: rating (a later, separate job)
+    turns unrated events into ledger charges and stamps ``rated_at``; until
+    then unpriced events stay visibly unrated. Append-only, attribution as
+    reported by the broker. App attribution is a snapshot (plain id + slug,
+    no FK): billing history must outlive app removal and environment
+    teardown, and rating still needs the app id after the app is gone.
+
+    Source-agnostic like AppDailyCost: the billable units live in
+    ``quantities`` (JSON, validated per source at ingest), never as columns.
+    Nothing aggregates quantities in SQL — rating reads events row by row and
+    every aggregate view reads the ledger. For ``llm``, ``subkey`` is the
+    observed model id and ``quantities`` holds five disjoint token buckets
+    (``input_tokens`` excludes cache reads; ``reasoning_tokens`` is
+    informational, already folded into ``output_tokens`` — rating must not
+    add it again).
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
+    organization = models.ForeignKey(
+        "humanityrules_app.Organization", on_delete=models.CASCADE, related_name="billing_usage_events",
+    )
+    app_id = models.UUIDField(help_text="Snapshot of the app's id at ingest; survives app deletion.")
+    app_slug = models.CharField(max_length=255, help_text="Snapshot of the app's slug at ingest; survives app deletion.")
+    owner_username = models.CharField(max_length=255)
+    source = models.CharField(max_length=32, help_text="Billable source key; 'llm' for model-provider usage.")
+    subkey = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Source-specific sub-dimension (llm: provider model id as observed by the broker).",
+    )
+    quantities = models.JSONField(help_text="The source's billable units, e.g. llm token buckets. Schema is per source.")
+    occurred_at = models.DateTimeField(help_text="Event time at the broker; rating selects the rate card active here.")
+    idempotency_key = models.CharField(
+        max_length=128,
+        unique=True,
+        help_text="Minted by the broker at event creation; duplicate reports are no-ops.",
+    )
+    rated_at = models.DateTimeField(null=True, blank=True, help_text="Set once rating has charged this event.")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Billing Usage Event"
+        verbose_name_plural = "Billing Usage Events"
+        indexes = [
+            models.Index(fields=["organization", "occurred_at"]),
+            models.Index(
+                fields=["rated_at"],
+                condition=models.Q(rated_at__isnull=True),
+                name="billing_usage_unrated_idx",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"BillingUsageEvent {self.idempotency_key} org={self.organization_id} {self.source}/{self.subkey}"
+
+
 class JobWorkerRun(models.Model):
     """One incarnation of a job worker process, heartbeating while alive.
 
