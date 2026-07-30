@@ -117,7 +117,7 @@ class TestBillingUsageIngestion(BillingUsageIngestTestBase):
         )
 
         self.assertEqual(status, 200)
-        self.assertEqual(body, {"ok": True})
+        self.assertEqual(body, {"ok": True, "skipped": 0})
         self.assertEqual(models.BillingUsageEvent.objects.count(), 2)
         event = models.BillingUsageEvent.objects.get(idempotency_key="evt-1")
         self.assertEqual(event.organization, self.organization)
@@ -139,7 +139,7 @@ class TestBillingUsageIngestion(BillingUsageIngestTestBase):
 
         self.assertEqual(first_status, 200)
         self.assertEqual(second_status, 200)
-        self.assertEqual(second_body, {"ok": True})
+        self.assertEqual(second_body, {"ok": True, "skipped": 0})
         self.assertEqual(models.BillingUsageEvent.objects.count(), 2)
         # The duplicate did not overwrite the original event.
         self.assertEqual(models.BillingUsageEvent.objects.get(idempotency_key="evt-1").quantities["input_tokens"], 200)
@@ -183,7 +183,53 @@ class TestBillingUsageIngestion(BillingUsageIngestTestBase):
         status, body = self.post_events(events=[], token=self.raw_token)
 
         self.assertEqual(status, 200)
-        self.assertEqual(body, {"ok": True})
+        self.assertEqual(body, {"ok": True, "skipped": 0})
+
+
+class TestBillingUsageVersionSkew(BillingUsageIngestTestBase):
+    """A broker older than this CP still gets its usage ingested."""
+
+    def test_missing_quantity_keys_read_as_zero(self) -> None:
+        quantities = _quantities()
+        del quantities["cache_read_tokens"]
+        del quantities["cache_write_tokens"]
+
+        status, body = self.post_events(events=[_event(quantities=quantities)], token=self.raw_token)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(body, {"ok": True, "skipped": 0})
+        stored = models.BillingUsageEvent.objects.get(idempotency_key="evt-1")
+        self.assertEqual(stored.quantities, _quantities(cache_read_tokens=0, cache_write_tokens=0))
+
+    def test_unknown_source_is_skipped_without_dropping_the_batch(self) -> None:
+        status, body = self.post_events(
+            events=[
+                _event(idempotency_key="evt-llm"),
+                _event(idempotency_key="evt-tavily", source="tavily", quantities={"request_count": 3}),
+            ],
+            token=self.raw_token,
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(body, {"ok": True, "skipped": 1})
+        self.assertEqual([event.idempotency_key for event in models.BillingUsageEvent.objects.all()], ["evt-llm"])
+
+    def test_a_skipped_event_still_fails_the_batch_when_malformed(self) -> None:
+        """Skipping is for unknown sources only — an unusable envelope is still a bug."""
+        status, body = self.post_events(
+            events=[_event(idempotency_key="", source="tavily")],
+            token=self.raw_token,
+        )
+
+        self.assertEqual(status, 400)
+        self.assertIn("idempotency_key", body["error"])
+
+    def test_a_non_object_event_rejects_the_batch(self) -> None:
+        status, body = self.post_events(events=[_event(), "not an event"], token=self.raw_token)
+
+        self.assertEqual(status, 400)
+        self.assertIn("events[1]", body["error"])
+        self.assertFalse(models.BillingUsageEvent.objects.exists())
 
 
 class TestBillingUsageValidation(BillingUsageIngestTestBase):
@@ -207,19 +253,11 @@ class TestBillingUsageValidation(BillingUsageIngestTestBase):
             error_fragment="input_tokens",
         )
 
-    def test_missing_quantity_key_is_rejected(self) -> None:
-        quantities = _quantities()
-        del quantities["cache_read_tokens"]
-        self._assert_rejected(event=_event(idempotency_key="evt-2", quantities=quantities), error_fragment="exactly")
-
     def test_unknown_quantity_key_is_rejected(self) -> None:
         self._assert_rejected(
             event=_event(idempotency_key="evt-2", quantities=_quantities(request_count=1)),
-            error_fragment="exactly",
+            error_fragment="not recognized",
         )
-
-    def test_unknown_source_is_rejected(self) -> None:
-        self._assert_rejected(event=_event(idempotency_key="evt-2", source="tavily"), error_fragment="source")
 
     def test_missing_idempotency_key_is_rejected(self) -> None:
         event = _event()
