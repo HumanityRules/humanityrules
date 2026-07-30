@@ -89,12 +89,12 @@ Composition and transport:
 - **`permissions_control.py`** — the `/permissions/*` relay for the self-referential IAM editor. See `permissions_broker_design.md`.
 - **`mcp_aggregator.py`**, **`mcp_merge_backend.py`**, **`mcp_top_level_tools.py`** — the MCP surface: the FastMCP server on 9952, the Merge-backed backend, and the four progressive-disclosure tools that keep ~1500 connector tools out of the prompt. See `mcp_aggregator_design.md` and `merge_integration_design.md`.
 
-The TLS-intercept subsystem is six modules. Dependencies point strictly downward — `tls_intercept` composes the four mechanism modules, all of which read the catalog; there are no edges between siblings:
+The TLS-intercept subsystem is six modules. Dependencies point strictly downward: `tls_intercept` composes the mechanism modules and owns host routing plus the joins between static provider specs and dynamic connection state. The token store, certificate authority, and HTTP relay do not read the catalog; credential injection reads only the credential-method rules it needs.
 
-- **`tls_intercept.py`** — the front door. `TlsInterceptRuntime` (the object the control API and credentials service hold) plus the CONNECT lifecycle: accept the CONNECT, tunnel or terminate, and run the per-request loop that decides, injects, forwards, and evicts on a 401.
+- **`tls_intercept.py`** — the front door. `TlsInterceptRuntime` (the object the control API and credentials service hold) owns host routing and status/env snapshots, plus the CONNECT lifecycle: accept the CONNECT, tunnel or terminate, and run the per-request loop that decides, injects, forwards, and evicts on a 401.
 - **`tls_provider_catalog.py`** — static data only. The credential-method dataclasses, the `TlsProviderSpec` entries, and the registries built from them. The only file a provider that uses an existing credential method needs.
 - **`tls_certificate_authority.py`** — `CertMinter`: the boot-generated CA, the `bundle.pem` the sandbox trusts, and the per-hostname leaf certs. Owns that material end to end and nothing else.
-- **`tls_token_store.py`** — `TokenStore`: the real secret for a host, the HUMR refresh protocol, and the durable per-provider connection state the status cards and gateway env read.
+- **`tls_token_store.py`** — `CredentialStateStore`: a slug-keyed cache of injectable secrets, the HUMR refresh protocol, and cache-independent per-provider connection state. It knows neither hosts nor provider specs and returns copied state snapshots for `TlsInterceptRuntime` to join with the catalog.
 - **`tls_credential_injection.py`** — whether a request is asking for HUMR's credential (`needs_injection`) and where the secret is written into it (`rewrite_request_for_provider`). Touches neither the network nor the cache; the caller looks the secrets up and passes them in.
 - **`tls_http_message_relay.py`** — provider-agnostic HTTP/1.1: parse, frame, replay upstream, stream the response back. Nothing here knows that providers, credentials, or tokens exist, and that discipline is what keeps it tractable.
 
@@ -111,14 +111,14 @@ Four things trigger a fetch:
 
 `transient` overwrites nothing: an unreachable HUMR leaves a still-unexpired cached secret in place and the proxy keeps serving it for the rest of that token's life, rather than reporting the provider disconnected because HUMR hiccuped.
 
-Two pieces of state come out of a refresh, with deliberately different lifetimes. The **token cache** holds the injectable secrets and is pruned by expiry on the injection path. The **connection state** is what the WebUI status cards and the gateway env block read, and it changes only on a refresh outcome (`has_token`/`absent`) or a confirmed disconnect. A lapsed token is not a disconnect: an idle provider's card still reads `connected` after its access token has been pruned, and its env bindings stay in the managed block.
+Two pieces of state come out of a refresh, with deliberately different lifetimes. The **token cache** holds the injectable secrets and is pruned by expiry on the injection path. The **cache-independent connection state** changes only on a refresh outcome (`has_token`/`absent`) or a confirmed disconnect. `TlsInterceptRuntime` joins that state with static provider specs to build the WebUI status cards and gateway env snapshot. A lapsed token is not a disconnect: an idle provider's card still reads `connected` after its access token has been pruned, and its env bindings stay in the managed block.
 
 ## What lives where
 
 - **OAuth client ID + secret** — HUMR database. One per HUMR deployment per provider. Never crosses the boundary.
 - **Refresh tokens** — HUMR database, keyed by `(user, env, provider)`. Custody stays on HUMR. Scoped to env so revocation can be env-surgical.
 - **Env bearer token** — customer env secrets manager, with only the hash stored on HUMR. Pre-existing pattern, reused.
-- **Provider secrets** — `TokenStore`'s in-memory slug→secrets-map cache, each entry carrying its own expiry. Never hits disk. Lost on container restart and refetched from HUMR during bootstrap.
+- **Provider secrets** — `CredentialStateStore`'s in-memory slug→secrets-map cache, each entry carrying its own expiry. Never hits disk. Lost on container restart and refetched from HUMR during bootstrap.
 - **Placeholders** — the gateway-managed block of `${HERMES_HOME}/.env`, and therefore visible inside the sandbox. These are the fixed non-secrets (`000000:HUMR_PLACEHOLDER`, `xoxb-HUMR_PLACEHOLDER`, …) whose *presence* activates a binding and which the proxy swaps in flight. See `gateway_env_and_restart_design.md`.
 - **Broker CA private key** — broker's process memory. Generated at startup, never persisted. A new container gets a new CA; the sandbox reboots with it and inherits the new `SSL_CERT_FILE` via supervisor env.
 - **Broker CA public cert** — `/run/humr/integrations-broker/ca/bundle.pem`, readable by the sandbox (the nono profile grants read on that directory). Contains our CA cert plus system roots so the sandbox trusts both our MITM'd hosts and real internet hosts (HUMR-proxied or tunneled).
@@ -152,7 +152,7 @@ The sandbox never opens a direct TCP connection to a provider — every connecti
 
 ## The provider catalog, end to end
 
-`tls_provider_catalog.py` is static data — frozen dataclasses, no behavior. `TLS_INTERCEPT_PROVIDER_SPECS` is a tuple of `TlsProviderSpec`, and two registries are derived from it at import: `TLS_INTERCEPT_PROVIDERS` (slug → spec, fails fast on a duplicate slug) and `HOST_TO_TLS_PROVIDER` (normalized host → slug, fails fast when two providers claim the same host). CONNECT hostnames are normalized the same way before routing (`normalize_connect_host`: strip, drop the trailing dot, lowercase).
+`tls_provider_catalog.py` is static data — frozen dataclasses plus small construction-time validation helpers. `TLS_INTERCEPT_PROVIDER_SPECS` is a tuple of `TlsProviderSpec`, and `TLS_INTERCEPT_PROVIDERS` (slug → spec) is derived from it at import, failing fast on a duplicate slug. Each `TlsInterceptRuntime` derives its own normalized host → slug map from the providers it receives, failing fast when two providers claim the same host. CONNECT hostnames are normalized the same way before routing (`normalize_connect_host`: strip, drop the trailing dot, lowercase).
 
 ```python
 TlsProviderSpec(

@@ -115,10 +115,10 @@ class CredentialsService:
         HUMR's unified disconnect handler deletes the credential row and, for
         OAuth providers, best-effort revokes upstream — the provider kind is
         resolved server-side, so both kinds are forwarded identically. On
-        success we flip this provider's durable connection state to disconnected
-        (so a transient follow-up refresh can't leave the card connected) and drop
-        its cached token; any process restart is selected from the provider spec
-        inside `credentials_invalidate`.
+        success we flip this provider's cache-independent connection state to
+        disconnected (so a transient follow-up refresh can't leave the card
+        connected) and drop its cached token; any process restart is selected
+        from the provider spec inside `credentials_invalidate`.
         """
         status, payload = await self._humr_client.post_json(
             path="/api/integrations/credentials/disconnect",
@@ -127,10 +127,10 @@ class CredentialsService:
         )
         if not (200 <= status < 300):
             return status, payload
-        # HUMR has authoritatively deleted the row. Flip the broker's durable
-        # connection state to disconnected directly, so even a transient
-        # follow-up refresh (which leaves connection state untouched) can't leave
-        # the card showing connected after the user just disconnected.
+        # HUMR has authoritatively deleted the row. Flip the broker's
+        # cache-independent connection state to disconnected directly, so even a
+        # transient follow-up refresh (which leaves connection state untouched)
+        # can't leave the card showing connected after the user just disconnected.
         await self._tls_intercept_runtime.mark_disconnected(slug=provider)
         try:
             await self.credentials_invalidate(slug=provider)
@@ -256,7 +256,7 @@ class CredentialsService:
             await self._apply_auth_marker(provider=provider, action=action)
 
     async def _render_gateway_env_file(self) -> bool:
-        """Write the HUMR-managed profile env block from current cache state."""
+        """Write the HUMR-managed profile env block from current connection state."""
         snapshot = await self._tls_intercept_runtime.gateway_env_snapshot()
         block = _render_managed_block(snapshot=snapshot)
         changed = await asyncio.to_thread(
@@ -330,12 +330,12 @@ def _render_env_lines(provider: tls_provider_catalog.TlsProviderSpec, config: di
 
 
 def _render_managed_block(snapshot: list[tuple[tls_provider_catalog.TlsProviderSpec, dict]]) -> str:
-    """Render the profile env managed block from a token-store snapshot.
+    """Render the profile env managed block from a TLS-runtime snapshot.
 
-    The snapshot lists only connected providers (by the token-store's durable
-    connection-state contract, independent of access-token expiry). Each tuple is
-    `(provider, config)`, and each provider declares the env lines it needs while
-    connected.
+    The snapshot lists only connected providers (by the credential store's
+    cache-independent connection-state contract, independent of access-token
+    expiry). Each tuple is `(provider, config)`, and each provider declares the
+    env lines it needs while connected.
     """
     body_lines: list[str] = []
     for provider, config in snapshot:

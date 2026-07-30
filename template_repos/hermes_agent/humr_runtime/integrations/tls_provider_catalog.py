@@ -1,8 +1,8 @@
 """Provider catalog for the TLS-intercept proxy.
 
 Static data only: the credential-method dataclasses, the per-provider
-`TlsProviderSpec` entries, and the registries built from them. The mechanism
-that consumes this catalog is one module per part — `tls_intercept` (the
+`TlsProviderSpec` entries, and the registry built from them. The mechanism that
+consumes this catalog is one module per part — `tls_intercept` (the
 connection lifecycle that composes them), `tls_certificate_authority`,
 `tls_token_store`, `tls_credential_injection`, `tls_http_message_relay`; the
 gateway-env projection of `env_bindings` lives in `credentials_service`.
@@ -435,4 +435,3 @@ def build_host_to_provider(providers: dict[str, TlsProviderSpec]) -> dict[str, s
 
 
 TLS_INTERCEPT_PROVIDERS = build_provider_registry(provider_specs=TLS_INTERCEPT_PROVIDER_SPECS)
-HOST_TO_TLS_PROVIDER = build_host_to_provider(providers=TLS_INTERCEPT_PROVIDERS)
