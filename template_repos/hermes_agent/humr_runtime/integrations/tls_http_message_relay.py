@@ -5,10 +5,11 @@ comprehensible: nothing here knows that providers, credentials, or tokens
 exist. It reads a request off a TLS-terminated socket, replays it to the real
 upstream, and streams the response back in the upstream's own framing.
 
-Bodies are never buffered whole, in either direction. Broker RSS would
-otherwise track the largest response ever proxied (git clone packs through
-github.com reached multi-GB peaks), and per-chunk flushing is also what keeps
-SSE deltas live for the sandbox client.
+Response bodies are never buffered whole. Broker RSS would otherwise track the
+largest response ever proxied (git clone packs through github.com reached
+multi-GB peaks), and per-chunk flushing is also what keeps SSE deltas live for
+the sandbox client. Request bodies are currently buffered in full so the broker
+can validate their framing and replay them upstream with Content-Length.
 
 Request-side and response-side framing rules are deliberately different, and
 they sit next to each other here so the asymmetry is visible: a request body
@@ -43,14 +44,6 @@ def parse_headers(lines: list[bytes]) -> list[tuple[bytes, bytes]]:
         name, _, value = line.partition(b":")
         headers.append((name.strip().lower(), value.strip().rstrip(b"\r\n")))
     return headers
-
-
-def _header_value(headers: list[tuple[bytes, bytes]], name: bytes) -> bytes | None:
-    normalized_name = name.lower()
-    for n, v in headers:
-        if n.lower() == normalized_name:
-            return v.lower()
-    return None
 
 
 def _header_values(headers: list[tuple[bytes, bytes]], name: bytes) -> list[bytes]:
@@ -125,29 +118,12 @@ async def _read_chunked(reader: asyncio.StreamReader) -> bytes:
             raise ValueError("request chunk payload was not followed by CRLF")
 
 
-def strip_proxy_headers_and_set_host(headers: list[tuple[bytes, bytes]], upstream_host: str) -> list[tuple[bytes, bytes]]:
-    """Remove proxy-only headers and force Host to the upstream hostname."""
-    host_override = upstream_host.encode()
-    rewritten: list[tuple[bytes, bytes]] = []
-    seen_host = False
-    for name, value in headers:
-        if name == b"host":
-            rewritten.append((b"Host", host_override))
-            seen_host = True
-            continue
-        if name in (b"proxy-connection", b"proxy-authorization", b"authorization"):
-            continue
-        rewritten.append((name, value))
-    if not seen_host:
-        rewritten.append((b"Host", host_override))
-    return rewritten
-
-
-def _normalize_forward_headers(headers: list[tuple[bytes, bytes]], body_length: int) -> list[tuple[bytes, bytes]]:
-    """Strip stale client-side framing before replaying the request upstream."""
+def _normalize_forward_headers(headers: list[tuple[bytes, bytes]], body_length: int, upstream_host: str) -> list[tuple[bytes, bytes]]:
+    """Set the upstream Host and strip proxy, hop-by-hop, and stale framing headers."""
     headers_to_strip = frozenset({
         b"connection",
         b"content-length",
+        b"host",
         b"keep-alive",
         b"proxy-authenticate",
         b"proxy-authorization",
@@ -166,6 +142,7 @@ def _normalize_forward_headers(headers: list[tuple[bytes, bytes]], body_length: 
         if lowered_name in headers_to_strip:
             continue
         normalized.append((name, value))
+    normalized.append((b"Host", upstream_host.encode()))
     if body_length > 0 or body_was_framed:
         normalized.append((b"Content-Length", str(body_length).encode()))
     return normalized
@@ -210,7 +187,11 @@ async def forward_to_upstream(
     ctx = _get_upstream_ssl_context()
     upstream_reader, upstream_writer = await asyncio.open_connection(host=host, port=port, ssl=ctx, server_hostname=host)
     try:
-        normalized_headers = _normalize_forward_headers(headers=headers, body_length=len(body))
+        normalized_headers = _normalize_forward_headers(
+            headers=headers,
+            body_length=len(body),
+            upstream_host=host,
+        )
         request = method.encode() + b" " + path_with_query.encode() + b" HTTP/1.1\r\n"
         for name, value in normalized_headers:
             request += name + b": " + value + b"\r\n"
