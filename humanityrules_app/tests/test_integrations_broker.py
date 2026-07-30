@@ -264,7 +264,7 @@ class TestRewriteAuthorization(unittest.TestCase):
         """A URL-rewrite provider must reject paths missing its placeholder.
 
         Url-encoded placeholders (e.g. `%3A` instead of `:`) don't substring-match
-        and must be rejected so we never forward an un-rewritten URL upstream.
+        and must be rejected so we never forward an un-rewritten URL provider.
         """
         provider = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["telegram"]
 
@@ -455,7 +455,7 @@ class TestAnonymousRequestClassification(unittest.TestCase):
         for slug in ("google", "github", "nous", "openai-codex"):
             self.assertTrue(self._classify(
                 slug=slug,
-                headers=[(b"host", b"upstream.example")],
+                headers=[(b"host", b"provider.example")],
                 path="/anything",
             ))
 
@@ -479,7 +479,7 @@ class TestAnonymousRequestClassification(unittest.TestCase):
 class TestForwardHeaderNormalization(unittest.TestCase):
 
     def test_dechunked_request_gets_content_length_and_no_transfer_encoding(self) -> None:
-        out = tls_http_message_relay._normalize_forward_headers(
+        out = tls_http_message_relay._normalize_provider_headers(
             headers=[
                 (b"Host", b"spoofed.example"),
                 (b"host", b"also-spoofed.example"),
@@ -488,7 +488,7 @@ class TestForwardHeaderNormalization(unittest.TestCase):
                 (b"Content-Type", b"application/json"),
             ],
             body_length=11,
-            upstream_host="github.com",
+            provider_host="github.com",
         )
 
         by_name = {name.lower(): value for name, value in out}
@@ -500,20 +500,20 @@ class TestForwardHeaderNormalization(unittest.TestCase):
         self.assertEqual(hosts, [b"github.com"])
 
     def test_existing_content_length_is_replaced(self) -> None:
-        out = tls_http_message_relay._normalize_forward_headers(
+        out = tls_http_message_relay._normalize_provider_headers(
             headers=[
                 (b"Host", b"api.telegram.org"),
                 (b"Content-Length", b"999"),
             ],
             body_length=4,
-            upstream_host="api.telegram.org",
+            provider_host="api.telegram.org",
         )
 
         content_lengths = [value for name, value in out if name.lower() == b"content-length"]
         self.assertEqual(content_lengths, [b"4"])
 
     def test_authorization_is_preserved_while_proxy_headers_are_removed(self) -> None:
-        out = tls_http_message_relay._normalize_forward_headers(
+        out = tls_http_message_relay._normalize_provider_headers(
             headers=[
                 (b"Host", b"api.openai.com"),
                 (b"Authorization", b"Bearer broker-injected-token"),
@@ -521,7 +521,7 @@ class TestForwardHeaderNormalization(unittest.TestCase):
                 (b"Proxy-Authorization", b"Basic sandbox-proxy-credential"),
             ],
             body_length=0,
-            upstream_host="api.openai.com",
+            provider_host="api.openai.com",
         )
 
         by_name = {name.lower(): value for name, value in out}
@@ -534,10 +534,10 @@ class TestForwardHeaderNormalization(unittest.TestCase):
 class TestHttpParsing(unittest.IsolatedAsyncioTestCase):
 
     async def test_read_body_reads_content_length(self) -> None:
-        reader = _feed_upstream(b"helloNEXT")
+        reader = _feed_reader(b"helloNEXT")
 
-        body = await tls_http_message_relay.read_body(
-            reader=reader,
+        body = await tls_http_message_relay._read_request_body(
+            sandbox_reader=reader,
             headers=[(b"Content-Length", b"5")],
         )
 
@@ -545,10 +545,10 @@ class TestHttpParsing(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await reader.readexactly(4), b"NEXT")
 
     async def test_read_body_prefers_chunked_over_content_length(self) -> None:
-        reader = _feed_upstream(b"5\r\nhello\r\n0\r\n\r\nNEXT")
+        reader = _feed_reader(b"5\r\nhello\r\n0\r\n\r\nNEXT")
 
-        body = await tls_http_message_relay.read_body(
-            reader=reader,
+        body = await tls_http_message_relay._read_request_body(
+            sandbox_reader=reader,
             headers=[
                 (b"Transfer-Encoding", b"chunked"),
                 (b"Content-Length", b"999"),
@@ -559,10 +559,10 @@ class TestHttpParsing(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await reader.readexactly(4), b"NEXT")
 
     async def test_read_body_accepts_repeated_identical_content_length(self) -> None:
-        reader = _feed_upstream(b"test")
+        reader = _feed_reader(b"test")
 
-        body = await tls_http_message_relay.read_body(
-            reader=reader,
+        body = await tls_http_message_relay._read_request_body(
+            sandbox_reader=reader,
             headers=[
                 (b"Content-Length", b"4"),
                 (b"Content-Length", b"4"),
@@ -572,11 +572,11 @@ class TestHttpParsing(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(body, b"test")
 
     async def test_read_body_rejects_conflicting_content_length(self) -> None:
-        reader = _feed_upstream(b"hello")
+        reader = _feed_reader(b"hello")
 
         with self.assertRaisesRegex(ValueError, "conflicting request Content-Length"):
-            await tls_http_message_relay.read_body(
-                reader=reader,
+            await tls_http_message_relay._read_request_body(
+                sandbox_reader=reader,
                 headers=[
                     (b"Content-Length", b"4"),
                     (b"Content-Length", b"5"),
@@ -584,20 +584,20 @@ class TestHttpParsing(unittest.IsolatedAsyncioTestCase):
             )
 
     async def test_read_body_rejects_malformed_content_length(self) -> None:
-        reader = _feed_upstream(b"")
+        reader = _feed_reader(b"")
 
         with self.assertRaisesRegex(ValueError, "invalid request Content-Length"):
-            await tls_http_message_relay.read_body(
-                reader=reader,
+            await tls_http_message_relay._read_request_body(
+                sandbox_reader=reader,
                 headers=[(b"Content-Length", b"-1")],
             )
 
     async def test_read_body_rejects_repeated_transfer_encoding_chain(self) -> None:
-        reader = _feed_upstream(b"0\r\n\r\n")
+        reader = _feed_reader(b"0\r\n\r\n")
 
         with self.assertRaisesRegex(ValueError, "unsupported request Transfer-Encoding"):
-            await tls_http_message_relay.read_body(
-                reader=reader,
+            await tls_http_message_relay._read_request_body(
+                sandbox_reader=reader,
                 headers=[
                     (b"Transfer-Encoding", b"chunked"),
                     (b"Transfer-Encoding", b"gzip"),
@@ -605,11 +605,11 @@ class TestHttpParsing(unittest.IsolatedAsyncioTestCase):
             )
 
     async def test_read_body_rejects_truncated_content_length(self) -> None:
-        reader = _feed_upstream(b"short")
+        reader = _feed_reader(b"short")
 
         with self.assertRaisesRegex(ValueError, "ended after 5 of 10 bytes"):
-            await tls_http_message_relay.read_body(
-                reader=reader,
+            await tls_http_message_relay._read_request_body(
+                sandbox_reader=reader,
                 headers=[(b"Content-Length", b"10")],
             )
 
@@ -617,41 +617,41 @@ class TestHttpParsing(unittest.IsolatedAsyncioTestCase):
         reader = asyncio.StreamReader()
         reader.feed_data(b"4\r\ntest\r\n0\r\nX-Trailer: one\r\nAnother: two\r\n\r\nNEXT")
 
-        body = await tls_http_message_relay._read_chunked(reader=reader)
+        body = await tls_http_message_relay._read_chunked_request_body(sandbox_reader=reader)
 
         self.assertEqual(body, b"test")
         self.assertEqual(await reader.readexactly(4), b"NEXT")
 
     async def test_read_chunked_rejects_truncated_payload(self) -> None:
-        reader = _feed_upstream(b"a\r\nshort")
+        reader = _feed_reader(b"a\r\nshort")
 
         with self.assertRaisesRegex(ValueError, "payload ended before"):
-            await tls_http_message_relay._read_chunked(reader=reader)
+            await tls_http_message_relay._read_chunked_request_body(sandbox_reader=reader)
 
     async def test_read_chunked_rejects_malformed_size(self) -> None:
-        reader = _feed_upstream(b"-1\r\n")
+        reader = _feed_reader(b"-1\r\n")
 
         with self.assertRaisesRegex(ValueError, "invalid request chunk size"):
-            await tls_http_message_relay._read_chunked(reader=reader)
+            await tls_http_message_relay._read_chunked_request_body(sandbox_reader=reader)
 
     async def test_read_chunked_rejects_malformed_payload_delimiter(self) -> None:
-        reader = _feed_upstream(b"4\r\ntestXX0\r\n\r\n")
+        reader = _feed_reader(b"4\r\ntestXX0\r\n\r\n")
 
         with self.assertRaisesRegex(ValueError, "not followed by CRLF"):
-            await tls_http_message_relay._read_chunked(reader=reader)
+            await tls_http_message_relay._read_chunked_request_body(sandbox_reader=reader)
 
     async def test_read_chunked_rejects_eof_inside_trailers(self) -> None:
-        reader = _feed_upstream(b"0\r\nX-Trailer: incomplete\r\n")
+        reader = _feed_reader(b"0\r\nX-Trailer: incomplete\r\n")
 
         with self.assertRaisesRegex(ValueError, "ended inside trailers"):
-            await tls_http_message_relay._read_chunked(reader=reader)
+            await tls_http_message_relay._read_chunked_request_body(sandbox_reader=reader)
 
 
 class _RecordingWriter:
     """asyncio.StreamWriter stand-in that records writes and drain boundaries.
 
     Each drain() snapshots everything written since the previous drain, so a
-    streaming relay (one drain per upstream frame) is distinguishable from a
+    streaming relay (one drain per provider frame) is distinguishable from a
     buffered one (a single drain carrying the whole body).
     """
 
@@ -692,7 +692,7 @@ class _NotifyingWriter(_RecordingWriter):
             )
 
 
-def _feed_upstream(raw: bytes) -> asyncio.StreamReader:
+def _feed_reader(raw: bytes) -> asyncio.StreamReader:
     reader = asyncio.StreamReader()
     reader.feed_data(raw)
     reader.feed_eof()
@@ -704,8 +704,8 @@ def _chunk(payload: bytes) -> bytes:
     return f"{len(payload):x}".encode() + b"\r\n" + payload + b"\r\n"
 
 
-class _StubUpstreamWriter:
-    """Minimal writer for the upstream side of forward_to_upstream."""
+class _StubProviderWriter:
+    """Minimal writer for the provider side of forward_to_provider."""
 
     def __init__(self) -> None:
         self.chunks: list[bytes] = []
@@ -785,57 +785,62 @@ class _StubCredentialStateStore:
 
 
 class TestStreamingRelay(unittest.IsolatedAsyncioTestCase):
-    """forward_to_upstream streams every response body live in its upstream framing."""
+    """forward_to_provider streams every response body live in its provider framing."""
 
-    async def _forward(self, upstream_response: bytes, *, host: str) -> tuple[int, bool, _RecordingWriter]:
-        client_writer = _RecordingWriter()
-        upstream_reader = _feed_upstream(upstream_response)
+    async def _forward(self, provider_response: bytes, *, host: str) -> tuple[int, bool, _RecordingWriter]:
+        sandbox_writer = _RecordingWriter()
+        provider_reader = _feed_reader(provider_response)
 
-        async def _fake_open_connection(**kwargs) -> tuple[asyncio.StreamReader, _StubUpstreamWriter]:
-            return upstream_reader, _StubUpstreamWriter()
+        async def _fake_open_connection(**kwargs) -> tuple[asyncio.StreamReader, _StubProviderWriter]:
+            return provider_reader, _StubProviderWriter()
 
         with patch.object(tls_http_message_relay.asyncio, "open_connection", _fake_open_connection):
-            status, keep_alive = await tls_http_message_relay.forward_to_upstream(
-                host=host,
-                port=443,
-                method="POST",
-                path_with_query="/v1/chat/completions",
-                headers=[(b"host", host.encode())],
-                body=b"{}",
-                client_writer=client_writer,
+            result = await tls_http_message_relay.forward_to_provider(
+                provider_host=host,
+                provider_port=443,
+                request=tls_http_message_relay.ProviderRequest(
+                    method="POST",
+                    path_with_query="/v1/chat/completions",
+                    headers=[(b"host", host.encode())],
+                    body=b"{}",
+                ),
+                sandbox_writer=sandbox_writer,
                 response_body_observer=None,
             )
-        return status, keep_alive, client_writer
+        return result.status_code, result.sandbox_connection_can_continue, sandbox_writer
 
     async def _forward_from_reader(
         self,
-        upstream_reader: asyncio.StreamReader,
-        client_writer: _RecordingWriter,
+        provider_reader: asyncio.StreamReader,
+        sandbox_writer: _RecordingWriter,
         host: str,
     ) -> tuple[int, bool]:
-        upstream_writer = _StubUpstreamWriter()
+        provider_writer = _StubProviderWriter()
 
-        async def _fake_open_connection(**kwargs: object) -> tuple[asyncio.StreamReader, _StubUpstreamWriter]:
-            return upstream_reader, upstream_writer
+        async def _fake_open_connection(**kwargs: object) -> tuple[asyncio.StreamReader, _StubProviderWriter]:
+            return provider_reader, provider_writer
 
         with patch.object(tls_http_message_relay.asyncio, "open_connection", _fake_open_connection):
-            return await tls_http_message_relay.forward_to_upstream(
-                host=host,
-                port=443,
-                method="POST",
-                path_with_query="/v1/chat/completions",
-                headers=[(b"host", host.encode())],
-                body=b"{}",
-                client_writer=client_writer,
+            result = await tls_http_message_relay.forward_to_provider(
+                provider_host=host,
+                provider_port=443,
+                request=tls_http_message_relay.ProviderRequest(
+                    method="POST",
+                    path_with_query="/v1/chat/completions",
+                    headers=[(b"host", host.encode())],
+                    body=b"{}",
+                ),
+                sandbox_writer=sandbox_writer,
                 response_body_observer=None,
             )
+            return result.status_code, result.sandbox_connection_can_continue
 
-    async def test_chunked_sse_reaches_client_before_upstream_finishes(self) -> None:
+    async def test_chunked_sse_reaches_sandbox_before_provider_finishes(self) -> None:
         first_event = b'data: {"d":"first"}\n\n'
         second_event = b'data: {"d":"second"}\n\n'
-        upstream_reader = asyncio.StreamReader()
-        client_writer = _NotifyingWriter()
-        upstream_reader.feed_data(
+        provider_reader = asyncio.StreamReader()
+        sandbox_writer = _NotifyingWriter()
+        provider_reader.feed_data(
             b"HTTP/1.1 200 OK\r\n"
             b"Content-Type: text/event-stream\r\n"
             b"Transfer-Encoding: chunked\r\n"
@@ -845,29 +850,29 @@ class TestStreamingRelay(unittest.IsolatedAsyncioTestCase):
 
         forward_task = asyncio.create_task(
             self._forward_from_reader(
-                upstream_reader=upstream_reader,
-                client_writer=client_writer,
+                provider_reader=provider_reader,
+                sandbox_writer=sandbox_writer,
                 host="api.openai.com",
             )
         )
-        await client_writer.wait_for_bytes(expected=first_event, timeout_seconds=1.0)
+        await sandbox_writer.wait_for_bytes(expected=first_event, timeout_seconds=1.0)
 
         self.assertFalse(forward_task.done())
-        self.assertNotIn(second_event, client_writer.all_bytes())
+        self.assertNotIn(second_event, sandbox_writer.all_bytes())
 
-        upstream_reader.feed_data(_chunk(second_event) + b"0\r\n\r\n")
-        upstream_reader.feed_eof()
-        status, keep_alive = await asyncio.wait_for(forward_task, timeout=1.0)
+        provider_reader.feed_data(_chunk(second_event) + b"0\r\n\r\n")
+        provider_reader.feed_eof()
+        status, sandbox_connection_can_continue = await asyncio.wait_for(forward_task, timeout=1.0)
 
         self.assertEqual(status, 200)
-        self.assertTrue(keep_alive)
-        self.assertIn(second_event, client_writer.all_bytes())
+        self.assertTrue(sandbox_connection_can_continue)
+        self.assertIn(second_event, sandbox_writer.all_bytes())
 
-    async def test_content_length_body_reaches_client_before_upstream_finishes(self) -> None:
+    async def test_content_length_body_reaches_sandbox_before_provider_finishes(self) -> None:
         body = b"first-second"
-        upstream_reader = asyncio.StreamReader()
-        client_writer = _NotifyingWriter()
-        upstream_reader.feed_data(
+        provider_reader = asyncio.StreamReader()
+        sandbox_writer = _NotifyingWriter()
+        provider_reader.feed_data(
             b"HTTP/1.1 200 OK\r\n"
             b"Content-Length: " + str(len(body)).encode() + b"\r\n"
             b"\r\n"
@@ -876,27 +881,27 @@ class TestStreamingRelay(unittest.IsolatedAsyncioTestCase):
 
         forward_task = asyncio.create_task(
             self._forward_from_reader(
-                upstream_reader=upstream_reader,
-                client_writer=client_writer,
+                provider_reader=provider_reader,
+                sandbox_writer=sandbox_writer,
                 host="api.anthropic.com",
             )
         )
-        await client_writer.wait_for_bytes(expected=b"first-", timeout_seconds=1.0)
+        await sandbox_writer.wait_for_bytes(expected=b"first-", timeout_seconds=1.0)
 
         self.assertFalse(forward_task.done())
-        self.assertNotIn(b"second", client_writer.all_bytes())
+        self.assertNotIn(b"second", sandbox_writer.all_bytes())
 
-        upstream_reader.feed_data(b"second")
-        status, keep_alive = await asyncio.wait_for(forward_task, timeout=1.0)
+        provider_reader.feed_data(b"second")
+        status, sandbox_connection_can_continue = await asyncio.wait_for(forward_task, timeout=1.0)
 
         self.assertEqual(status, 200)
-        self.assertTrue(keep_alive)
-        self.assertTrue(client_writer.all_bytes().endswith(body))
+        self.assertTrue(sandbox_connection_can_continue)
+        self.assertTrue(sandbox_writer.all_bytes().endswith(body))
 
-    async def test_eof_body_reaches_client_before_upstream_finishes(self) -> None:
-        upstream_reader = asyncio.StreamReader()
-        client_writer = _NotifyingWriter()
-        upstream_reader.feed_data(
+    async def test_eof_body_reaches_sandbox_before_provider_finishes(self) -> None:
+        provider_reader = asyncio.StreamReader()
+        sandbox_writer = _NotifyingWriter()
+        provider_reader.feed_data(
             b"HTTP/1.1 200 OK\r\n"
             b"Content-Type: application/octet-stream\r\n"
             b"\r\n"
@@ -905,25 +910,25 @@ class TestStreamingRelay(unittest.IsolatedAsyncioTestCase):
 
         forward_task = asyncio.create_task(
             self._forward_from_reader(
-                upstream_reader=upstream_reader,
-                client_writer=client_writer,
+                provider_reader=provider_reader,
+                sandbox_writer=sandbox_writer,
                 host="github.com",
             )
         )
-        await client_writer.wait_for_bytes(expected=b"first-", timeout_seconds=1.0)
+        await sandbox_writer.wait_for_bytes(expected=b"first-", timeout_seconds=1.0)
 
         self.assertFalse(forward_task.done())
 
-        upstream_reader.feed_data(b"second")
-        upstream_reader.feed_eof()
-        status, keep_alive = await asyncio.wait_for(forward_task, timeout=1.0)
+        provider_reader.feed_data(b"second")
+        provider_reader.feed_eof()
+        status, sandbox_connection_can_continue = await asyncio.wait_for(forward_task, timeout=1.0)
 
         self.assertEqual(status, 200)
-        self.assertFalse(keep_alive)
-        self.assertTrue(client_writer.all_bytes().endswith(b"first-second"))
+        self.assertFalse(sandbox_connection_can_continue)
+        self.assertTrue(sandbox_writer.all_bytes().endswith(b"first-second"))
 
     async def test_chunked_sse_is_relayed_frame_by_frame(self) -> None:
-        upstream = (
+        provider = (
             b"HTTP/1.1 200 OK\r\n"
             b"Content-Type: text/event-stream\r\n"
             b"Transfer-Encoding: chunked\r\n"
@@ -933,10 +938,10 @@ class TestStreamingRelay(unittest.IsolatedAsyncioTestCase):
             + _chunk(b"data: [DONE]\n\n")
             + b"0\r\n\r\n"
         )
-        status, keep_alive, writer = await self._forward(upstream, host="api.openai.com")
+        status, sandbox_connection_can_continue, writer = await self._forward(provider, host="api.openai.com")
 
         self.assertEqual(status, 200)
-        self.assertTrue(keep_alive)
+        self.assertTrue(sandbox_connection_can_continue)
         # Status/header preamble preserves the chunked framing verbatim — the
         # client's chunked decoder is what makes incremental delivery work.
         full = writer.all_bytes()
@@ -953,7 +958,7 @@ class TestStreamingRelay(unittest.IsolatedAsyncioTestCase):
         # (chatgpt.com/backend-api/codex/responses): chunked + no declared
         # content type must still take the streaming relay, not the buffered
         # path that would hold every token until the run completes.
-        upstream = (
+        provider = (
             b"HTTP/1.1 200 OK\r\n"
             b"Transfer-Encoding: chunked\r\n"
             b"\r\n"
@@ -962,10 +967,10 @@ class TestStreamingRelay(unittest.IsolatedAsyncioTestCase):
             + _chunk(b"event: response.completed\ndata: {}\n\n")
             + b"0\r\n\r\n"
         )
-        status, keep_alive, writer = await self._forward(upstream, host="chatgpt.com")
+        status, sandbox_connection_can_continue, writer = await self._forward(provider, host="chatgpt.com")
 
         self.assertEqual(status, 200)
-        self.assertTrue(keep_alive)
+        self.assertTrue(sandbox_connection_can_continue)
         full = writer.all_bytes()
         self.assertIn(b"Transfer-Encoding: chunked", full)
         self.assertNotIn(b"Content-Length:", full)
@@ -976,15 +981,15 @@ class TestStreamingRelay(unittest.IsolatedAsyncioTestCase):
 
     async def test_content_length_body_streams_after_head(self) -> None:
         body = b"{\"ok\":true}"
-        upstream = (
+        provider = (
             b"HTTP/1.1 200 OK\r\n"
             b"Content-Length: " + str(len(body)).encode() + b"\r\n"
             b"\r\n" + body
         )
-        status, keep_alive, writer = await self._forward(upstream, host="api.anthropic.com")
+        status, sandbox_connection_can_continue, writer = await self._forward(provider, host="api.anthropic.com")
 
         self.assertEqual(status, 200)
-        self.assertTrue(keep_alive)
+        self.assertTrue(sandbox_connection_can_continue)
         self.assertTrue(writer.all_bytes().endswith(body))
         # Streaming path: the head is committed first, then the body relays
         # in its own flush(es) — never held until the body completes.
@@ -992,30 +997,30 @@ class TestStreamingRelay(unittest.IsolatedAsyncioTestCase):
 
     async def test_content_length_sse_is_relayed(self) -> None:
         payload = b"data: {\"d\":\"hi\"}\n\ndata: [DONE]\n\n"
-        upstream = (
+        provider = (
             b"HTTP/1.1 200 OK\r\n"
             b"Content-Type: text/event-stream\r\n"
             b"Content-Length: " + str(len(payload)).encode() + b"\r\n"
             b"\r\n" + payload
         )
-        status, keep_alive, writer = await self._forward(upstream, host="api.openai.com")
+        status, sandbox_connection_can_continue, writer = await self._forward(provider, host="api.openai.com")
 
         self.assertEqual(status, 200)
-        self.assertTrue(keep_alive)
+        self.assertTrue(sandbox_connection_can_continue)
         self.assertIn(payload, writer.all_bytes())
 
     async def test_json_content_length_response_streams_with_framing_preserved(self) -> None:
         body = b"{\"ok\":true}"
-        upstream = (
+        provider = (
             b"HTTP/1.1 200 OK\r\n"
             b"Content-Type: application/json\r\n"
             b"Content-Length: " + str(len(body)).encode() + b"\r\n"
             b"\r\n" + body
         )
-        status, keep_alive, writer = await self._forward(upstream, host="api.anthropic.com")
+        status, sandbox_connection_can_continue, writer = await self._forward(provider, host="api.anthropic.com")
 
         self.assertEqual(status, 200)
-        self.assertTrue(keep_alive)
+        self.assertTrue(sandbox_connection_can_continue)
         full = writer.all_bytes()
         self.assertIn(b"Content-Length: 11", full)
         self.assertTrue(full.endswith(body))
@@ -1024,25 +1029,25 @@ class TestStreamingRelay(unittest.IsolatedAsyncioTestCase):
 
     async def test_interim_1xx_head_is_relayed_before_final_response(self) -> None:
         body = b"ok"
-        upstream = (
+        provider = (
             b"HTTP/1.1 100 Continue\r\n"
             b"\r\n"
             b"HTTP/1.1 200 OK\r\n"
             b"Content-Length: " + str(len(body)).encode() + b"\r\n"
             b"\r\n" + body
         )
-        status, keep_alive, writer = await self._forward(upstream, host="api.anthropic.com")
+        status, sandbox_connection_can_continue, writer = await self._forward(provider, host="api.anthropic.com")
 
         # The final status — not the interim one — drives the return value.
         self.assertEqual(status, 200)
-        self.assertTrue(keep_alive)
+        self.assertTrue(sandbox_connection_can_continue)
         full = writer.all_bytes()
         self.assertIn(b"HTTP/1.1 100 Continue", full)
         self.assertIn(b"HTTP/1.1 200 OK", full)
         self.assertTrue(full.endswith(body))
 
     async def test_transfer_encoding_wins_over_content_length_and_cl_is_stripped(self) -> None:
-        upstream = (
+        provider = (
             b"HTTP/1.1 200 OK\r\n"
             b"Transfer-Encoding: chunked\r\n"
             b"Content-Length: 999\r\n"
@@ -1050,12 +1055,12 @@ class TestStreamingRelay(unittest.IsolatedAsyncioTestCase):
             + _chunk(b"payload")
             + b"0\r\n\r\n"
         )
-        status, keep_alive, writer = await self._forward(upstream, host="api.anthropic.com")
+        status, sandbox_connection_can_continue, writer = await self._forward(provider, host="api.anthropic.com")
 
         self.assertEqual(status, 200)
         # Chunked framing terminated cleanly, so the connection is reusable —
         # which is only sound because the body was read by TE, not CL.
-        self.assertTrue(keep_alive)
+        self.assertTrue(sandbox_connection_can_continue)
         full = writer.all_bytes()
         self.assertIn(b"Transfer-Encoding: chunked", full)
         # Forwarding both TE and CL would leave the client parser free to
@@ -1064,34 +1069,36 @@ class TestStreamingRelay(unittest.IsolatedAsyncioTestCase):
         self.assertIn(b"payload", full)
 
     async def test_invalid_content_length_fails_before_head_is_committed(self) -> None:
-        upstream = (
+        provider = (
             b"HTTP/1.1 200 OK\r\n"
             b"Content-Length: garbage\r\n"
             b"\r\n"
         )
-        client_writer = _RecordingWriter()
-        upstream_reader = _feed_upstream(upstream)
+        sandbox_writer = _RecordingWriter()
+        provider_reader = _feed_reader(provider)
 
-        async def _fake_open_connection(**kwargs) -> tuple[asyncio.StreamReader, _StubUpstreamWriter]:
-            return upstream_reader, _StubUpstreamWriter()
+        async def _fake_open_connection(**kwargs) -> tuple[asyncio.StreamReader, _StubProviderWriter]:
+            return provider_reader, _StubProviderWriter()
 
         with patch.object(tls_http_message_relay.asyncio, "open_connection", _fake_open_connection):
             with self.assertRaises(RuntimeError):
-                await tls_http_message_relay.forward_to_upstream(
-                    host="api.anthropic.com",
-                    port=443,
-                    method="GET",
-                    path_with_query="/v1/models",
-                    headers=[(b"host", b"api.anthropic.com")],
-                    body=b"",
-                    client_writer=client_writer,
+                await tls_http_message_relay.forward_to_provider(
+                    provider_host="api.anthropic.com",
+                    provider_port=443,
+                    request=tls_http_message_relay.ProviderRequest(
+                        method="GET",
+                        path_with_query="/v1/models",
+                        headers=[(b"host", b"api.anthropic.com")],
+                        body=b"",
+                    ),
+                    sandbox_writer=sandbox_writer,
                     response_body_observer=None,
                 )
         # Nothing was written: the caller can still answer with a clean 502.
-        self.assertEqual(client_writer.all_bytes(), b"")
+        self.assertEqual(sandbox_writer.all_bytes(), b"")
 
     async def test_malformed_chunk_size_marks_connection_not_reusable(self) -> None:
-        upstream = (
+        provider = (
             b"HTTP/1.1 200 OK\r\n"
             b"Transfer-Encoding: chunked\r\n"
             b"\r\n"
@@ -1099,27 +1106,27 @@ class TestStreamingRelay(unittest.IsolatedAsyncioTestCase):
             b"\r\n"
             b"0\r\n\r\n"
         )
-        status, keep_alive, writer = await self._forward(upstream, host="api.anthropic.com")
+        status, sandbox_connection_can_continue, writer = await self._forward(provider, host="api.anthropic.com")
 
         self.assertEqual(status, 200)
-        self.assertFalse(keep_alive)
+        self.assertFalse(sandbox_connection_can_continue)
         # The bogus size line is not forwarded — int(x, 16) would have
         # accepted "-1" but a client chunk parser must reject it.
         self.assertNotIn(b"-1\r\n", writer.all_bytes())
 
     async def test_huge_single_chunk_relays_in_bounded_subreads(self) -> None:
         payload = b"x" * 200_000
-        upstream = (
+        provider = (
             b"HTTP/1.1 200 OK\r\n"
             b"Transfer-Encoding: chunked\r\n"
             b"\r\n"
             + _chunk(payload)
             + b"0\r\n\r\n"
         )
-        status, keep_alive, writer = await self._forward(upstream, host="api.anthropic.com")
+        status, sandbox_connection_can_continue, writer = await self._forward(provider, host="api.anthropic.com")
 
         self.assertEqual(status, 200)
-        self.assertTrue(keep_alive)
+        self.assertTrue(sandbox_connection_can_continue)
         self.assertIn(payload, writer.all_bytes())
         # One sender-controlled 200KB chunk must NOT arrive as one flush —
         # the relay reads it in <=64KB sub-reads (4 payload flushes here),
@@ -1129,94 +1136,94 @@ class TestStreamingRelay(unittest.IsolatedAsyncioTestCase):
 
     async def test_repeated_connection_close_field_disables_reuse(self) -> None:
         body = b"ok"
-        upstream = (
+        provider = (
             b"HTTP/1.1 200 OK\r\n"
             b"Connection: keep-alive\r\n"
             b"Connection: close\r\n"
             b"Content-Length: " + str(len(body)).encode() + b"\r\n"
             b"\r\n" + body
         )
-        status, keep_alive, writer = await self._forward(upstream, host="api.anthropic.com")
+        status, sandbox_connection_can_continue, writer = await self._forward(provider, host="api.anthropic.com")
 
         self.assertEqual(status, 200)
         # Connection may appear as multiple field lines; the `close` token in
         # ANY of them wins over an earlier keep-alive.
-        self.assertFalse(keep_alive)
+        self.assertFalse(sandbox_connection_can_continue)
         self.assertTrue(writer.all_bytes().endswith(body))
 
     async def test_eof_framed_sse_marks_connection_not_reusable(self) -> None:
-        upstream = (
+        provider = (
             b"HTTP/1.1 200 OK\r\n"
             b"Content-Type: text/event-stream\r\n"
             b"\r\n"
             b"data: {\"d\":\"x\"}\n\ndata: [DONE]\n\n"
         )
-        status, keep_alive, writer = await self._forward(upstream, host="api.openai.com")
+        status, sandbox_connection_can_continue, writer = await self._forward(provider, host="api.openai.com")
 
         self.assertEqual(status, 200)
         # No Content-Length / chunked framing: EOF is the only end-of-body
         # signal, so the client connection cannot be reused.
-        self.assertFalse(keep_alive)
+        self.assertFalse(sandbox_connection_can_continue)
         self.assertIn(b"data: [DONE]", writer.all_bytes())
 
     async def test_truncated_content_length_sse_marks_connection_not_reusable(self) -> None:
-        # Upstream advertises 40 bytes but EOFs after 15 — the client is left
+        # The provider advertises 40 bytes but EOFs after 15 — the sandbox is left
         # waiting on the unfulfilled Content-Length, so the socket must not be
         # reused for a later response.
-        upstream = (
+        provider = (
             b"HTTP/1.1 200 OK\r\n"
             b"Content-Type: text/event-stream\r\n"
             b"Content-Length: 40\r\n"
             b"\r\n"
             b"data: {\"d\":\"x\"}"
         )
-        status, keep_alive, writer = await self._forward(upstream, host="api.openai.com")
+        status, sandbox_connection_can_continue, writer = await self._forward(provider, host="api.openai.com")
 
         self.assertEqual(status, 200)
-        self.assertFalse(keep_alive)
+        self.assertFalse(sandbox_connection_can_continue)
         # Bytes that did arrive are still forwarded.
         self.assertIn(b'data: {"d":"x"}', writer.all_bytes())
         self.assertNotIn(b"HTTP/1.1 502", writer.all_bytes())
 
     async def test_chunked_sse_without_terminator_marks_connection_not_reusable(self) -> None:
-        # A well-formed chunk arrives, then upstream EOFs before the
+        # A well-formed chunk arrives, then provider EOFs before the
         # terminating 0-chunk: the client's chunk decoder has no legal
         # end-of-body, so reuse would hang or misframe the next response.
-        upstream = (
+        provider = (
             b"HTTP/1.1 200 OK\r\n"
             b"Content-Type: text/event-stream\r\n"
             b"Transfer-Encoding: chunked\r\n"
             b"\r\n"
             + _chunk(b"data: {\"d\":\"Hel\"}\n\n")
         )
-        status, keep_alive, writer = await self._forward(upstream, host="api.openai.com")
+        status, sandbox_connection_can_continue, writer = await self._forward(provider, host="api.openai.com")
 
         self.assertEqual(status, 200)
-        self.assertFalse(keep_alive)
+        self.assertFalse(sandbox_connection_can_continue)
         self.assertIn(b'data: {"d":"Hel"}', writer.all_bytes())
 
     async def test_chunked_sse_with_short_payload_marks_connection_not_reusable(self) -> None:
         # Size line declares 20 bytes but only 5 arrive before EOF: the partial
         # payload is forwarded, but the framing is broken so the connection is
         # not reusable.
-        upstream = (
+        provider = (
             b"HTTP/1.1 200 OK\r\n"
             b"Content-Type: text/event-stream\r\n"
             b"Transfer-Encoding: chunked\r\n"
             b"\r\n"
             b"14\r\nhello"
         )
-        status, keep_alive, writer = await self._forward(upstream, host="api.openai.com")
+        status, sandbox_connection_can_continue, writer = await self._forward(provider, host="api.openai.com")
 
         self.assertEqual(status, 200)
-        self.assertFalse(keep_alive)
+        self.assertFalse(sandbox_connection_can_continue)
         self.assertIn(b"hello", writer.all_bytes())
 
     async def test_chunked_sse_terminator_without_final_crlf_marks_not_reusable(self) -> None:
-        # Upstream sends the 0-chunk size line but EOFs before the blank line
+        # The provider sends the 0-chunk size line but EOFs before the blank line
         # closing the trailer section: the chunked terminator is incomplete, so
         # the client can't reframe and the connection must not be reused.
-        upstream = (
+        provider = (
             b"HTTP/1.1 200 OK\r\n"
             b"Content-Type: text/event-stream\r\n"
             b"Transfer-Encoding: chunked\r\n"
@@ -1224,16 +1231,16 @@ class TestStreamingRelay(unittest.IsolatedAsyncioTestCase):
             + _chunk(b"data: [DONE]\n\n")
             + b"0\r\n"  # last-chunk size line, then EOF — no closing CRLF
         )
-        status, keep_alive, writer = await self._forward(upstream, host="api.openai.com")
+        status, sandbox_connection_can_continue, writer = await self._forward(provider, host="api.openai.com")
 
         self.assertEqual(status, 200)
-        self.assertFalse(keep_alive)
+        self.assertFalse(sandbox_connection_can_continue)
         self.assertIn(b"data: [DONE]", writer.all_bytes())
 
     async def test_chunked_sse_complete_terminator_is_reusable(self) -> None:
         # The well-formed counterpart: 0-chunk followed by its closing blank
         # line. Clean terminator → connection reusable.
-        upstream = (
+        provider = (
             b"HTTP/1.1 200 OK\r\n"
             b"Content-Type: text/event-stream\r\n"
             b"Transfer-Encoding: chunked\r\n"
@@ -1241,25 +1248,25 @@ class TestStreamingRelay(unittest.IsolatedAsyncioTestCase):
             + _chunk(b"data: [DONE]\n\n")
             + b"0\r\n\r\n"
         )
-        status, keep_alive, writer = await self._forward(upstream, host="api.openai.com")
+        status, sandbox_connection_can_continue, writer = await self._forward(provider, host="api.openai.com")
 
         self.assertEqual(status, 200)
-        self.assertTrue(keep_alive)
+        self.assertTrue(sandbox_connection_can_continue)
         self.assertTrue(writer.all_bytes().endswith(b"0\r\n\r\n"))
 
     async def test_no_body_status_with_event_stream_type_is_buffered(self) -> None:
         # A 204 mislabeled text/event-stream must not enter the streaming relay
         # (which would block on EOF); it takes the buffered no-body path and
         # the connection stays reusable.
-        upstream = (
+        provider = (
             b"HTTP/1.1 204 No Content\r\n"
             b"Content-Type: text/event-stream\r\n"
             b"\r\n"
         )
-        status, keep_alive, writer = await self._forward(upstream, host="api.openai.com")
+        status, sandbox_connection_can_continue, writer = await self._forward(provider, host="api.openai.com")
 
         self.assertEqual(status, 204)
-        self.assertTrue(keep_alive)
+        self.assertTrue(sandbox_connection_can_continue)
         self.assertIn(b"204 No Content", writer.all_bytes())
 
 
@@ -1268,42 +1275,42 @@ class TestProxyConnectionStateMachine(unittest.IsolatedAsyncioTestCase):
 
     async def _run_provider_intercept(
         self,
-        client_bytes: bytes,
-        upstream_responses: list[bytes],
+        sandbox_bytes: bytes,
+        provider_responses: list[bytes],
         secrets: dict[str, str] | None,
-        feed_client_eof: bool,
+        feed_sandbox_eof: bool,
         provider_slug: str,
         host: str,
-    ) -> tuple[_TlsRecordingWriter, list[_StubUpstreamWriter], _StubCredentialStateStore]:
+    ) -> tuple[_TlsRecordingWriter, list[_StubProviderWriter], _StubCredentialStateStore]:
         provider = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS[provider_slug]
         credential_state_store = _StubCredentialStateStore(secrets=secrets)
         minter = _StubCertMinter()
-        client_reader = asyncio.StreamReader()
-        client_reader.feed_data(client_bytes)
-        if feed_client_eof:
-            client_reader.feed_eof()
-        client_writer = _TlsRecordingWriter()
-        upstream_readers = [_feed_upstream(response) for response in upstream_responses]
-        upstream_writers = [_StubUpstreamWriter() for _response in upstream_responses]
+        sandbox_reader = asyncio.StreamReader()
+        sandbox_reader.feed_data(sandbox_bytes)
+        if feed_sandbox_eof:
+            sandbox_reader.feed_eof()
+        sandbox_writer = _TlsRecordingWriter()
+        provider_readers = [_feed_reader(response) for response in provider_responses]
+        provider_writers = [_StubProviderWriter() for _response in provider_responses]
 
-        async def _fake_open_connection(**kwargs: object) -> tuple[asyncio.StreamReader, _StubUpstreamWriter]:
-            if not upstream_readers:
-                raise AssertionError("intercept loop opened more upstream connections than expected")
-            return upstream_readers.pop(0), upstream_writers[len(upstream_writers) - len(upstream_readers) - 1]
+        async def _fake_open_connection(**kwargs: object) -> tuple[asyncio.StreamReader, _StubProviderWriter]:
+            if not provider_readers:
+                raise AssertionError("intercept loop opened more provider connections than expected")
+            return provider_readers.pop(0), provider_writers[len(provider_writers) - len(provider_readers) - 1]
 
         loop = asyncio.get_running_loop()
-        start_tls = AsyncMock(return_value=client_writer.transport)
+        start_tls = AsyncMock(return_value=sandbox_writer.transport)
         with (
             patch.object(loop, "start_tls", start_tls),
-            patch.object(broker.tls_intercept.asyncio, "StreamWriter", return_value=client_writer),
+            patch.object(broker.tls_intercept.asyncio, "StreamWriter", return_value=sandbox_writer),
             patch.object(tls_http_message_relay.asyncio, "open_connection", _fake_open_connection),
         ):
             await asyncio.wait_for(
-                broker.tls_intercept._intercept_and_forward(
-                    client_reader=client_reader,
-                    client_writer=client_writer,
-                    host=host,
-                    port=443,
+                broker.tls_intercept._serve_intercepted_connection(
+                    sandbox_reader=sandbox_reader,
+                    sandbox_writer=sandbox_writer,
+                    provider_host=host,
+                    provider_port=443,
                     provider=provider,
                     minter=minter,
                     credential_state_store=credential_state_store,
@@ -1314,58 +1321,58 @@ class TestProxyConnectionStateMachine(unittest.IsolatedAsyncioTestCase):
 
         start_tls.assert_awaited_once()
         self.assertEqual(minter.hostnames, [host])
-        return client_writer, upstream_writers, credential_state_store
+        return sandbox_writer, provider_writers, credential_state_store
 
     async def _run_intercept(
         self,
-        client_bytes: bytes,
-        upstream_responses: list[bytes],
+        sandbox_bytes: bytes,
+        provider_responses: list[bytes],
         secrets: dict[str, str] | None,
-        feed_client_eof: bool,
-    ) -> tuple[_TlsRecordingWriter, list[_StubUpstreamWriter], _StubCredentialStateStore]:
+        feed_sandbox_eof: bool,
+    ) -> tuple[_TlsRecordingWriter, list[_StubProviderWriter], _StubCredentialStateStore]:
         return await self._run_provider_intercept(
-            client_bytes=client_bytes,
-            upstream_responses=upstream_responses,
+            sandbox_bytes=sandbox_bytes,
+            provider_responses=provider_responses,
             secrets=secrets,
-            feed_client_eof=feed_client_eof,
+            feed_sandbox_eof=feed_sandbox_eof,
             provider_slug="openrouter",
             host="openrouter.ai",
         )
 
     async def _forward_one_request(
         self,
-        client_bytes: bytes,
+        sandbox_bytes: bytes,
         secrets: dict[str, str],
         provider_slug: str,
         host: str,
     ) -> tuple[bytes, _StubCredentialStateStore]:
-        _client_writer, upstream_writers, credential_state_store = await self._run_provider_intercept(
-            client_bytes=client_bytes,
-            upstream_responses=[b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"],
+        _sandbox_writer, provider_writers, credential_state_store = await self._run_provider_intercept(
+            sandbox_bytes=sandbox_bytes,
+            provider_responses=[b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"],
             secrets=secrets,
-            feed_client_eof=True,
+            feed_sandbox_eof=True,
             provider_slug=provider_slug,
             host=host,
         )
-        self.assertEqual(len(upstream_writers), 1)
-        return upstream_writers[0].all_bytes(), credential_state_store
+        self.assertEqual(len(provider_writers), 1)
+        return provider_writers[0].all_bytes(), credential_state_store
 
     async def test_connect_routes_known_host_to_tls_interceptor(self) -> None:
         provider = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["openrouter"]
         credential_state_store = _StubCredentialStateStore(secrets={"api_key": "real-key"})
         minter = _StubCertMinter()
-        client_reader = _feed_upstream(
+        sandbox_reader = _feed_reader(
             b"CONNECT OpenRouter.ai.:8443 HTTP/1.1\r\n"
             b"Host: OpenRouter.ai.:8443\r\n"
             b"\r\n"
         )
-        client_writer = _TlsRecordingWriter()
+        sandbox_writer = _TlsRecordingWriter()
         intercept = AsyncMock()
 
-        with patch.object(broker.tls_intercept, "_intercept_and_forward", intercept):
-            await broker.tls_intercept._handle_proxy_conn(
-                reader=client_reader,
-                writer=client_writer,
+        with patch.object(broker.tls_intercept, "_serve_intercepted_connection", intercept):
+            await broker.tls_intercept._handle_proxy_connection(
+                sandbox_reader=sandbox_reader,
+                sandbox_writer=sandbox_writer,
                 minter=minter,
                 providers=tls_provider_catalog.TLS_INTERCEPT_PROVIDERS,
                 host_to_provider=tls_provider_catalog.build_host_to_provider(
@@ -1376,20 +1383,20 @@ class TestProxyConnectionStateMachine(unittest.IsolatedAsyncioTestCase):
             )
 
         intercept.assert_awaited_once_with(
-            client_reader=client_reader,
-            client_writer=client_writer,
-            host="openrouter.ai",
-            port=8443,
+            sandbox_reader=sandbox_reader,
+            sandbox_writer=sandbox_writer,
+            provider_host="openrouter.ai",
+            provider_port=8443,
             provider=provider,
             minter=minter,
             credential_state_store=credential_state_store,
             usage_reporter=None,
         )
-        self.assertTrue(client_writer.closed)
+        self.assertTrue(sandbox_writer.closed)
 
-    async def test_persistent_client_relays_chunked_sse_then_content_length_response(self) -> None:
+    async def test_persistent_sandbox_relays_chunked_sse_then_content_length_response(self) -> None:
         first_event = b'data: {"d":"first"}\n\n'
-        client_bytes = (
+        sandbox_bytes = (
             b"POST /api/v1/chat/completions HTTP/1.1\r\n"
             b"Host: openrouter.ai\r\n"
             b"Authorization: Bearer HUMR_PLACEHOLDER\r\n"
@@ -1401,7 +1408,7 @@ class TestProxyConnectionStateMachine(unittest.IsolatedAsyncioTestCase):
             b"Connection: close\r\n"
             b"\r\n"
         )
-        upstream_responses = [
+        provider_responses = [
             (
                 b"HTTP/1.1 200 OK\r\n"
                 b"Content-Type: text/event-stream\r\n"
@@ -1413,31 +1420,31 @@ class TestProxyConnectionStateMachine(unittest.IsolatedAsyncioTestCase):
             b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}",
         ]
 
-        client_writer, upstream_writers, credential_state_store = await self._run_intercept(
-            client_bytes=client_bytes,
-            upstream_responses=upstream_responses,
+        sandbox_writer, provider_writers, credential_state_store = await self._run_intercept(
+            sandbox_bytes=sandbox_bytes,
+            provider_responses=provider_responses,
             secrets={"api_key": "real-openrouter-key"},
-            feed_client_eof=False,
+            feed_sandbox_eof=False,
         )
 
-        downstream = client_writer.all_bytes()
+        downstream = sandbox_writer.all_bytes()
         self.assertIn(first_event, downstream)
         self.assertTrue(downstream.endswith(b"{}"))
         self.assertEqual(downstream.count(b"HTTP/1.1 200 OK"), 2)
-        first_request = upstream_writers[0].all_bytes()
+        first_request = provider_writers[0].all_bytes()
         self.assertIn(b"POST /api/v1/chat/completions HTTP/1.1", first_request)
         self.assertIn(b"Authorization: Bearer real-openrouter-key", first_request)
         self.assertIn(b"Content-Length: 2", first_request)
         self.assertNotIn(b"Transfer-Encoding", first_request)
-        second_request = upstream_writers[1].all_bytes()
+        second_request = provider_writers[1].all_bytes()
         self.assertIn(b"GET /api/v1/models HTTP/1.1", second_request)
         self.assertNotIn(b"Authorization", second_request)
         self.assertEqual(credential_state_store.secret_slugs, ["openrouter"])
-        self.assertTrue(client_writer.closed)
+        self.assertTrue(sandbox_writer.closed)
 
     async def test_anonymous_request_normalizes_host_and_removes_proxy_headers(self) -> None:
-        upstream_request, credential_state_store = await self._forward_one_request(
-            client_bytes=(
+        provider_request, credential_state_store = await self._forward_one_request(
+            sandbox_bytes=(
                 b"GET /api/v1/models HTTP/1.1\r\n"
                 b"Host: attacker.example\r\n"
                 b"Proxy-Connection: keep-alive\r\n"
@@ -1451,16 +1458,16 @@ class TestProxyConnectionStateMachine(unittest.IsolatedAsyncioTestCase):
             host="openrouter.ai",
         )
 
-        self.assertIn(b"Host: openrouter.ai\r\n", upstream_request)
-        self.assertIn(b"user-agent: sandbox-client\r\n", upstream_request)
-        self.assertNotIn(b"attacker.example", upstream_request)
-        self.assertNotIn(b"proxy-", upstream_request.lower())
-        self.assertNotIn(b"authorization", upstream_request.lower())
+        self.assertIn(b"Host: openrouter.ai\r\n", provider_request)
+        self.assertIn(b"user-agent: sandbox-client\r\n", provider_request)
+        self.assertNotIn(b"attacker.example", provider_request)
+        self.assertNotIn(b"proxy-", provider_request.lower())
+        self.assertNotIn(b"authorization", provider_request.lower())
         self.assertEqual(credential_state_store.secret_slugs, [])
 
-    async def test_oauth_bearer_injection_normalizes_final_upstream_request(self) -> None:
-        upstream_request, credential_state_store = await self._forward_one_request(
-            client_bytes=(
+    async def test_oauth_bearer_injection_normalizes_final_provider_request(self) -> None:
+        provider_request, credential_state_store = await self._forward_one_request(
+            sandbox_bytes=(
                 b"GET /gmail/v1/users/me/profile HTTP/1.1\r\n"
                 b"Host: attacker.example\r\n"
                 b"Proxy-Authorization: Basic must-not-leak\r\n"
@@ -1472,15 +1479,15 @@ class TestProxyConnectionStateMachine(unittest.IsolatedAsyncioTestCase):
             host="gmail.googleapis.com",
         )
 
-        self.assertIn(b"Host: gmail.googleapis.com\r\n", upstream_request)
-        self.assertIn(b"Authorization: Bearer ya29-real\r\n", upstream_request)
-        self.assertNotIn(b"attacker.example", upstream_request)
-        self.assertNotIn(b"proxy-", upstream_request.lower())
+        self.assertIn(b"Host: gmail.googleapis.com\r\n", provider_request)
+        self.assertIn(b"Authorization: Bearer ya29-real\r\n", provider_request)
+        self.assertNotIn(b"attacker.example", provider_request)
+        self.assertNotIn(b"proxy-", provider_request.lower())
         self.assertEqual(credential_state_store.secret_slugs, ["google"])
 
     async def test_oauth_multi_header_injection_replaces_every_broker_owned_value(self) -> None:
-        upstream_request, credential_state_store = await self._forward_one_request(
-            client_bytes=(
+        provider_request, credential_state_store = await self._forward_one_request(
+            sandbox_bytes=(
                 b"POST /backend-api/codex/responses HTTP/1.1\r\n"
                 b"Host: attacker.example\r\n"
                 b"Authorization: Bearer sandbox-placeholder\r\n"
@@ -1497,17 +1504,17 @@ class TestProxyConnectionStateMachine(unittest.IsolatedAsyncioTestCase):
             host="chatgpt.com",
         )
 
-        self.assertIn(b"Host: chatgpt.com\r\n", upstream_request)
-        self.assertIn(b"Authorization: Bearer codex-real\r\n", upstream_request)
-        self.assertIn(b"ChatGPT-Account-ID: account-real\r\n", upstream_request)
-        self.assertIn(b"originator: codex_cli_rs\r\n", upstream_request)
-        self.assertNotIn(b"spoofed-account", upstream_request)
-        self.assertNotIn(b"proxy-", upstream_request.lower())
+        self.assertIn(b"Host: chatgpt.com\r\n", provider_request)
+        self.assertIn(b"Authorization: Bearer codex-real\r\n", provider_request)
+        self.assertIn(b"ChatGPT-Account-ID: account-real\r\n", provider_request)
+        self.assertIn(b"originator: codex_cli_rs\r\n", provider_request)
+        self.assertNotIn(b"spoofed-account", provider_request)
+        self.assertNotIn(b"proxy-", provider_request.lower())
         self.assertEqual(credential_state_store.secret_slugs, ["openai-codex"])
 
     async def test_url_credential_rewrite_removes_authorization_before_forwarding(self) -> None:
-        upstream_request, credential_state_store = await self._forward_one_request(
-            client_bytes=(
+        provider_request, credential_state_store = await self._forward_one_request(
+            sandbox_bytes=(
                 b"POST /bot000000:HUMR_PLACEHOLDER/sendMessage HTTP/1.1\r\n"
                 b"Host: attacker.example\r\n"
                 b"Authorization: Bearer must-not-leak\r\n"
@@ -1523,17 +1530,17 @@ class TestProxyConnectionStateMachine(unittest.IsolatedAsyncioTestCase):
             host="api.telegram.org",
         )
 
-        self.assertIn(b"POST /bot123456:real/sendMessage HTTP/1.1\r\n", upstream_request)
-        self.assertIn(b"Host: api.telegram.org\r\n", upstream_request)
-        self.assertIn(b"content-type: application/json\r\n", upstream_request)
-        self.assertNotIn(b"attacker.example", upstream_request)
-        self.assertNotIn(b"authorization", upstream_request.lower())
-        self.assertNotIn(b"proxy-", upstream_request.lower())
+        self.assertIn(b"POST /bot123456:real/sendMessage HTTP/1.1\r\n", provider_request)
+        self.assertIn(b"Host: api.telegram.org\r\n", provider_request)
+        self.assertIn(b"content-type: application/json\r\n", provider_request)
+        self.assertNotIn(b"attacker.example", provider_request)
+        self.assertNotIn(b"authorization", provider_request.lower())
+        self.assertNotIn(b"proxy-", provider_request.lower())
         self.assertEqual(credential_state_store.secret_slugs, ["telegram"])
 
     async def test_custom_api_key_rewrite_removes_authorization_and_preserves_provider_headers(self) -> None:
-        upstream_request, credential_state_store = await self._forward_one_request(
-            client_bytes=(
+        provider_request, credential_state_store = await self._forward_one_request(
+            sandbox_bytes=(
                 b"POST /v1/messages HTTP/1.1\r\n"
                 b"Host: attacker.example\r\n"
                 b"X-Api-Key: HUMR_PLACEHOLDER\r\n"
@@ -1550,52 +1557,52 @@ class TestProxyConnectionStateMachine(unittest.IsolatedAsyncioTestCase):
             host="api.anthropic.com",
         )
 
-        self.assertIn(b"Host: api.anthropic.com\r\n", upstream_request)
-        self.assertIn(b"x-api-key: sk-ant-real\r\n", upstream_request)
-        self.assertIn(b"anthropic-version: 2023-06-01\r\n", upstream_request)
-        self.assertNotIn(b"attacker.example", upstream_request)
-        self.assertNotIn(b"authorization", upstream_request.lower())
-        self.assertNotIn(b"proxy-", upstream_request.lower())
+        self.assertIn(b"Host: api.anthropic.com\r\n", provider_request)
+        self.assertIn(b"x-api-key: sk-ant-real\r\n", provider_request)
+        self.assertIn(b"anthropic-version: 2023-06-01\r\n", provider_request)
+        self.assertNotIn(b"attacker.example", provider_request)
+        self.assertNotIn(b"authorization", provider_request.lower())
+        self.assertNotIn(b"proxy-", provider_request.lower())
         self.assertEqual(credential_state_store.secret_slugs, ["anthropic"])
 
-    async def test_upstream_eof_framing_ends_client_loop_without_waiting_for_another_request(self) -> None:
-        client_writer, upstream_writers, credential_state_store = await self._run_intercept(
-            client_bytes=b"GET /api/v1/models HTTP/1.1\r\nHost: openrouter.ai\r\n\r\n",
-            upstream_responses=[b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{}"],
+    async def test_provider_eof_framing_ends_sandbox_loop_without_waiting_for_another_request(self) -> None:
+        sandbox_writer, provider_writers, credential_state_store = await self._run_intercept(
+            sandbox_bytes=b"GET /api/v1/models HTTP/1.1\r\nHost: openrouter.ai\r\n\r\n",
+            provider_responses=[b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{}"],
             secrets={"api_key": "unused"},
-            feed_client_eof=False,
+            feed_sandbox_eof=False,
         )
 
-        self.assertTrue(client_writer.all_bytes().endswith(b"{}"))
-        self.assertEqual(len(upstream_writers), 1)
+        self.assertTrue(sandbox_writer.all_bytes().endswith(b"{}"))
+        self.assertEqual(len(provider_writers), 1)
         self.assertEqual(credential_state_store.secret_slugs, [])
 
-    async def test_upstream_connection_close_ends_client_loop_after_framed_body(self) -> None:
-        client_writer, _upstream_writers, _credential_state_store = await self._run_intercept(
-            client_bytes=b"GET /api/v1/models HTTP/1.1\r\nHost: openrouter.ai\r\n\r\n",
-            upstream_responses=[b"HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 2\r\n\r\n{}"],
+    async def test_provider_connection_close_ends_sandbox_loop_after_framed_body(self) -> None:
+        sandbox_writer, _provider_writers, _credential_state_store = await self._run_intercept(
+            sandbox_bytes=b"GET /api/v1/models HTTP/1.1\r\nHost: openrouter.ai\r\n\r\n",
+            provider_responses=[b"HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 2\r\n\r\n{}"],
             secrets={"api_key": "unused"},
-            feed_client_eof=False,
+            feed_sandbox_eof=False,
         )
 
-        self.assertTrue(client_writer.all_bytes().endswith(b"{}"))
+        self.assertTrue(sandbox_writer.all_bytes().endswith(b"{}"))
 
-    async def test_upstream_failure_before_head_returns_clean_502(self) -> None:
+    async def test_provider_failure_before_head_returns_clean_502(self) -> None:
         with patch.object(broker.tls_intercept.logger, "exception") as log_exception:
-            client_writer, _upstream_writers, _credential_state_store = await self._run_intercept(
-                client_bytes=b"GET /api/v1/models HTTP/1.1\r\nHost: openrouter.ai\r\n\r\n",
-                upstream_responses=[b"HTTP/1.1 200 OK\r\nContent-Length: garbage\r\n\r\n"],
+            sandbox_writer, _provider_writers, _credential_state_store = await self._run_intercept(
+                sandbox_bytes=b"GET /api/v1/models HTTP/1.1\r\nHost: openrouter.ai\r\n\r\n",
+                provider_responses=[b"HTTP/1.1 200 OK\r\nContent-Length: garbage\r\n\r\n"],
                 secrets={"api_key": "unused"},
-                feed_client_eof=False,
+                feed_sandbox_eof=False,
             )
 
-        response = client_writer.all_bytes()
+        response = sandbox_writer.all_bytes()
         self.assertIn(b"HTTP/1.1 502 Bad Gateway", response)
         self.assertNotIn(b"HTTP/1.1 200 OK", response)
         log_exception.assert_called_once()
 
     async def test_only_credentialed_401_invalidates_provider_cache(self) -> None:
-        client_bytes = (
+        sandbox_bytes = (
             b"GET /api/v1/authenticated HTTP/1.1\r\n"
             b"Host: openrouter.ai\r\n"
             b"Authorization: Bearer HUMR_PLACEHOLDER\r\n"
@@ -1607,34 +1614,34 @@ class TestProxyConnectionStateMachine(unittest.IsolatedAsyncioTestCase):
         )
         unauthorized = b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n"
 
-        _client_writer, _upstream_writers, credential_state_store = await self._run_intercept(
-            client_bytes=client_bytes,
-            upstream_responses=[unauthorized, unauthorized],
+        _sandbox_writer, _provider_writers, credential_state_store = await self._run_intercept(
+            sandbox_bytes=sandbox_bytes,
+            provider_responses=[unauthorized, unauthorized],
             secrets={"api_key": "real-openrouter-key"},
-            feed_client_eof=False,
+            feed_sandbox_eof=False,
         )
 
         self.assertEqual(credential_state_store.secret_slugs, ["openrouter"])
         self.assertEqual(credential_state_store.invalidated_slugs, ["openrouter"])
 
-    async def test_bad_request_framing_returns_400_without_opening_upstream(self) -> None:
-        client_writer, upstream_writers, credential_state_store = await self._run_intercept(
-            client_bytes=(
+    async def test_bad_request_framing_returns_400_without_opening_provider(self) -> None:
+        sandbox_writer, provider_writers, credential_state_store = await self._run_intercept(
+            sandbox_bytes=(
                 b"POST /api/v1/chat/completions HTTP/1.1\r\n"
                 b"Host: openrouter.ai\r\n"
                 b"Content-Length: 4\r\n"
                 b"Content-Length: 5\r\n"
                 b"\r\n"
             ),
-            upstream_responses=[],
+            provider_responses=[],
             secrets={"api_key": "unused"},
-            feed_client_eof=False,
+            feed_sandbox_eof=False,
         )
 
-        response = client_writer.all_bytes()
+        response = sandbox_writer.all_bytes()
         self.assertIn(b"HTTP/1.1 400 Bad Request", response)
         self.assertIn(b"conflicting request Content-Length", response)
-        self.assertEqual(upstream_writers, [])
+        self.assertEqual(provider_writers, [])
         self.assertEqual(credential_state_store.secret_slugs, [])
 
 

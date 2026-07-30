@@ -220,7 +220,7 @@ class _RelayRecordingWriter:
         return b"".join(self.chunks)
 
 
-class _StubUpstreamWriter:
+class _StubProviderWriter:
 
     def write(self, data: bytes) -> None:
         return None
@@ -252,27 +252,29 @@ def _sse_parts(model: str) -> list[bytes]:
     return [stream[:third], stream[third:2 * third], stream[2 * third:]]
 
 
-async def _forward(upstream_response: bytes, observer: object | None) -> tuple[int, bool, _RelayRecordingWriter]:
-    client_writer = _RelayRecordingWriter()
-    upstream_reader = asyncio.StreamReader()
-    upstream_reader.feed_data(upstream_response)
-    upstream_reader.feed_eof()
+async def _forward(provider_response: bytes, observer: object | None) -> tuple[int, bool, _RelayRecordingWriter]:
+    sandbox_writer = _RelayRecordingWriter()
+    provider_reader = asyncio.StreamReader()
+    provider_reader.feed_data(provider_response)
+    provider_reader.feed_eof()
 
-    async def _fake_open_connection(**kwargs: object) -> tuple[asyncio.StreamReader, _StubUpstreamWriter]:
-        return upstream_reader, _StubUpstreamWriter()
+    async def _fake_open_connection(**kwargs: object) -> tuple[asyncio.StreamReader, _StubProviderWriter]:
+        return provider_reader, _StubProviderWriter()
 
     with patch.object(tls_http_message_relay.asyncio, "open_connection", _fake_open_connection):
-        status, keep_alive = await tls_http_message_relay.forward_to_upstream(
-            host="chatgpt.com",
-            port=443,
-            method="POST",
-            path_with_query="/backend-api/codex/responses",
-            headers=[(b"host", b"chatgpt.com")],
-            body=b"{}",
-            client_writer=client_writer,
+        result = await tls_http_message_relay.forward_to_provider(
+            provider_host="chatgpt.com",
+            provider_port=443,
+            request=tls_http_message_relay.ProviderRequest(
+                method="POST",
+                path_with_query="/backend-api/codex/responses",
+                headers=[(b"host", b"chatgpt.com")],
+                body=b"{}",
+            ),
+            sandbox_writer=sandbox_writer,
             response_body_observer=observer,
         )
-    return status, keep_alive, client_writer
+    return result.status_code, result.sandbox_connection_can_continue, sandbox_writer
 
 
 class TestRelayObserverSeam(unittest.IsolatedAsyncioTestCase):
@@ -281,24 +283,24 @@ class TestRelayObserverSeam(unittest.IsolatedAsyncioTestCase):
         reporter = _RecordingReporter()
         tap = tls_usage_metering.UsageTap(provider_slug="openai-codex", record_usage=reporter.record)
 
-        status, keep_alive, writer = await _forward(
-            upstream_response=_chunked_sse_response(model="gpt-5.2-codex"), observer=tap,
+        status, sandbox_connection_can_continue, writer = await _forward(
+            provider_response=_chunked_sse_response(model="gpt-5.2-codex"), observer=tap,
         )
 
         self.assertEqual(status, 200)
-        self.assertTrue(keep_alive)
+        self.assertTrue(sandbox_connection_can_continue)
         self.assertEqual(len(reporter.events), 1)
         self.assertEqual(reporter.events[0]["subkey"], "gpt-5.2-codex")
-        # The client still sees the chunked framing verbatim.
+        # The sandbox still sees the chunked framing verbatim.
         self.assertIn(b"Transfer-Encoding: chunked", writer.all_bytes())
         self.assertIn(b"event: response.completed", writer.all_bytes())
 
     async def test_raising_observer_never_disturbs_the_relay(self) -> None:
         with_observer = await _forward(
-            upstream_response=_chunked_sse_response(model="m"), observer=_RaisingObserver(),
+            provider_response=_chunked_sse_response(model="m"), observer=_RaisingObserver(),
         )
         without_observer = await _forward(
-            upstream_response=_chunked_sse_response(model="m"), observer=None,
+            provider_response=_chunked_sse_response(model="m"), observer=None,
         )
 
         self.assertEqual(with_observer[0], without_observer[0])
@@ -384,7 +386,7 @@ class _TlsRecordingWriter(_RelayRecordingWriter):
         return None
 
 
-class _RecordingUpstreamWriter(_StubUpstreamWriter):
+class _RecordingProviderWriter(_StubProviderWriter):
 
     def __init__(self) -> None:
         self.chunks: list[bytes] = []
@@ -438,7 +440,7 @@ class TestTapForRequest(unittest.TestCase):
 
 
 class TestMeteredInterceptWiring(unittest.IsolatedAsyncioTestCase):
-    """_intercept_and_forward attaches the tap and strips Accept-Encoding for metered requests only."""
+    """The intercept loop attaches the tap and strips Accept-Encoding for metered requests only."""
 
     async def _intercept(
         self,
@@ -447,12 +449,12 @@ class TestMeteredInterceptWiring(unittest.IsolatedAsyncioTestCase):
         secrets: dict[str, str],
         platform_shared: bool,
         request_headers: bytes,
-        upstream_response: bytes,
+        provider_response: bytes,
         usage_reporter: object | None,
-    ) -> tuple[_TlsRecordingWriter, _RecordingUpstreamWriter]:
+    ) -> tuple[_TlsRecordingWriter, _RecordingProviderWriter]:
         provider = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS[provider_slug]
-        client_reader = asyncio.StreamReader()
-        client_reader.feed_data(
+        sandbox_reader = asyncio.StreamReader()
+        sandbox_reader.feed_data(
             b"POST /backend-api/codex/responses HTTP/1.1\r\n"
             b"Host: " + host.encode() + b"\r\n"
             + request_headers +
@@ -461,28 +463,28 @@ class TestMeteredInterceptWiring(unittest.IsolatedAsyncioTestCase):
             b"\r\n"
             b"{}"
         )
-        client_reader.feed_eof()
-        client_writer = _TlsRecordingWriter()
-        upstream_reader = asyncio.StreamReader()
-        upstream_reader.feed_data(upstream_response)
-        upstream_reader.feed_eof()
-        upstream_writer = _RecordingUpstreamWriter()
+        sandbox_reader.feed_eof()
+        sandbox_writer = _TlsRecordingWriter()
+        provider_reader = asyncio.StreamReader()
+        provider_reader.feed_data(provider_response)
+        provider_reader.feed_eof()
+        provider_writer = _RecordingProviderWriter()
 
-        async def _fake_open_connection(**kwargs: object) -> tuple[asyncio.StreamReader, _RecordingUpstreamWriter]:
-            return upstream_reader, upstream_writer
+        async def _fake_open_connection(**kwargs: object) -> tuple[asyncio.StreamReader, _RecordingProviderWriter]:
+            return provider_reader, provider_writer
 
         loop = asyncio.get_running_loop()
         with (
-            patch.object(loop, "start_tls", AsyncMock(return_value=client_writer.transport)),
-            patch.object(tls_intercept.asyncio, "StreamWriter", return_value=client_writer),
+            patch.object(loop, "start_tls", AsyncMock(return_value=sandbox_writer.transport)),
+            patch.object(tls_intercept.asyncio, "StreamWriter", return_value=sandbox_writer),
             patch.object(tls_http_message_relay.asyncio, "open_connection", _fake_open_connection),
         ):
             await asyncio.wait_for(
-                tls_intercept._intercept_and_forward(
-                    client_reader=client_reader,
-                    client_writer=client_writer,
-                    host=host,
-                    port=443,
+                tls_intercept._serve_intercepted_connection(
+                    sandbox_reader=sandbox_reader,
+                    sandbox_writer=sandbox_writer,
+                    provider_host=host,
+                    provider_port=443,
                     provider=provider,
                     minter=_StubCertMinter(),
                     credential_state_store=_StubCredentialStateStore(secrets=secrets, platform_shared=platform_shared),
@@ -490,63 +492,63 @@ class TestMeteredInterceptWiring(unittest.IsolatedAsyncioTestCase):
                 ),
                 timeout=1.0,
             )
-        return client_writer, upstream_writer
+        return sandbox_writer, provider_writer
 
     async def test_platform_funded_codex_is_metered_and_accept_encoding_stripped(self) -> None:
         reporter = _RecordingReporter()
 
-        client_writer, upstream_writer = await self._intercept(
+        sandbox_writer, provider_writer = await self._intercept(
             provider_slug="openai-codex",
             host="chatgpt.com",
             secrets={"access_token": "tok", "chatgpt_account_id": "acct"},
             platform_shared=True,
             request_headers=b"Accept-Encoding: gzip, br\r\n",
-            upstream_response=_chunked_sse_response(model="gpt-5.2-codex"),
+            provider_response=_chunked_sse_response(model="gpt-5.2-codex"),
             usage_reporter=reporter,
         )
 
-        self.assertNotIn(b"accept-encoding", upstream_writer.all_bytes().lower())
+        self.assertNotIn(b"accept-encoding", provider_writer.all_bytes().lower())
         self.assertEqual(len(reporter.events), 1)
         self.assertEqual(reporter.events[0]["subkey"], "gpt-5.2-codex")
-        self.assertIn(b"event: response.completed", client_writer.all_bytes())
+        self.assertIn(b"event: response.completed", sandbox_writer.all_bytes())
 
     async def test_customer_funded_codex_is_not_metered(self) -> None:
         """An org-shared or personal Codex credential consumes no credits — no tap, no header strip."""
         reporter = _RecordingReporter()
 
-        _client_writer, upstream_writer = await self._intercept(
+        _sandbox_writer, provider_writer = await self._intercept(
             provider_slug="openai-codex",
             host="chatgpt.com",
             secrets={"access_token": "tok", "chatgpt_account_id": "acct"},
             platform_shared=False,
             request_headers=b"Accept-Encoding: gzip, br\r\n",
-            upstream_response=_chunked_sse_response(model="gpt-5.2-codex"),
+            provider_response=_chunked_sse_response(model="gpt-5.2-codex"),
             usage_reporter=reporter,
         )
 
-        self.assertIn(b"accept-encoding", upstream_writer.all_bytes().lower())
+        self.assertIn(b"accept-encoding", provider_writer.all_bytes().lower())
         self.assertEqual(reporter.events, [])
 
     async def test_platform_funded_unparsed_provider_keeps_accept_encoding_and_reports_nothing(self) -> None:
         reporter = _RecordingReporter()
         response_body = json.dumps({"model": "gpt-5.2", "usage": _USAGE}).encode()
-        upstream_response = (
+        provider_response = (
             b"HTTP/1.1 200 OK\r\n"
             b"Content-Length: " + str(len(response_body)).encode() + b"\r\n"
             b"\r\n" + response_body
         )
 
-        _client_writer, upstream_writer = await self._intercept(
+        _sandbox_writer, provider_writer = await self._intercept(
             provider_slug="openrouter",
             host="openrouter.ai",
             secrets={"api_key": "sk-or-real"},
             platform_shared=True,
             request_headers=b"Accept-Encoding: gzip\r\nAuthorization: Bearer HUMR_PLACEHOLDER\r\n",
-            upstream_response=upstream_response,
+            provider_response=provider_response,
             usage_reporter=reporter,
         )
 
-        self.assertIn(b"accept-encoding", upstream_writer.all_bytes().lower())
+        self.assertIn(b"accept-encoding", provider_writer.all_bytes().lower())
         self.assertEqual(reporter.events, [])
 
 
