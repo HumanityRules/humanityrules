@@ -1,33 +1,64 @@
-"""TLS-intercept proxy for platform-managed provider credentials — the subsystem's front door.
+"""Front door of the TLS-intercept subsystem: the local HTTPS proxy that stands
+between the sandboxed agent and the outside world.
 
-The sandbox gets HTTPS_PROXY pointed at this proxy and SSL_CERT_FILE pointed at
-our CA bundle, so every outbound HTTPS request arrives here as a CONNECT. A host
-no provider claims falls through to an opaque tunnel — the agent reaches the rest
-of the internet without this proxy reading it. A host in the catalog gets
-terminated with a minted leaf cert, its credential swapped for the real secret,
-and each request sent to the real provider.
+The agent cannot hold real credentials. When it calls a managed API — Gmail,
+GitHub, an LLM provider, and so on — the call still looks like ordinary HTTPS
+from inside the sandbox. What actually happens is that every outbound HTTPS
+request is forced through this proxy (`HTTPS_PROXY` points here; the sandbox
+trusts a CA bundle we control via `SSL_CERT_FILE`). The proxy is the place
+where a real credential can be written into the request, because it lives
+outside the sandbox and already holds the user's secrets in memory.
 
-That flow is this file. Each part it composes is one module:
+Think of an arriving connection in two stages.
 
-- `tls_provider_catalog` — which hosts are intercepted and how each provider's
-  credential works. Static data; the only file a new provider needs.
-- `tls_certificate_authority` — the CA and the per-host leaf certs that let us
-  terminate the sandbox's TLS connection.
-- `tls_token_store` — the real secrets and cache-independent connection state
-  for a provider slug, refreshed from HUMR.
-- `tls_credential_injection` — plans credential handling from the sandbox
-  request, then applies that plan after the token lookup.
-- `tls_http_message_relay` — provider-agnostic HTTP/1.1: parse, frame, replay
-  to the provider, stream the response back to the sandbox.
-- `tls_usage_metering` — billing usage metering. Owns the decision of which
-  requests are metered (HUMR-funded credential + parseable dialect), observes
-  the response relay through the relay's observer seam, and reports token
-  usage to HUMR. Absent (None reporter) the proxy behaves identically.
+First the sandbox asks the proxy to open a tunnel to some hostname (an HTTP
+`CONNECT`). The proxy looks that hostname up in the provider catalog:
 
-This runtime only invalidates and refreshes its in-memory credential cache.
-It does not drive the broader credential-change flow (env re-render, process
-restarts, auth-marker updates) — that lives in `credentials_service`, which
-calls down into this runtime, never the other way around.
+- If no provider lists it, the proxy becomes a dumb pipe. Bytes flow both
+  ways untouched; the agent has a normal end-to-end TLS session with whoever
+  it called. That is how the rest of the internet keeps working.
+- If a provider does list it, the proxy does *not* become a pipe. It answers
+  the tunnel request, then pretends to *be* that hostname for the sandbox's
+  TLS handshake — presenting a certificate it minted for the occasion. From
+  the sandbox's point of view the connection looks legitimate. From the
+  proxy's point of view the HTTP inside is now readable.
+
+Second, for each HTTP request on that readable connection, the proxy:
+
+1. Decides whether this request needs a managed credential (and rejects it
+   cleanly if the sandbox sent something the provider's rules forbid).
+2. Looks up the real secrets for that provider, refreshing from HUMR when
+   the cache is stale or empty.
+3. Rewrites the request so the secret is where the upstream expects it.
+4. Opens a fresh TLS connection to the real provider, sends the rewritten
+   request, and streams the response back — optionally watching the body
+   for billable usage when HUMR itself funded the credential.
+5. If the provider answers 401 on a request we injected into, drops the
+   cached secret so the next call refetches. A 401 on anonymous traffic
+   never touches the cache; we did not put our secret in that request.
+
+`TlsInterceptRuntime` is the object the rest of the broker holds. It owns
+host routing, the status cards and gateway-env snapshots (joining each
+static catalog entry with live connection state), and the proxy lifecycle
+above. The pieces it composes each do one job and nothing else:
+
+- `tls_provider_catalog` — static per-provider declarations (hosts, wire
+  behavior, env bindings, connect UX).
+- `tls_certificate_authority` — the CA and the per-host certificates that
+  let us terminate the sandbox's TLS.
+- `tls_token_store` — the in-memory secrets and "is this provider
+  connected?" state, refreshed from HUMR.
+- `tls_credential_injection` — turn a sandbox request + a wire behavior
+  into a concrete rewrite plan, then apply it once secrets are in hand.
+- `tls_http_message_relay` — provider-agnostic HTTP/1.1 read/write/stream.
+- `tls_usage_metering` — decide whether a response is billable and report
+  usage; absent a reporter, the proxy behaves identically.
+
+This runtime only manages its own in-memory credential cache. The broader
+choreography after a connect or disconnect — re-rendering gateway env,
+restarting processes, updating auth markers — lives in
+`credentials_service`, which calls down into this runtime and is never
+called back.
 """
 
 import asyncio
