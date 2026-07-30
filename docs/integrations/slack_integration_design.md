@@ -176,7 +176,7 @@ parts fork in five places, everything else is shared:
   hands the sandbox two distinct placeholder bearers (`xapp-…PLACEHOLDER`,
   `xoxb-…PLACEHOLDER`); the sandbox already sends the correct token per call (app token
   opens the socket, bot token posts), so the proxy maps the incoming placeholder bearer →
-  real secret name. No per-request path logic in the hot path. `placeholders` is a
+  real secret name. No per-request path logic in the hot path. `placeholder_by_secret_name` is a
   secret_name → placeholder map; the hot path fails closed on an unknown bearer.
 - **`TlsProviderSpec` hosts** `slack.com`, `www.slack.com` (REST only). The `wss://`
   Socket Mode host is not intercepted — it passes through as a plain CONNECT tunnel
