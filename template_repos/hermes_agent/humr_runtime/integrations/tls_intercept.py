@@ -24,10 +24,10 @@ That flow is this file. Each part it composes is one module:
   the response relay through the relay's observer seam, and reports token
   usage to HUMR. Absent (None reporter) the proxy behaves identically.
 
-Pure mechanism: cache invalidation and refresh do not perform credential-change
-choreography. The env re-render, process restarts, and auth-marker updates that
-follow a credential change live in `credentials_service`, which calls down into
-this runtime — never the other way around.
+This runtime only invalidates and refreshes its in-memory credential cache.
+It does not drive the broader credential-change flow (env re-render, process
+restarts, auth-marker updates) — that lives in `credentials_service`, which
+calls down into this runtime, never the other way around.
 """
 
 import asyncio
@@ -294,6 +294,14 @@ async def _serve_intercepted_connection(
                     message=f"{provider.slug}: {exc}",
                 )
                 return
+            except tls_credential_injection.CredentialContractError as exc:
+                logger.error("%s credential contract failed: %s", provider.slug, exc)
+                await tls_http_message_relay.send_json_error(
+                    writer=sandbox_tls_writer,
+                    status=502,
+                    message=f"{provider.slug}: HUMR returned an incomplete managed credential",
+                )
+                return
             except _ProviderNotConnected:
                 await _send_provider_not_connected(sandbox_writer=sandbox_tls_writer, provider=provider)
                 return
@@ -359,7 +367,12 @@ async def _build_provider_request(
     provider: tls_provider_catalog.TlsProviderSpec,
     credential_state_store: tls_token_store.CredentialStateStore,
 ) -> tuple[tls_http_message_relay.ProviderRequest, ProviderCredentialSource]:
-    """Build the request that should reach the provider."""
+    """
+    Build a provider request from the sandbox request.
+
+    Injects credentials when the provider's wire behavior requires them;
+    otherwise returns the sandbox request unchanged (passthrough).
+    """
     injection_plan = tls_credential_injection.plan_injection(
         headers=sandbox_request.headers,
         path_with_query=sandbox_request.path_with_query,
@@ -379,12 +392,14 @@ async def _build_provider_request(
     credential = await credential_state_store.credential_for_slug(slug=provider.slug)
     if credential is None:
         raise _ProviderNotConnected
+
     provider_headers, provider_path = tls_credential_injection.apply_injection_plan(
         headers=sandbox_request.headers,
         path_with_query=sandbox_request.path_with_query,
         secrets=credential.secrets,
         plan=injection_plan,
     )
+
     return (
         tls_http_message_relay.ProviderRequest(
             method=sandbox_request.method,

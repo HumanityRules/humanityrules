@@ -34,7 +34,7 @@ stored only on HUMR, never injected into customer containers).
    `allowed_users`, so the bot answers them immediately. The WebUI then runs
    the usual invalidate → gateway-env rewrite → `system.gateway` restart.
 
-Everything downstream is unchanged: the `PathPlaceholder` wire behavior, the
+Everything downstream is unchanged: the `UrlCredentialPlaceholder` wire behavior, the
 `TELEGRAM_BOT_TOKEN`/`TELEGRAM_ALLOWED_USERS` env bindings, and the restart
 contract in `docs/integrations/gateway_env_and_restart_design.md`.
 

@@ -1,16 +1,18 @@
 """Provider catalog for the TLS-intercept proxy.
 
-Static data only: the credential wire-behavior dataclasses, the per-provider
-`TlsProviderSpec` entries, and the registry built from them. The mechanism that
-consumes this catalog is one module per part — `tls_intercept` (the
-connection lifecycle that composes them), `tls_certificate_authority`,
-`tls_token_store`, `tls_credential_injection`, `tls_http_message_relay`; the
-gateway-env projection of `env_bindings` lives in `credentials_service`.
+One `TlsProviderSpec` is one third-party API the broker MITMs. It answers:
+which CONNECT hosts to claim, how a managed secret is written onto an
+intercepted request (`credential_wire_behavior`), and which env vars to
+project while connected (`env_bindings`). Connect UX (`connect_mode`) and
+panel placement (`category`) live here too.
 
-To add a provider that uses an existing credential wire behavior, append a
-`TlsProviderSpec` to `TLS_INTERCEPT_PROVIDER_SPECS` — no mechanism change
-needed. A new wire behavior also needs one planning branch in
-`tls_credential_injection`.
+This file is only that static data — the wire-behavior types, the specs
+tuple, and the slug registry. Runtime joins a spec with live connection
+state elsewhere.
+
+To add a provider that reuses an existing wire behavior, append a
+`TlsProviderSpec` to `TLS_INTERCEPT_PROVIDER_SPECS`. A new wire behavior
+also needs one planning branch in `tls_credential_injection`.
 """
 
 from dataclasses import dataclass
@@ -22,22 +24,34 @@ HEADER_VALUE_RAW = "raw"
 HEADER_VALUE_BEARER = "bearer"
 HEADER_VALUE_BASIC_X_ACCESS_TOKEN = "basic_x_access_token"
 HUMR_PLACEHOLDER_VALUE = "HUMR_PLACEHOLDER"
+
+HeaderValueFormat = Literal["raw", "bearer", "basic_x_access_token"]
+PlaceholderHeaderValueFormat = Literal["raw", "bearer"]
 ConnectMode = Literal["oauth", "device", "vault"]
+
 # Which integrations-panel section a provider renders under.
 Category = Literal["model_provider", "connector"]
 
 
 @dataclass(frozen=True)
 class HeaderInjection:
-    """Write one named HUMR secret into one provider request header."""
+    """Write one control-plane secret into one provider request header."""
 
     header_name: str
     secret_name: str
-    value_format: str
+    header_value_format: HeaderValueFormat
+
+    def __post_init__(self) -> None:
+        if self.header_value_format not in {
+            HEADER_VALUE_RAW,
+            HEADER_VALUE_BEARER,
+            HEADER_VALUE_BASIC_X_ACCESS_TOKEN,
+        }:
+            raise ValueError(f"unsupported header value format: {self.header_value_format!r}")
 
 
 @dataclass(frozen=True)
-class AlwaysInject:
+class AlwaysInjectHeaders:
     """Every request to the provider receives the configured HUMR secrets."""
 
     header_injections: tuple[HeaderInjection, ...]
@@ -66,26 +80,33 @@ class HeaderPlaceholder:
     """A recognized placeholder header selects one HUMR secret; an empty slot passes through."""
 
     header_name: str
-    placeholders: dict[str, str]
-    value_format: str
+    placeholder_by_secret_name: dict[str, str]
+    header_value_format: PlaceholderHeaderValueFormat
+    remove_authorization: bool
+    reject_authorization_when_placeholder_missing: bool
+
+    def __post_init__(self) -> None:
+        if self.header_value_format not in {HEADER_VALUE_RAW, HEADER_VALUE_BEARER}:
+            raise ValueError(f"unsupported placeholder header value format: {self.header_value_format!r}")
 
     def secret_for_placeholder(self, placeholder_value: str) -> str | None:
         """Return the secret selected by an incoming placeholder value."""
-        for secret_name, placeholder in self.placeholders.items():
+        for secret_name, placeholder in self.placeholder_by_secret_name.items():
             if placeholder == placeholder_value:
                 return secret_name
         return None
 
 
 @dataclass(frozen=True)
-class PathPlaceholder:
-    """Every provider path must contain the placeholder for one HUMR secret."""
+class UrlCredentialPlaceholder:
+    """The request URL must contain the placeholder for one HUMR secret."""
 
     placeholder: str
     secret_name: str
+    remove_authorization: bool
 
 
-CredentialWireBehavior = AlwaysInject | HeaderPlaceholder | PathPlaceholder
+CredentialWireBehavior = AlwaysInjectHeaders | HeaderPlaceholder | UrlCredentialPlaceholder
 
 
 @dataclass(frozen=True)
@@ -131,12 +152,12 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         ),
         logo_url="/extensions/humr/google-workspace.svg",
         connect_mode="oauth",
-        credential_wire_behavior=AlwaysInject(
+        credential_wire_behavior=AlwaysInjectHeaders(
             header_injections=(
                 HeaderInjection(
                     header_name="Authorization",
                     secret_name="access_token",
-                    value_format=HEADER_VALUE_BEARER,
+                    header_value_format=HEADER_VALUE_BEARER,
                 ),
             ),
         ),
@@ -160,12 +181,12 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         ),
         logo_url="/extensions/humr/github.svg",
         connect_mode="oauth",
-        credential_wire_behavior=AlwaysInject(
+        credential_wire_behavior=AlwaysInjectHeaders(
             header_injections=(
                 HeaderInjection(
                     header_name="Authorization",
                     secret_name="access_token",
-                    value_format=HEADER_VALUE_BASIC_X_ACCESS_TOKEN,
+                    header_value_format=HEADER_VALUE_BASIC_X_ACCESS_TOKEN,
                 ),
             ),
         ),
@@ -183,9 +204,10 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         hosts=("api.telegram.org",),
         logo_url="/extensions/humr/telegram.svg",
         connect_mode="vault",
-        credential_wire_behavior=PathPlaceholder(
+        credential_wire_behavior=UrlCredentialPlaceholder(
             placeholder="000000:HUMR_PLACEHOLDER",
             secret_name="bot_token",
+            remove_authorization=True,
         ),
         env_bindings=(
             EnvBinding(env_var="TELEGRAM_BOT_TOKEN", value="000000:HUMR_PLACEHOLDER"),
@@ -208,11 +230,13 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         connect_mode="vault",
         credential_wire_behavior=HeaderPlaceholder(
             header_name="Authorization",
-            placeholders={
+            placeholder_by_secret_name={
                 "app_token": "xapp-HUMR_PLACEHOLDER",
                 "bot_token": "xoxb-HUMR_PLACEHOLDER",
             },
-            value_format=HEADER_VALUE_BEARER,
+            header_value_format=HEADER_VALUE_BEARER,
+            remove_authorization=False,
+            reject_authorization_when_placeholder_missing=False,
         ),
         env_bindings=(
             EnvBinding(env_var="SLACK_APP_TOKEN", value="xapp-HUMR_PLACEHOLDER"),
@@ -238,17 +262,17 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         hosts=("chatgpt.com",),
         logo_url="/extensions/humr/openai.svg",
         connect_mode="device",
-        credential_wire_behavior=AlwaysInject(
+        credential_wire_behavior=AlwaysInjectHeaders(
             header_injections=(
                 HeaderInjection(
                     header_name="Authorization",
                     secret_name="access_token",
-                    value_format=HEADER_VALUE_BEARER,
+                    header_value_format=HEADER_VALUE_BEARER,
                 ),
                 HeaderInjection(
                     header_name="ChatGPT-Account-ID",
                     secret_name="chatgpt_account_id",
-                    value_format=HEADER_VALUE_RAW,
+                    header_value_format=HEADER_VALUE_RAW,
                 ),
             ),
         ),
@@ -264,12 +288,12 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         hosts=("inference-api.nousresearch.com",),
         logo_url="/extensions/humr/nous.svg",
         connect_mode="device",
-        credential_wire_behavior=AlwaysInject(
+        credential_wire_behavior=AlwaysInjectHeaders(
             header_injections=(
                 HeaderInjection(
                     header_name="Authorization",
                     secret_name="access_token",
-                    value_format=HEADER_VALUE_BEARER,
+                    header_value_format=HEADER_VALUE_BEARER,
                 ),
             ),
         ),
@@ -287,8 +311,10 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         connect_mode="vault",
         credential_wire_behavior=HeaderPlaceholder(
             header_name="Authorization",
-            placeholders={"api_key": HUMR_PLACEHOLDER_VALUE},
-            value_format=HEADER_VALUE_BEARER,
+            placeholder_by_secret_name={"api_key": HUMR_PLACEHOLDER_VALUE},
+            header_value_format=HEADER_VALUE_BEARER,
+            remove_authorization=False,
+            reject_authorization_when_placeholder_missing=False,
         ),
         env_bindings=(
             EnvBinding(env_var="OPENROUTER_API_KEY", value=HUMR_PLACEHOLDER_VALUE),
@@ -308,8 +334,10 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         connect_mode="vault",
         credential_wire_behavior=HeaderPlaceholder(
             header_name="Authorization",
-            placeholders={"api_key": HUMR_PLACEHOLDER_VALUE},
-            value_format=HEADER_VALUE_BEARER,
+            placeholder_by_secret_name={"api_key": HUMR_PLACEHOLDER_VALUE},
+            header_value_format=HEADER_VALUE_BEARER,
+            remove_authorization=False,
+            reject_authorization_when_placeholder_missing=False,
         ),
         env_bindings=(
             EnvBinding(env_var="OPENAI_API_KEY", value=HUMR_PLACEHOLDER_VALUE),
@@ -328,8 +356,10 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         connect_mode="vault",
         credential_wire_behavior=HeaderPlaceholder(
             header_name="x-api-key",
-            placeholders={"api_key": HUMR_PLACEHOLDER_VALUE},
-            value_format=HEADER_VALUE_RAW,
+            placeholder_by_secret_name={"api_key": HUMR_PLACEHOLDER_VALUE},
+            header_value_format=HEADER_VALUE_RAW,
+            remove_authorization=True,
+            reject_authorization_when_placeholder_missing=True,
         ),
         env_bindings=(
             EnvBinding(env_var="ANTHROPIC_API_KEY", value=HUMR_PLACEHOLDER_VALUE),
@@ -352,8 +382,10 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         connect_mode="vault",
         credential_wire_behavior=HeaderPlaceholder(
             header_name="X-Browser-Use-API-Key",
-            placeholders={"api_key": HUMR_PLACEHOLDER_VALUE},
-            value_format=HEADER_VALUE_RAW,
+            placeholder_by_secret_name={"api_key": HUMR_PLACEHOLDER_VALUE},
+            header_value_format=HEADER_VALUE_RAW,
+            remove_authorization=True,
+            reject_authorization_when_placeholder_missing=True,
         ),
         env_bindings=(
             EnvBinding(env_var="BROWSER_USE_API_KEY", value=HUMR_PLACEHOLDER_VALUE),
@@ -377,12 +409,12 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         hosts=("api.x.com",),
         logo_url="/extensions/humr/x.svg",
         connect_mode="oauth",
-        credential_wire_behavior=AlwaysInject(
+        credential_wire_behavior=AlwaysInjectHeaders(
             header_injections=(
                 HeaderInjection(
                     header_name="Authorization",
                     secret_name="access_token",
-                    value_format=HEADER_VALUE_BEARER,
+                    header_value_format=HEADER_VALUE_BEARER,
                 ),
             ),
         ),
@@ -404,8 +436,10 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         connect_mode="vault",
         credential_wire_behavior=HeaderPlaceholder(
             header_name="Authorization",
-            placeholders={"api_key": "tvly-HUMR_PLACEHOLDER"},
-            value_format=HEADER_VALUE_BEARER,
+            placeholder_by_secret_name={"api_key": "tvly-HUMR_PLACEHOLDER"},
+            header_value_format=HEADER_VALUE_BEARER,
+            remove_authorization=False,
+            reject_authorization_when_placeholder_missing=False,
         ),
         env_bindings=(
             EnvBinding(env_var="TAVILY_API_KEY", value="tvly-HUMR_PLACEHOLDER"),
