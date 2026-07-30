@@ -10,7 +10,11 @@
             </p>
         </div>
         <button type="button"
-                onclick="document.getElementById('billing-events-{{ app_id }}').innerHTML = ''"
+                hx-get="{% url 'platform_billing' %}?window={{ billing_window.key }}"
+                hx-target="#billing-events-{{ app_id }}"
+                hx-select="#billing-events-{{ app_id }}"
+                hx-swap="outerHTML"
+                hx-push-url="true"
                 class="text-xs font-medium text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">Close</button>
     </div>
 
@@ -62,16 +66,18 @@
         <div class="flex gap-3">
             {% if event_page.page.has_previous %}
             <button type="button"
-                    hx-get="{% url 'platform_billing_app_events' organization_id=organization.id app_id=app_id %}?window={{ billing_window.key }}&page={{ event_page.page.previous_page_number }}"
+                    hx-get="{% url 'platform_billing_app_events' organization_id=organization.id app_id=app_id %}?window={{ billing_window.key }}&amp;page={{ event_page.page.previous_page_number }}"
                     hx-target="#billing-events-{{ app_id }}"
                     hx-swap="innerHTML"
+                    hx-push-url="{% url 'platform_billing' %}?window={{ billing_window.key }}&amp;organization={{ organization.id }}&amp;app={{ app_id }}&amp;page={{ event_page.page.previous_page_number }}"
                     class="font-medium text-indigo-600 hover:underline dark:text-indigo-400">Previous</button>
             {% endif %}
             {% if event_page.page.has_next %}
             <button type="button"
-                    hx-get="{% url 'platform_billing_app_events' organization_id=organization.id app_id=app_id %}?window={{ billing_window.key }}&page={{ event_page.page.next_page_number }}"
+                    hx-get="{% url 'platform_billing_app_events' organization_id=organization.id app_id=app_id %}?window={{ billing_window.key }}&amp;page={{ event_page.page.next_page_number }}"
                     hx-target="#billing-events-{{ app_id }}"
                     hx-swap="innerHTML"
+                    hx-push-url="{% url 'platform_billing' %}?window={{ billing_window.key }}&amp;organization={{ organization.id }}&amp;app={{ app_id }}&amp;page={{ event_page.page.next_page_number }}"
                     class="font-medium text-indigo-600 hover:underline dark:text-indigo-400">Next</button>
             {% endif %}
         </div>
