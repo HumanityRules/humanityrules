@@ -28,8 +28,6 @@ import tls_provider_catalog
 logger = logging.getLogger("tls_token_store")
 
 
-REFRESH_LEAD_SECONDS = 300
-
 # Browser-facing status strings rendered by the WebUI extension.
 STATUS_CONNECTED = "connected"
 STATUS_NOT_CONNECTED = "not_connected"
@@ -342,6 +340,11 @@ class TokenStore:
                 _status_item_for_provider(provider=provider, state=self._conn.get(provider.slug))
                 for provider in self._providers.values()
             ]
+
+    async def connected_slugs(self) -> frozenset[str]:
+        """Return the provider slugs with connected durable state; never calls HUMR."""
+        async with self._lock:
+            return frozenset(slug for slug, state in self._conn.items() if state.connected)
 
     async def gateway_env_snapshot(self) -> list[tuple[tls_provider_catalog.TlsProviderSpec, dict]]:
         """Pair every connected provider with its last-known config for env rendering.
