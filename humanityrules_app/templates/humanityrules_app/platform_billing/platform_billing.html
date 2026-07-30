@@ -15,7 +15,7 @@
             <div class="flex items-center gap-3">
                 <div class="inline-flex rounded-md shadow-xs" role="group" aria-label="Billing time window">
                     {% for choice in billing_window_choices %}
-                    <a href="{% url 'platform_billing' %}?window={{ choice.key }}"
+                    <a href="{% url 'platform_billing' %}?window={{ choice.key }}{% if expanded_event_page %}&amp;organization={{ expanded_organization.id }}&amp;app={{ expanded_app_id }}{% endif %}"
                        class="border px-3 py-2 text-sm font-medium first:rounded-l-md last:rounded-r-md
                               {% if choice.key == billing_window.key %}relative z-10 border-indigo-500 bg-indigo-50 text-indigo-700 dark:border-indigo-400 dark:bg-indigo-500/10 dark:text-indigo-300
                               {% else %}-ml-px border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-white/10 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-white/5{% endif %}">
@@ -23,7 +23,7 @@
                     </a>
                     {% endfor %}
                 </div>
-                <a href="{% url 'platform_billing' %}?window={{ billing_window.key }}"
+                <a href="{% url 'platform_billing' %}?window={{ billing_window.key }}{% if expanded_event_page %}&amp;organization={{ expanded_organization.id }}&amp;app={{ expanded_app_id }}&amp;page={{ expanded_event_page.page.number }}{% endif %}"
                    class="rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-700 shadow-xs ring-1 ring-inset ring-gray-300 hover:bg-gray-50 dark:bg-gray-900 dark:text-gray-300 dark:ring-white/10 dark:hover:bg-white/5">
                     Refresh
                 </a>
@@ -106,12 +106,17 @@
                                         hx-get="{% url 'platform_billing_app_events' organization_id=group.organization.id app_id=app.app_id %}?window={{ billing_window.key }}"
                                         hx-target="#billing-events-{{ app.app_id }}"
                                         hx-swap="innerHTML"
+                                        hx-push-url="{% url 'platform_billing' %}?window={{ billing_window.key }}&amp;organization={{ group.organization.id }}&amp;app={{ app.app_id }}"
                                         class="text-xs font-medium text-indigo-600 hover:underline dark:text-indigo-400">Events</button>
                             </td>
                         </tr>
                         <tr>
                             <td colspan="7" class="p-0">
-                                <div id="billing-events-{{ app.app_id }}" class="px-3"></div>
+                                <div id="billing-events-{{ app.app_id }}" class="px-3">
+                                    {% if expanded_event_page and expanded_organization.id == group.organization.id and expanded_app_id == app.app_id %}
+                                    {% include "humanityrules_app/platform_billing/_billing_app_events.html" with app_id=app.app_id event_page=expanded_event_page organization=expanded_organization %}
+                                    {% endif %}
+                                </div>
                             </td>
                         </tr>
                         {% empty %}

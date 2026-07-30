@@ -165,12 +165,46 @@ class TestPlatformBilling(TestCase):
         wrong_org_response = self.client.get(
             f"/platform/billing/organization/{self.empty_organization.id}/app/{self.app.id}/events/?window=30d"
         )
+        wrong_org_page_response = self.client.get(
+            f"/platform/billing/?window=30d&organization={self.empty_organization.id}&app={self.app.id}"
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, event.idempotency_key)
         self.assertContains(response, "input_tokens")
         self.assertContains(response, "gpt-5.2-codex")
         self.assertEqual(wrong_org_response.status_code, 404)
+        self.assertIsNone(wrong_org_page_response.context["expanded_event_page"])
+        self.assertNotContains(wrong_org_page_response, event.idempotency_key)
+
+    def test_event_panel_state_is_encoded_in_the_page_url(self) -> None:
+        event = self._create_event(
+            organization=self.organization,
+            app_id=self.app.id,
+            app_slug=self.app.slug,
+            occurred_at=timezone.now(),
+            idempotency_key="expanded-event",
+            rated_at=None,
+        )
+        self.client.force_login(self.staff)
+
+        response = self.client.get(
+            f"/platform/billing/?window=30d&organization={self.organization.id}&app={self.app.id}"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["expanded_app_id"], self.app.id)
+        self.assertEqual(response.context["expanded_organization"], self.organization)
+        self.assertContains(response, event.idempotency_key)
+        self.assertContains(
+            response,
+            f'href="/platform/billing/?window=7d&amp;organization={self.organization.id}&amp;app={self.app.id}"',
+        )
+        self.assertContains(
+            response,
+            f'hx-push-url="/platform/billing/?window=30d&amp;organization={self.organization.id}&amp;app={self.app.id}"',
+        )
+        self.assertContains(response, 'hx-select="#billing-events-')
 
     def test_event_drilldown_is_paginated(self) -> None:
         now = timezone.now()
@@ -188,11 +222,16 @@ class TestPlatformBilling(TestCase):
         response = self.client.get(
             f"/platform/billing/organization/{self.organization.id}/app/{self.app.id}/events/?window=30d&page=2"
         )
+        refreshed_page_response = self.client.get(
+            f"/platform/billing/?window=30d&organization={self.organization.id}&app={self.app.id}&page=2"
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["event_page"].page.number, 2)
         self.assertEqual(len(response.context["event_page"].page.object_list), 1)
         self.assertContains(response, f"Page 2 of 2 · {billing_admin_service.EVENTS_PER_PAGE + 1} events")
+        self.assertEqual(refreshed_page_response.context["expanded_event_page"].page.number, 2)
+        self.assertContains(refreshed_page_response, f"Page 2 of 2 · {billing_admin_service.EVENTS_PER_PAGE + 1} events")
 
     def test_platform_billing_is_hidden_from_nonstaff(self) -> None:
         anonymous_response = self.client.get("/platform/billing/")
