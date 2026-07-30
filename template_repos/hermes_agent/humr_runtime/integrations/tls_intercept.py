@@ -269,6 +269,7 @@ async def _intercept_and_forward(
                     break
             headers = tls_http_message_relay.parse_headers(lines=headers_raw)
             path_with_query = request_line.decode("iso-8859-1").split(" ", 2)[1]
+            
             try:
                 body = await tls_http_message_relay.read_body(reader=tls_reader, headers=headers)
             except ValueError as exc:
@@ -277,20 +278,14 @@ async def _intercept_and_forward(
                 # body bytes as the next request line.
                 await tls_http_message_relay.send_json_error(writer=tls_writer, status=400, message=f"bad request framing: {exc}")
                 return
+            
             try:
-                should_inject = tls_credential_injection.needs_injection(
-                    headers=headers,
-                    path_with_query=path_with_query,
-                    provider=provider,
-                )
+                should_inject = tls_credential_injection.needs_injection(headers=headers, path_with_query=path_with_query, provider=provider)
             except tls_credential_injection.SecretSelectionError as exc:
                 logger.error("%s secret selection failed: %s", provider.slug, exc)
-                await tls_http_message_relay.send_json_error(
-                    writer=tls_writer,
-                    status=400,
-                    message=f"{provider.slug}: {exc}",
-                )
+                await tls_http_message_relay.send_json_error(writer=tls_writer, status=400, message=f"{provider.slug}: {exc}")
                 return
+
             credential = None
             if should_inject:
                 credential = await credential_state_store.credential_for_slug(slug=provider.slug)
@@ -306,15 +301,12 @@ async def _intercept_and_forward(
                     )
                 except tls_credential_injection.SecretSelectionError as exc:
                     logger.error("%s secret selection failed: %s", provider.slug, exc)
-                    await tls_http_message_relay.send_json_error(
-                        writer=tls_writer,
-                        status=400,
-                        message=f"{provider.slug}: {exc}",
-                    )
+                    await tls_http_message_relay.send_json_error(writer=tls_writer, status=400, message=f"{provider.slug}: {exc}")
                     return
             else:
                 forward_headers = headers
                 forward_path = path_with_query
+            
             usage_tap = None
             if credential is not None and usage_reporter is not None:
                 usage_tap = tls_usage_metering.tap_for_request(
@@ -322,12 +314,12 @@ async def _intercept_and_forward(
                     platform_shared=credential.platform_shared,
                     record_usage=usage_reporter.record,
                 )
+            
             if usage_tap is not None:
-                # Usage must stay readable in the response: drop the client's
-                # Accept-Encoding so the upstream can't compress. Observe-only
-                # past this point — a tap failure logs "unmetered" and the
-                # relay never notices.
+                # Drop Accept-Encoding so the upstream can't compress (usage stays readable).
+                # Observe-only past this — a tap failure logs "unmetered"; the relay never notices.
                 forward_headers = [(name, value) for name, value in forward_headers if name.lower() != b"accept-encoding"]
+            
             try:
                 upstream_status, keep_alive = await tls_http_message_relay.forward_to_upstream(
                     host=host,
@@ -343,18 +335,18 @@ async def _intercept_and_forward(
                 logger.exception("forward to %s failed", host)
                 await tls_http_message_relay.send_json_error(writer=tls_writer, status=502, message=f"broker upstream error: {exc}")
                 return
-            # Treat upstream 401 as "the cached token is no longer valid":
-            # evict it so the next request refetches from HUMR. Covers both
-            # transient-after-rotation and user-revoked-on-provider-side.
-            # We don't retry within this connection — the user's next
-            # request through the proxy hits the refreshed token. Anonymous
-            # pass-through 401s must not evict: they never used our token,
-            # so the cached entry is not implicated.
+            
+            # Treat upstream 401 as "the cached token is no longer valid": evict it so the next request refetches from
+            # HUMR. Covers both transient-after-rotation and user-revoked-on-provider-side. We don't retry within this
+            # connection — the user's next request through the proxy hits the refreshed token. Anonymous pass-through
+            # 401s must not evict: they never used our token, so the cached entry is not implicated.
             if upstream_status == 401 and should_inject:
                 await credential_state_store.invalidate(slug=provider.slug)
                 logger.info("evicted %s token cache after upstream 401 from %s", provider.slug, host)
+
             if not keep_alive:
                 return
+            
             # The client asked to close after this exchange; don't sit in
             # readline() waiting for a request that will never come.
             if tls_http_message_relay.connection_close_requested(headers=headers):
