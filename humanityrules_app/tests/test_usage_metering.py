@@ -99,6 +99,37 @@ class TestUsageTapSse(unittest.TestCase):
         self.assertTrue(event["idempotency_key"])
         self.assertIn("+00:00", event["occurred_at"])
 
+    def test_cache_write_tokens_are_reported_as_observed(self) -> None:
+        usage = {
+            "input_tokens": 1200,
+            "input_tokens_details": {"cached_tokens": 1000, "cache_write_tokens": 150},
+            "output_tokens": 350,
+            "output_tokens_details": {"reasoning_tokens": 80},
+        }
+        payload = {"type": "response.completed", "response": {"model": "m", "usage": usage}}
+        body = b"event: response.completed\ndata: " + json.dumps(payload).encode() + b"\n\n"
+        events = _run_tap(body=body, status=200, headers=[], chunk_size=64)
+
+        self.assertEqual(len(events), 1)
+        # Reported, not derived: input_tokens still only subtracts cache reads.
+        self.assertEqual(events[0]["quantities"]["cache_write_tokens"], 150)
+        self.assertEqual(events[0]["quantities"]["input_tokens"], 200)
+
+    def test_missing_or_unusable_detail_counts_fall_back_to_zero(self) -> None:
+        usage = {"input_tokens": 40, "output_tokens": 5, "input_tokens_details": {"cache_write_tokens": -1}}
+        payload = {"type": "response.completed", "response": {"model": "m", "usage": usage}}
+        body = b"event: response.completed\ndata: " + json.dumps(payload).encode() + b"\n\n"
+        events = _run_tap(body=body, status=200, headers=[], chunk_size=64)
+
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["quantities"], {
+            "input_tokens": 40,
+            "output_tokens": 5,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "reasoning_tokens": 0,
+        })
+
     def test_byte_by_byte_delivery_parses_identically(self) -> None:
         events = _run_tap(
             body=_sse_stream(model="gpt-5.2-codex"),

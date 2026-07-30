@@ -39,10 +39,13 @@ sandbox receives:
 
 Events themselves are source-generic. Billable units ride in a
 `quantities` dict; `subkey` carries the source's sub-dimension (for
-`llm`, the observed model id). The LLM token buckets are deliberately
-disjoint: `input_tokens` excludes cache reads (`cache_read_tokens`
-carries those), and `reasoning_tokens` is informational — OpenAI already
-folds reasoning into `output_tokens`, so rating must not add it again.
+`llm`, the observed model id). Of the LLM token buckets, only two are
+priceable on their own: `input_tokens` (cache reads removed, so it never
+double-counts `cache_read_tokens`) and `output_tokens`. The other two
+are recorded as the provider reports them and rating must not add them
+to anything: `reasoning_tokens` is already inside `output_tokens`, and
+`cache_write_tokens` — which the Codex backend sends on every response,
+so far always 0 — has no established relationship to `input_tokens`.
 """
 
 import asyncio
@@ -104,8 +107,16 @@ def _is_count(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
+def _detail_count(details: object, name: str) -> int:
+    """Read one token count out of a usage details object, or 0 when absent or unusable."""
+    if not isinstance(details, dict):
+        return 0
+    value = details.get(name)
+    return value if _is_count(value) else 0
+
+
 def _counts_from_usage(usage: object) -> dict[str, int] | None:
-    """Map a Responses-API usage object to disjoint token buckets, or None."""
+    """Map a Responses-API usage object to the llm token buckets, or None."""
     if not isinstance(usage, dict):
         return None
     input_tokens = usage.get("input_tokens")
@@ -113,19 +124,13 @@ def _counts_from_usage(usage: object) -> dict[str, int] | None:
     if not _is_count(input_tokens) or not _is_count(output_tokens):
         return None
     input_details = usage.get("input_tokens_details")
-    cached_tokens = input_details.get("cached_tokens") if isinstance(input_details, dict) else 0
-    if not _is_count(cached_tokens):
-        cached_tokens = 0
-    output_details = usage.get("output_tokens_details")
-    reasoning_tokens = output_details.get("reasoning_tokens") if isinstance(output_details, dict) else 0
-    if not _is_count(reasoning_tokens):
-        reasoning_tokens = 0
+    cached_tokens = _detail_count(details=input_details, name="cached_tokens")
     return {
         "input_tokens": max(input_tokens - cached_tokens, 0),
         "output_tokens": output_tokens,
         "cache_read_tokens": cached_tokens,
-        "cache_write_tokens": 0,
-        "reasoning_tokens": reasoning_tokens,
+        "cache_write_tokens": _detail_count(details=input_details, name="cache_write_tokens"),
+        "reasoning_tokens": _detail_count(details=usage.get("output_tokens_details"), name="reasoning_tokens"),
     }
 
 

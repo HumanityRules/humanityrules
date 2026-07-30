@@ -6,13 +6,22 @@ the environment, and the payload's app_slug picks the app within it. Each
 broker batches BillingUsageEvents and posts them here (see
 `tls_usage_metering` in the hermes_agent template). Inserts are
 idempotent on the broker-minted key — retried or duplicated batches are
-no-ops — and the whole batch is rejected on the first malformed event, since
-the reporter is trusted platform code and a malformed event means a bug, not
-customer input.
+no-ops.
+
+A malformed event rejects the whole batch: the reporter is trusted platform
+code, so malformed means a bug, not customer input. Version skew is not a
+bug and never rejects. Brokers ship inside HA images and redeploy long after
+the CP does, so an old broker reporting fewer quantity keys, or a new one
+reporting a source this CP predates, is the normal steady state — the
+missing keys read as 0 and the unknown-source events are skipped. The
+reverse skew (a broker ahead of the CP, i.e. a template shipped before the
+CP that understands it) does reject, because the CP cannot store a quantity
+rating will need.
 """
 
 import datetime
 import json
+import logging
 
 from django.http import HttpRequest, JsonResponse
 from django.utils import dateparse, timezone
@@ -22,38 +31,44 @@ from django.views.decorators.http import require_POST
 from humanityrules_app import models
 from . import env_bearer_auth
 
+logger = logging.getLogger(__name__)
+
 MAX_EVENTS_PER_REPORT = 500
 MAX_FUTURE_CLOCK_SKEW = datetime.timedelta(minutes=5)
 
-# Per-source schema for the `quantities` dict: exactly these keys, each a
-# non-negative int. A key set mismatch means a broker bug — reject loudly.
+# Per-source schema for the `quantities` dict: these keys, each a non-negative
+# int. Absent keys read as 0 (an older broker had nothing to say about them);
+# keys outside the set are a broker bug or a CP that is behind its fleet. The
+# order is the stored order, so it is also the order the admin displays.
 _QUANTITY_KEYS_BY_SOURCE = {
-    "llm": frozenset({"input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "reasoning_tokens"}),
+    "llm": ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "reasoning_tokens"),
 }
 
 
-def _parse_event(event: object, now: datetime.datetime) -> dict | str:
-    """Validate one reported event into model kwargs, or return an error string."""
-    if not isinstance(event, dict):
-        return "event must be a JSON object"
+def _parse_event(event: dict, now: datetime.datetime) -> dict | str | None:
+    """Validate one reported event into model kwargs, an error string, or None to skip its unknown source."""
     idempotency_key = event.get("idempotency_key")
     if not isinstance(idempotency_key, str) or not 1 <= len(idempotency_key) <= 128:
         return "idempotency_key must be a string of 1-128 characters"
     source = event.get("source")
     if source not in _QUANTITY_KEYS_BY_SOURCE:
-        return f"unknown source: {source!r}"
+        return None
     subkey = event.get("subkey")
     if not isinstance(subkey, str) or len(subkey) > 255:
         return "subkey must be a string of at most 255 characters"
-    quantities = event.get("quantities")
-    if not isinstance(quantities, dict):
+    reported_quantities = event.get("quantities")
+    if not isinstance(reported_quantities, dict):
         return "quantities must be a JSON object"
     expected_keys = _QUANTITY_KEYS_BY_SOURCE[source]
-    if set(quantities) != expected_keys:
-        return f"quantities keys for source {source!r} must be exactly {sorted(expected_keys)}"
-    for quantity_name, quantity in quantities.items():
+    unknown_keys = set(reported_quantities) - set(expected_keys)
+    if unknown_keys:
+        return f"quantities keys for source {source!r} are not recognized: {sorted(unknown_keys)}"
+    quantities: dict[str, int] = {}
+    for quantity_name in expected_keys:
+        quantity = reported_quantities.get(quantity_name, 0)
         if not isinstance(quantity, int) or isinstance(quantity, bool) or quantity < 0:
             return f"quantities.{quantity_name} must be a non-negative integer"
+        quantities[quantity_name] = quantity
     occurred_at_value = event.get("occurred_at")
     if not isinstance(occurred_at_value, str):
         return "occurred_at is required"
@@ -112,10 +127,16 @@ def billing_usage_events(request: HttpRequest) -> JsonResponse:
 
     now = timezone.now()
     rows: list[models.BillingUsageEvent] = []
+    skipped_sources: list[object] = []
     for index, event in enumerate(events):
+        if not isinstance(event, dict):
+            return JsonResponse({"error": f"events[{index}]: event must be a JSON object"}, status=400)
         parsed = _parse_event(event=event, now=now)
         if isinstance(parsed, str):
             return JsonResponse({"error": f"events[{index}]: {parsed}"}, status=400)
+        if parsed is None:
+            skipped_sources.append(event.get("source"))
+            continue
         rows.append(models.BillingUsageEvent(
             organization=organization,
             app_id=app.id,
@@ -124,5 +145,10 @@ def billing_usage_events(request: HttpRequest) -> JsonResponse:
             **parsed,
         ))
 
+    if skipped_sources:
+        logger.error(
+            "skipped %d usage events from app %s reporting sources this control plane does not know: %s",
+            len(skipped_sources), app.slug, sorted({str(source) for source in skipped_sources}),
+        )
     models.BillingUsageEvent.objects.bulk_create(rows, ignore_conflicts=True)
-    return JsonResponse({"ok": True})
+    return JsonResponse({"ok": True, "skipped": len(skipped_sources)})
