@@ -1,15 +1,35 @@
-"""Boot-generated CA for the TLS-intercept proxy: the trust bundle and per-SNI leaf certs.
+"""The certificates that let the TLS-intercept proxy pretend to be a provider
+hostname when talking to the sandbox.
 
-Terminating TLS as an intercepted host means presenting a certificate the
-sandbox will trust. This module owns that material end to end and nothing
-else: the CA generated in memory at broker startup, the `bundle.pem` the
-sandbox picks up as SSL_CERT_FILE, and the leaf certs minted on demand, one
-per CONNECT hostname. `tls_intercept` calls `context_for` at the moment it
-decides to intercept rather than tunnel.
+To rewrite a request, the proxy must be able to *read* it. That means it
+cannot be a blind tunnel for managed hosts: it has to complete a TLS
+handshake with the sandbox *as if it were* `gmail.googleapis.com` (or
+whoever), then open its own separate TLS connection to the real upstream.
+For the sandbox to accept that handshake, the certificate the proxy
+presents must chain to something the sandbox already trusts.
 
-The CA private key never leaves process memory and never hits disk, so a new
-container gets a new CA; the sandbox reboots with it and inherits the new
-bundle.
+`CertMinter` is that trust material, and nothing else. At broker startup
+it generates a certificate authority in process memory, writes a
+`bundle.pem` that concatenates our CA certificate with the system root
+store, and exposes that bundle as the file the sandbox will use for
+`SSL_CERT_FILE`. From then on, when `tls_intercept` decides a hostname is
+one it should open rather than tunnel, it calls `context_for(hostname)`
+and gets back an `SSLContext` presenting a leaf certificate minted for
+that name, signed by our CA. Leaf contexts are cached in memory by
+hostname; the first request to a host pays the minting cost, later ones
+reuse the context.
+
+The CA private key never leaves process memory and never hits disk. Leaf
+key material is written only as a transient file long enough to load into
+the SSL context, then unlinked — under a directory the sandbox is not
+granted. A new container boot generates a new CA; the sandbox reboots
+with the container and picks up the new bundle, so there is no "CA
+rotated under a live agent" case to handle.
+
+This module does not know which hosts are providers, does not open
+connections, and does not touch credentials. It answers one question:
+given a hostname we have already decided to impersonate, what TLS context
+should we present to the sandbox?
 """
 
 import contextlib

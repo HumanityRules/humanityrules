@@ -1,36 +1,48 @@
-"""Billing usage metering at the TLS-intercept proxy.
+"""Observe billable LLM usage as it streams through the TLS-intercept proxy,
+and report it to HUMR.
 
-This module owns the metering decision: a request is metered iff HUMR's own
-platform-tier credential was injected into it (`platform_shared` provenance
-from the token refresh — org-shared and personal credentials are
-customer-funded and consume no credits) AND the provider speaks a dialect
-this module can parse. `tap_for_request` is that decision; the intercept
-just attaches whatever it returns. Today the only parsed dialect is the
-OpenAI Responses API (Codex): other model providers are expected to move
-behind a HUMR-owned gateway before they are ever billed, so the
-intercept-side parser never grows beyond it.
+Not every proxied request is a billing event. The agent may call a model
+provider with the user's own key, with an org-shared key, or with a
+credential HUMR itself funds (the platform tier). Only the last of those
+consumes HUMR credits — customer-funded traffic must not. And even among
+platform-funded calls, this module can only meter providers whose response
+shape it knows how to read. Today that is a single dialect: the OpenAI
+Responses API used by Codex. Other model providers are expected to move
+behind a HUMR-owned gateway before they are billed, so the parser here is
+not meant to grow provider by provider.
 
-The pieces, all observe-only:
+`tap_for_request` is the whole metering decision in one place. The
+intercept layer asks it after credential injection, passing the provider
+slug and whether the injected credential was platform-shared. It gets
+back either a `UsageTap` to attach to the response relay, or `None`.
+When a tap is returned, the intercept also strips `Accept-Encoding` so
+the upstream cannot compress the body into something the tap cannot read.
+When no reporter is configured at all, the proxy behaves as if this
+module did not exist.
 
-- `UsageTap` — a per-response `ResponseBodyObserver` (see
-  `tls_http_message_relay`) that pulls token usage out of the Responses
-  terminal event (`response.completed` / `response.failed` /
-  `response.incomplete`), or out of a plain JSON body for non-streamed calls.
-- `UsageReporter` — a process-wide buffer + flush loop that posts usage
-  events to HUMR through `HumrClient` (which stamps owner/app attribution
-  into every payload). No spool: if HUMR is unreachable the batch is dropped
-  with a log line — the failure mode is undercharging, never a broken agent.
+The two pieces are both observe-only — they never alter the bytes the
+sandbox receives:
 
-Events are source-generic: the billable units ride in a per-source
-`quantities` dict and `subkey` carries the source's sub-dimension (for
-`llm`: the observed model id). The llm token buckets are disjoint:
-`input_tokens` excludes cache reads (`cache_read_tokens` carries those),
-and `reasoning_tokens` is informational — OpenAI already folds reasoning
-into `output_tokens`, so rating must not add it again.
+- `UsageTap` implements the relay's `ResponseBodyObserver`. As decoded
+  response bytes pass through, it looks for token usage: the terminal
+  SSE event (`response.completed` / `response.failed` /
+  `response.incomplete`) for streamed calls, or the JSON body for
+  non-streamed ones. Memory is capped per response; anything past the
+  cap is logged as unmetered rather than buffered further. A tap that
+  fails is dropped for the rest of that response; the agent still gets
+  a normal reply.
+- `UsageReporter` is the process-wide buffer and flush loop. Taps hand
+  it events; it batches them and posts to HUMR through `HumrClient`
+  (which stamps owner/app attribution). There is no on-disk spool: if
+  HUMR is unreachable the batch is dropped with a log line. The failure
+  mode is undercharging, never a stuck agent.
 
-Memory is bounded per in-flight response: only terminal-event payloads are
-accumulated (capped), non-captured over-long lines are discarded, and a
-response that exceeds a cap is logged as unmetered — never buffered further.
+Events themselves are source-generic. Billable units ride in a
+`quantities` dict; `subkey` carries the source's sub-dimension (for
+`llm`, the observed model id). The LLM token buckets are deliberately
+disjoint: `input_tokens` excludes cache reads (`cache_read_tokens`
+carries those), and `reasoning_tokens` is informational — OpenAI already
+folds reasoning into `output_tokens`, so rating must not add it again.
 """
 
 import asyncio
