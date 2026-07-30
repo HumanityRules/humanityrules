@@ -54,9 +54,10 @@ connected. Telegram:
 
 ```python
 connect_mode="vault",
-credential_wire_behavior=PathPlaceholder(
+credential_wire_behavior=UrlCredentialPlaceholder(
     placeholder="000000:HUMR_PLACEHOLDER",
     secret_name="bot_token",
+    remove_authorization=True,
 ),
 env_bindings=(
     EnvBinding(env_var="TELEGRAM_BOT_TOKEN", value="000000:HUMR_PLACEHOLDER"),

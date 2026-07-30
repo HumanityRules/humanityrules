@@ -4,7 +4,8 @@
 lookup. A plan records the selected secret names and their wire destinations,
 so `apply_injection_plan` only performs the planned substitutions after the
 caller fetches those secrets. `None` means anonymous pass-through; an invalid
-or foreign credential raises `SecretSelectionError`.
+or foreign credential raises `SecretSelectionError`. A managed credential that
+does not contain a planned secret raises `CredentialContractError` instead.
 
 Neither function touches the network or token cache. HTTP transport
 normalization (Host, proxy headers, and framing) remains in
@@ -18,36 +19,32 @@ import tls_provider_catalog
 
 
 @dataclass(frozen=True)
-class PathInjection:
-    """Replace one path placeholder with one named HUMR secret."""
-
-    placeholder: str
-    secret_name: str
-
-
-@dataclass(frozen=True)
 class InjectionPlan:
-    """A validated description of how managed secrets enter one request."""
+    """A request-specific description of how managed secrets enter the request."""
 
     header_injections: tuple[tls_provider_catalog.HeaderInjection, ...]
-    path_injection: PathInjection | None
+    url_credential_placeholder: tls_provider_catalog.UrlCredentialPlaceholder | None
     remove_authorization: bool
 
 
 class SecretSelectionError(Exception):
-    """The request or secret set cannot satisfy its credential wire behavior."""
+    """The sandbox request does not satisfy its credential wire behavior."""
 
 
-def _build_header_value(secret: str, value_format: str) -> bytes:
+class CredentialContractError(Exception):
+    """The control plane did not return a secret required by the provider catalog."""
+
+
+def _build_header_value(secret: str, header_value_format: tls_provider_catalog.HeaderValueFormat) -> bytes:
     """Encode one secret for its provider request header."""
-    if value_format == tls_provider_catalog.HEADER_VALUE_RAW:
+    if header_value_format == tls_provider_catalog.HEADER_VALUE_RAW:
         return secret.encode()
-    if value_format == tls_provider_catalog.HEADER_VALUE_BEARER:
+    if header_value_format == tls_provider_catalog.HEADER_VALUE_BEARER:
         return b"Bearer " + secret.encode()
-    if value_format == tls_provider_catalog.HEADER_VALUE_BASIC_X_ACCESS_TOKEN:
+    if header_value_format == tls_provider_catalog.HEADER_VALUE_BASIC_X_ACCESS_TOKEN:
         credentials = b"x-access-token:" + secret.encode()
         return b"Basic " + base64.b64encode(credentials)
-    raise ValueError(f"unknown header value format: {value_format!r}")
+    raise ValueError(f"unknown header value format: {header_value_format!r}")
 
 
 def _strip_bearer_prefix(value: bytes) -> str:
@@ -70,9 +67,9 @@ def _inject_headers(headers: list[tuple[bytes, bytes]], replacements: dict[bytes
     return kept_headers + list(replacements.items())
 
 
-def _incoming_placeholder_value(value: bytes, value_format: str) -> str:
+def _incoming_placeholder_value(value: bytes, header_value_format: tls_provider_catalog.PlaceholderHeaderValueFormat) -> str:
     """Extract the configured placeholder value from an incoming header."""
-    if value_format == tls_provider_catalog.HEADER_VALUE_BEARER:
+    if header_value_format == tls_provider_catalog.HEADER_VALUE_BEARER:
         return _strip_bearer_prefix(value=value)
     return value.decode("iso-8859-1").strip()
 
@@ -83,10 +80,10 @@ def plan_injection(
     behavior: tls_provider_catalog.CredentialWireBehavior,
 ) -> InjectionPlan | None:
     """Return the managed-credential plan, `None` for pass-through, or reject the request."""
-    if isinstance(behavior, tls_provider_catalog.AlwaysInject):
+    if isinstance(behavior, tls_provider_catalog.AlwaysInjectHeaders):
         return InjectionPlan(
             header_injections=behavior.header_injections,
-            path_injection=None,
+            url_credential_placeholder=None,
             remove_authorization=False,
         )
 
@@ -96,7 +93,7 @@ def plan_injection(
         incoming = next((value for name, value in headers if name.lower() == header_name_lower), None)
         if incoming is None:
             carries_authorization = any(name.lower() == b"authorization" for name, _value in headers)
-            if header_name_lower != b"authorization" and carries_authorization:
+            if behavior.reject_authorization_when_placeholder_missing and carries_authorization:
                 raise SecretSelectionError(
                     f"request carried Authorization instead of the {behavior.header_name} HUMR placeholder"
                 )
@@ -104,7 +101,7 @@ def plan_injection(
 
         placeholder_value = _incoming_placeholder_value(
             value=incoming,
-            value_format=behavior.value_format,
+            header_value_format=behavior.header_value_format,
         )
         secret_name = behavior.secret_for_placeholder(placeholder_value=placeholder_value)
         if secret_name is None:
@@ -117,23 +114,20 @@ def plan_injection(
                 tls_provider_catalog.HeaderInjection(
                     header_name=behavior.header_name,
                     secret_name=secret_name,
-                    value_format=behavior.value_format,
+                    header_value_format=behavior.header_value_format,
                 ),
             ),
-            path_injection=None,
-            remove_authorization=header_name_lower != b"authorization",
+            url_credential_placeholder=None,
+            remove_authorization=behavior.remove_authorization,
         )
 
-    if isinstance(behavior, tls_provider_catalog.PathPlaceholder):
+    if isinstance(behavior, tls_provider_catalog.UrlCredentialPlaceholder):
         if behavior.placeholder not in path_with_query:
             raise SecretSelectionError("request URL must contain the HUMR placeholder")
         return InjectionPlan(
             header_injections=(),
-            path_injection=PathInjection(
-                placeholder=behavior.placeholder,
-                secret_name=behavior.secret_name,
-            ),
-            remove_authorization=True,
+            url_credential_placeholder=behavior,
+            remove_authorization=behavior.remove_authorization,
         )
 
     raise ValueError(f"unknown credential wire behavior: {behavior!r}")
@@ -143,7 +137,7 @@ def _required_secret(secrets: dict[str, str], secret_name: str) -> str:
     """Return one non-empty secret required by an injection plan."""
     secret = secrets.get(secret_name)
     if not secret:
-        raise SecretSelectionError(f"no cached secret for {secret_name!r}")
+        raise CredentialContractError(f"managed credential is missing required secret {secret_name!r}")
     return secret
 
 
@@ -153,7 +147,7 @@ def apply_injection_plan(
     secrets: dict[str, str],
     plan: InjectionPlan,
 ) -> tuple[list[tuple[bytes, bytes]], str]:
-    """Apply a previously validated plan using the fetched HUMR secrets."""
+    """Apply a recorded plan using the fetched HUMR secrets."""
     provider_headers = headers
     if plan.remove_authorization:
         provider_headers = _remove_headers(
@@ -166,7 +160,7 @@ def apply_injection_plan(
         secret = _required_secret(secrets=secrets, secret_name=injection.secret_name)
         header_replacements[injection.header_name.encode()] = _build_header_value(
             secret=secret,
-            value_format=injection.value_format,
+            header_value_format=injection.header_value_format,
         )
     if header_replacements:
         provider_headers = _inject_headers(
@@ -175,11 +169,11 @@ def apply_injection_plan(
         )
 
     provider_path = path_with_query
-    if plan.path_injection is not None:
+    if plan.url_credential_placeholder is not None:
         path_secret = _required_secret(
             secrets=secrets,
-            secret_name=plan.path_injection.secret_name,
+            secret_name=plan.url_credential_placeholder.secret_name,
         )
-        provider_path = provider_path.replace(plan.path_injection.placeholder, path_secret)
+        provider_path = provider_path.replace(plan.url_credential_placeholder.placeholder, path_secret)
 
     return provider_headers, provider_path

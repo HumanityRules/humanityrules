@@ -9,6 +9,7 @@ asyncio servers.
 """
 
 import asyncio
+import base64
 import dataclasses
 import importlib.util
 import pathlib
@@ -176,67 +177,98 @@ class TestHostToProviderRouting(unittest.TestCase):
             tls_provider_catalog.build_host_to_provider(providers={"first": provider, "second": provider})
 
 
-class TestRewriteAuthorization(unittest.TestCase):
+def _plan_provider_injection(
+    slug: str,
+    headers: list[tuple[bytes, bytes]],
+    path_with_query: str,
+) -> tls_credential_injection.InjectionPlan | None:
+    provider = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS[slug]
+    return tls_credential_injection.plan_injection(
+        headers=headers,
+        path_with_query=path_with_query,
+        behavior=provider.credential_wire_behavior,
+    )
+
+
+def _apply_provider_injection(
+    slug: str,
+    headers: list[tuple[bytes, bytes]],
+    path_with_query: str,
+    secrets: dict[str, str],
+) -> tuple[list[tuple[bytes, bytes]], str]:
+    plan = _plan_provider_injection(
+        slug=slug,
+        headers=headers,
+        path_with_query=path_with_query,
+    )
+    if plan is None:
+        raise AssertionError(f"{slug} request unexpectedly planned as pass-through")
+    return tls_credential_injection.apply_injection_plan(
+        headers=headers,
+        path_with_query=path_with_query,
+        secrets=secrets,
+        plan=plan,
+    )
+
+
+class TestCredentialInjection(unittest.TestCase):
 
     def test_existing_authorization_is_replaced(self) -> None:
-        hdrs = [
-            (b"authorization", b"Bearer SANDBOX-DUMMY-1"),
-            (b"Authorization", b"Bearer SANDBOX-DUMMY-2"),
-            (b"content-type", b"application/json"),
-        ]
-        out = tls_credential_injection._rewrite_authorization(
-            headers=hdrs, token="REAL-TOKEN",
-            auth_format=tls_provider_catalog.AUTH_FORMAT_BEARER,
+        headers, _path = _apply_provider_injection(
+            slug="google",
+            headers=[
+                (b"authorization", b"Bearer SANDBOX-DUMMY-1"),
+                (b"Authorization", b"Bearer SANDBOX-DUMMY-2"),
+                (b"content-type", b"application/json"),
+            ],
+            path_with_query="/gmail/v1/users/me/profile",
+            secrets={"access_token": "REAL-TOKEN"},
         )
-        auth_values = [value for name, value in out if name.lower() == b"authorization"]
+
+        auth_values = [value for name, value in headers if name.lower() == b"authorization"]
         self.assertEqual(auth_values, [b"Bearer REAL-TOKEN"])
 
     def test_missing_authorization_gets_injected(self) -> None:
-        hdrs = [(b"content-type", b"application/json")]
-        out = tls_credential_injection._rewrite_authorization(
-            headers=hdrs, token="T",
-            auth_format=tls_provider_catalog.AUTH_FORMAT_BEARER,
+        headers, _path = _apply_provider_injection(
+            slug="google",
+            headers=[(b"content-type", b"application/json")],
+            path_with_query="/gmail/v1/users/me/profile",
+            secrets={"access_token": "T"},
         )
-        auth = dict([(n.lower(), v) for n, v in out])[b"authorization"]
-        self.assertEqual(auth, b"Bearer T")
 
-    def test_host_is_left_for_relay_normalization(self) -> None:
-        hdrs = [(b"host", b"whatever"), (b"authorization", b"Bearer x")]
-        out = tls_credential_injection._rewrite_authorization(
-            headers=hdrs, token="T",
-            auth_format=tls_provider_catalog.AUTH_FORMAT_BEARER,
-        )
-        host = dict([(n.lower(), v) for n, v in out])[b"host"]
-        self.assertEqual(host, b"whatever")
+        self.assertEqual(dict((name.lower(), value) for name, value in headers)[b"authorization"], b"Bearer T")
 
-    def test_proxy_headers_are_left_for_relay_normalization(self) -> None:
-        hdrs = [
-            (b"authorization", b"Bearer x"),
-            (b"proxy-connection", b"keep-alive"),
-            (b"proxy-authorization", b"Basic xxx"),
-        ]
-        out = tls_credential_injection._rewrite_authorization(
-            headers=hdrs, token="T",
-            auth_format=tls_provider_catalog.AUTH_FORMAT_BEARER,
+    def test_injection_leaves_transport_headers_for_relay_normalization(self) -> None:
+        headers, _path = _apply_provider_injection(
+            slug="google",
+            headers=[
+                (b"host", b"whatever"),
+                (b"proxy-connection", b"keep-alive"),
+                (b"proxy-authorization", b"Basic xxx"),
+            ],
+            path_with_query="/gmail/v1/users/me/profile",
+            secrets={"access_token": "T"},
         )
-        names = [n.lower() for n, _ in out]
-        self.assertIn(b"proxy-connection", names)
-        self.assertIn(b"proxy-authorization", names)
 
-    def test_basic_x_access_token_format_for_github(self) -> None:
-        import base64
-        hdrs = [(b"authorization", b"Basic SANDBOX-PLACEHOLDER")]
-        out = tls_credential_injection._rewrite_authorization(
-            headers=hdrs, token="ghs_real_token",
-            auth_format=tls_provider_catalog.AUTH_FORMAT_BASIC_X_ACCESS_TOKEN,
+        by_name = dict((name.lower(), value) for name, value in headers)
+        self.assertEqual(by_name[b"host"], b"whatever")
+        self.assertEqual(by_name[b"proxy-connection"], b"keep-alive")
+        self.assertEqual(by_name[b"proxy-authorization"], b"Basic xxx")
+
+    def test_github_uses_basic_x_access_token_format(self) -> None:
+        headers, _path = _apply_provider_injection(
+            slug="github",
+            headers=[(b"authorization", b"Basic SANDBOX-PLACEHOLDER")],
+            path_with_query="/owner/repo.git/info/refs",
+            secrets={"access_token": "ghs_real_token"},
         )
-        auth = dict([(n.lower(), v) for n, v in out])[b"authorization"]
+
         expected = b"Basic " + base64.b64encode(b"x-access-token:ghs_real_token")
-        self.assertEqual(auth, expected)
+        self.assertEqual(dict((name.lower(), value) for name, value in headers)[b"authorization"], expected)
 
-    def test_telegram_path_token_is_rewritten_without_authorization_header(self) -> None:
-        provider = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["telegram"]
-        headers, path = tls_credential_injection.rewrite_request_for_provider(
+    def test_telegram_url_token_is_rewritten_without_authorization_header(self) -> None:
+        headers, path = _apply_provider_injection(
+            slug="telegram",
             headers=[
                 (b"host", b"api.telegram.org"),
                 (b"authorization", b"Bearer placeholder"),
@@ -244,235 +276,236 @@ class TestRewriteAuthorization(unittest.TestCase):
             ],
             path_with_query="/bot000000:HUMR_PLACEHOLDER/getUpdates?timeout=20",
             secrets={"bot_token": "123456:REAL"},
-            provider=provider,
         )
-        self.assertEqual(path, "/bot123456:REAL/getUpdates?timeout=20")
-        header_names = [name.lower() for name, _value in headers]
-        self.assertNotIn(b"authorization", header_names)
 
-    def test_telegram_file_path_token_is_rewritten(self) -> None:
-        provider = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["telegram"]
-        _headers, path = tls_credential_injection.rewrite_request_for_provider(
+        self.assertEqual(path, "/bot123456:REAL/getUpdates?timeout=20")
+        self.assertNotIn(b"authorization", [name.lower() for name, _value in headers])
+
+    def test_telegram_file_url_token_is_rewritten(self) -> None:
+        _headers, path = _apply_provider_injection(
+            slug="telegram",
             headers=[(b"host", b"api.telegram.org")],
             path_with_query="/file/bot000000:HUMR_PLACEHOLDER/documents/file.txt",
             secrets={"bot_token": "123456:REAL"},
-            provider=provider,
         )
+
         self.assertEqual(path, "/file/bot123456:REAL/documents/file.txt")
 
-    def test_url_rewrite_fails_closed_without_placeholder(self) -> None:
-        """A URL-rewrite provider must reject paths missing its placeholder.
-
-        Url-encoded placeholders (e.g. `%3A` instead of `:`) don't substring-match
-        and must be rejected so we never forward an un-rewritten URL provider.
-        """
-        provider = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["telegram"]
-
-        with self.assertRaisesRegex(tls_credential_injection.SecretSelectionError, "placeholder"):
-            tls_credential_injection.rewrite_request_for_provider(
-                headers=[(b"host", b"api.telegram.org")],
-                path_with_query="/bot000000%3AHUMR_PLACEHOLDER/sendMessage",
-                secrets={"bot_token": "123456:REAL"},
-                provider=provider,
-            )
-
-    def test_slack_app_token_placeholder_selects_app_token(self) -> None:
-        """A request bearing the app-token placeholder gets the real app token."""
-        provider = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["slack"]
-        headers, path = tls_credential_injection.rewrite_request_for_provider(
-            headers=[(b"host", b"slack.com"), (b"authorization", b"Bearer xapp-HUMR_PLACEHOLDER")],
-            path_with_query="/api/apps.connections.open",
-            secrets={"app_token": "xapp-REAL", "bot_token": "xoxb-REAL"},
-            provider=provider,
+    def test_slack_placeholders_select_their_named_secrets(self) -> None:
+        cases = (
+            ("xapp-HUMR_PLACEHOLDER", "xapp-REAL", "/api/apps.connections.open"),
+            ("xoxb-HUMR_PLACEHOLDER", "xoxb-REAL", "/api/chat.postMessage"),
         )
-        self.assertEqual(path, "/api/apps.connections.open")
-        self.assertEqual(dict((n.lower(), v) for n, v in headers)[b"authorization"], b"Bearer xapp-REAL")
-
-    def test_slack_bot_token_placeholder_selects_bot_token(self) -> None:
-        """A request bearing the bot-token placeholder gets the real bot token."""
-        provider = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["slack"]
-        headers, _path = tls_credential_injection.rewrite_request_for_provider(
-            headers=[(b"host", b"slack.com"), (b"authorization", b"Bearer xoxb-HUMR_PLACEHOLDER")],
-            path_with_query="/api/chat.postMessage",
-            secrets={"app_token": "xapp-REAL", "bot_token": "xoxb-REAL"},
-            provider=provider,
-        )
-        self.assertEqual(dict((n.lower(), v) for n, v in headers)[b"authorization"], b"Bearer xoxb-REAL")
-
-    def test_slack_unknown_placeholder_fails_closed(self) -> None:
-        """An unrecognized bearer must raise rather than forward an un-swapped token."""
-        provider = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["slack"]
-        with self.assertRaises(tls_credential_injection.SecretSelectionError):
-            tls_credential_injection.rewrite_request_for_provider(
-                headers=[(b"host", b"slack.com"), (b"authorization", b"Bearer xoxb-NOT-OURS")],
-                path_with_query="/api/chat.postMessage",
-                secrets={"app_token": "xapp-REAL", "bot_token": "xoxb-REAL"},
-                provider=provider,
-            )
+        for placeholder, expected_secret, path in cases:
+            with self.subTest(placeholder=placeholder):
+                headers, provider_path = _apply_provider_injection(
+                    slug="slack",
+                    headers=[(b"authorization", f"Bearer {placeholder}".encode())],
+                    path_with_query=path,
+                    secrets={"app_token": "xapp-REAL", "bot_token": "xoxb-REAL"},
+                )
+                self.assertEqual(provider_path, path)
+                self.assertEqual(
+                    dict((name.lower(), value) for name, value in headers)[b"authorization"],
+                    f"Bearer {expected_secret}".encode(),
+                )
 
     def test_openrouter_placeholder_bearer_is_rewritten(self) -> None:
-        provider = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["openrouter"]
-        headers, path = tls_credential_injection.rewrite_request_for_provider(
-            headers=[(b"host", b"openrouter.ai"), (b"authorization", b"Bearer HUMR_PLACEHOLDER")],
+        headers, path = _apply_provider_injection(
+            slug="openrouter",
+            headers=[(b"authorization", b"Bearer HUMR_PLACEHOLDER")],
             path_with_query="/api/v1/chat/completions",
             secrets={"api_key": "sk-or-v1-real"},
-            provider=provider,
         )
-        self.assertEqual(path, "/api/v1/chat/completions")
-        self.assertEqual(dict((n.lower(), v) for n, v in headers)[b"authorization"], b"Bearer sk-or-v1-real")
 
-    def test_nous_placeholder_bearer_is_rewritten(self) -> None:
-        provider = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["nous"]
-        headers, path = tls_credential_injection.rewrite_request_for_provider(
-            headers=[(b"host", b"inference-api.nousresearch.com"), (b"authorization", b"Bearer HUMR_PLACEHOLDER")],
+        self.assertEqual(path, "/api/v1/chat/completions")
+        self.assertEqual(
+            dict((name.lower(), value) for name, value in headers)[b"authorization"],
+            b"Bearer sk-or-v1-real",
+        )
+
+    def test_nous_always_injects_its_bearer(self) -> None:
+        headers, path = _apply_provider_injection(
+            slug="nous",
+            headers=[(b"authorization", b"Bearer HUMR_PLACEHOLDER")],
             path_with_query="/v1/chat/completions",
             secrets={"access_token": "nous-access"},
-            provider=provider,
         )
-        self.assertEqual(path, "/v1/chat/completions")
-        self.assertEqual(dict((n.lower(), v) for n, v in headers)[b"authorization"], b"Bearer nous-access")
 
-    def test_openai_placeholder_bearer_is_rewritten(self) -> None:
-        provider = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["openai-api"]
-        headers, path = tls_credential_injection.rewrite_request_for_provider(
-            headers=[(b"host", b"api.openai.com"), (b"authorization", b"Bearer HUMR_PLACEHOLDER")],
-            path_with_query="/v1/chat/completions",
-            secrets={"api_key": "sk-real"},
-            provider=provider,
-        )
         self.assertEqual(path, "/v1/chat/completions")
-        self.assertEqual(dict((n.lower(), v) for n, v in headers)[b"authorization"], b"Bearer sk-real")
+        self.assertEqual(dict((name.lower(), value) for name, value in headers)[b"authorization"], b"Bearer nous-access")
 
-    def test_anthropic_placeholder_x_api_key_is_rewritten(self) -> None:
-        provider = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["anthropic"]
-        headers, path = tls_credential_injection.rewrite_request_for_provider(
+    def test_anthropic_placeholder_is_rewritten_and_authorization_removed(self) -> None:
+        headers, path = _apply_provider_injection(
+            slug="anthropic",
             headers=[
-                (b"host", b"api.anthropic.com"),
                 (b"x-api-key", b"HUMR_PLACEHOLDER"),
+                (b"authorization", b"Bearer must-not-leak"),
                 (b"anthropic-version", b"2023-06-01"),
             ],
             path_with_query="/v1/messages",
             secrets={"api_key": "sk-ant-real"},
-            provider=provider,
         )
+
         self.assertEqual(path, "/v1/messages")
-        by_name = dict((n.lower(), v) for n, v in headers)
-        # Real key swapped in; anthropic-version preserved; no bogus Authorization added.
+        by_name = dict((name.lower(), value) for name, value in headers)
         self.assertEqual(by_name[b"x-api-key"], b"sk-ant-real")
         self.assertEqual(by_name[b"anthropic-version"], b"2023-06-01")
         self.assertNotIn(b"authorization", by_name)
 
-    def test_anthropic_request_without_placeholder_is_rejected(self) -> None:
-        provider = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["anthropic"]
-        with self.assertRaises(tls_credential_injection.SecretSelectionError):
-            tls_credential_injection.rewrite_request_for_provider(
-                headers=[(b"host", b"api.anthropic.com"), (b"x-api-key", b"sk-ant-NOT-OURS")],
-                path_with_query="/v1/messages",
-                secrets={"api_key": "sk-ant-real"},
-                provider=provider,
+    def test_missing_planned_secret_is_a_credential_contract_error(self) -> None:
+        plan = _plan_provider_injection(
+            slug="openai-codex",
+            headers=[],
+            path_with_query="/backend-api/codex/responses",
+        )
+        self.assertIsNotNone(plan)
+
+        with self.assertRaisesRegex(tls_credential_injection.CredentialContractError, "chatgpt_account_id"):
+            tls_credential_injection.apply_injection_plan(
+                headers=[],
+                path_with_query="/backend-api/codex/responses",
+                secrets={"access_token": "codex-token"},
+                plan=plan,
             )
 
+    def test_header_placeholder_rejects_basic_value_format(self) -> None:
+        with self.assertRaisesRegex(ValueError, "placeholder header value format"):
+            tls_provider_catalog.HeaderPlaceholder(
+                header_name="Authorization",
+                placeholder_by_secret_name={"access_token": "HUMR_PLACEHOLDER"},
+                header_value_format=tls_provider_catalog.HEADER_VALUE_BASIC_X_ACCESS_TOKEN,
+                remove_authorization=False,
+                reject_authorization_when_placeholder_missing=False,
+            )
 
-class TestAnonymousRequestClassification(unittest.TestCase):
-    """Credential-less vault-style requests pass through; everything else stays on the HUMR path.
-
-    The classifier runs before the token-store lookup, so an anonymous
-    request (False) must never cost a HUMR refresh, a credentialed request
-    (True) follows the rewrite path, and an unrecognized credential raises
-    so BYO keys are never forwarded.
-    """
-
-    def _classify(self, *, slug: str, headers: list[tuple[bytes, bytes]], path: str) -> bool:
-        return tls_credential_injection.needs_injection(
-            headers=headers,
-            path_with_query=path,
-            provider=tls_provider_catalog.TLS_INTERCEPT_PROVIDERS[slug],
+    def test_custom_placeholder_can_preserve_unrelated_authorization(self) -> None:
+        behavior = tls_provider_catalog.HeaderPlaceholder(
+            header_name="x-managed-key",
+            placeholder_by_secret_name={"api_key": "HUMR_PLACEHOLDER"},
+            header_value_format=tls_provider_catalog.HEADER_VALUE_RAW,
+            remove_authorization=False,
+            reject_authorization_when_placeholder_missing=False,
         )
+        headers = [
+            (b"x-managed-key", b"HUMR_PLACEHOLDER"),
+            (b"authorization", b"Bearer provider-secondary-token"),
+        ]
+        plan = tls_credential_injection.plan_injection(
+            headers=headers,
+            path_with_query="/resource",
+            behavior=behavior,
+        )
+        self.assertIsNotNone(plan)
 
-    def test_openrouter_request_without_authorization_is_anonymous(self) -> None:
-        """The webui's public /api/v1/models fetch carries no Authorization — pass through."""
-        self.assertFalse(self._classify(
+        provider_headers, _path = tls_credential_injection.apply_injection_plan(
+            headers=headers,
+            path_with_query="/resource",
+            secrets={"api_key": "managed-real"},
+            plan=plan,
+        )
+        by_name = dict((name.lower(), value) for name, value in provider_headers)
+        self.assertEqual(by_name[b"x-managed-key"], b"managed-real")
+        self.assertEqual(by_name[b"authorization"], b"Bearer provider-secondary-token")
+
+
+class TestInjectionPlanning(unittest.TestCase):
+    """Planning decides pass-through, managed injection, or request refusal before token lookup."""
+
+    def test_openrouter_request_without_authorization_passes_through(self) -> None:
+        plan = _plan_provider_injection(
             slug="openrouter",
             headers=[(b"host", b"openrouter.ai"), (b"accept", b"application/json")],
-            path="/api/v1/models",
-        ))
+            path_with_query="/api/v1/models",
+        )
 
-    def test_openrouter_placeholder_bearer_needs_injection(self) -> None:
-        self.assertTrue(self._classify(
+        self.assertIsNone(plan)
+
+    def test_openrouter_placeholder_bearer_produces_plan(self) -> None:
+        plan = _plan_provider_injection(
             slug="openrouter",
             headers=[(b"authorization", b"Bearer HUMR_PLACEHOLDER")],
-            path="/api/v1/chat/completions",
-        ))
+            path_with_query="/api/v1/chat/completions",
+        )
+
+        self.assertIsInstance(plan, tls_credential_injection.InjectionPlan)
 
     def test_openrouter_unknown_bearer_is_rejected(self) -> None:
         with self.assertRaises(tls_credential_injection.SecretSelectionError):
-            self._classify(
+            _plan_provider_injection(
                 slug="openrouter",
                 headers=[(b"authorization", b"Bearer sk-or-v1-byo-key")],
-                path="/api/v1/chat/completions",
+                path_with_query="/api/v1/chat/completions",
             )
 
-    def test_slack_request_without_authorization_is_anonymous(self) -> None:
-        self.assertFalse(self._classify(
+    def test_slack_request_without_authorization_passes_through(self) -> None:
+        plan = _plan_provider_injection(
             slug="slack",
             headers=[(b"host", b"slack.com")],
-            path="/api/api.test",
-        ))
+            path_with_query="/api/api.test",
+        )
 
-    def test_anthropic_request_without_credentials_is_anonymous(self) -> None:
-        self.assertFalse(self._classify(
+        self.assertIsNone(plan)
+
+    def test_anthropic_request_without_credentials_passes_through(self) -> None:
+        plan = _plan_provider_injection(
             slug="anthropic",
-            headers=[(b"host", b"api.anthropic.com"), (b"anthropic-version", b"2023-06-01")],
-            path="/v1/models",
-        ))
+            headers=[(b"anthropic-version", b"2023-06-01")],
+            path_with_query="/v1/models",
+        )
 
-    def test_anthropic_placeholder_x_api_key_needs_injection(self) -> None:
-        self.assertTrue(self._classify(
+        self.assertIsNone(plan)
+
+    def test_anthropic_placeholder_produces_plan(self) -> None:
+        plan = _plan_provider_injection(
             slug="anthropic",
             headers=[(b"x-api-key", b"HUMR_PLACEHOLDER")],
-            path="/v1/messages",
-        ))
+            path_with_query="/v1/messages",
+        )
 
-    def test_anthropic_foreign_x_api_key_is_rejected(self) -> None:
+        self.assertIsInstance(plan, tls_credential_injection.InjectionPlan)
+
+    def test_anthropic_foreign_api_key_is_rejected(self) -> None:
         with self.assertRaises(tls_credential_injection.SecretSelectionError):
-            self._classify(
+            _plan_provider_injection(
                 slug="anthropic",
                 headers=[(b"x-api-key", b"sk-ant-byo-key")],
-                path="/v1/messages",
+                path_with_query="/v1/messages",
             )
 
-    def test_anthropic_byo_authorization_bearer_is_rejected(self) -> None:
-        """No x-api-key but an Authorization header (e.g. BYO OAuth bearer) must not pass through."""
+    def test_anthropic_authorization_without_placeholder_is_rejected(self) -> None:
         with self.assertRaises(tls_credential_injection.SecretSelectionError):
-            self._classify(
+            _plan_provider_injection(
                 slug="anthropic",
                 headers=[(b"authorization", b"Bearer byo-oauth-token")],
-                path="/v1/messages",
+                path_with_query="/v1/messages",
             )
 
-    def test_oauth_providers_need_injection_even_without_authorization(self) -> None:
-        """OAuth-style requests are implicitly ours — the proxy injects unconditionally."""
+    def test_always_inject_providers_plan_without_a_placeholder(self) -> None:
         for slug in ("google", "github", "nous", "openai-codex"):
-            self.assertTrue(self._classify(
-                slug=slug,
-                headers=[(b"host", b"provider.example")],
-                path="/anything",
-            ))
+            with self.subTest(slug=slug):
+                plan = _plan_provider_injection(
+                    slug=slug,
+                    headers=[(b"host", b"provider.example")],
+                    path_with_query="/anything",
+                )
+                self.assertIsInstance(plan, tls_credential_injection.InjectionPlan)
 
-    def test_telegram_placeholder_path_needs_injection(self) -> None:
-        self.assertTrue(self._classify(
+    def test_telegram_url_placeholder_produces_plan(self) -> None:
+        plan = _plan_provider_injection(
             slug="telegram",
             headers=[(b"host", b"api.telegram.org")],
-            path="/bot000000:HUMR_PLACEHOLDER/getUpdates",
-        ))
+            path_with_query="/bot000000:HUMR_PLACEHOLDER/getUpdates",
+        )
 
-    def test_telegram_path_without_placeholder_is_rejected(self) -> None:
-        """Every Bot API path embeds a token, so telegram has no anonymous surface."""
+        self.assertIsInstance(plan, tls_credential_injection.InjectionPlan)
+
+    def test_telegram_url_without_placeholder_is_rejected(self) -> None:
         with self.assertRaises(tls_credential_injection.SecretSelectionError):
-            self._classify(
+            _plan_provider_injection(
                 slug="telegram",
                 headers=[(b"host", b"api.telegram.org")],
-                path="/bot123456:BYO-TOKEN/sendMessage",
+                path_with_query="/bot123456:BYO-TOKEN/sendMessage",
             )
 
 
@@ -1600,6 +1633,29 @@ class TestProxyConnectionStateMachine(unittest.IsolatedAsyncioTestCase):
         self.assertIn(b"HTTP/1.1 502 Bad Gateway", response)
         self.assertNotIn(b"HTTP/1.1 200 OK", response)
         log_exception.assert_called_once()
+
+    async def test_incomplete_managed_credential_returns_502_without_opening_provider(self) -> None:
+        with patch.object(broker.tls_intercept.logger, "error") as log_error:
+            sandbox_writer, provider_writers, credential_state_store = await self._run_provider_intercept(
+                sandbox_bytes=(
+                    b"GET /gmail/v1/users/me/profile HTTP/1.1\r\n"
+                    b"Host: gmail.googleapis.com\r\n"
+                    b"Connection: close\r\n"
+                    b"\r\n"
+                ),
+                provider_responses=[],
+                secrets={},
+                feed_sandbox_eof=True,
+                provider_slug="google",
+                host="gmail.googleapis.com",
+            )
+
+        response = sandbox_writer.all_bytes()
+        self.assertIn(b"HTTP/1.1 502 Bad Gateway", response)
+        self.assertIn(b"incomplete managed credential", response)
+        self.assertEqual(provider_writers, [])
+        self.assertEqual(credential_state_store.secret_slugs, ["google"])
+        log_error.assert_called_once()
 
     async def test_only_credentialed_401_invalidates_provider_cache(self) -> None:
         sandbox_bytes = (
