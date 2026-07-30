@@ -4,30 +4,20 @@ Deliberately unscoped by organization — this is a platform-operator view, so t
 staff gate replaces the usual per-org query scoping.
 """
 
-import functools
 from uuid import UUID
 
-from django.http import Http404, HttpRequest, HttpResponse
+from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.views.decorators.http import require_GET, require_POST
 
 from humanityrules_app import models
 from humanityrules_app.services import fleet_service
+from humanityrules_app.views import platform_access
 
 FLEET_LOG_MAX_LINES = 300
 
 
-def _staff_or_404(view_func):
-    """Gate to staff, answering everyone else with a 404 so the page's existence isn't revealed."""
-    @functools.wraps(view_func)
-    def wrapper(request: HttpRequest, *args, **kwargs) -> HttpResponse:
-        if not (request.user.is_authenticated and request.user.is_staff):
-            raise Http404
-        return view_func(request, *args, **kwargs)
-    return wrapper
-
-
-@_staff_or_404
+@platform_access.platform_staff_required
 def fleet(request: HttpRequest) -> HttpResponse:
     context = {"env_groups": fleet_service.build_fleet_snapshot()}
     template = "humanityrules_app/fleet/fleet.html"
@@ -36,7 +26,7 @@ def fleet(request: HttpRequest) -> HttpResponse:
     return render(request, template, context=context)
 
 
-@_staff_or_404
+@platform_access.platform_staff_required
 @require_GET
 def fleet_redeploy_all_confirm(request: HttpRequest) -> HttpResponse:
     """Return the fleet-wide redeploy confirmation modal."""
@@ -44,7 +34,7 @@ def fleet_redeploy_all_confirm(request: HttpRequest) -> HttpResponse:
     return render(request, "humanityrules_app/fleet/_fleet_redeploy_all_confirm.html", context=context)
 
 
-@_staff_or_404
+@platform_access.platform_staff_required
 @require_POST
 def fleet_redeploy_all(request: HttpRequest) -> HttpResponse:
     """Queue redeployments for the eligible current fleet rows."""
@@ -60,7 +50,7 @@ def fleet_redeploy_all(request: HttpRequest) -> HttpResponse:
     return render(request, "humanityrules_app/fleet/fleet.html#fleet_list", context=context)
 
 
-@_staff_or_404
+@platform_access.platform_staff_required
 @require_GET
 def fleet_fail_unsettled_deployments_confirm(request: HttpRequest) -> HttpResponse:
     """Return the confirmation modal for the fleet recovery action."""
@@ -68,7 +58,7 @@ def fleet_fail_unsettled_deployments_confirm(request: HttpRequest) -> HttpRespon
     return render(request, "humanityrules_app/fleet/_fleet_fail_unsettled_confirm.html", context=context)
 
 
-@_staff_or_404
+@platform_access.platform_staff_required
 @require_POST
 def fleet_fail_unsettled_deployments(request: HttpRequest) -> HttpResponse:
     """Mark all deployment jobs left in unsettled states as failed."""
@@ -80,7 +70,7 @@ def fleet_fail_unsettled_deployments(request: HttpRequest) -> HttpResponse:
     return render(request, "humanityrules_app/fleet/fleet.html#fleet_list", context=context)
 
 
-@_staff_or_404
+@platform_access.platform_staff_required
 @require_POST
 def fleet_deployment_redeploy(request: HttpRequest, app_id: UUID) -> HttpResponse:
     """Queue a redeploy for one eligible HA row on the fleet page."""
@@ -96,7 +86,7 @@ def fleet_deployment_redeploy(request: HttpRequest, app_id: UUID) -> HttpRespons
     return render(request, "humanityrules_app/fleet/fleet.html#fleet_list", context=context)
 
 
-@_staff_or_404
+@platform_access.platform_staff_required
 @require_GET
 def fleet_app_remove_confirm(request: HttpRequest, app_id: UUID) -> HttpResponse:
     """Return the confirmation modal for tearing down and deleting one HA."""
@@ -111,7 +101,7 @@ def fleet_app_remove_confirm(request: HttpRequest, app_id: UUID) -> HttpResponse
     return render(request, "humanityrules_app/fleet/_fleet_remove_confirm.html", context=context)
 
 
-@_staff_or_404
+@platform_access.platform_staff_required
 @require_POST
 def fleet_app_remove(request: HttpRequest, app_id: UUID) -> HttpResponse:
     """Queue teardown, data purge, and deletion for one HA row on the fleet page."""
@@ -127,7 +117,7 @@ def fleet_app_remove(request: HttpRequest, app_id: UUID) -> HttpResponse:
     return render(request, "humanityrules_app/fleet/fleet.html#fleet_list", context=context)
 
 
-@_staff_or_404
+@platform_access.platform_staff_required
 def fleet_deployment_log(request: HttpRequest, app_id: str) -> HttpResponse:
     app = get_object_or_404(models.App.objects.select_related("environment"), id=app_id)
     # Fetch newest-first so the cap keeps the tail, then reverse to chronological for display.
