@@ -35,7 +35,7 @@ Look for:
 2. Choose the shortest name that preserves the concept, not the shortest name possible. Prefer explicit directional names when direction matters.
 3. Name values by what they mean now. Represent provenance explicitly only when later behavior depends on it.
 4. Make the entry point read as the system's story. Keep policy decisions visible and move lower-level mechanics behind names that state their outcome.
-5. Introduce a type only when it marks a meaningful transition, invariant, or decision boundary.
+5. Treat every new type as a concept the reader must retain. A boundary makes a type eligible, not justified. Add one only when it makes invalid states unrepresentable or removes more explanation than it adds.
 6. Pass or return a fact when it becomes known instead of making downstream code infer it from construction details.
 7. Place decisions in the layer that owns the policy. Let lower-level mechanisms expose capabilities and results without knowing the caller's policy.
 8. Make each component depend only on concepts required by its responsibility. Prefer dependencies on narrower, more stable concepts.
@@ -52,6 +52,7 @@ Evaluate the change by asking:
 4. Can they predict what happens next from the entry point?
 5. Does each dependency make conceptual sense, and does it point in the direction of responsibility?
 6. Does every remaining abstraction eliminate more explanation than it introduces?
+7. What does each new type let the reader forget?
 
 Do not claim simplification solely from reduced line count, fewer functions, or shorter names.
 
