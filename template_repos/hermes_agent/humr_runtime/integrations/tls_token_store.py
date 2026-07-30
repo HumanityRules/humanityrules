@@ -1,16 +1,52 @@
-"""Access-token cache, HUMR refresh protocol, and cache-independent connection state.
+"""In-memory home for the secrets the TLS-intercept proxy injects, and for the
+"is this provider connected?" facts the WebUI and gateway env need.
 
-`CredentialStateStore` answers the proxy's one dynamic question — what are the
-real secrets for this provider slug — from an in-memory, expiry-pruned cache of
-the short-lived secrets HUMR hands back, refreshed under a single lock. Refresh
-tokens and OAuth client secrets never reach this process; HUMR performs the
-upstream exchange and returns only what the proxy injects.
+The proxy's hot path has one dynamic question: given a provider slug, what
+real secrets should go into this request right now? The answer never comes
+from disk or from the sandbox. It comes from HUMR's control plane, which
+owns the long-lived material (refresh tokens, OAuth client secrets, vault
+keys) and mints short-lived secrets the broker is allowed to hold. This
+module is the broker-side cache of those secrets, plus the thin protocol
+that refreshes them.
 
-Alongside the cache, and deliberately decoupled from its lifetime, sits the
-cache-independent per-provider connection state. The two change atomically from
-the same refresh outcome, but an access token can expire and be pruned without
-disconnecting the provider. Static provider facts, host routing, and the catalog
-joins for WebUI status and gateway-env snapshots live in `tls_intercept`.
+`CredentialStateStore` is the whole surface. It is keyed only by provider
+slug — it does not know hostnames, catalog entries, or HTTP. Callers that
+need "Google's card in the integrations panel" join a snapshot from here
+with a static `TlsProviderSpec` in `tls_intercept`.
+
+Two kinds of state live side by side and must not be confused:
+
+- The **token cache** holds the injectable secrets (`access_token`, Slack's
+  bot + app tokens, and so on) with an expiry. The proxy prunes entries as
+  they age out, and refreshes ahead of expiry when a request needs them.
+  A missing or expired entry is "we cannot inject right now," not
+  "the user disconnected."
+- The **connection state** (`ProviderConnectionState`) is whether HUMR
+  currently has a grant for this provider, plus the last-known `config`
+  and `metadata` that status cards and env bindings need. It changes only
+  when a refresh comes back `has_token` or `absent`, or on an explicit
+  disconnect. An idle provider whose access token has been pruned still
+  reads as connected; its card and env bindings survive.
+
+Every refresh is the same batched call to HUMR
+(`POST /api/integrations/tokens`), whether bootstrap is asking about every
+slug or the proxy hot path is asking about one. HUMR answers per slug with
+one of three outcomes:
+
+- `has_token` — here are fresh secrets (and config/metadata); cache them.
+- `absent` — the user is not connected (or the grant was revoked); clear
+  the cache and mark disconnected. This is a normal 200 entry, not an
+  HTTP error.
+- `transient` — HUMR hiccuped; leave whatever we already have alone. A
+  still-unexpired cached secret keeps serving so a brief outage does not
+  look like a disconnect.
+
+There is no per-provider timer and no background refresh loop. Fetches are
+triggered by broker bootstrap, by a request whose cache entry is missing
+or near expiry, by a known state change (connect / disconnect / vault
+save / device-flow completion), or by an explicit Refresh in the UI.
+A single lock serializes cache mutation and any read that needs a
+consistent view, so a parked fetch cannot write past an invalidate.
 """
 
 import asyncio

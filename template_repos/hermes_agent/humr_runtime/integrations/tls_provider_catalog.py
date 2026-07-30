@@ -1,18 +1,53 @@
-"""Provider catalog for the TLS-intercept proxy.
+"""Static catalog of third-party APIs whose credentials the integrations broker
+injects on the agent's behalf.
 
-One `TlsProviderSpec` is one third-party API the broker MITMs. It answers:
-which CONNECT hosts to claim, how a managed secret is written onto an
-intercepted request (`credential_wire_behavior`), and which env vars to
-project while connected (`env_bindings`). Connect UX (`connect_mode`) and
-panel placement (`category`) live here too.
+The agent runs in a sandbox that is never allowed to hold real credentials —
+not even short-lived access tokens. When it calls Gmail, GitHub, Telegram, or
+another managed API, the request leaves the sandbox through a local HTTPS
+proxy (the TLS-intercept side of the integrations broker). That proxy sits
+outside the sandbox, already holds the user's secrets in memory, and rewrites
+each request so the upstream sees a real credential while the sandbox never
+did.
 
-This file is only that static data — the wire-behavior types, the specs
-tuple, and the slug registry. Runtime joins a spec with live connection
-state elsewhere.
+This module is the declarative half of that arrangement: a frozen description,
+per provider, of everything the proxy and the surrounding UI need to know
+about that provider *before* any user has connected. It does not fetch tokens,
+open sockets, or decide whether a user is currently connected. Those are
+runtime concerns. What lives here is the shape of each provider.
 
-To add a provider that reuses an existing wire behavior, append a
-`TlsProviderSpec` to `TLS_INTERCEPT_PROVIDER_SPECS`. A new wire behavior
-also needs one planning branch in `tls_credential_injection`.
+Each entry is a `TlsProviderSpec`. Read one as answering four questions:
+
+1. **Identity and placement.** `slug`, `label`, `logo_url`, and `category`
+   identify the provider and decide where its card appears in the
+   integrations panel (model provider vs connector).
+
+2. **Which traffic belongs to this provider.** `hosts` lists the hostnames
+   whose HTTPS the proxy should open and inspect. A request to a listed host
+   is treated as this provider's traffic; every other host is tunnelled
+   opaquely and never gets a credential written into it. Listing a host here
+   *is* the allowlist — there is no separate network-policy entry.
+
+3. **How the user connects.** `connect_mode` selects the integrations-panel
+   flow (`oauth`, `device`, or `vault`). That is independent of how
+   credentials later appear on the wire.
+
+4. **How a managed credential is put onto a request, and what the sandbox
+   sees meanwhile.** `credential_wire_behavior` says how the proxy recognizes
+   that a request wants a managed secret and where that secret is written —
+   always into headers, via a placeholder header the sandbox sends, or via a
+   placeholder embedded in the URL. `env_bindings` says which environment
+   variables the gateway should receive while the provider is connected
+   (often a placeholder the proxy will later swap). The restart flags say
+   which processes must be bounced after a connect or disconnect that
+   changed that env block.
+
+Three wire behaviors exist today (`AlwaysInjectHeaders`, `HeaderPlaceholder`,
+`UrlCredentialPlaceholder`). Each is a frozen dataclass in this file and has
+exactly one planning branch in `tls_credential_injection`. Adding a provider
+that reuses an existing behavior is appending a `TlsProviderSpec` to
+`TLS_INTERCEPT_PROVIDER_SPECS`. Adding a new behavior means a new dataclass
+here plus that one new planning branch — the rest of the proxy does not
+change.
 """
 
 from dataclasses import dataclass

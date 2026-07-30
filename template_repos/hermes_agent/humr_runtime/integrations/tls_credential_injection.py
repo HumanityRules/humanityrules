@@ -1,15 +1,41 @@
-"""Plan and apply managed credentials to intercepted provider requests.
+"""Decide how — and whether — a managed credential should enter one intercepted
+request, then perform that rewrite once the secrets are in hand.
 
-`plan_injection` makes the request policy decision before the token-store
-lookup. A plan records the selected secret names and their wire destinations,
-so `apply_injection_plan` only performs the planned substitutions after the
-caller fetches those secrets. `None` means anonymous pass-through; an invalid
-or foreign credential raises `SecretSelectionError`. A managed credential that
-does not contain a planned secret raises `CredentialContractError` instead.
+The TLS-intercept proxy has already opened the sandbox's HTTPS and can read
+the request. What it still needs to know is provider-specific and
+request-specific: does this call want HUMR's managed credential at all? If
+so, which named secret(s), and where on the wire do they go — a header, a
+URL path segment, both? Different providers answer differently. Google gets
+a bearer token on every call. Telegram embeds the bot token in the URL path
+and expects a placeholder there. Slack and some LLM providers send a
+placeholder header that selects which secret to use, and an empty slot means
+"forward anonymously."
 
-Neither function touches the network or token cache. HTTP transport
-normalization (Host, proxy headers, and framing) remains in
-`tls_http_message_relay`.
+This module is that decision, split into two deliberate steps so the policy
+never waits on the network:
+
+1. `plan_injection` looks only at the sandbox request and the provider's
+   `credential_wire_behavior` from the catalog. It returns an
+   `InjectionPlan` naming the secrets and destinations, `None` for anonymous
+   pass-through, or raises `SecretSelectionError` when the request is
+   refused (a foreign credential, a missing URL placeholder, Authorization
+   used where a custom placeholder header was required, and so on). No
+   token lookup happens here — a refused request never costs a HUMR call.
+
+2. `apply_injection_plan` runs after the caller has fetched the named
+   secrets. It performs only the substitutions the plan recorded: write
+   header values in the right encoding, replace a URL placeholder, strip
+   Authorization when the plan says so. It does not re-branch on provider
+   behavior. A secret the plan required but HUMR did not return raises
+   `CredentialContractError` — that is a control-plane contract failure,
+   not a sandbox request error.
+
+Neither function opens a socket or reads the token cache. Framing, Host
+rewrites, and everything else about HTTP transport stay in
+`tls_http_message_relay`. The three wire-behavior types themselves
+(`AlwaysInjectHeaders`, `HeaderPlaceholder`, `UrlCredentialPlaceholder`)
+are declared in `tls_provider_catalog`; each has exactly one planning
+branch here.
 """
 
 import base64

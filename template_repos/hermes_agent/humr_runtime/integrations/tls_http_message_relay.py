@@ -1,25 +1,50 @@
-"""HTTP/1.1 mechanics for forwarding sandbox requests to providers.
+"""Provider-agnostic HTTP/1.1: read a request from the sandbox, send it to a
+destination host, and stream the response back.
 
-Provider-agnostic, and that is the discipline that keeps this file
-comprehensible: nothing here knows that providers, credentials, or tokens
-exist. It reads a request from the sandbox, sends it to the destination
-provider, and streams the provider's response back to the sandbox.
+This module deliberately knows nothing about providers, credentials, tokens,
+or the catalog. By the time code here runs, the TLS-intercept layer has
+already decided *which* host to talk to and *what* the outbound request
+bytes should be. What remains is mechanical: parse HTTP, frame bodies
+correctly, open a TLS connection to the destination, replay the request,
+and copy the response home without distorting it.
 
-Response bodies are never buffered whole. Broker RSS would otherwise track the
-largest response ever proxied (git clone packs through github.com reached
-multi-GB peaks), and per-chunk flushing is also what keeps SSE deltas live for
-the sandbox. Request bodies are currently buffered in full so the broker can
-validate their framing and send them to the provider with Content-Length.
+That ignorance is load-bearing. Keeping credentials and provider policy out
+of this file is what keeps the HTTP machinery tractable — and what lets
+billing (`tls_usage_metering`) watch a response through a narrow observer
+seam without the relay knowing why anyone is watching.
 
-Request-side and response-side framing rules are deliberately different, and
-they sit next to each other here so the asymmetry is visible: a request body
-must be chunked-alone or Content-Length, because the broker re-frames what it
-forwards, while a response body is relayed in whatever framing arrived.
+The main shapes:
+
+- `SandboxRequest` / `ProviderRequest` — the same HTTP message on either
+  side of the credential rewrite. The intercept layer reads one, possibly
+  rewrites headers and path, and hands the other to `forward_to_provider`.
+- `forward_to_provider` — connect to the real upstream, write the request,
+  stream the response to the sandbox writer, and return a small
+  `ForwardResult` (status code, whether the sandbox connection can keep
+  serving more requests).
+- `pump_both_ways` — the opaque-tunnel path for hosts we do not intercept:
+  copy bytes in both directions and stop when either side closes.
+- Synthetic replies (`send_raw`, `send_json_error`) — used when the proxy
+  itself must answer the sandbox (bad request, provider not connected,
+  upstream connect failed) without ever talking to a real provider.
+
+Two framing policies sit next to each other on purpose, because they are
+asymmetric and easy to conflate:
+
+- **Request bodies** are buffered in full. The broker validates framing,
+  then re-sends to the provider with `Content-Length`. Chunked-alone or
+  Content-Length are accepted; anything else is a 400.
+- **Response bodies** are never buffered whole. Bytes are flushed per
+  chunk in whatever framing the upstream used. Buffering whole bodies made
+  broker memory track the largest response ever proxied (git clone packs
+  through GitHub reached multi-GB peaks). Per-chunk flushing is also what
+  keeps server-sent-event deltas live for the sandbox.
 
 A caller may pass a `ResponseBodyObserver` to watch one response as decoded
-bytes (transfer framing removed). Observation is strictly one-way: every call
-is guarded, an observer that raises is dropped for the rest of the response,
-and the relayed byte stream is identical with or without one.
+bytes (transfer framing already removed). Observation is strictly one-way:
+every callback is guarded, an observer that raises is dropped for the rest
+of that response, and the bytes the sandbox receives are identical whether
+or not anyone is watching.
 """
 
 import asyncio
