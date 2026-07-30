@@ -122,6 +122,7 @@ class TestBillingUsageIngestion(BillingUsageIngestTestBase):
         event = models.BillingUsageEvent.objects.get(idempotency_key="evt-1")
         self.assertEqual(event.organization, self.organization)
         self.assertEqual(event.app_id, self.app.id)
+        self.assertEqual(event.app_slug, self.app.slug)
         self.assertEqual(event.owner_username, "vmendi")
         self.assertEqual(event.source, "llm")
         self.assertEqual(event.subkey, "gpt-5.2-codex")
@@ -161,6 +162,22 @@ class TestBillingUsageIngestion(BillingUsageIngestTestBase):
         self.assertEqual(status, 404)
         self.assertEqual(body["error"], "app not found in environment")
         self.assertFalse(models.BillingUsageEvent.objects.exists())
+
+    def test_events_survive_app_deletion(self) -> None:
+        app_id, app_slug = self.app.id, self.app.slug
+        status, _body = self.post_events(
+            events=[_event(idempotency_key="evt-1"), _event(idempotency_key="evt-2")],
+            token=self.raw_token,
+        )
+
+        self.app.delete()
+
+        self.assertEqual(status, 200)
+        self.assertFalse(models.App.objects.filter(id=app_id).exists())
+        self.assertEqual(models.BillingUsageEvent.objects.count(), 2)
+        for event in models.BillingUsageEvent.objects.all():
+            self.assertEqual(event.app_id, app_id)
+            self.assertEqual(event.app_slug, app_slug)
 
     def test_empty_batch_is_accepted(self) -> None:
         status, body = self.post_events(events=[], token=self.raw_token)
