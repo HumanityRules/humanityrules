@@ -27,7 +27,6 @@ from humr_client import HumrClient
 from mcp_aggregator import MCPAggregator
 import tls_intercept
 import tls_provider_catalog
-import tls_token_store
 
 
 GATEWAY_PROCESS_NAME = "system.gateway"
@@ -251,12 +250,7 @@ class CredentialsService:
         marker_slugs = {spec.slug for spec in specs_in_scope if spec.slug in AUTH_MARKER_PROVIDERS}
         if not marker_slugs:
             return
-        status_items = await self._tls_intercept_runtime.status_items()
-        connected_slugs = {
-            str(item.get("slug"))
-            for item in status_items
-            if item.get("status") == tls_token_store.STATUS_CONNECTED
-        }
+        connected_slugs = await self._tls_intercept_runtime.connected_slugs()
         for provider in sorted(marker_slugs):
             action = "connect" if provider in connected_slugs else "disconnect"
             await self._apply_auth_marker(provider=provider, action=action)

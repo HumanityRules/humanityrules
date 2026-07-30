@@ -43,6 +43,15 @@ import tls_token_store
 logger = logging.getLogger("tls_intercept")
 
 
+REFRESH_LEAD_SECONDS = 300
+
+# Public browser-facing status strings. The token store owns their current
+# serialization, but callers depend on the TLS-intercept subsystem contract,
+# not on that implementation module.
+STATUS_CONNECTED = tls_token_store.STATUS_CONNECTED
+STATUS_NOT_CONNECTED = tls_token_store.STATUS_NOT_CONNECTED
+
+
 class TlsInterceptRuntime:
     """TLS-intercept subsystem: proxy transport, token refresh, and status cards."""
 
@@ -70,6 +79,10 @@ class TlsInterceptRuntime:
     async def status_items(self) -> list[dict]:
         """Return TLS-intercept integration cards."""
         return await self._token_store.status_items()
+
+    async def connected_slugs(self) -> frozenset[str]:
+        """Return the providers whose durable connection state is connected."""
+        return await self._token_store.connected_slugs()
 
     async def invalidate(self, slug: str) -> None:
         """Drop one provider's cached token entry."""

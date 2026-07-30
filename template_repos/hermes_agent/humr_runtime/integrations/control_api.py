@@ -24,7 +24,6 @@ from humr_client import HumrClient
 from mcp_aggregator import MCPAggregator
 import permissions_control
 import tls_intercept
-import tls_token_store
 
 logger = logging.getLogger("control_api")
 
@@ -52,7 +51,7 @@ def _card_visible(item: dict, org_slug: str) -> bool:
         return False
     if slug == _CODEX_SLUG:
         metadata = item.get("metadata") or {}
-        return item.get("status") == tls_token_store.STATUS_CONNECTED and not metadata.get("platform_shared")
+        return item.get("status") == tls_intercept.STATUS_CONNECTED and not metadata.get("platform_shared")
     return True
 
 
