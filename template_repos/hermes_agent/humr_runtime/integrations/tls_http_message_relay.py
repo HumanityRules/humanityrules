@@ -1,15 +1,15 @@
-"""HTTP/1.1 wire mechanics for the TLS-intercept proxy: parse, frame, replay, relay.
+"""HTTP/1.1 mechanics for forwarding sandbox requests to providers.
 
 Provider-agnostic, and that is the discipline that keeps this file
 comprehensible: nothing here knows that providers, credentials, or tokens
-exist. It reads a request off a TLS-terminated socket, replays it to the real
-upstream, and streams the response back in the upstream's own framing.
+exist. It reads a request from the sandbox, sends it to the destination
+provider, and streams the provider's response back to the sandbox.
 
 Response bodies are never buffered whole. Broker RSS would otherwise track the
 largest response ever proxied (git clone packs through github.com reached
 multi-GB peaks), and per-chunk flushing is also what keeps SSE deltas live for
-the sandbox client. Request bodies are currently buffered in full so the broker
-can validate their framing and replay them upstream with Content-Length.
+the sandbox. Request bodies are currently buffered in full so the broker can
+validate their framing and send them to the provider with Content-Length.
 
 Request-side and response-side framing rules are deliberately different, and
 they sit next to each other here so the asymmetry is visible: a request body
@@ -39,7 +39,35 @@ _CONTENT_LENGTH_RE = re.compile(rb"^\d+$")
 _CHUNK_SIZE_RE = re.compile(rb"^[0-9A-Fa-f]+$")
 
 
-def parse_headers(lines: list[bytes]) -> list[tuple[bytes, bytes]]:
+@dataclass(frozen=True)
+class SandboxRequest:
+    """An HTTP request read from the sandbox connection."""
+
+    method: str
+    path_with_query: str
+    headers: list[tuple[bytes, bytes]]
+    body: bytes
+
+
+@dataclass(frozen=True)
+class ProviderRequest:
+    """The HTTP request the broker will send to the provider."""
+
+    method: str
+    path_with_query: str
+    headers: list[tuple[bytes, bytes]]
+    body: bytes
+
+
+@dataclass(frozen=True)
+class ForwardResult:
+    """Facts the intercept loop needs after forwarding one request."""
+
+    status_code: int
+    sandbox_connection_can_continue: bool
+
+
+def _parse_headers(lines: list[bytes]) -> list[tuple[bytes, bytes]]:
     headers: list[tuple[bytes, bytes]] = []
     for line in lines:
         if line in (b"\r\n", b"\n", b""):
@@ -57,7 +85,7 @@ def _header_values(headers: list[tuple[bytes, bytes]], name: bytes) -> list[byte
     return [value.lower() for field_name, value in headers if field_name.lower() == normalized_name]
 
 
-async def read_body(reader: asyncio.StreamReader, headers: list[tuple[bytes, bytes]]) -> bytes:
+async def _read_request_body(sandbox_reader: asyncio.StreamReader, headers: list[tuple[bytes, bytes]]) -> bytes:
     """Read a request body per Content-Length / Transfer-Encoding.
 
     Transfer-Encoding takes precedence over Content-Length, mirroring the
@@ -72,12 +100,16 @@ async def read_body(reader: asyncio.StreamReader, headers: list[tuple[bytes, byt
         encodings = [token.strip() for value in transfer_encoding_values for token in value.split(b",")]
         # Dechunking is the only request transfer coding the broker implements.
         # Accepting a preceding coding (for example gzip, chunked) and then
-        # stripping Transfer-Encoding upstream would silently change semantics.
+        # stripping Transfer-Encoding before sending would silently change semantics.
         if encodings != [b"chunked"]:
             raise ValueError(f"unsupported request Transfer-Encoding: {b', '.join(encodings)!r}")
-        return await _read_chunked(reader=reader)
+        return await _read_chunked_request_body(sandbox_reader=sandbox_reader)
 
-    content_length_values = [token.strip() for value in _header_values(headers=headers, name=b"content-length") for token in value.split(b",")]
+    content_length_values = [
+        token.strip()
+        for value in _header_values(headers=headers, name=b"content-length")
+        for token in value.split(b",")
+    ]
     if not content_length_values:
         return b""
     if any(not _CONTENT_LENGTH_RE.fullmatch(value) for value in content_length_values):
@@ -88,15 +120,15 @@ async def read_body(reader: asyncio.StreamReader, headers: list[tuple[bytes, byt
     if remaining == 0:
         return b""
     try:
-        return await reader.readexactly(remaining)
+        return await sandbox_reader.readexactly(remaining)
     except asyncio.IncompleteReadError as exc:
         raise ValueError(f"request body ended after {len(exc.partial)} of {remaining} bytes") from exc
 
 
-async def _read_chunked(reader: asyncio.StreamReader) -> bytes:
+async def _read_chunked_request_body(sandbox_reader: asyncio.StreamReader) -> bytes:
     chunks: list[bytes] = []
     while True:
-        size_line = await reader.readline()
+        size_line = await sandbox_reader.readline()
         if not size_line:
             raise ValueError("request chunked body ended before a chunk size")
         if not size_line.endswith(b"\r\n"):
@@ -107,7 +139,7 @@ async def _read_chunked(reader: asyncio.StreamReader) -> bytes:
         size = int(size_token, 16)
         if size == 0:
             while True:
-                trailer_line = await reader.readline()
+                trailer_line = await sandbox_reader.readline()
                 if not trailer_line:
                     raise ValueError("request chunked body ended inside trailers")
                 if trailer_line == b"\r\n":
@@ -115,16 +147,37 @@ async def _read_chunked(reader: asyncio.StreamReader) -> bytes:
                 if not trailer_line.endswith(b"\r\n"):
                     raise ValueError("request trailer line did not end with CRLF")
         try:
-            chunks.append(await reader.readexactly(size))
-            delimiter = await reader.readexactly(2)
+            chunks.append(await sandbox_reader.readexactly(size))
+            delimiter = await sandbox_reader.readexactly(2)
         except asyncio.IncompleteReadError as exc:
             raise ValueError("request chunk payload ended before its declared boundary") from exc
         if delimiter != b"\r\n":
             raise ValueError("request chunk payload was not followed by CRLF")
 
 
-def _normalize_forward_headers(headers: list[tuple[bytes, bytes]], body_length: int, upstream_host: str) -> list[tuple[bytes, bytes]]:
-    """Set the upstream Host and strip proxy, hop-by-hop, and stale framing headers."""
+async def read_sandbox_request(sandbox_reader: asyncio.StreamReader) -> SandboxRequest | None:
+    """Read one complete request from the sandbox, or None after a clean EOF."""
+    request_line = await sandbox_reader.readline()
+    if not request_line:
+        return None
+    try:
+        method, path_with_query, _http_version = request_line.decode("iso-8859-1").strip().split(" ", 2)
+    except ValueError as exc:
+        raise ValueError("bad request line") from exc
+
+    header_lines: list[bytes] = []
+    while True:
+        line = await sandbox_reader.readline()
+        header_lines.append(line)
+        if line in (b"\r\n", b"\n", b""):
+            break
+    headers = _parse_headers(lines=header_lines)
+    body = await _read_request_body(sandbox_reader=sandbox_reader, headers=headers)
+    return SandboxRequest(method=method, path_with_query=path_with_query, headers=headers, body=body)
+
+
+def _normalize_provider_headers(headers: list[tuple[bytes, bytes]], body_length: int, provider_host: str) -> list[tuple[bytes, bytes]]:
+    """Set the provider Host and strip proxy, hop-by-hop, and stale framing headers."""
     headers_to_strip = frozenset({
         b"connection",
         b"content-length",
@@ -147,32 +200,32 @@ def _normalize_forward_headers(headers: list[tuple[bytes, bytes]], body_length: 
         if lowered_name in headers_to_strip:
             continue
         normalized.append((name, value))
-    normalized.append((b"Host", upstream_host.encode()))
+    normalized.append((b"Host", provider_host.encode()))
     if body_length > 0 or body_was_framed:
         normalized.append((b"Content-Length", str(body_length).encode()))
     return normalized
 
 
-_upstream_ssl_context: ssl.SSLContext | None = None
+_provider_ssl_context: ssl.SSLContext | None = None
 
 
-def _get_upstream_ssl_context() -> ssl.SSLContext:
-    """Return the shared upstream client SSLContext, creating it on first use.
+def _get_provider_ssl_context() -> ssl.SSLContext:
+    """Return the shared provider SSLContext, creating it on first use.
 
     A context is safe to share across connections, and creating one per
     request re-parses the entire system CA store — measurable allocator churn
     under concurrent proxy traffic.
     """
-    global _upstream_ssl_context
-    if _upstream_ssl_context is None:
-        _upstream_ssl_context = ssl.create_default_context()
-    return _upstream_ssl_context
+    global _provider_ssl_context
+    if _provider_ssl_context is None:
+        _provider_ssl_context = ssl.create_default_context()
+    return _provider_ssl_context
 
 
 class ResponseBodyObserver(Protocol):
-    """Read-only sink for one upstream response, fed decoded body bytes.
+    """Read-only sink for one provider response, fed decoded body bytes.
 
-    `on_head` receives the final (non-interim) status and the upstream's own
+    `on_head` receives the final (non-interim) status and the provider's own
     header list; `on_body` receives payload bytes with transfer framing
     (chunk sizes, delimiters, trailers) already removed; `on_end` fires once
     the exchange is over, cleanly or not. Content codings are NOT undone —
@@ -216,61 +269,61 @@ class _GuardedObserver:
         self._call("on_end")
 
 
-async def forward_to_upstream(
-    host: str,
-    port: int,
-    method: str,
-    path_with_query: str,
-    headers: list[tuple[bytes, bytes]],
-    body: bytes,
-    client_writer: asyncio.StreamWriter,
+async def forward_to_provider(
+    provider_host: str,
+    provider_port: int,
+    request: ProviderRequest,
+    sandbox_writer: asyncio.StreamWriter,
     response_body_observer: ResponseBodyObserver | None,
-) -> tuple[int, bool]:
-    """Replay the request to the real upstream and relay the response to the client.
+) -> ForwardResult:
+    """Send one request to the provider and stream its response to the sandbox.
 
     The response head is forwarded verbatim and the body is relayed chunk by
-    chunk in its upstream framing — never buffered whole. Streaming keeps SSE
-    deltas live for the sandbox client AND caps broker memory at one relay
+    chunk in the provider's framing — never buffered whole. Streaming keeps
+    SSE deltas live for the sandbox AND caps broker memory at one response
     chunk per in-flight response; buffering entire bodies made broker RSS
     track the largest response ever proxied (git clone packs through
-    github.com reached multi-GB peaks). Returns ``(status, keep_alive)``;
-    ``keep_alive`` is False when the client connection must be torn down
-    after this exchange.
+    github.com reached multi-GB peaks).
     """
     observer = _GuardedObserver(observer=response_body_observer) if response_body_observer is not None else None
-    ctx = _get_upstream_ssl_context()
-    upstream_reader, upstream_writer = await asyncio.open_connection(host=host, port=port, ssl=ctx, server_hostname=host)
+    ssl_context = _get_provider_ssl_context()
+    provider_reader, provider_writer = await asyncio.open_connection(
+        host=provider_host,
+        port=provider_port,
+        ssl=ssl_context,
+        server_hostname=provider_host,
+    )
     try:
-        normalized_headers = _normalize_forward_headers(
-            headers=headers,
-            body_length=len(body),
-            upstream_host=host,
+        provider_headers = _normalize_provider_headers(
+            headers=request.headers,
+            body_length=len(request.body),
+            provider_host=provider_host,
         )
-        request = method.encode() + b" " + path_with_query.encode() + b" HTTP/1.1\r\n"
-        for name, value in normalized_headers:
-            request += name + b": " + value + b"\r\n"
-        request += b"\r\n"
-        upstream_writer.write(request)
-        if body:
-            upstream_writer.write(body)
-        await upstream_writer.drain()
+        request_head = request.method.encode() + b" " + request.path_with_query.encode() + b" HTTP/1.1\r\n"
+        for name, value in provider_headers:
+            request_head += name + b": " + value + b"\r\n"
+        request_head += b"\r\n"
+        provider_writer.write(request_head)
+        if request.body:
+            provider_writer.write(request.body)
+        await provider_writer.drain()
         # Interim (1xx) responses precede the final one on the same
         # connection: relay each interim head verbatim and keep reading, so
         # an interim 100/103 doesn't desync the stream and the final status
         # (which drives keep-alive and the 401 evict) is the one acted on.
         # (The proxy reads the full request body before forwarding, so a
-        # client waiting on 100-continue waits out its expect timeout first —
+        # sandbox waiting on 100-continue waits out its expect timeout first —
         # pre-existing behavior.) 101 is the exception: it has no following
         # response — the connection switches protocols. Upgrades aren't
         # supported (the request normalizer strips `Upgrade`/`Connection`),
         # so a stray 101 is final and force-closes.
         while True:
-            status, response_headers = await _read_response_head(reader=upstream_reader)
+            status, response_headers = await _read_provider_response_head(provider_reader=provider_reader)
             if not (100 <= status < 200) or status == 101:
                 break
-            client_writer.write(_render_response_head(status=status, headers=response_headers))
-            await client_writer.drain()
-        connection_keep_alive = status != 101 and not connection_close_requested(headers=response_headers)
+            sandbox_writer.write(_render_response_head(status=status, headers=response_headers))
+            await sandbox_writer.drain()
+        sandbox_connection_can_continue = status != 101 and not connection_close_requested(headers=response_headers)
         if observer is not None:
             observer.on_head(status, response_headers)
 
@@ -278,53 +331,56 @@ async def forward_to_upstream(
         # the head even when framing headers are present (a 304 echoes
         # the would-be body's Content-Length) — the relay would otherwise
         # wait on body bytes that never come and hang a valid response.
-        response_can_have_body = not (method.upper() == "HEAD" or 100 <= status < 200 or status in (204, 304))
+        response_can_have_body = not (request.method.upper() == "HEAD" or 100 <= status < 200 or status in (204, 304))
         if response_can_have_body:
             # Parsing (and validating) the framing BEFORE the head is written
             # keeps invalid-framing failures on the clean-502 path below.
-            framing, forward_headers = _parse_response_framing(headers=response_headers)
+            framing, sandbox_headers = _parse_response_framing(headers=response_headers)
         else:
-            framing, forward_headers = None, response_headers
+            framing, sandbox_headers = None, response_headers
 
-        client_writer.write(_render_response_head(status=status, headers=forward_headers))
-        await client_writer.drain()
+        sandbox_writer.write(_render_response_head(status=status, headers=sandbox_headers))
+        await sandbox_writer.drain()
 
-        # Past this point the head is committed to the client: an error can
+        # Past this point the head is committed to the sandbox: an error can
         # no longer be reported as an HTTP response without corrupting the
-        # byte stream (the client would read it as body data). On failure,
+        # byte stream (the sandbox would read it as body data). On failure,
         # tear the connection down instead — truncation is detectable from
         # the framing; an injected 502 mid-body is silent corruption.
         try:
             if not response_can_have_body:
-                return status, connection_keep_alive
-            framed = await _relay_response_body(
-                upstream_reader=upstream_reader,
-                client_writer=client_writer,
+                return ForwardResult(status_code=status, sandbox_connection_can_continue=sandbox_connection_can_continue)
+            body_has_clean_boundary = await _relay_response_body(
+                provider_reader=provider_reader,
+                sandbox_writer=sandbox_writer,
                 framing=framing,
                 observer=observer,
             )
-            return status, connection_keep_alive and framed
+            return ForwardResult(
+                status_code=status,
+                sandbox_connection_can_continue=sandbox_connection_can_continue and body_has_clean_boundary,
+            )
         except Exception:
-            logger.exception("relay from %s failed after response head was sent", host)
-            return status, False
+            logger.exception("forward from %s failed after response head was sent", provider_host)
+            return ForwardResult(status_code=status, sandbox_connection_can_continue=False)
     finally:
         if observer is not None:
             observer.on_end()
         with contextlib.suppress(Exception):
-            upstream_writer.close()
-            await upstream_writer.wait_closed()
+            provider_writer.close()
+            await provider_writer.wait_closed()
 
 
-async def _read_response_head(reader: asyncio.StreamReader) -> tuple[int, list[tuple[bytes, bytes]]]:
-    """Read one response status line + header block from the upstream."""
-    status_line = await reader.readline()
+async def _read_provider_response_head(provider_reader: asyncio.StreamReader) -> tuple[int, list[tuple[bytes, bytes]]]:
+    """Read one response status line and header block from the provider."""
+    status_line = await provider_reader.readline()
     try:
         status = int(status_line.split(b" ", 2)[1])
     except (IndexError, ValueError):
-        raise RuntimeError(f"bad upstream status line: {status_line!r}")
+        raise RuntimeError(f"bad provider status line: {status_line!r}")
     headers: list[tuple[bytes, bytes]] = []
     while True:
-        line = await reader.readline()
+        line = await provider_reader.readline()
         if line in (b"\r\n", b"\n", b""):
             break
         if b":" not in line:
@@ -350,7 +406,7 @@ def connection_close_requested(headers: list[tuple[bytes, bytes]]) -> bool:
 
 @dataclass(frozen=True)
 class _BodyFraming:
-    """How one upstream response body is delimited on the wire."""
+    """How one provider response body is delimited on the wire."""
 
     kind: Literal["chunked", "content_length", "eof"]
     content_length: int | None
@@ -365,7 +421,7 @@ def _parse_response_framing(headers: list[tuple[bytes, bytes]]) -> tuple[_BodyFr
     stripped from the forwarded head so the downstream parser can't pick the
     other one. TE is a comma-separated coding list; the body is chunked-framed
     only when chunked is the FINAL coding, otherwise it is close-delimited.
-    Raises RuntimeError on a malformed Content-Length (a response the client
+    Raises RuntimeError on a malformed Content-Length (a response the sandbox
     must never see as-is — callers turn it into a clean 502).
     """
     transfer_encoding = None
@@ -377,19 +433,19 @@ def _parse_response_framing(headers: list[tuple[bytes, bytes]]) -> tuple[_BodyFr
         elif lowered == b"content-length":
             content_length_value = value
     if transfer_encoding is not None:
-        forward_headers = [(name, value) for name, value in headers if name.lower() != b"content-length"]
+        sandbox_headers = [(name, value) for name, value in headers if name.lower() != b"content-length"]
         encodings = [token.strip() for token in transfer_encoding.split(b",")]
         kind = "chunked" if encodings and encodings[-1] == b"chunked" else "eof"
-        return _BodyFraming(kind=kind, content_length=None), forward_headers
+        return _BodyFraming(kind=kind, content_length=None), sandbox_headers
     if content_length_value is not None:
         if not _CONTENT_LENGTH_RE.fullmatch(content_length_value):
-            raise RuntimeError(f"invalid upstream Content-Length: {content_length_value!r}")
+            raise RuntimeError(f"invalid provider Content-Length: {content_length_value!r}")
         return _BodyFraming(kind="content_length", content_length=int(content_length_value)), headers
     return _BodyFraming(kind="eof", content_length=None), headers
 
 
 def _render_response_head(status: int, headers: list[tuple[bytes, bytes]]) -> bytes:
-    """Render the response status line + headers verbatim for the client."""
+    """Render the response status line and headers for the sandbox."""
     head = b"HTTP/1.1 " + str(status).encode() + b" " + _http_reason(status=status).encode() + b"\r\n"
     for name, value in headers:
         head += name + b": " + value + b"\r\n"
@@ -397,96 +453,96 @@ def _render_response_head(status: int, headers: list[tuple[bytes, bytes]]) -> by
 
 
 async def _relay_response_body(
-    upstream_reader: asyncio.StreamReader,
-    client_writer: asyncio.StreamWriter,
+    provider_reader: asyncio.StreamReader,
+    sandbox_writer: asyncio.StreamWriter,
     framing: _BodyFraming,
     observer: _GuardedObserver | None,
 ) -> bool:
-    """Relay a response body to the client chunk by chunk, flushing per chunk.
+    """Stream a provider response body to the sandbox, flushing per chunk.
 
-    The head already told the client how the body is delimited (framing was
+    The head already told the sandbox how the body is delimited (framing was
     parsed and validated by `_parse_response_framing` before the head was
     committed). Per-chunk flushing keeps SSE deltas live and holds at most
     one relay chunk in memory regardless of body size. Returns whether the
-    client connection may be reused: False whenever the body didn't terminate
+    sandbox connection may be reused: False whenever the body didn't terminate
     cleanly (connection-close framing, a short ``Content-Length``, or a
-    chunked body without its terminating 0-chunk), since the client's parser
+    chunked body without its terminating 0-chunk), since the sandbox's parser
     can't find a clean boundary and would misframe or hang on the next
     response sent over the same socket.
     """
     if framing.kind == "chunked":
-        return await _relay_chunked_stream(upstream_reader=upstream_reader, client_writer=client_writer, observer=observer)
+        return await _relay_chunked_stream(provider_reader=provider_reader, sandbox_writer=sandbox_writer, observer=observer)
     if framing.kind == "content_length":
         remaining = framing.content_length
         while remaining > 0:
-            chunk = await upstream_reader.read(min(65536, remaining))
+            chunk = await provider_reader.read(min(65536, remaining))
             if not chunk:
-                # Upstream EOF before the advertised length — the client is
+                # Provider EOF before the advertised length — the sandbox is
                 # still waiting on the unfulfilled Content-Length, so the
                 # socket can't carry another response.
                 return False
             remaining -= len(chunk)
             if observer is not None:
                 observer.on_body(chunk)
-            client_writer.write(chunk)
-            await client_writer.drain()
+            sandbox_writer.write(chunk)
+            await sandbox_writer.drain()
         return True
-    # No explicit framing: relay until upstream EOF — the client learns the
+    # No explicit framing: stream until provider EOF — the sandbox learns the
     # body ended only when we close the connection, so it can't be reused.
     while True:
-        chunk = await upstream_reader.read(65536)
+        chunk = await provider_reader.read(65536)
         if not chunk:
             break
         if observer is not None:
             observer.on_body(chunk)
-        client_writer.write(chunk)
-        await client_writer.drain()
+        sandbox_writer.write(chunk)
+        await sandbox_writer.drain()
     return False
 
 
 async def _relay_chunked_stream(
-    upstream_reader: asyncio.StreamReader,
-    client_writer: asyncio.StreamWriter,
+    provider_reader: asyncio.StreamReader,
+    sandbox_writer: asyncio.StreamWriter,
     observer: _GuardedObserver | None,
 ) -> bool:
-    """Relay a chunked upstream body to the client one chunk at a time, flushing each.
+    """Stream a chunked provider body to the sandbox, flushing each chunk.
 
     The chunk framing is forwarded verbatim (size line, payload, trailing CRLF,
-    final 0-chunk + trailers) so the client's chunked decoder sees each SSE
+    final 0-chunk + trailers) so the sandbox's chunked decoder sees each SSE
     frame the instant it arrives. The observer, by contrast, sees only payload
     bytes — this loop already separates framing from payload, which is what
     lets observers read a chunked stream without their own dechunker. Returns
     True only when the stream closed cleanly with its terminating 0-chunk; a
     premature EOF, malformed size line, or truncated payload returns False so
-    the caller tears the client connection down rather than reuse a socket the
-    client can't reframe.
+    the caller tears the sandbox connection down rather than reuse a socket
+    the sandbox can't reframe.
     """
     while True:
-        size_line = await upstream_reader.readline()
+        size_line = await provider_reader.readline()
         if not size_line:
             return False
         # Validate the size token as strict hex (RFC 9112 §7.1) before
         # converting: int(x, 16) also accepts forms like `-1`/`+1` that a
-        # client parser would reject or, worse, interpret differently.
+        # sandbox parser would reject or, worse, interpret differently.
         size_token = size_line.strip().split(b";")[0].strip()
         if not _CHUNK_SIZE_RE.fullmatch(size_token):
             return False
         size = int(size_token, 16)
-        client_writer.write(size_line)
+        sandbox_writer.write(size_line)
         if size == 0:
             # Forward the trailer section up to its terminating blank line,
             # flushing per line — trailer size is sender-controlled, and an
             # undrained loop would buffer it without backpressure. A bare EOF
             # (b"") before the blank line means the chunked terminator
-            # (0-chunk + trailers + CRLF) never completed, so the client
+            # (0-chunk + trailers + CRLF) never completed, so the sandbox
             # can't reframe — relay the partial bytes but report non-reuse.
             while True:
-                trailer_line = await upstream_reader.readline()
+                trailer_line = await provider_reader.readline()
                 if trailer_line == b"":
-                    await client_writer.drain()
+                    await sandbox_writer.drain()
                     return False
-                client_writer.write(trailer_line)
-                await client_writer.drain()
+                sandbox_writer.write(trailer_line)
+                await sandbox_writer.drain()
                 if trailer_line in (b"\r\n", b"\n"):
                     break
             return True
@@ -494,26 +550,26 @@ async def _relay_chunked_stream(
         # sender-controlled, and reading a whole chunk at once would let one
         # huge chunk re-create the buffered-body memory blowup. A short read
         # (EOF mid-payload) has already forwarded the partial bytes, but the
-        # chunk is short of its declared size — the client's decoder can't
+        # chunk is short of its declared size — the sandbox's decoder can't
         # trust the framing from here on.
         remaining = size
         while remaining > 0:
-            payload = await upstream_reader.read(min(65536, remaining))
+            payload = await provider_reader.read(min(65536, remaining))
             if not payload:
                 return False
             remaining -= len(payload)
             if observer is not None:
                 observer.on_body(payload)
-            client_writer.write(payload)
-            await client_writer.drain()
-        crlf = await upstream_reader.readline()
-        client_writer.write(crlf)
-        await client_writer.drain()
+            sandbox_writer.write(payload)
+            await sandbox_writer.drain()
+        crlf = await provider_reader.readline()
+        sandbox_writer.write(crlf)
+        await sandbox_writer.drain()
         if crlf != b"\r\n":
             # The chunk delimiter is missing or malformed (strict CRLF per
             # RFC 9112): whatever follows can't be framed as a size line, so
             # stop relaying and report the connection unusable rather than
-            # emit garbage framing a stricter client parser would reject.
+            # emit garbage framing a stricter sandbox parser would reject.
             return False
 
 
@@ -551,10 +607,10 @@ async def send_raw(writer: asyncio.StreamWriter, status: int, body: bytes) -> No
 
 
 async def pump_both_ways(
-    a_reader: asyncio.StreamReader,
-    a_writer: asyncio.StreamWriter,
-    b_reader: asyncio.StreamReader,
-    b_writer: asyncio.StreamWriter,
+    sandbox_reader: asyncio.StreamReader,
+    sandbox_writer: asyncio.StreamWriter,
+    destination_reader: asyncio.StreamReader,
+    destination_writer: asyncio.StreamWriter,
 ) -> None:
     async def _copy(src: asyncio.StreamReader, dst: asyncio.StreamWriter) -> None:
         try:
@@ -569,4 +625,7 @@ async def pump_both_ways(
         finally:
             with contextlib.suppress(Exception):
                 dst.close()
-    await asyncio.gather(_copy(src=a_reader, dst=b_writer), _copy(src=b_reader, dst=a_writer))
+    await asyncio.gather(
+        _copy(src=sandbox_reader, dst=destination_writer),
+        _copy(src=destination_reader, dst=sandbox_writer),
+    )
