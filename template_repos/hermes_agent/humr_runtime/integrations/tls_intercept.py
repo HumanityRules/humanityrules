@@ -278,7 +278,7 @@ async def _intercept_and_forward(
                 await tls_http_message_relay.send_json_error(writer=tls_writer, status=400, message=f"bad request framing: {exc}")
                 return
             try:
-                injected_humr_credential = tls_credential_injection.needs_injection(
+                should_inject = tls_credential_injection.needs_injection(
                     headers=headers,
                     path_with_query=path_with_query,
                     provider=provider,
@@ -292,7 +292,7 @@ async def _intercept_and_forward(
                 )
                 return
             credential = None
-            if injected_humr_credential:
+            if should_inject:
                 credential = await credential_state_store.credential_for_slug(slug=provider.slug)
                 if credential is None:
                     await _send_provider_not_connected(writer=tls_writer, provider=provider)
@@ -350,7 +350,7 @@ async def _intercept_and_forward(
             # request through the proxy hits the refreshed token. Anonymous
             # pass-through 401s must not evict: they never used our token,
             # so the cached entry is not implicated.
-            if upstream_status == 401 and injected_humr_credential:
+            if upstream_status == 401 and should_inject:
                 await credential_state_store.invalidate(slug=provider.slug)
                 logger.info("evicted %s token cache after upstream 401 from %s", provider.slug, host)
             if not keep_alive:
