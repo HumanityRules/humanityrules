@@ -80,6 +80,23 @@ class _TokenCacheEntry:
 
 
 @dataclass(frozen=True)
+class ActiveCredential:
+    """Secrets to inject plus provenance facts from the same refresh.
+
+    `secrets` is a name→value map (multi-secret providers like Slack need the
+    whole map so the request rewrite can pick the right secret per call).
+    `platform_shared` is HUMR's provenance stamp on the serving credential —
+    True only when HUMR's own platform-tier credential produced these secrets
+    (vs the user's personal or an org-shared credential). Read together under
+    one lock so the flag can never describe a different credential than the
+    secrets came from.
+    """
+
+    secrets: dict[str, str]
+    platform_shared: bool
+
+
+@dataclass(frozen=True)
 class ProviderConnectionState:
     """Cache-independent connection state for one provider.
 
@@ -213,20 +230,22 @@ class CredentialStateStore:
         self._cache: dict[str, _TokenCacheEntry] = {}
         self._connection_states: dict[str, ProviderConnectionState] = {}
 
-    async def secrets_for_slug(self, slug: str) -> dict[str, str] | None:
-        """Return fresh secrets for a provider slug, or None when unknown or disconnected.
+    async def credential_for_slug(self, slug: str) -> ActiveCredential | None:
+        """Return the fresh active credential for a provider slug, or None when unknown or disconnected.
 
-        Multi-secret providers (Slack) need the whole map so the request
-        rewrite can pick the right secret per call; single-secret providers
-        get a one-entry map.
+        Secrets and the `platform_shared` provenance flag are read under the
+        same lock, so they always describe the same refresh outcome
+        (`_apply_locked` writes cache and connection state together).
         """
         if slug not in self._provider_slug_set:
             return None
         async with self._lock:
             entry = await self._ensure_fresh_locked(slug=slug)
-        if entry is None:
-            return None
-        return dict(entry.secrets)
+            if entry is None:
+                return None
+            state = self._connection_states.get(slug)
+            platform_shared = state is not None and bool(state.metadata.get("platform_shared"))
+            return ActiveCredential(secrets=dict(entry.secrets), platform_shared=platform_shared)
 
     async def invalidate(self, slug: str) -> None:
         """Drop the cached token for a provider."""

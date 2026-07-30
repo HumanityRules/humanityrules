@@ -201,6 +201,8 @@ urlpatterns = [
     path("api/pdp/evaluate-public", views.pdp_evaluate_public, name="pdp_evaluate_public"),
     #  - policy_proxy_activity: debounced last-authorized-traffic signal from each policy proxy
     path("api/runtime/policy-proxy-activity", views.policy_proxy_activity, name="policy_proxy_activity"),
+    #  - billing_usage_events: batched LLM usage facts from each integrations broker
+    path("api/runtime/billing-usage-events", views.billing_usage_events, name="billing_usage_events"),
 
     #  - Permissions editor (self-referential): the env-resident humr_broker relays the Hermes WebUI's
     #    /permissions/* calls here with the env bearer. Target (app, environment) is resolved from the

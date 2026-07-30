@@ -1,4 +1,4 @@
-"""Outside-the-sandbox broker — the env's single relay to HUMR.
+"""Outside-the-sandbox broker — one per agent app container, its relay to HUMR.
 
 Fronts per-user third-party integrations and the self-referential permissions
 editor (more HUMR APIs later). Runs as a supervisor-managed sidecar process. Pure
@@ -57,6 +57,7 @@ from humr_client import HumrClient
 from mcp_aggregator import MCPAggregator
 import tls_intercept
 import tls_provider_catalog
+import tls_usage_metering
 
 
 DEFAULT_PROXY_PORT = 9950
@@ -138,12 +139,14 @@ async def _run(
         owner_username=owner_username,
         app_slug=app_slug,
     )
+    usage_reporter = tls_usage_metering.UsageReporter(humr_client=humr_client)
     tls_intercept_runtime = tls_intercept.TlsInterceptRuntime(
         providers=tls_provider_catalog.TLS_INTERCEPT_PROVIDERS,
         humr_client=humr_client,
         refresh_lead_seconds=tls_intercept.REFRESH_LEAD_SECONDS,
         ca_dir=ca_dir,
         private_dir=private_dir,
+        usage_reporter=usage_reporter,
     )
 
     public_base_url = os.environ.get("HUMR_APP_PUBLIC_URL")
@@ -208,8 +211,9 @@ async def _run(
         tls_proxy_task = asyncio.create_task(tls_proxy_server.serve_forever())
         control_task = asyncio.create_task(control_server.serve())
         mcp_aggregator_task = asyncio.create_task(mcp_aggregator.serve())
+        usage_flush_task = asyncio.create_task(usage_reporter.run())
         done, pending = await asyncio.wait(
-            {stop, tls_proxy_task, control_task, mcp_aggregator_task},
+            {stop, tls_proxy_task, control_task, mcp_aggregator_task, usage_flush_task},
             return_when=asyncio.FIRST_COMPLETED,
         )
         for task in pending:
