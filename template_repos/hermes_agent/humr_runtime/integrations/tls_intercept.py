@@ -13,17 +13,17 @@ That flow is this file. Each part it composes is one module:
   credential works. Static data; the only file a new provider needs.
 - `tls_certificate_authority` — the CA and the per-host leaf certs that let us
   terminate TLS as the upstream.
-- `tls_token_store` — the real secret for a host, refreshed from HUMR, plus the
-  durable connection state the WebUI cards and gateway env read.
+- `tls_token_store` — the real secrets and cache-independent connection state
+  for a provider slug, refreshed from HUMR.
 - `tls_credential_injection` — whether a request is asking for HUMR's credential,
   and where the secret is written into it.
 - `tls_http_message_relay` — provider-agnostic HTTP/1.1: parse, frame, replay
   upstream, stream the response back.
 
-Pure mechanism: invalidate/refresh only touch the token cache. The choreography
-that follows a *credential change* (env re-render, process restarts, auth
-markers) lives in `credentials_service`, which calls down into this runtime —
-never the other way around.
+Pure mechanism: cache invalidation and refresh do not perform credential-change
+choreography. The env re-render, process restarts, and auth-marker updates that
+follow a credential change live in `credentials_service`, which calls down into
+this runtime — never the other way around.
 """
 
 import asyncio
@@ -45,19 +45,49 @@ logger = logging.getLogger("tls_intercept")
 
 REFRESH_LEAD_SECONDS = 300
 
-# Public browser-facing status strings. The token store owns their current
-# serialization, but callers depend on the TLS-intercept subsystem contract,
-# not on that implementation module.
-STATUS_CONNECTED = tls_token_store.STATUS_CONNECTED
-STATUS_NOT_CONNECTED = tls_token_store.STATUS_NOT_CONNECTED
+# Public browser-facing status strings owned by the TLS-intercept subsystem contract.
+STATUS_CONNECTED = "connected"
+STATUS_NOT_CONNECTED = "not_connected"
+
+
+def _status_item_for_provider(
+    provider: tls_provider_catalog.TlsProviderSpec,
+    state: tls_token_store.ProviderConnectionState | None,
+) -> dict:
+    """Join a static provider spec with its dynamic state for the integrations payload."""
+    method = provider.credential_method
+    is_connected = state is not None and state.connected
+    return {
+        "kind": "tls_intercept",
+        "category": provider.category,
+        "slug": provider.slug,
+        "label": provider.label,
+        "logo_url": provider.logo_url,
+        "status": STATUS_CONNECTED if is_connected else STATUS_NOT_CONNECTED,
+        "last_refreshed_at": state.last_refreshed_at if is_connected else None,
+        "config": state.config if is_connected else {},
+        "metadata": state.metadata if is_connected else {},
+        "connect_mode": method.connect_mode,
+        "restart_required_after_save": provider.restart_gateway_after_save or provider.restart_webui_after_save,
+        "affects_model_picker": provider.affects_model_picker,
+    }
 
 
 class TlsInterceptRuntime:
     """TLS-intercept subsystem: proxy transport, token refresh, and status cards."""
 
-    def __init__(self, providers: dict[str, tls_provider_catalog.TlsProviderSpec], humr_client: HumrClient, refresh_lead_seconds: int, ca_dir: Path, private_dir: Path) -> None:
-        self._token_store = tls_token_store.TokenStore(
-            providers=providers,
+    def __init__(
+        self,
+        providers: dict[str, tls_provider_catalog.TlsProviderSpec],
+        humr_client: HumrClient,
+        refresh_lead_seconds: int,
+        ca_dir: Path,
+        private_dir: Path,
+    ) -> None:
+        self._providers = dict(providers)
+        self._host_to_provider = tls_provider_catalog.build_host_to_provider(providers=self._providers)
+        self._credential_state_store = tls_token_store.CredentialStateStore(
+            provider_slugs=tuple(self._providers),
             humr_client=humr_client,
             refresh_lead_seconds=refresh_lead_seconds,
         )
@@ -71,49 +101,64 @@ class TlsInterceptRuntime:
                 reader=reader,
                 writer=writer,
                 minter=self._cert_minter,
-                token_store=self._token_store,
+                providers=self._providers,
+                host_to_provider=self._host_to_provider,
+                credential_state_store=self._credential_state_store,
             )
 
         return await asyncio.start_server(client_connected_cb=handle_conn, host=host, port=port)
 
     async def status_items(self) -> list[dict]:
         """Return TLS-intercept integration cards."""
-        return await self._token_store.status_items()
+        connection_states = await self._credential_state_store.connection_snapshot()
+        return [
+            _status_item_for_provider(provider=provider, state=connection_states.get(provider.slug))
+            for provider in self._providers.values()
+        ]
 
     async def connected_slugs(self) -> frozenset[str]:
-        """Return the providers whose durable connection state is connected."""
-        return await self._token_store.connected_slugs()
+        """Return the providers whose cache-independent connection state is connected."""
+        connection_states = await self._credential_state_store.connection_snapshot()
+        return frozenset(slug for slug, state in connection_states.items() if state.connected)
 
     async def invalidate(self, slug: str) -> None:
         """Drop one provider's cached token entry."""
-        await self._token_store.invalidate(slug=slug)
+        await self._credential_state_store.invalidate(slug=slug)
 
     async def invalidate_all(self) -> None:
         """Drop every cached token entry."""
-        await self._token_store.invalidate_all()
+        await self._credential_state_store.invalidate_all()
 
     async def mark_disconnected(self, slug: str) -> None:
         """Mark a provider disconnected after a confirmed disconnect (drops cache + flips connection state)."""
-        await self._token_store.mark_disconnected(slug=slug)
+        await self._credential_state_store.mark_disconnected(slug=slug)
 
     async def refresh_slug(self, slug: str) -> bool:
         """Force a single-provider refetch; False when the HUMR round-trip failed transiently."""
-        return await self._token_store.refresh(slug=slug)
+        return await self._credential_state_store.refresh(slug=slug)
 
     async def refresh_all(self) -> bool:
         """Force a refetch of every provider in one HUMR round-trip; False on transient failure."""
-        return await self._token_store.refresh_all()
+        return await self._credential_state_store.refresh_all()
 
     async def gateway_env_snapshot(self) -> list[tuple[tls_provider_catalog.TlsProviderSpec, dict]]:
-        """Pair every connected provider with its last-known config (durable connection state) for env rendering."""
-        return await self._token_store.gateway_env_snapshot()
+        """Pair every connected provider with its last-known config for env rendering."""
+        connection_states = await self._credential_state_store.connection_snapshot()
+        snapshot: list[tuple[tls_provider_catalog.TlsProviderSpec, dict]] = []
+        for provider in self._providers.values():
+            state = connection_states.get(provider.slug)
+            if state is not None and state.connected:
+                snapshot.append((provider, state.config))
+        return snapshot
 
 
 async def _handle_proxy_conn(
     reader: asyncio.StreamReader,
     writer: asyncio.StreamWriter,
     minter: tls_certificate_authority.CertMinter,
-    token_store: tls_token_store.TokenStore,
+    providers: dict[str, tls_provider_catalog.TlsProviderSpec],
+    host_to_provider: dict[str, str],
+    credential_state_store: tls_token_store.CredentialStateStore,
 ) -> None:
     """Accept a CONNECT, then either intercept known hosts or tunnel."""
     peer = writer.get_extra_info("peername")
@@ -136,10 +181,11 @@ async def _handle_proxy_conn(
         raw_host, _, port_str = target.partition(":")
         host = tls_provider_catalog.normalize_connect_host(host=raw_host)
         port = int(port_str) if port_str else 443
-        provider = token_store.provider_for_host(host=host)
-        if provider is None:
+        provider_slug = host_to_provider.get(host)
+        if provider_slug is None:
             await _tunnel_opaque(client_reader=reader, client_writer=writer, host=host, port=port)
             return
+        provider = providers[provider_slug]
         await _intercept_and_forward(
             client_reader=reader,
             client_writer=writer,
@@ -147,7 +193,7 @@ async def _handle_proxy_conn(
             port=port,
             provider=provider,
             minter=minter,
-            token_store=token_store,
+            credential_state_store=credential_state_store,
         )
     except (ConnectionResetError, BrokenPipeError):
         return
@@ -178,7 +224,7 @@ async def _intercept_and_forward(
     port: int,
     provider: tls_provider_catalog.TlsProviderSpec,
     minter: tls_certificate_authority.CertMinter,
-    token_store: tls_token_store.TokenStore,
+    credential_state_store: tls_token_store.CredentialStateStore,
 ) -> None:
     """TLS-terminate with a minted leaf, swap Authorization, and forward."""
     client_writer.write(b"HTTP/1.1 200 Connection established\r\n\r\n")
@@ -235,7 +281,7 @@ async def _intercept_and_forward(
                 )
                 return
             if injected_humr_credential:
-                secrets = await token_store.secrets_for_host(host=host)
+                secrets = await credential_state_store.secrets_for_slug(slug=provider.slug)
                 if secrets is None:
                     await _send_provider_not_connected(writer=tls_writer, provider=provider)
                     return
@@ -280,7 +326,7 @@ async def _intercept_and_forward(
             # pass-through 401s must not evict: they never used our token,
             # so the cached entry is not implicated.
             if upstream_status == 401 and injected_humr_credential:
-                await token_store.invalidate(slug=provider.slug)
+                await credential_state_store.invalidate(slug=provider.slug)
                 logger.info("evicted %s token cache after upstream 401 from %s", provider.slug, host)
             if not keep_alive:
                 return
