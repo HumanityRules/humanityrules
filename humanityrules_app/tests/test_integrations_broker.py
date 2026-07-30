@@ -87,6 +87,7 @@ import humr_client  # noqa: E402
 import tls_certificate_authority  # noqa: E402
 import tls_credential_injection  # noqa: E402
 import tls_http_message_relay  # noqa: E402
+import tls_intercept  # noqa: E402
 import tls_provider_catalog  # noqa: E402
 import tls_token_store  # noqa: E402
 
@@ -117,12 +118,12 @@ class TestEnvironmentFlags(unittest.TestCase):
             self.assertTrue(broker._env_flag_enabled(name="HUMR_MERGE_INTEGRATION_ENABLED", default=True))
 
 
-def _make_token_store() -> tls_token_store.TokenStore:
-    """Create a fresh TLS token store for isolated broker tests."""
-    return tls_token_store.TokenStore(
-        providers=tls_provider_catalog.TLS_INTERCEPT_PROVIDERS,
+def _make_credential_state_store() -> tls_token_store.CredentialStateStore:
+    """Create a fresh credential-state store for isolated broker tests."""
+    return tls_token_store.CredentialStateStore(
+        provider_slugs=tuple(tls_provider_catalog.TLS_INTERCEPT_PROVIDERS),
         humr_client=_make_humr_client(),
-        refresh_lead_seconds=tls_token_store.REFRESH_LEAD_SECONDS,
+        refresh_lead_seconds=tls_intercept.REFRESH_LEAD_SECONDS,
     )
 
 
@@ -131,7 +132,7 @@ def _make_tls_intercept_runtime(ca_dir: pathlib.Path, private_dir: pathlib.Path)
     return broker.tls_intercept.TlsInterceptRuntime(
         providers=tls_provider_catalog.TLS_INTERCEPT_PROVIDERS,
         humr_client=_make_humr_client(),
-        refresh_lead_seconds=tls_token_store.REFRESH_LEAD_SECONDS,
+        refresh_lead_seconds=tls_intercept.REFRESH_LEAD_SECONDS,
         ca_dir=ca_dir,
         private_dir=private_dir,
     )
@@ -139,38 +140,38 @@ def _make_tls_intercept_runtime(ca_dir: pathlib.Path, private_dir: pathlib.Path)
 
 class TestHostToProviderRouting(unittest.TestCase):
 
-    def test_all_google_hosts_route_to_google(self) -> None:
-        for host in tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["google"].hosts:
-            self.assertEqual(tls_provider_catalog.HOST_TO_TLS_PROVIDER[host], "google")
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.tmp = tempfile.TemporaryDirectory()
+        root = pathlib.Path(cls.tmp.name)
+        cls.runtime = _make_tls_intercept_runtime(ca_dir=root / "ca", private_dir=root / "private")
 
-    def test_tavily_host_routes_to_tavily(self) -> None:
-        self.assertEqual(tls_provider_catalog.HOST_TO_TLS_PROVIDER["api.tavily.com"], "tavily")
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.tmp.cleanup()
+
+    def _routed_slug(self, host: str) -> str | None:
+        normalized = tls_provider_catalog.normalize_connect_host(host=host)
+        return self.runtime._host_to_provider.get(normalized)
+
+    def test_every_catalog_host_routes_to_its_provider(self) -> None:
+        for slug, provider in tls_provider_catalog.TLS_INTERCEPT_PROVIDERS.items():
+            for host in provider.hosts:
+                with self.subTest(slug=slug, host=host):
+                    self.assertEqual(self._routed_slug(host=host), slug)
 
     def test_unknown_host_returns_none(self) -> None:
-        store = _make_token_store()
-        self.assertIsNone(store.provider_for_host(host="api.notaprovider.com"))
-        self.assertIsNone(store.provider_for_host(host="example.com"))
+        self.assertIsNone(self._routed_slug(host="api.notaprovider.com"))
+        self.assertIsNone(self._routed_slug(host="example.com"))
 
     def test_connect_host_routing_is_case_and_trailing_dot_insensitive(self) -> None:
-        store = _make_token_store()
-        self.assertEqual(store.provider_for_host(host="GitHub.COM").slug, "github")
-        self.assertEqual(store.provider_for_host(host="github.com.").slug, "github")
+        self.assertEqual(self._routed_slug(host="GitHub.COM"), "github")
+        self.assertEqual(self._routed_slug(host="github.com."), "github")
 
-    def test_openrouter_host_routes_to_openrouter(self) -> None:
-        store = _make_token_store()
-        self.assertEqual(store.provider_for_host(host="openrouter.ai").slug, "openrouter")
-
-    def test_nous_host_routes_to_nous(self) -> None:
-        store = _make_token_store()
-        self.assertEqual(store.provider_for_host(host="inference-api.nousresearch.com").slug, "nous")
-
-    def test_openai_host_routes_to_openai(self) -> None:
-        store = _make_token_store()
-        self.assertEqual(store.provider_for_host(host="api.openai.com").slug, "openai-api")
-
-    def test_anthropic_host_routes_to_anthropic(self) -> None:
-        store = _make_token_store()
-        self.assertEqual(store.provider_for_host(host="api.anthropic.com").slug, "anthropic")
+    def test_duplicate_host_claim_is_rejected(self) -> None:
+        provider = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["google"]
+        with self.assertRaisesRegex(RuntimeError, "claimed by both"):
+            tls_provider_catalog.build_host_to_provider(providers={"first": provider, "second": provider})
 
 
 class TestRewriteAuthorization(unittest.TestCase):
@@ -754,21 +755,15 @@ class _StubCertMinter:
         return self.context
 
 
-class _StubProxyTokenStore:
+class _StubCredentialStateStore:
 
-    def __init__(self, provider: tls_provider_catalog.TlsProviderSpec, secrets: dict[str, str] | None) -> None:
-        self.provider = provider
+    def __init__(self, secrets: dict[str, str] | None) -> None:
         self.secrets = secrets
         self.invalidated_slugs: list[str] = []
-        self.secret_hosts: list[str] = []
+        self.secret_slugs: list[str] = []
 
-    def provider_for_host(self, host: str) -> tls_provider_catalog.TlsProviderSpec | None:
-        if host in self.provider.hosts:
-            return self.provider
-        return None
-
-    async def secrets_for_host(self, host: str) -> dict[str, str] | None:
-        self.secret_hosts.append(host)
+    async def secrets_for_slug(self, slug: str) -> dict[str, str] | None:
+        self.secret_slugs.append(slug)
         return self.secrets
 
     async def invalidate(self, slug: str) -> None:
@@ -1260,9 +1255,9 @@ class TestProxyConnectionStateMachine(unittest.IsolatedAsyncioTestCase):
         upstream_responses: list[bytes],
         secrets: dict[str, str] | None,
         feed_client_eof: bool,
-    ) -> tuple[_TlsRecordingWriter, list[_StubUpstreamWriter], _StubProxyTokenStore]:
+    ) -> tuple[_TlsRecordingWriter, list[_StubUpstreamWriter], _StubCredentialStateStore]:
         provider = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["openrouter"]
-        token_store = _StubProxyTokenStore(provider=provider, secrets=secrets)
+        credential_state_store = _StubCredentialStateStore(secrets=secrets)
         minter = _StubCertMinter()
         client_reader = asyncio.StreamReader()
         client_reader.feed_data(client_bytes)
@@ -1292,18 +1287,18 @@ class TestProxyConnectionStateMachine(unittest.IsolatedAsyncioTestCase):
                     port=443,
                     provider=provider,
                     minter=minter,
-                    token_store=token_store,
+                    credential_state_store=credential_state_store,
                 ),
                 timeout=1.0,
             )
 
         start_tls.assert_awaited_once()
         self.assertEqual(minter.hostnames, ["openrouter.ai"])
-        return client_writer, upstream_writers, token_store
+        return client_writer, upstream_writers, credential_state_store
 
     async def test_connect_routes_known_host_to_tls_interceptor(self) -> None:
         provider = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["openrouter"]
-        token_store = _StubProxyTokenStore(provider=provider, secrets={"api_key": "real-key"})
+        credential_state_store = _StubCredentialStateStore(secrets={"api_key": "real-key"})
         minter = _StubCertMinter()
         client_reader = _feed_upstream(
             b"CONNECT OpenRouter.ai.:8443 HTTP/1.1\r\n"
@@ -1318,7 +1313,11 @@ class TestProxyConnectionStateMachine(unittest.IsolatedAsyncioTestCase):
                 reader=client_reader,
                 writer=client_writer,
                 minter=minter,
-                token_store=token_store,
+                providers=tls_provider_catalog.TLS_INTERCEPT_PROVIDERS,
+                host_to_provider=tls_provider_catalog.build_host_to_provider(
+                    providers=tls_provider_catalog.TLS_INTERCEPT_PROVIDERS,
+                ),
+                credential_state_store=credential_state_store,
             )
 
         intercept.assert_awaited_once_with(
@@ -1328,7 +1327,7 @@ class TestProxyConnectionStateMachine(unittest.IsolatedAsyncioTestCase):
             port=8443,
             provider=provider,
             minter=minter,
-            token_store=token_store,
+            credential_state_store=credential_state_store,
         )
         self.assertTrue(client_writer.closed)
 
@@ -1358,7 +1357,7 @@ class TestProxyConnectionStateMachine(unittest.IsolatedAsyncioTestCase):
             b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}",
         ]
 
-        client_writer, upstream_writers, token_store = await self._run_intercept(
+        client_writer, upstream_writers, credential_state_store = await self._run_intercept(
             client_bytes=client_bytes,
             upstream_responses=upstream_responses,
             secrets={"api_key": "real-openrouter-key"},
@@ -1377,11 +1376,11 @@ class TestProxyConnectionStateMachine(unittest.IsolatedAsyncioTestCase):
         second_request = upstream_writers[1].all_bytes()
         self.assertIn(b"GET /api/v1/models HTTP/1.1", second_request)
         self.assertNotIn(b"Authorization", second_request)
-        self.assertEqual(token_store.secret_hosts, ["openrouter.ai"])
+        self.assertEqual(credential_state_store.secret_slugs, ["openrouter"])
         self.assertTrue(client_writer.closed)
 
     async def test_upstream_eof_framing_ends_client_loop_without_waiting_for_another_request(self) -> None:
-        client_writer, upstream_writers, token_store = await self._run_intercept(
+        client_writer, upstream_writers, credential_state_store = await self._run_intercept(
             client_bytes=b"GET /api/v1/models HTTP/1.1\r\nHost: openrouter.ai\r\n\r\n",
             upstream_responses=[b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{}"],
             secrets={"api_key": "unused"},
@@ -1390,10 +1389,10 @@ class TestProxyConnectionStateMachine(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(client_writer.all_bytes().endswith(b"{}"))
         self.assertEqual(len(upstream_writers), 1)
-        self.assertEqual(token_store.secret_hosts, [])
+        self.assertEqual(credential_state_store.secret_slugs, [])
 
     async def test_upstream_connection_close_ends_client_loop_after_framed_body(self) -> None:
-        client_writer, _upstream_writers, _token_store = await self._run_intercept(
+        client_writer, _upstream_writers, _credential_state_store = await self._run_intercept(
             client_bytes=b"GET /api/v1/models HTTP/1.1\r\nHost: openrouter.ai\r\n\r\n",
             upstream_responses=[b"HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 2\r\n\r\n{}"],
             secrets={"api_key": "unused"},
@@ -1404,7 +1403,7 @@ class TestProxyConnectionStateMachine(unittest.IsolatedAsyncioTestCase):
 
     async def test_upstream_failure_before_head_returns_clean_502(self) -> None:
         with patch.object(broker.tls_intercept.logger, "exception") as log_exception:
-            client_writer, _upstream_writers, _token_store = await self._run_intercept(
+            client_writer, _upstream_writers, _credential_state_store = await self._run_intercept(
                 client_bytes=b"GET /api/v1/models HTTP/1.1\r\nHost: openrouter.ai\r\n\r\n",
                 upstream_responses=[b"HTTP/1.1 200 OK\r\nContent-Length: garbage\r\n\r\n"],
                 secrets={"api_key": "unused"},
@@ -1429,18 +1428,18 @@ class TestProxyConnectionStateMachine(unittest.IsolatedAsyncioTestCase):
         )
         unauthorized = b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n"
 
-        _client_writer, _upstream_writers, token_store = await self._run_intercept(
+        _client_writer, _upstream_writers, credential_state_store = await self._run_intercept(
             client_bytes=client_bytes,
             upstream_responses=[unauthorized, unauthorized],
             secrets={"api_key": "real-openrouter-key"},
             feed_client_eof=False,
         )
 
-        self.assertEqual(token_store.secret_hosts, ["openrouter.ai"])
-        self.assertEqual(token_store.invalidated_slugs, ["openrouter"])
+        self.assertEqual(credential_state_store.secret_slugs, ["openrouter"])
+        self.assertEqual(credential_state_store.invalidated_slugs, ["openrouter"])
 
     async def test_bad_request_framing_returns_400_without_opening_upstream(self) -> None:
-        client_writer, upstream_writers, token_store = await self._run_intercept(
+        client_writer, upstream_writers, credential_state_store = await self._run_intercept(
             client_bytes=(
                 b"POST /api/v1/chat/completions HTTP/1.1\r\n"
                 b"Host: openrouter.ai\r\n"
@@ -1457,7 +1456,7 @@ class TestProxyConnectionStateMachine(unittest.IsolatedAsyncioTestCase):
         self.assertIn(b"HTTP/1.1 400 Bad Request", response)
         self.assertIn(b"conflicting request Content-Length", response)
         self.assertEqual(upstream_writers, [])
-        self.assertEqual(token_store.secret_hosts, [])
+        self.assertEqual(credential_state_store.secret_slugs, [])
 
 
 class TestCertMinter(unittest.TestCase):
@@ -1643,7 +1642,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resp2.json(), resp.json())
         self.assertEqual(resp3.json(), resp.json())
         self.assertEqual(
-            await self.tls_intercept_runtime._token_store.secrets_for_host(host="gmail.googleapis.com"),
+            await self.tls_intercept_runtime._credential_state_store.secrets_for_slug(slug="google"),
             {"access_token": "fresh-token"},
         )
 
@@ -1746,7 +1745,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         ):
             await self.tls_intercept_runtime.refresh_slug(slug="google")
 
-        self.assertNotIn("google", self.tls_intercept_runtime._token_store._cache)
+        self.assertNotIn("google", self.tls_intercept_runtime._credential_state_store._cache)
         items_by_slug = {item["slug"]: item for item in await self.tls_intercept_runtime.status_items()}
         self.assertEqual(items_by_slug["google"]["status"], "not_connected")
 
@@ -1767,7 +1766,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
             await self.tls_intercept_runtime.refresh_slug(slug="google")
 
         self.assertEqual(fetch_mock.call_count, 2)
-        self.assertEqual(self.tls_intercept_runtime._token_store._cache["google"].secrets, {"access_token": "T2"})
+        self.assertEqual(self.tls_intercept_runtime._credential_state_store._cache["google"].secrets, {"access_token": "T2"})
 
     async def test_transient_after_eviction_does_not_fabricate_entry(self) -> None:
         """A transient refresh outcome must not write a sentinel into an empty cache."""
@@ -1783,10 +1782,10 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         ]
         with patch.object(tls_token_store, "fetch_provider_tokens_batch", side_effect=responses):
             await self.tls_intercept_runtime.refresh_slug(slug="google")
-            await self.tls_intercept_runtime._token_store.invalidate(slug="google")
+            await self.tls_intercept_runtime._credential_state_store.invalidate(slug="google")
             await self.tls_intercept_runtime.refresh_slug(slug="google")
 
-        self.assertNotIn("google", self.tls_intercept_runtime._token_store._cache)
+        self.assertNotIn("google", self.tls_intercept_runtime._credential_state_store._cache)
 
     async def test_transient_during_lead_window_keeps_serving_cached_token(self) -> None:
         """Refresh-ahead transient failure must NOT make the proxy say "not connected"
@@ -1798,13 +1797,11 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         serving the cached token for the rest of its expires_at window.
         """
         import time
-        store = self.tls_intercept_runtime._token_store
+        store = self.tls_intercept_runtime._credential_state_store
         # Seed an entry inside the lead window (lead is 300s; this has 120s left).
         store._cache["google"] = tls_token_store._TokenCacheEntry(
             secrets={"access_token": "STILL-VALID"},
             expires_at=time.monotonic() + 120,
-            last_refreshed_at="2026-05-25T22:00:00+00:00",
-            config={}, metadata={},
         )
         with patch.object(
             tls_token_store,
@@ -1814,7 +1811,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
                 secrets=None, expires_in=None, config={}, metadata={},
             )),
         ):
-            secrets = await store.secrets_for_host(host="gmail.googleapis.com")
+            secrets = await store.secrets_for_slug(slug="google")
 
         self.assertEqual(secrets, {"access_token": "STILL-VALID"})
         # And the cache entry survives the failed refresh-ahead.
@@ -1867,9 +1864,9 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
             idx += 1
             return await fn(*args, **kwargs)
 
-        store = self.tls_intercept_runtime._token_store
+        store = self.tls_intercept_runtime._credential_state_store
         with patch.object(tls_token_store, "fetch_provider_tokens_batch", side_effect=dispatch):
-            proxy_task = asyncio.create_task(store.secrets_for_host(host="gmail.googleapis.com"))
+            proxy_task = asyncio.create_task(store.secrets_for_slug(slug="google"))
             await asyncio.wait_for(started.wait(), timeout=5)
             invalidate_task = asyncio.create_task(store.invalidate(slug="google"))
             await asyncio.sleep(0)  # let invalidate queue on the store lock
@@ -1915,7 +1912,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
                 for slug in slugs
             }
 
-        store = self.tls_intercept_runtime._token_store
+        store = self.tls_intercept_runtime._credential_state_store
         with patch.object(tls_token_store, "fetch_provider_tokens_batch", side_effect=parked_has_token):
             refresh_all_task = asyncio.create_task(store.refresh_all())
             await asyncio.wait_for(started.wait(), timeout=5)
@@ -1938,12 +1935,10 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         because the cache happens to still hold one.
         """
         import time
-        store = self.tls_intercept_runtime._token_store
+        store = self.tls_intercept_runtime._credential_state_store
         store._cache["google"] = tls_token_store._TokenCacheEntry(
             secrets={"access_token": "EXPIRED"},
             expires_at=time.monotonic() - 10,
-            last_refreshed_at="2026-05-25T22:00:00+00:00",
-            config={}, metadata={},
         )
         with patch.object(
             tls_token_store,
@@ -1953,34 +1948,32 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
                 secrets=None, expires_in=None, config={}, metadata={},
             )),
         ):
-            secrets = await store.secrets_for_host(host="gmail.googleapis.com")
+            secrets = await store.secrets_for_slug(slug="google")
 
         self.assertIsNone(secrets)
 
     async def test_status_items_reflect_connection_state_not_token_expiry(self) -> None:
         """A connected provider whose injection token expired still renders connected.
 
-        The core fix: status reads durable `_conn`, not cache presence, and does
-        NOT prune by token expiry — so an idle provider past its access-token TTL
-        keeps a green card instead of flipping to not_connected.
+        Status reads cache-independent connection state, not cache presence, and
+        do NOT prune by token expiry — so an idle provider past its access-token
+        TTL keeps a green card instead of flipping to not_connected.
         """
         import time
-        store = self.tls_intercept_runtime._token_store
+        store = self.tls_intercept_runtime._credential_state_store
         # An expired injection-cache entry (would be pruned on the injection path)...
         store._cache["google"] = tls_token_store._TokenCacheEntry(
             secrets={"access_token": "EXPIRED"},
             expires_at=time.monotonic() - 10,
-            last_refreshed_at="2026-05-25T22:00:00+00:00",
-            config={}, metadata={},
         )
-        # ...but durable connection state says connected.
-        store._conn["google"] = tls_token_store._ConnState(
+        # ...but cache-independent connection state says connected.
+        store._connection_states["google"] = tls_token_store.ProviderConnectionState(
             connected=True,
             last_refreshed_at="2026-05-25T22:00:00+00:00",
             config={}, metadata={},
         )
 
-        items_by_slug = {item["slug"]: item for item in await store.status_items()}
+        items_by_slug = {item["slug"]: item for item in await self.tls_intercept_runtime.status_items()}
         self.assertEqual(items_by_slug["google"]["status"], "connected")
         self.assertEqual(items_by_slug["google"]["last_refreshed_at"], "2026-05-25T22:00:00+00:00")
         # Status reads are a pure projection: they do NOT prune the injection cache.
@@ -1994,23 +1987,20 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         isn't restarted without the integration; a disconnected provider is excluded.
         """
         import time
-        store = self.tls_intercept_runtime._token_store
+        store = self.tls_intercept_runtime._credential_state_store
         # Token cache expired, but connection state is connected with config.
         store._cache["telegram"] = tls_token_store._TokenCacheEntry(
             secrets={"access_token": "EXPIRED"},
             expires_at=time.monotonic() - 10,
-            last_refreshed_at="2026-05-25T22:00:00+00:00",
-            config={"allowed_users": ["123"]},
-            metadata={},
         )
-        store._conn["telegram"] = tls_token_store._ConnState(
+        store._connection_states["telegram"] = tls_token_store.ProviderConnectionState(
             connected=True,
             last_refreshed_at="2026-05-25T22:00:00+00:00",
             config={"allowed_users": ["123"]},
             metadata={},
         )
         # A disconnected provider must be excluded.
-        store._conn["slack"] = tls_token_store._ConnState(
+        store._connection_states["slack"] = tls_token_store.ProviderConnectionState(
             connected=False, last_refreshed_at=None, config={}, metadata={},
         )
 
@@ -2022,12 +2012,10 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
     async def test_proxy_hot_path_prunes_expired_entry_after_transient(self) -> None:
         """Transient refresh on an expired entry must leave the cache empty."""
         import time
-        store = self.tls_intercept_runtime._token_store
+        store = self.tls_intercept_runtime._credential_state_store
         store._cache["google"] = tls_token_store._TokenCacheEntry(
             secrets={"access_token": "EXPIRED"},
             expires_at=time.monotonic() - 10,
-            last_refreshed_at="2026-05-25T22:00:00+00:00",
-            config={}, metadata={},
         )
 
         with patch.object(
@@ -2038,7 +2026,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
                 secrets=None, expires_in=None, config={}, metadata={},
             )),
         ):
-            secrets = await store.secrets_for_host(host="gmail.googleapis.com")
+            secrets = await store.secrets_for_slug(slug="google")
 
         self.assertIsNone(secrets)
         self.assertNotIn("google", store._cache)
@@ -2047,9 +2035,9 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         """A proxy hot-path refresh returning has_token marks the card connected (E2).
 
         Self-healing: a provider that was idle/never-refreshed turns green on the
-        first real request, because the shared refresh path updates `_conn` too.
+        first real request, because the shared refresh path updates connection state too.
         """
-        store = self.tls_intercept_runtime._token_store
+        store = self.tls_intercept_runtime._credential_state_store
         with patch.object(
             tls_token_store,
             "fetch_provider_tokens_batch",
@@ -2058,10 +2046,10 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
                 secrets={"access_token": "fresh"}, expires_in=3600, config={}, metadata={},
             )),
         ):
-            secrets = await store.secrets_for_host(host="gmail.googleapis.com")
+            secrets = await store.secrets_for_slug(slug="google")
 
         self.assertEqual(secrets, {"access_token": "fresh"})
-        items_by_slug = {item["slug"]: item for item in await store.status_items()}
+        items_by_slug = {item["slug"]: item for item in await self.tls_intercept_runtime.status_items()}
         self.assertEqual(items_by_slug["google"]["status"], "connected")
 
     async def test_hot_path_absent_marks_connection_not_connected(self) -> None:
@@ -2070,8 +2058,8 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         A provider revoked/disconnected elsewhere stops showing connected the
         moment the proxy next tries to use it.
         """
-        store = self.tls_intercept_runtime._token_store
-        store._conn["google"] = tls_token_store._ConnState(
+        store = self.tls_intercept_runtime._credential_state_store
+        store._connection_states["google"] = tls_token_store.ProviderConnectionState(
             connected=True, last_refreshed_at="2026-05-25T22:00:00+00:00", config={}, metadata={},
         )
         with patch.object(
@@ -2082,21 +2070,21 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
                 secrets=None, expires_in=None, config={}, metadata={},
             )),
         ):
-            secrets = await store.secrets_for_host(host="gmail.googleapis.com")
+            secrets = await store.secrets_for_slug(slug="google")
 
         self.assertIsNone(secrets)
-        items_by_slug = {item["slug"]: item for item in await store.status_items()}
+        items_by_slug = {item["slug"]: item for item in await self.tls_intercept_runtime.status_items()}
         self.assertEqual(items_by_slug["google"]["status"], "not_connected")
 
     async def test_evict_then_transient_keeps_card_connected_but_token_unavailable(self) -> None:
         """After a 401 evict + transient refresh the card stays connected while the token is gone (E3).
 
-        `invalidate` (the 401-evict path) drops only the cache, not `_conn`; a
-        transient follow-up leaves `_conn` untouched. The card reads "connected"
-        (last known good) while a proxy request would 503 — the deliberate trade
-        for not eagerly disconnecting on a recoverable 401.
+        `invalidate` (the 401-evict path) drops only the cache, not connection
+        state; a transient follow-up leaves that state untouched. The card reads
+        "connected" (last known good) while a proxy request would 503 — the
+        deliberate trade for not eagerly disconnecting on a recoverable 401.
         """
-        store = self.tls_intercept_runtime._token_store
+        store = self.tls_intercept_runtime._credential_state_store
         with patch.object(
             tls_token_store,
             "fetch_provider_tokens_batch",
@@ -2114,10 +2102,10 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
             "fetch_provider_tokens_batch",
             return_value=_batched(slug="google", result=tls_token_store._transient_result()),
         ):
-            secrets = await store.secrets_for_host(host="gmail.googleapis.com")
+            secrets = await store.secrets_for_slug(slug="google")
 
         self.assertIsNone(secrets)  # a proxy request would 503
-        items_by_slug = {item["slug"]: item for item in await store.status_items()}
+        items_by_slug = {item["slug"]: item for item in await self.tls_intercept_runtime.status_items()}
         self.assertEqual(items_by_slug["google"]["status"], "connected")  # card still connected
 
     async def test_refresh_endpoint_reloads_catalog_and_drops_tls_cache(self) -> None:
@@ -2153,7 +2141,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
             return_value=True,
         ):
             await self.tls_intercept_runtime.refresh_slug(slug="google")
-            self.assertIn("google", self.tls_intercept_runtime._token_store._cache)
+            self.assertIn("google", self.tls_intercept_runtime._credential_state_store._cache)
             with TestClient(parts.app) as client:
                 resp = client.post("/integrations/refresh_all")
                 # A successful refresh arms the service-owned cooldown: an
@@ -2164,7 +2152,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json(), {"ok": True, "tools": 12, "connectors": 3})
         self.assertEqual(aggregator.refresh_calls, 1)
-        self.assertEqual(self.tls_intercept_runtime._token_store._cache, {})
+        self.assertEqual(self.tls_intercept_runtime._credential_state_store._cache, {})
         self.assertEqual(resp_on_cooldown.status_code, 429)
         self.assertEqual(resp_on_cooldown.json()["error"], "refresh_cooldown")
         self.assertEqual(aggregator.refresh_calls, 1)
@@ -2331,11 +2319,11 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         invalidate_mock.assert_awaited_once_with(slug="github")
 
 
-class TestLazyTokenForHost(unittest.IsolatedAsyncioTestCase):
-    """The TLS token store fetches lazily and reuses the cache until near-expiry."""
+class TestCredentialStateStore(unittest.IsolatedAsyncioTestCase):
+    """The credential-state store fetches lazily and reuses secrets until near-expiry."""
 
     def setUp(self) -> None:
-        self.token_store = _make_token_store()
+        self.credential_state_store = _make_credential_state_store()
 
     async def test_first_call_fetches_subsequent_calls_use_cache(self) -> None:
         with patch.object(
@@ -2349,8 +2337,11 @@ class TestLazyTokenForHost(unittest.IsolatedAsyncioTestCase):
                 metadata={},
             )),
         ) as fetch_mock:
-            self.assertEqual(await self.token_store.secrets_for_host(host="gmail.googleapis.com"), {"access_token": "T1"})
-            self.assertEqual(await self.token_store.secrets_for_host(host="drive.googleapis.com"), {"access_token": "T1"})
+            first_secrets = await self.credential_state_store.secrets_for_slug(slug="google")
+            self.assertEqual(first_secrets, {"access_token": "T1"})
+            assert first_secrets is not None
+            first_secrets["access_token"] = "caller-mutated"
+            self.assertEqual(await self.credential_state_store.secrets_for_slug(slug="google"), {"access_token": "T1"})
             fetch_mock.assert_called_once()
 
     async def test_refresh_when_within_lead_window(self) -> None:
@@ -2371,14 +2362,14 @@ class TestLazyTokenForHost(unittest.IsolatedAsyncioTestCase):
             )),
         ]
         with patch.object(tls_token_store, "fetch_provider_tokens_batch", side_effect=responses):
-            self.assertEqual(await self.token_store.secrets_for_host(host="gmail.googleapis.com"), {"access_token": "T1"})
+            self.assertEqual(await self.credential_state_store.secrets_for_slug(slug="google"), {"access_token": "T1"})
             # Backdate the cached entry past the lead window to force a refresh.
-            self.token_store._cache["google"].expires_at = self.token_store._cache["google"].expires_at - 3600
-            self.assertEqual(await self.token_store.secrets_for_host(host="gmail.googleapis.com"), {"access_token": "T2"})
+            self.credential_state_store._cache["google"].expires_at = self.credential_state_store._cache["google"].expires_at - 3600
+            self.assertEqual(await self.credential_state_store.secrets_for_slug(slug="google"), {"access_token": "T2"})
 
-    async def test_unknown_host_returns_none_without_fetching(self) -> None:
+    async def test_unknown_slug_returns_none_without_fetching(self) -> None:
         with patch.object(tls_token_store, "fetch_provider_tokens_batch") as fetch_mock:
-            self.assertIsNone(await self.token_store.secrets_for_host(host="api.notaprovider.com"))
+            self.assertIsNone(await self.credential_state_store.secrets_for_slug(slug="unknown"))
             fetch_mock.assert_not_called()
 
     async def test_absent_outcome_leaves_cache_empty(self) -> None:
@@ -2394,8 +2385,30 @@ class TestLazyTokenForHost(unittest.IsolatedAsyncioTestCase):
                 metadata={},
             )),
         ):
-            self.assertIsNone(await self.token_store.secrets_for_host(host="gmail.googleapis.com"))
-        self.assertNotIn("google", self.token_store._cache)
+            self.assertIsNone(await self.credential_state_store.secrets_for_slug(slug="google"))
+        self.assertNotIn("google", self.credential_state_store._cache)
+
+    async def test_connection_snapshot_deep_copies_config_and_metadata(self) -> None:
+        with patch.object(
+            tls_token_store,
+            "fetch_provider_tokens_batch",
+            return_value=_batched(slug="google", result=tls_token_store.RefreshResult(
+                outcome=tls_token_store.REFRESH_OUTCOME_HAS_TOKEN,
+                secrets={"access_token": "T1"},
+                expires_in=3600,
+                config={"nested": {"enabled": True}},
+                metadata={"scopes": ["mail"]},
+            )),
+        ):
+            await self.credential_state_store.refresh(slug="google")
+
+        snapshot = await self.credential_state_store.connection_snapshot()
+        snapshot["google"].config["nested"]["enabled"] = False
+        snapshot["google"].metadata["scopes"].append("drive")
+
+        fresh_snapshot = await self.credential_state_store.connection_snapshot()
+        self.assertEqual(fresh_snapshot["google"].config, {"nested": {"enabled": True}})
+        self.assertEqual(fresh_snapshot["google"].metadata, {"scopes": ["mail"]})
 
 
 def _patched_humr_httpx_client(handler: Callable[[httpx.Request], httpx.Response], timeouts: list[int]) -> AbstractContextManager:
@@ -2524,7 +2537,7 @@ class TestFetchProviderTokensBatch(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(results["telegram"].metadata, {"bot_username": "humr_bot"})
 
     async def test_has_token_with_non_dict_config_or_metadata_is_coerced_empty(self) -> None:
-        """Malformed config/metadata must not poison durable connection state."""
+        """Malformed config/metadata must not poison cache-independent connection state."""
         results = await self._run_with_response(payload={
             "results": {
                 "google": {
@@ -2543,7 +2556,7 @@ class TestFetchProviderTokensBatch(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(results["google"].metadata, {})
 
     async def test_google_grants_metadata_passes_through(self) -> None:
-        """The scope-picker capability projection rides metadata to _ConnState/the card."""
+        """The scope-picker capability projection rides metadata to connection state and the card."""
         grants = {"products": {"gmail": "write"}, "raw_scopes": ["x"], "google_email": "v@x.com"}
         results = await self._run_with_response(payload={
             "results": {
@@ -2611,20 +2624,18 @@ class TestFetchProviderTokensBatch(unittest.IsolatedAsyncioTestCase):
 
 
 class TestRefreshAllBatchedApply(unittest.IsolatedAsyncioTestCase):
-    """`TokenStore.refresh_all` must apply batched results under per-slug refresh_locks."""
+    """`CredentialStateStore.refresh_all` applies every outcome under its single lock."""
 
     async def test_has_token_writes_absent_drops_transient_leaves(self) -> None:
-        """One batched call covers all three apply paths, for both the cache and the durable connection state."""
+        """One batched call covers all three cache and connection-state outcomes."""
         import time
-        store = _make_token_store()
+        store = _make_credential_state_store()
         store._cache["github"] = tls_token_store._TokenCacheEntry(
             secrets={"access_token": "PRIOR-GITHUB"},
             expires_at=time.monotonic() + 600,
-            last_refreshed_at="2026-05-25T22:00:00+00:00",
-            config={}, metadata={},
         )
         # GitHub is the transient slug: its prior connected state must survive.
-        store._conn["github"] = tls_token_store._ConnState(
+        store._connection_states["github"] = tls_token_store.ProviderConnectionState(
             connected=True, last_refreshed_at="2026-05-25T22:00:00+00:00", config={}, metadata={},
         )
 
@@ -2660,13 +2671,13 @@ class TestRefreshAllBatchedApply(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("telegram", store._cache)
         # Connection state tracks the same three outcomes: has_token ⇒ connected,
         # absent ⇒ not-connected, transient ⇒ prior state preserved.
-        self.assertTrue(store._conn["google"].connected)
-        self.assertTrue(store._conn["github"].connected)  # transient ⇒ prior connected state preserved
-        self.assertFalse(store._conn["telegram"].connected)
+        self.assertTrue(store._connection_states["google"].connected)
+        self.assertTrue(store._connection_states["github"].connected)  # transient ⇒ prior connected state preserved
+        self.assertFalse(store._connection_states["telegram"].connected)
 
 
 class TestGatewayEnvRender(unittest.TestCase):
-    """Render the HUMR-managed block from a token-store snapshot."""
+    """Render the HUMR-managed block from a TLS-runtime snapshot."""
 
     def _telegram_provider(self) -> "tls_provider_catalog.TlsProviderSpec":
         return tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["telegram"]
@@ -2839,7 +2850,7 @@ class TestCredentialsServiceChoreography(unittest.IsolatedAsyncioTestCase):
 
         Credential-change choreography (HUMR refresh, env render, process
         restarts) belongs to CredentialsService. Both the runtime's public
-        invalidate and the proxy 401-eviction path (inner token store) only
+        invalidate and the proxy 401-eviction path (inner credential-state store) only
         touch the cache, so a 401-eviction during normal traffic can never
         trigger a gateway restart.
         """
@@ -2847,7 +2858,7 @@ class TestCredentialsServiceChoreography(unittest.IsolatedAsyncioTestCase):
         with patch.object(tls_token_store, "fetch_provider_tokens_batch") as fetch_mock:
             await runtime.invalidate(slug="telegram")
             await runtime.invalidate_all()
-            await runtime._token_store.invalidate(slug="telegram")
+            await runtime._credential_state_store.invalidate(slug="telegram")
         fetch_mock.assert_not_called()
 
     async def test_processes_requiring_restart_follow_provider_specs(self) -> None:
@@ -3038,7 +3049,7 @@ class TestCredentialsServiceChoreography(unittest.IsolatedAsyncioTestCase):
             webui_state_dir=self.webui_state_dir,
         )
         # Telegram starts connected.
-        runtime._token_store._conn["telegram"] = tls_token_store._ConnState(
+        runtime._credential_state_store._connection_states["telegram"] = tls_token_store.ProviderConnectionState(
             connected=True, last_refreshed_at="2026-05-25T22:00:00+00:00",
             config={"allowed_users": ["123"]}, metadata={},
         )
@@ -3067,7 +3078,7 @@ class TestCredentialsServiceChoreography(unittest.IsolatedAsyncioTestCase):
             webui_state_dir=self.webui_state_dir,
         )
         # Telegram starts connected, with its managed env block already on disk.
-        runtime._token_store._conn["telegram"] = tls_token_store._ConnState(
+        runtime._credential_state_store._connection_states["telegram"] = tls_token_store.ProviderConnectionState(
             connected=True, last_refreshed_at="2026-05-25T22:00:00+00:00",
             config={"allowed_users": ["123"]}, metadata={},
         )

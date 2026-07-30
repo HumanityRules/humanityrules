@@ -43,10 +43,11 @@ Empty managed block (no vault providers connected) is fine.
 ### Spec carries the env mapping
 
 Each `TlsProviderSpec` (in `tls_provider_catalog.py`) declares its env
-bindings; the broker asks the token store for a snapshot of every
-*connected* provider paired with its last-known config, then follows
-each provider's bindings to render the block. The snapshot projects the
-store's durable connection state, not its access-token cache: otherwise
+bindings; the broker asks the TLS-intercept runtime for a snapshot of
+every *connected* provider paired with its last-known config, then
+follows each provider's bindings to render the block. The snapshot
+projects the credential store's cache-independent connection state, not
+its access-token cache: otherwise
 an idle provider past its token expiry would be stripped from the block
 and trigger a spurious gateway restart while its card still read
 connected. Telegram:
