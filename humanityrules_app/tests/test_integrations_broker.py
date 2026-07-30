@@ -9,6 +9,7 @@ asyncio servers.
 """
 
 import asyncio
+import dataclasses
 import importlib.util
 import pathlib
 import ssl
@@ -2875,6 +2876,26 @@ class TestCredentialsServiceChoreography(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(service._processes_requiring_restart(slug="bogus"), ())
         # None (Refresh-all) covers every restart-declaring provider in scope.
         self.assertEqual(service._processes_requiring_restart(slug=None), (gateway, webui))
+
+    async def test_apply_auth_marker_follows_provider_spec(self) -> None:
+        """Auth-marker orchestration reads provider policy rather than a separate slug registry."""
+        service = self._make_service()
+        service._providers = {
+            **service._providers,
+            "openai-codex": dataclasses.replace(service._providers["openai-codex"], sync_auth_marker=False),
+        }
+
+        with patch.object(credentials_service, "_run_provider_auth_marker", return_value=True) as auth_marker_mock:
+            await service._apply_auth_marker(provider="openai-codex", action="connect")
+            await service._apply_auth_marker(provider="nous", action="connect")
+
+        auth_marker_mock.assert_called_once_with(
+            provider="nous",
+            action="connect",
+            webui_python=pathlib.Path("/nonexistent/webui-python"),
+            runtime_dir=pathlib.Path("/nonexistent/humr-runtime"),
+            hermes_home=pathlib.Path("/nonexistent/hermes-home"),
+        )
 
     async def test_per_slug_invalidate_refreshes_only_that_slug(self) -> None:
         """Slug-targeted invalidate must NOT fan out to disconnected providers.

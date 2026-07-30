@@ -40,7 +40,6 @@ REFRESH_COOLDOWN_SECONDS = 30
 # The in-sandbox gateway user; auth.json must stay owned by it (mode 0600), so
 # the root broker drops to it via runuser when it touches the local auth store.
 GATEWAY_USER = "hermeswebui"
-AUTH_MARKER_PROVIDERS = frozenset({"openai-codex", "nous"})
 
 logger = logging.getLogger("credentials_service")
 
@@ -247,7 +246,7 @@ class CredentialsService:
 
     async def _sync_auth_markers(self, specs_in_scope: tuple[tls_provider_catalog.TlsProviderSpec, ...]) -> None:
         """Mirror broker-connected state into local marker auth stores."""
-        marker_slugs = {spec.slug for spec in specs_in_scope if spec.slug in AUTH_MARKER_PROVIDERS}
+        marker_slugs = {spec.slug for spec in specs_in_scope if spec.sync_auth_marker}
         if not marker_slugs:
             return
         connected_slugs = await self._tls_intercept_runtime.connected_slugs()
@@ -291,7 +290,8 @@ class CredentialsService:
 
     async def _apply_auth_marker(self, provider: str, action: str) -> None:
         """Run the local auth marker for providers that declare one; no-op for the rest."""
-        if provider not in AUTH_MARKER_PROVIDERS:
+        spec = self._providers.get(provider)
+        if spec is None or not spec.sync_auth_marker:
             return
         await asyncio.to_thread(
             _run_provider_auth_marker,
