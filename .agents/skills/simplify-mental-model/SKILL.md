@@ -5,7 +5,7 @@ description: Simplify code and system design by reducing the concepts, relations
 
 # Simplify Mental Model
 
-Optimize for the smallest accurate mental model, not the fewest lines, functions, types, or characters. Accept a little more code or a longer name when it removes ambiguity, inference, or navigation.
+Optimize for the smallest accurate mental model. Accept a little more code or a longer name when it removes ambiguity, inference, or navigation.
 
 Treat a dependency as anything one part must know about another, not only an import or package dependency.
 
@@ -54,11 +54,10 @@ Evaluate the change by asking:
 6. Does every remaining abstraction eliminate more explanation than it introduces?
 7. What does each new type let the reader forget?
 
-Do not claim simplification solely from reduced line count, fewer functions, or shorter names.
 
-## Review With a Fresh Reader
+## Review with a Subagent
 
-For a non-trivial change, give a fresh-context reviewer the relevant code or diff without giving it the intended conclusions. Ask the reviewer to:
+Give a fresh-context reviewer subagent the relevant code or diff without giving it the intended conclusions. Ask the reviewer to:
 
 1. Explain the system's main path in its own words.
 2. Identify terms it cannot understand at their point of use.
