@@ -95,7 +95,7 @@ The TLS-intercept subsystem is six modules. Dependencies point strictly downward
 - **`tls_provider_catalog.py`** — static data only. The credential-method dataclasses, the `TlsProviderSpec` entries, and the registries built from them. The only file a provider that uses an existing credential method needs.
 - **`tls_certificate_authority.py`** — `CertMinter`: the boot-generated CA, the `bundle.pem` the sandbox trusts, and the per-hostname leaf certs. Owns that material end to end and nothing else.
 - **`tls_token_store.py`** — `CredentialStateStore`: a slug-keyed cache of injectable secrets, the HUMR refresh protocol, and cache-independent per-provider connection state. It knows neither hosts nor provider specs and returns copied state snapshots for `TlsInterceptRuntime` to join with the catalog.
-- **`tls_credential_injection.py`** — whether a request is asking for HUMR's credential (`needs_injection`) and where the secret is written into it (`rewrite_request_for_provider`). Touches neither the network nor the cache; the caller looks the secrets up and passes them in.
+- **`tls_credential_injection.py`** — produces one request-specific `InjectionPlan` before the token lookup, then applies that plan after the caller supplies its named secrets. Touches neither the network nor the cache.
 - **`tls_http_message_relay.py`** — provider-agnostic HTTP/1.1: parse, frame, replay upstream, stream the response back. Nothing here knows that providers, credentials, or tokens exist, and that discipline is what keeps it tractable.
 
 ## Token refresh
@@ -160,7 +160,11 @@ TlsProviderSpec(
     label="Telegram",
     hosts=("api.telegram.org",),
     logo_url="/extensions/humr/telegram.svg",
-    credential_method=VaultUrlRewrite(placeholder="000000:HUMR_PLACEHOLDER"),
+    connect_mode="vault",
+    credential_wire_behavior=PathPlaceholder(
+        placeholder="000000:HUMR_PLACEHOLDER",
+        secret_name="bot_token",
+    ),
     env_bindings=(
         EnvBinding(env_var="TELEGRAM_BOT_TOKEN", value="000000:HUMR_PLACEHOLDER"),
         EnvBinding(env_var="TELEGRAM_ALLOWED_USERS", config_key="allowed_users", list_separator=","),
@@ -176,26 +180,27 @@ What each field drives:
 - **`slug`** — the key everywhere: the identity in HUMR's provider registry, the path segment in `/integrations/tls_intercept/<slug>/*`, and the cache/connection-state key in the token store.
 - **`hosts`** — which CONNECTs get intercepted. Everything else tunnels opaquely. Listing a host is the whole decision; there is no separate allowlist.
 - **`label`**, **`logo_url`** — what the WebUI card shows. `logo_url` resolves to an SVG shipped in `webui-extension/`.
-- **`credential_method`** — the dataclass that decides both whether a request is asking for HUMR's credential and where the secret is written. See below.
+- **`connect_mode`** — `oauth`, `device`, or `vault`; this controls the integrations-panel connection flow and is independent of request-wire credential handling.
+- **`credential_wire_behavior`** — how an intercepted request identifies a managed credential and where its named secret is written. See below.
 - **`env_bindings`** — env vars rendered into the gateway-managed env block while the provider is connected. Either a static `value` (a placeholder the proxy later swaps) or a `config_key` read from what HUMR returned, optionally joined with `list_separator` for list-shaped config. Exactly one of the two, enforced in `__post_init__`. A provider whose credential nothing in the sandbox reads out of the environment declares `env_bindings=()`. See `gateway_env_and_restart_design.md`.
 - **`restart_gateway_after_save`**, **`restart_webui_after_save`** — which process-compose entries the credentials service restarts after a connect or disconnect *that actually changed the env block*. Needed when a process reads the value at startup or caches it.
 - **`category`** — `model_provider` or `connector`, which section of the integrations panel the card renders under. `affects_model_picker` is derived from it rather than stored, so the two cannot drift: connecting a model provider is precisely what changes `/api/models`.
 
-Five credential methods exist. Each is a frozen dataclass in the catalog, and each has one branch in `needs_injection` and one in `rewrite_request_for_provider`:
+Three credential wire behaviors exist. Each is a frozen dataclass in the catalog and has one branch in `plan_injection`:
 
-- **`OAuthHeader`** — HUMR's OAuth token injected as `Authorization`. `auth_format` picks the encoding: `bearer` (Google, X, Nous) or `basic_x_access_token` for GitHub's git smart-HTTP, which wants HTTP Basic with the token as the password under the `x-access-token` username. `connect_mode` defaults to redirect `oauth`; Nous overrides it to `device`.
-- **`OAuthHeaderMultiInject`** — one bearer plus named extra headers, when HUMR's refresh returns several secrets. `bearer_secret` names the one carried as `Authorization: Bearer`; `header_secrets` maps each remaining secret to the header it is injected as. Codex is the consumer: an `access_token` plus a `chatgpt_account_id` sent as `ChatGPT-Account-ID`. Injected headers override anything the client sent under the same name, so the sandbox cannot spoof them; every other client header passes through untouched.
-- **`VaultUrlRewrite`** — the secret sits in the URL path. The sandbox uses `placeholder` where the real token goes (Telegram's `/bot{token}/`) and the proxy substitutes before forwarding. Every path on that host embeds a token, so a request without the placeholder is an un-rewritable credential rather than public traffic, and it is refused.
-- **`VaultHeaderInject`** — vault-pasted secret(s) riding `Authorization: Bearer`. `placeholders` maps secret name → placeholder, and selection is by reverse-mapping the incoming placeholder bearer, not by request path: the env hands the sandbox a distinct placeholder per secret and the sandbox already sends the right one per call (Slack's app token opens Socket Mode, its bot token posts messages). Also OpenRouter, OpenAI API, and Tavily, each with a single `api_key`.
-- **`VaultApiKeyHeader`** — same idea, but the credential rides a provider-specific header instead of `Authorization`: Anthropic's `x-api-key`, Browser Use's `X-Browser-Use-API-Key`. The proxy confirms the named header carries `placeholder`, then swaps in the real key. No `Authorization` is added, and other required headers (Anthropic's `anthropic-version`) pass through.
+- **`AlwaysInject`** — every intercepted request uses HUMR's managed credential. Its `header_injections` name each required secret, destination header, and value format: bearer for Google, X, and Nous; `basic_x_access_token` for GitHub git smart-HTTP; bearer plus raw `ChatGPT-Account-ID` for Codex.
+- **`HeaderPlaceholder`** — an empty credential header is anonymous pass-through; a recognized placeholder selects its named secret; a foreign credential is refused. The same behavior covers `Authorization: Bearer` providers (Slack, OpenRouter, OpenAI API, Tavily) and raw custom-header providers (Anthropic's `x-api-key`, Browser Use's `X-Browser-Use-API-Key`). Slack's placeholder map selects either `app_token` or `bot_token` without request-path logic.
+- **`PathPlaceholder`** — the request path must contain the configured placeholder, which is replaced by its named secret. Telegram's `/bot{token}/` and `/file/bot{token}/` paths use this behavior. A missing placeholder is refused because that host has no anonymous surface.
+
+`plan_injection` runs before the token-store lookup and returns one `InjectionPlan`, `None` for anonymous pass-through, or `SecretSelectionError` for a refused request. The plan retains the selected secret names and wire destinations across the asynchronous lookup. `apply_injection_plan` then performs only those recorded substitutions; it does not branch on provider behavior.
 
 Beyond that, three refusals are worth knowing, all raised as `SecretSelectionError` and answered with a 400 rather than forwarded:
 
-- A vault credential slot holding something that is neither empty nor a recognized placeholder. A BYO key is neither injected over nor silently forwarded.
-- A `VaultApiKeyHeader` request that sent no api-key header but did send an `Authorization` — credentialed by other means, so refused.
-- A required secret missing from the cache for a multi-secret provider.
+- A placeholder header holding something that is neither empty nor recognized. A BYO key is neither injected over nor silently forwarded.
+- A custom-header provider request that sent no placeholder header but did send `Authorization` — credentialed by other means, so refused.
+- Any named secret required by an injection plan missing from the cache.
 
-An empty slot on a vault provider is the one benign case: it means anonymous public traffic (OpenRouter's unauthenticated `/api/v1/models`, say), which the proxy forwards as-is without consulting the token store, so a disconnected provider costs no HUMR refresh per request.
+An empty `HeaderPlaceholder` slot is the one benign case: it means anonymous public traffic (OpenRouter's unauthenticated `/api/v1/models`, say), which the proxy forwards as-is without consulting the token store, so a disconnected provider costs no HUMR refresh per request.
 
 ## Cert lifecycle
 
@@ -228,7 +233,7 @@ Three things in `humr_runtime/hermes-nono-profile.json` make the broker path wor
 
 ## Shape that generalizes to other providers
 
-Everything above is provider-agnostic. Adding a provider that reuses an existing credential method is:
+Everything above is provider-agnostic. Adding a provider that reuses an existing credential wire behavior is:
 
 1. A `TlsProviderSpec` appended to `TLS_INTERCEPT_PROVIDER_SPECS` in `tls_provider_catalog.py`.
 2. A `provider_<slug>.py` module under `humanityrules_app/views/integrations/` plus a row in that package's `provider_registry.py`. The registry's `ProviderKind` (OAUTH or VAULT) determines which uniform functions the module must expose; the module's `refresh_outcome` is what the batched token endpoint calls.
@@ -236,7 +241,7 @@ Everything above is provider-agnostic. Adding a provider that reuses an existing
 
 No new broker code, no new supervisor code, no new containers. The generic `tls_intercept` card in the WebUI extension renders the new provider from its status payload, including the connect, disconnect, vault-paste, and device-login flows — a per-slug card specialization (as Google and Slack have) is only needed for UI a generic card can't express.
 
-A *new credential method* costs more: a dataclass in the catalog and one more branch in each of `needs_injection` and `rewrite_request_for_provider`. Nothing else in the subsystem has to change.
+A *new credential wire behavior* costs more: a dataclass in the catalog and one more planning branch in `plan_injection`. Plan application, the token store, and the runtime do not change.
 
 ## Open questions
 
