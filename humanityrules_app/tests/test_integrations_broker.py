@@ -519,6 +519,22 @@ class TestForwardHeaderNormalization(unittest.TestCase):
         content_lengths = [value for name, value in out if name.lower() == b"content-length"]
         self.assertEqual(content_lengths, [b"4"])
 
+    def test_authorization_is_preserved_while_proxy_headers_are_removed(self) -> None:
+        out = tls_http_message_relay._normalize_forward_headers(
+            headers=[
+                (b"Host", b"api.openai.com"),
+                (b"Authorization", b"Bearer broker-injected-token"),
+                (b"Proxy-Connection", b"keep-alive"),
+                (b"Proxy-Authorization", b"Basic sandbox-proxy-credential"),
+            ],
+            body_length=0,
+        )
+
+        by_name = {name.lower(): value for name, value in out}
+        self.assertEqual(by_name[b"authorization"], b"Bearer broker-injected-token")
+        self.assertNotIn(b"proxy-connection", by_name)
+        self.assertNotIn(b"proxy-authorization", by_name)
+
 
 class TestHttpParsing(unittest.IsolatedAsyncioTestCase):
 
@@ -1250,14 +1266,16 @@ class TestStreamingRelay(unittest.IsolatedAsyncioTestCase):
 class TestProxyConnectionStateMachine(unittest.IsolatedAsyncioTestCase):
     """Exercise CONNECT routing and the persistent intercepted-request loop."""
 
-    async def _run_intercept(
+    async def _run_provider_intercept(
         self,
         client_bytes: bytes,
         upstream_responses: list[bytes],
         secrets: dict[str, str] | None,
         feed_client_eof: bool,
+        provider_slug: str,
+        host: str,
     ) -> tuple[_TlsRecordingWriter, list[_StubUpstreamWriter], _StubCredentialStateStore]:
-        provider = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["openrouter"]
+        provider = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS[provider_slug]
         credential_state_store = _StubCredentialStateStore(secrets=secrets)
         minter = _StubCertMinter()
         client_reader = asyncio.StreamReader()
@@ -1284,7 +1302,7 @@ class TestProxyConnectionStateMachine(unittest.IsolatedAsyncioTestCase):
                 broker.tls_intercept._intercept_and_forward(
                     client_reader=client_reader,
                     client_writer=client_writer,
-                    host="openrouter.ai",
+                    host=host,
                     port=443,
                     provider=provider,
                     minter=minter,
@@ -1294,8 +1312,42 @@ class TestProxyConnectionStateMachine(unittest.IsolatedAsyncioTestCase):
             )
 
         start_tls.assert_awaited_once()
-        self.assertEqual(minter.hostnames, ["openrouter.ai"])
+        self.assertEqual(minter.hostnames, [host])
         return client_writer, upstream_writers, credential_state_store
+
+    async def _run_intercept(
+        self,
+        client_bytes: bytes,
+        upstream_responses: list[bytes],
+        secrets: dict[str, str] | None,
+        feed_client_eof: bool,
+    ) -> tuple[_TlsRecordingWriter, list[_StubUpstreamWriter], _StubCredentialStateStore]:
+        return await self._run_provider_intercept(
+            client_bytes=client_bytes,
+            upstream_responses=upstream_responses,
+            secrets=secrets,
+            feed_client_eof=feed_client_eof,
+            provider_slug="openrouter",
+            host="openrouter.ai",
+        )
+
+    async def _forward_one_request(
+        self,
+        client_bytes: bytes,
+        secrets: dict[str, str],
+        provider_slug: str,
+        host: str,
+    ) -> tuple[bytes, _StubCredentialStateStore]:
+        _client_writer, upstream_writers, credential_state_store = await self._run_provider_intercept(
+            client_bytes=client_bytes,
+            upstream_responses=[b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"],
+            secrets=secrets,
+            feed_client_eof=True,
+            provider_slug=provider_slug,
+            host=host,
+        )
+        self.assertEqual(len(upstream_writers), 1)
+        return upstream_writers[0].all_bytes(), credential_state_store
 
     async def test_connect_routes_known_host_to_tls_interceptor(self) -> None:
         provider = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["openrouter"]
@@ -1379,6 +1431,129 @@ class TestProxyConnectionStateMachine(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(b"Authorization", second_request)
         self.assertEqual(credential_state_store.secret_slugs, ["openrouter"])
         self.assertTrue(client_writer.closed)
+
+    async def test_anonymous_request_normalizes_host_and_removes_proxy_headers(self) -> None:
+        upstream_request, credential_state_store = await self._forward_one_request(
+            client_bytes=(
+                b"GET /api/v1/models HTTP/1.1\r\n"
+                b"Host: attacker.example\r\n"
+                b"Proxy-Connection: keep-alive\r\n"
+                b"Proxy-Authorization: Basic must-not-leak\r\n"
+                b"User-Agent: sandbox-client\r\n"
+                b"Connection: close\r\n"
+                b"\r\n"
+            ),
+            secrets={"api_key": "unused"},
+            provider_slug="openrouter",
+            host="openrouter.ai",
+        )
+
+        self.assertIn(b"Host: openrouter.ai\r\n", upstream_request)
+        self.assertIn(b"user-agent: sandbox-client\r\n", upstream_request)
+        self.assertNotIn(b"attacker.example", upstream_request)
+        self.assertNotIn(b"proxy-", upstream_request.lower())
+        self.assertNotIn(b"authorization", upstream_request.lower())
+        self.assertEqual(credential_state_store.secret_slugs, [])
+
+    async def test_oauth_bearer_injection_normalizes_final_upstream_request(self) -> None:
+        upstream_request, credential_state_store = await self._forward_one_request(
+            client_bytes=(
+                b"GET /gmail/v1/users/me/profile HTTP/1.1\r\n"
+                b"Host: attacker.example\r\n"
+                b"Proxy-Authorization: Basic must-not-leak\r\n"
+                b"Connection: close\r\n"
+                b"\r\n"
+            ),
+            secrets={"access_token": "ya29-real"},
+            provider_slug="google",
+            host="gmail.googleapis.com",
+        )
+
+        self.assertIn(b"Host: gmail.googleapis.com\r\n", upstream_request)
+        self.assertIn(b"Authorization: Bearer ya29-real\r\n", upstream_request)
+        self.assertNotIn(b"attacker.example", upstream_request)
+        self.assertNotIn(b"proxy-", upstream_request.lower())
+        self.assertEqual(credential_state_store.secret_slugs, ["google"])
+
+    async def test_oauth_multi_header_injection_replaces_every_broker_owned_value(self) -> None:
+        upstream_request, credential_state_store = await self._forward_one_request(
+            client_bytes=(
+                b"POST /backend-api/codex/responses HTTP/1.1\r\n"
+                b"Host: attacker.example\r\n"
+                b"Authorization: Bearer sandbox-placeholder\r\n"
+                b"ChatGPT-Account-ID: spoofed-account\r\n"
+                b"Originator: codex_cli_rs\r\n"
+                b"Proxy-Connection: keep-alive\r\n"
+                b"Content-Length: 2\r\n"
+                b"Connection: close\r\n"
+                b"\r\n"
+                b"{}"
+            ),
+            secrets={"access_token": "codex-real", "chatgpt_account_id": "account-real"},
+            provider_slug="openai-codex",
+            host="chatgpt.com",
+        )
+
+        self.assertIn(b"Host: chatgpt.com\r\n", upstream_request)
+        self.assertIn(b"Authorization: Bearer codex-real\r\n", upstream_request)
+        self.assertIn(b"ChatGPT-Account-ID: account-real\r\n", upstream_request)
+        self.assertIn(b"originator: codex_cli_rs\r\n", upstream_request)
+        self.assertNotIn(b"spoofed-account", upstream_request)
+        self.assertNotIn(b"proxy-", upstream_request.lower())
+        self.assertEqual(credential_state_store.secret_slugs, ["openai-codex"])
+
+    async def test_url_credential_rewrite_removes_authorization_before_forwarding(self) -> None:
+        upstream_request, credential_state_store = await self._forward_one_request(
+            client_bytes=(
+                b"POST /bot000000:HUMR_PLACEHOLDER/sendMessage HTTP/1.1\r\n"
+                b"Host: attacker.example\r\n"
+                b"Authorization: Bearer must-not-leak\r\n"
+                b"Proxy-Authorization: Basic must-not-leak\r\n"
+                b"Content-Type: application/json\r\n"
+                b"Content-Length: 2\r\n"
+                b"Connection: close\r\n"
+                b"\r\n"
+                b"{}"
+            ),
+            secrets={"bot_token": "123456:real"},
+            provider_slug="telegram",
+            host="api.telegram.org",
+        )
+
+        self.assertIn(b"POST /bot123456:real/sendMessage HTTP/1.1\r\n", upstream_request)
+        self.assertIn(b"Host: api.telegram.org\r\n", upstream_request)
+        self.assertIn(b"content-type: application/json\r\n", upstream_request)
+        self.assertNotIn(b"attacker.example", upstream_request)
+        self.assertNotIn(b"authorization", upstream_request.lower())
+        self.assertNotIn(b"proxy-", upstream_request.lower())
+        self.assertEqual(credential_state_store.secret_slugs, ["telegram"])
+
+    async def test_custom_api_key_rewrite_removes_authorization_and_preserves_provider_headers(self) -> None:
+        upstream_request, credential_state_store = await self._forward_one_request(
+            client_bytes=(
+                b"POST /v1/messages HTTP/1.1\r\n"
+                b"Host: attacker.example\r\n"
+                b"X-Api-Key: HUMR_PLACEHOLDER\r\n"
+                b"Authorization: Bearer must-not-leak\r\n"
+                b"Anthropic-Version: 2023-06-01\r\n"
+                b"Proxy-Connection: keep-alive\r\n"
+                b"Content-Length: 2\r\n"
+                b"Connection: close\r\n"
+                b"\r\n"
+                b"{}"
+            ),
+            secrets={"api_key": "sk-ant-real"},
+            provider_slug="anthropic",
+            host="api.anthropic.com",
+        )
+
+        self.assertIn(b"Host: api.anthropic.com\r\n", upstream_request)
+        self.assertIn(b"x-api-key: sk-ant-real\r\n", upstream_request)
+        self.assertIn(b"anthropic-version: 2023-06-01\r\n", upstream_request)
+        self.assertNotIn(b"attacker.example", upstream_request)
+        self.assertNotIn(b"authorization", upstream_request.lower())
+        self.assertNotIn(b"proxy-", upstream_request.lower())
+        self.assertEqual(credential_state_store.secret_slugs, ["anthropic"])
 
     async def test_upstream_eof_framing_ends_client_loop_without_waiting_for_another_request(self) -> None:
         client_writer, upstream_writers, credential_state_store = await self._run_intercept(
