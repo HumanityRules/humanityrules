@@ -51,7 +51,9 @@ REPORT_PATH = "/api/runtime/billing-usage-events"
 
 _FLUSH_INTERVAL_SECONDS = 10
 _FLUSH_BATCH_SIZE = 20
-_MAX_BUFFERED_EVENTS = 1000
+# Must stay at or below the CP ingest cap (MAX_EVENTS_PER_REPORT in views/billing_usage.py):
+# flush posts the whole buffer in one request, and an oversized batch is rejected outright.
+_MAX_BUFFERED_EVENTS = 500
 _POST_TIMEOUT_SECONDS = 15
 
 # A terminal event's data line carries the full response object (all output
