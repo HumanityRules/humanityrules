@@ -217,7 +217,7 @@ urlpatterns = [
     path("api/permissions/service-catalog", views.permissions_service_catalog, name="permissions_service_catalog"),
 
     # Staff-only platform fleet dashboard (cross-org by design; gated by is_staff)
-    path("platform/fleet/", views.fleet, name="fleet"),
+    path("platform/fleet/", views.platform_fleet, name="platform_fleet"),
     path("platform/fleet/fail-unsettled/confirm/", views.fleet_fail_unsettled_deployments_confirm, name="fleet_fail_unsettled_deployments_confirm"),
     path("platform/fleet/fail-unsettled/", views.fleet_fail_unsettled_deployments, name="fleet_fail_unsettled_deployments"),
     path("platform/fleet/redeploy-all/confirm/", views.fleet_redeploy_all_confirm, name="fleet_redeploy_all_confirm"),
