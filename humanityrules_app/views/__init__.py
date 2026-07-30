@@ -1,7 +1,6 @@
 from .landing import devopshero_landing, landing
 from .dashboard import dashboard
-from .fleet import (
-    fleet,
+from .platform_fleet import (
     fleet_app_remove,
     fleet_app_remove_confirm,
     fleet_deployment_log,
@@ -10,6 +9,7 @@ from .fleet import (
     fleet_fail_unsettled_deployments_confirm,
     fleet_redeploy_all,
     fleet_redeploy_all_confirm,
+    platform_fleet,
 )
 from .platform_billing import platform_billing, platform_billing_app_events
 from .workspaces import workspace_detail, workspace_create, workspace_remove_confirm, workspace_remove, workspace_tags_save
@@ -147,7 +147,6 @@ __all__ = [
     "landing",
     "devopshero_landing",
     "dashboard",
-    "fleet",
     "fleet_app_remove",
     "fleet_app_remove_confirm",
     "fleet_deployment_log",
@@ -156,6 +155,7 @@ __all__ = [
     "fleet_fail_unsettled_deployments_confirm",
     "fleet_redeploy_all",
     "fleet_redeploy_all_confirm",
+    "platform_fleet",
     "platform_billing",
     "platform_billing_app_events",
     "workspaces",

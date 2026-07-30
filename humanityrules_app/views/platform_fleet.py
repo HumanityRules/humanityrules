@@ -18,9 +18,9 @@ FLEET_LOG_MAX_LINES = 300
 
 
 @platform_access.platform_staff_required
-def fleet(request: HttpRequest) -> HttpResponse:
+def platform_fleet(request: HttpRequest) -> HttpResponse:
     context = {"env_groups": fleet_service.build_fleet_snapshot()}
-    template = "humanityrules_app/fleet/fleet.html"
+    template = "humanityrules_app/platform_fleet/platform_fleet.html"
     if request.htmx:
         template += "#fleet_list"
     return render(request, template, context=context)
@@ -31,7 +31,7 @@ def fleet(request: HttpRequest) -> HttpResponse:
 def fleet_redeploy_all_confirm(request: HttpRequest) -> HttpResponse:
     """Return the fleet-wide redeploy confirmation modal."""
     context = {"preview": fleet_service.build_redeploy_all_preview()}
-    return render(request, "humanityrules_app/fleet/_fleet_redeploy_all_confirm.html", context=context)
+    return render(request, "humanityrules_app/platform_fleet/_fleet_redeploy_all_confirm.html", context=context)
 
 
 @platform_access.platform_staff_required
@@ -47,7 +47,7 @@ def fleet_redeploy_all(request: HttpRequest) -> HttpResponse:
         "env_groups": fleet_service.build_fleet_snapshot(),
         "redeploy_result": redeploy_result,
     }
-    return render(request, "humanityrules_app/fleet/fleet.html#fleet_list", context=context)
+    return render(request, "humanityrules_app/platform_fleet/platform_fleet.html#fleet_list", context=context)
 
 
 @platform_access.platform_staff_required
@@ -55,7 +55,7 @@ def fleet_redeploy_all(request: HttpRequest) -> HttpResponse:
 def fleet_fail_unsettled_deployments_confirm(request: HttpRequest) -> HttpResponse:
     """Return the confirmation modal for the fleet recovery action."""
     context = {"unsettled_count": fleet_service.count_unsettled_deployments()}
-    return render(request, "humanityrules_app/fleet/_fleet_fail_unsettled_confirm.html", context=context)
+    return render(request, "humanityrules_app/platform_fleet/_fleet_fail_unsettled_confirm.html", context=context)
 
 
 @platform_access.platform_staff_required
@@ -67,7 +67,7 @@ def fleet_fail_unsettled_deployments(request: HttpRequest) -> HttpResponse:
         "env_groups": fleet_service.build_fleet_snapshot(),
         "recovery_result": recovery_result,
     }
-    return render(request, "humanityrules_app/fleet/fleet.html#fleet_list", context=context)
+    return render(request, "humanityrules_app/platform_fleet/platform_fleet.html#fleet_list", context=context)
 
 
 @platform_access.platform_staff_required
@@ -83,7 +83,7 @@ def fleet_deployment_redeploy(request: HttpRequest, app_id: UUID) -> HttpRespons
         "env_groups": fleet_service.build_fleet_snapshot(),
         "redeploy_result": redeploy_result,
     }
-    return render(request, "humanityrules_app/fleet/fleet.html#fleet_list", context=context)
+    return render(request, "humanityrules_app/platform_fleet/platform_fleet.html#fleet_list", context=context)
 
 
 @platform_access.platform_staff_required
@@ -98,7 +98,7 @@ def fleet_app_remove_confirm(request: HttpRequest, app_id: UUID) -> HttpResponse
         "app": app,
         "skip_reason": fleet_service.get_remove_skip_reason(app=app),
     }
-    return render(request, "humanityrules_app/fleet/_fleet_remove_confirm.html", context=context)
+    return render(request, "humanityrules_app/platform_fleet/_fleet_remove_confirm.html", context=context)
 
 
 @platform_access.platform_staff_required
@@ -114,7 +114,7 @@ def fleet_app_remove(request: HttpRequest, app_id: UUID) -> HttpResponse:
         "env_groups": fleet_service.build_fleet_snapshot(),
         "remove_result": remove_result,
     }
-    return render(request, "humanityrules_app/fleet/fleet.html#fleet_list", context=context)
+    return render(request, "humanityrules_app/platform_fleet/platform_fleet.html#fleet_list", context=context)
 
 
 @platform_access.platform_staff_required
@@ -131,4 +131,4 @@ def fleet_deployment_log(request: HttpRequest, app_id: str) -> HttpResponse:
         "truncated": len(recent) > FLEET_LOG_MAX_LINES,
         "max_lines": FLEET_LOG_MAX_LINES,
     }
-    return render(request, "humanityrules_app/fleet/_fleet_deployment_log.html", context=context)
+    return render(request, "humanityrules_app/platform_fleet/_fleet_deployment_log.html", context=context)
