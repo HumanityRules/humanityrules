@@ -11,17 +11,6 @@ from jinja2 import Environment, FileSystemLoader
 logger = logging.getLogger(__name__)
 
 
-def use_express_mode() -> bool:
-    """Express (skip resource-stabilization waits) only when the CP runs in local dev; prod deploys wait for readiness."""
-    from django.conf import settings
-    return settings.DEBUG
-
-
-def _deployment_config_kwargs() -> dict:
-    """Deployment-mode kwargs for create/update/delete_stack; empty in prod (STANDARD is the API default)."""
-    return {"DeploymentConfig": {"Mode": "EXPRESS"}} if use_express_mode() else {}
-
-
 def stack_exists(cf_client, stack_name: str) -> bool:
     """Check if a CloudFormation stack exists."""
     try:
@@ -116,20 +105,16 @@ def deploy_cloudformation_stack(
                 TemplateBody=template_body,
                 Parameters=cf_parameters,
                 Capabilities=cf_capabilities,
-                **_deployment_config_kwargs(),
             )
             waiter = cf_client.get_waiter("stack_update_complete")
         else:
             logger.info("   Stack does not exist, creating")
-            # OnFailure keeps failed stacks around for debugging, but conflicts with Express, which owns failure handling.
-            on_failure_kwargs = {} if use_express_mode() else {"OnFailure": "ROLLBACK"}
             cf_client.create_stack(
                 StackName=stack_name,
                 TemplateBody=template_body,
                 Parameters=cf_parameters,
                 Capabilities=cf_capabilities,
-                **_deployment_config_kwargs(),
-                **on_failure_kwargs,
+                OnFailure="ROLLBACK",
             )
             waiter = cf_client.get_waiter("stack_create_complete")
         
@@ -223,7 +208,7 @@ def delete_stack_and_wait(cf_client, stack_name: str) -> bool:
     
     logger.info("   Deleting stack '%(stack_name)s'", {"stack_name": stack_name})
     try:
-        cf_client.delete_stack(StackName=stack_name, **_deployment_config_kwargs())
+        cf_client.delete_stack(StackName=stack_name)
         
         # Wait for deletion
         waiter = cf_client.get_waiter("stack_delete_complete")
