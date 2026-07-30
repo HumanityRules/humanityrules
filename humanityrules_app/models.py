@@ -1758,10 +1758,11 @@ class BillingUsageEvent(models.Model):
     ``quantities`` (JSON, validated per source at ingest), never as columns.
     Nothing aggregates quantities in SQL — rating reads events row by row and
     every aggregate view reads the ledger. For ``llm``, ``subkey`` is the
-    observed model id and ``quantities`` holds five disjoint token buckets
-    (``input_tokens`` excludes cache reads; ``reasoning_tokens`` is
-    informational, already folded into ``output_tokens`` — rating must not
-    add it again).
+    observed model id and ``quantities`` holds five token buckets of which
+    only ``input_tokens`` (cache reads removed) and ``output_tokens`` are
+    priceable on their own; ``reasoning_tokens`` is already inside
+    ``output_tokens`` and ``cache_write_tokens`` has no established
+    relationship to ``input_tokens``, so rating must not add either.
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
