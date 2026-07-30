@@ -15,6 +15,11 @@ Request-side and response-side framing rules are deliberately different, and
 they sit next to each other here so the asymmetry is visible: a request body
 must be chunked-alone or Content-Length, because the broker re-frames what it
 forwards, while a response body is relayed in whatever framing arrived.
+
+A caller may pass a `ResponseBodyObserver` to watch one response as decoded
+bytes (transfer framing removed). Observation is strictly one-way: every call
+is guarded, an observer that raises is dropped for the rest of the response,
+and the relayed byte stream is identical with or without one.
 """
 
 import asyncio
@@ -24,7 +29,7 @@ import logging
 import re
 import ssl
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Protocol
 
 
 logger = logging.getLogger("tls_http_message_relay")
@@ -164,6 +169,53 @@ def _get_upstream_ssl_context() -> ssl.SSLContext:
     return _upstream_ssl_context
 
 
+class ResponseBodyObserver(Protocol):
+    """Read-only sink for one upstream response, fed decoded body bytes.
+
+    `on_head` receives the final (non-interim) status and the upstream's own
+    header list; `on_body` receives payload bytes with transfer framing
+    (chunk sizes, delimiters, trailers) already removed; `on_end` fires once
+    the exchange is over, cleanly or not. Content codings are NOT undone —
+    an observer that needs a readable body must arrange for an uncompressed
+    response itself (e.g. by stripping the request's Accept-Encoding).
+    """
+
+    def on_head(self, status: int, headers: list[tuple[bytes, bytes]]) -> None: ...
+
+    def on_body(self, data: bytes) -> None: ...
+
+    def on_end(self) -> None: ...
+
+
+class _GuardedObserver:
+    """Wraps a ResponseBodyObserver so no exception can reach the relay.
+
+    The first raise disables the observer for the rest of the response —
+    observation is best-effort; the byte relay never is.
+    """
+
+    def __init__(self, observer: ResponseBodyObserver) -> None:
+        self._observer: ResponseBodyObserver | None = observer
+
+    def _call(self, method_name: str, *args: object) -> None:
+        if self._observer is None:
+            return
+        try:
+            getattr(self._observer, method_name)(*args)
+        except Exception:
+            logger.exception("response body observer raised in %s; disabled for this response", method_name)
+            self._observer = None
+
+    def on_head(self, status: int, headers: list[tuple[bytes, bytes]]) -> None:
+        self._call("on_head", status, headers)
+
+    def on_body(self, data: bytes) -> None:
+        self._call("on_body", data)
+
+    def on_end(self) -> None:
+        self._call("on_end")
+
+
 async def forward_to_upstream(
     host: str,
     port: int,
@@ -172,6 +224,7 @@ async def forward_to_upstream(
     headers: list[tuple[bytes, bytes]],
     body: bytes,
     client_writer: asyncio.StreamWriter,
+    response_body_observer: ResponseBodyObserver | None,
 ) -> tuple[int, bool]:
     """Replay the request to the real upstream and relay the response to the client.
 
@@ -184,6 +237,7 @@ async def forward_to_upstream(
     ``keep_alive`` is False when the client connection must be torn down
     after this exchange.
     """
+    observer = _GuardedObserver(observer=response_body_observer) if response_body_observer is not None else None
     ctx = _get_upstream_ssl_context()
     upstream_reader, upstream_writer = await asyncio.open_connection(host=host, port=port, ssl=ctx, server_hostname=host)
     try:
@@ -217,6 +271,8 @@ async def forward_to_upstream(
             client_writer.write(_render_response_head(status=status, headers=response_headers))
             await client_writer.drain()
         connection_keep_alive = status != 101 and not connection_close_requested(headers=response_headers)
+        if observer is not None:
+            observer.on_head(status, response_headers)
 
         # Statuses that cannot carry a body (HEAD, 1xx, 204, 304) stop at
         # the head even when framing headers are present (a 304 echoes
@@ -245,12 +301,15 @@ async def forward_to_upstream(
                 upstream_reader=upstream_reader,
                 client_writer=client_writer,
                 framing=framing,
+                observer=observer,
             )
             return status, connection_keep_alive and framed
         except Exception:
             logger.exception("relay from %s failed after response head was sent", host)
             return status, False
     finally:
+        if observer is not None:
+            observer.on_end()
         with contextlib.suppress(Exception):
             upstream_writer.close()
             await upstream_writer.wait_closed()
@@ -341,6 +400,7 @@ async def _relay_response_body(
     upstream_reader: asyncio.StreamReader,
     client_writer: asyncio.StreamWriter,
     framing: _BodyFraming,
+    observer: _GuardedObserver | None,
 ) -> bool:
     """Relay a response body to the client chunk by chunk, flushing per chunk.
 
@@ -355,7 +415,7 @@ async def _relay_response_body(
     response sent over the same socket.
     """
     if framing.kind == "chunked":
-        return await _relay_chunked_stream(upstream_reader=upstream_reader, client_writer=client_writer)
+        return await _relay_chunked_stream(upstream_reader=upstream_reader, client_writer=client_writer, observer=observer)
     if framing.kind == "content_length":
         remaining = framing.content_length
         while remaining > 0:
@@ -366,6 +426,8 @@ async def _relay_response_body(
                 # socket can't carry another response.
                 return False
             remaining -= len(chunk)
+            if observer is not None:
+                observer.on_body(chunk)
             client_writer.write(chunk)
             await client_writer.drain()
         return True
@@ -375,20 +437,29 @@ async def _relay_response_body(
         chunk = await upstream_reader.read(65536)
         if not chunk:
             break
+        if observer is not None:
+            observer.on_body(chunk)
         client_writer.write(chunk)
         await client_writer.drain()
     return False
 
 
-async def _relay_chunked_stream(upstream_reader: asyncio.StreamReader, client_writer: asyncio.StreamWriter) -> bool:
+async def _relay_chunked_stream(
+    upstream_reader: asyncio.StreamReader,
+    client_writer: asyncio.StreamWriter,
+    observer: _GuardedObserver | None,
+) -> bool:
     """Relay a chunked upstream body to the client one chunk at a time, flushing each.
 
     The chunk framing is forwarded verbatim (size line, payload, trailing CRLF,
     final 0-chunk + trailers) so the client's chunked decoder sees each SSE
-    frame the instant it arrives. Returns True only when the stream closed
-    cleanly with its terminating 0-chunk; a premature EOF, malformed size line,
-    or truncated payload returns False so the caller tears the client
-    connection down rather than reuse a socket the client can't reframe.
+    frame the instant it arrives. The observer, by contrast, sees only payload
+    bytes — this loop already separates framing from payload, which is what
+    lets observers read a chunked stream without their own dechunker. Returns
+    True only when the stream closed cleanly with its terminating 0-chunk; a
+    premature EOF, malformed size line, or truncated payload returns False so
+    the caller tears the client connection down rather than reuse a socket the
+    client can't reframe.
     """
     while True:
         size_line = await upstream_reader.readline()
@@ -431,6 +502,8 @@ async def _relay_chunked_stream(upstream_reader: asyncio.StreamReader, client_wr
             if not payload:
                 return False
             remaining -= len(payload)
+            if observer is not None:
+                observer.on_body(payload)
             client_writer.write(payload)
             await client_writer.drain()
         crlf = await upstream_reader.readline()
