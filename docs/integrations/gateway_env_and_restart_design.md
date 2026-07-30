@@ -42,9 +42,14 @@ Empty managed block (no vault providers connected) is fine.
 
 ### Spec carries the env mapping
 
-Each `TlsProviderSpec` declares its env bindings; the broker projects
-connected `_token_store` cache → managed block by following those bindings.
-Telegram:
+Each `TlsProviderSpec` (in `tls_provider_catalog.py`) declares its env
+bindings; the broker asks the token store for a snapshot of every
+*connected* provider paired with its last-known config, then follows
+each provider's bindings to render the block. The snapshot projects the
+store's durable connection state, not its access-token cache: otherwise
+an idle provider past its token expiry would be stripped from the block
+and trigger a spurious gateway restart while its card still read
+connected. Telegram:
 
 ```python
 credential_method=VaultUrlRewrite(
@@ -58,29 +63,37 @@ env_bindings=(
 
 Adding a future messaging platform that gates activation on env presence
 is one `TlsProviderSpec` entry — no shell, no supervisor changes.
-URL-rewrite providers used only by agent tools (e.g., GitHub) don't
-need env bindings: the broker's TLS interception is enough on
-its own.
+
+A provider declares `env_bindings=()` when nothing in the sandbox needs to
+read a value: Google, X, Codex and Nous are reached purely over intercepted
+HTTPS, so interception alone suffices. A binding is needed whenever some
+in-sandbox consumer reads the credential from the environment rather than
+being handed it — GitHub binds `GITHUB_TOKEN` for `git`/`gh`, Tavily and
+Browser Use bind their key for the agent tools that read it at call time.
 
 ### One render path, two triggers
 
-The same `_render_gateway_env_file()` runs:
+The same `_render_gateway_env_file()` in `credentials_service.py` runs:
 
-1. **On broker startup**, after `_ensure_fresh` for every provider.
+1. **On broker startup**, after the bootstrap refresh of every provider.
    Supervisor's `wait_for_port` on the broker control port doubles as
    the synchronization point: by the time it returns, the file is on
    disk and the gateway can boot.
-2. **On every `_token_store.invalidate(slug)`** — the chokepoint that
-   covers vault save, vault disconnect, and explicit "Refresh all".
+2. **After any credential change** — the `credentials_invalidate` /
+   `refresh_all_integrations` chokepoint, which covers vault save, vault
+   or OAuth disconnect, device-flow completion, and explicit "Refresh
+   all". Each drops the cache, refetches from HUMR, and re-renders.
 
-Pure projection of cache → managed-block string. No "first call vs
-subsequent" branch.
+Pure projection of connection state → managed-block string. No "first
+call vs subsequent" branch. A refresh that came back transient skips the
+render entirely: rendering from state that missed its refresh would
+strip live integrations out of the block.
 
 ### Targeted restart
 
-`TlsProviderSpec.restart_gateway_after_save` is load-bearing. After the
-broker rewrites `.env`, if the connected/disconnected provider's spec
-demands a gateway restart, the broker POSTs to process-compose:
+`TlsProviderSpec.restart_gateway_after_save` is load-bearing. If the
+rewrite **changed** the file and the touched provider's spec demands a
+gateway restart, the broker POSTs to process-compose:
 
 ```
 POST http://127.0.0.1:9956/process/restart/system.gateway
@@ -90,10 +103,13 @@ process-compose stops the gateway and respawns it. The fresh process
 inherits the `.env` via Hermes's normal path. WebUI and agent are
 untouched — open chat sessions don't drop.
 
-Providers that do not affect gateway startup keep
-`restart_gateway_after_save = False`. The same trigger covers connect
-*and* disconnect: connect populates the managed block, disconnect empties
-it; the gateway either picks up the platform binding or boots without it.
+An unchanged file restarts nothing, so a Refresh that finds no drift is
+free. `restart_webui_after_save` is the same mechanism aimed at
+`system.webui`, for credentials the WebUI process reads at startup; a
+provider can demand both. Providers that affect neither keep both flags
+`False`. The same trigger covers connect *and* disconnect: connect
+populates the managed block, disconnect empties it; the gateway either
+picks up the platform binding or boots without it.
 
 ### Process supervision: system and app-workloads projects
 
@@ -118,17 +134,16 @@ seeded by `webui.sh` through
 Broker writes `.env` successfully but the process-compose REST call
 fails (process-compose down, transient network glitch). The vault
 Save's success response chains through invalidate → broker write →
-restart-call. If the restart call fails, the broker returns an error;
-the modal surfaces "Saved, but the gateway restart failed. Redeploy
-this Hermes app to apply the new credentials." A real fault worth
-seeing.
+restart-call. If the restart call fails, the broker answers 502 and the
+WebUI surfaces "Saved, but applying the credentials failed. Redeploy
+this Hermes app to apply them." A real fault worth seeing.
 
 ## Boot ordering
 
 ```
 supervisor (root, outside nono):
   start aws_signer
-  start integrations_broker
+  start humr_broker
     ├─ broker fetches HUMR state for all providers
     ├─ broker writes ${HERMES_HOME}/.env managed block
     └─ broker opens control port  ← supervisor's wait_for_port unblocks
