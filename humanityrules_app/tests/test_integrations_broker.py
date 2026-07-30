@@ -178,36 +178,37 @@ class TestHostToProviderRouting(unittest.TestCase):
 class TestRewriteAuthorization(unittest.TestCase):
 
     def test_existing_authorization_is_replaced(self) -> None:
-        hdrs = [(b"authorization", b"Bearer SANDBOX-DUMMY"), (b"content-type", b"application/json")]
+        hdrs = [
+            (b"authorization", b"Bearer SANDBOX-DUMMY-1"),
+            (b"Authorization", b"Bearer SANDBOX-DUMMY-2"),
+            (b"content-type", b"application/json"),
+        ]
         out = tls_credential_injection._rewrite_authorization(
             headers=hdrs, token="REAL-TOKEN",
             auth_format=tls_provider_catalog.AUTH_FORMAT_BEARER,
-            upstream_host="gmail.googleapis.com",
         )
-        auth = dict([(n.lower(), v) for n, v in out])[b"authorization"]
-        self.assertEqual(auth, b"Bearer REAL-TOKEN")
+        auth_values = [value for name, value in out if name.lower() == b"authorization"]
+        self.assertEqual(auth_values, [b"Bearer REAL-TOKEN"])
 
     def test_missing_authorization_gets_injected(self) -> None:
         hdrs = [(b"content-type", b"application/json")]
         out = tls_credential_injection._rewrite_authorization(
             headers=hdrs, token="T",
             auth_format=tls_provider_catalog.AUTH_FORMAT_BEARER,
-            upstream_host="gmail.googleapis.com",
         )
         auth = dict([(n.lower(), v) for n, v in out])[b"authorization"]
         self.assertEqual(auth, b"Bearer T")
 
-    def test_host_is_set_to_upstream(self) -> None:
+    def test_host_is_left_for_relay_normalization(self) -> None:
         hdrs = [(b"host", b"whatever"), (b"authorization", b"Bearer x")]
         out = tls_credential_injection._rewrite_authorization(
             headers=hdrs, token="T",
             auth_format=tls_provider_catalog.AUTH_FORMAT_BEARER,
-            upstream_host="gmail.googleapis.com",
         )
         host = dict([(n.lower(), v) for n, v in out])[b"host"]
-        self.assertEqual(host, b"gmail.googleapis.com")
+        self.assertEqual(host, b"whatever")
 
-    def test_hop_by_hop_proxy_headers_are_stripped(self) -> None:
+    def test_proxy_headers_are_left_for_relay_normalization(self) -> None:
         hdrs = [
             (b"authorization", b"Bearer x"),
             (b"proxy-connection", b"keep-alive"),
@@ -216,11 +217,10 @@ class TestRewriteAuthorization(unittest.TestCase):
         out = tls_credential_injection._rewrite_authorization(
             headers=hdrs, token="T",
             auth_format=tls_provider_catalog.AUTH_FORMAT_BEARER,
-            upstream_host="gmail.googleapis.com",
         )
         names = [n.lower() for n, _ in out]
-        self.assertNotIn(b"proxy-connection", names)
-        self.assertNotIn(b"proxy-authorization", names)
+        self.assertIn(b"proxy-connection", names)
+        self.assertIn(b"proxy-authorization", names)
 
     def test_basic_x_access_token_format_for_github(self) -> None:
         import base64
@@ -228,7 +228,6 @@ class TestRewriteAuthorization(unittest.TestCase):
         out = tls_credential_injection._rewrite_authorization(
             headers=hdrs, token="ghs_real_token",
             auth_format=tls_provider_catalog.AUTH_FORMAT_BASIC_X_ACCESS_TOKEN,
-            upstream_host="github.com",
         )
         auth = dict([(n.lower(), v) for n, v in out])[b"authorization"]
         expected = b"Basic " + base64.b64encode(b"x-access-token:ghs_real_token")
@@ -245,12 +244,10 @@ class TestRewriteAuthorization(unittest.TestCase):
             path_with_query="/bot000000:HUMR_PLACEHOLDER/getUpdates?timeout=20",
             secrets={"bot_token": "123456:REAL"},
             provider=provider,
-            upstream_host="api.telegram.org",
         )
         self.assertEqual(path, "/bot123456:REAL/getUpdates?timeout=20")
         header_names = [name.lower() for name, _value in headers]
         self.assertNotIn(b"authorization", header_names)
-        self.assertEqual(dict((name.lower(), value) for name, value in headers)[b"host"], b"api.telegram.org")
 
     def test_telegram_file_path_token_is_rewritten(self) -> None:
         provider = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS["telegram"]
@@ -259,7 +256,6 @@ class TestRewriteAuthorization(unittest.TestCase):
             path_with_query="/file/bot000000:HUMR_PLACEHOLDER/documents/file.txt",
             secrets={"bot_token": "123456:REAL"},
             provider=provider,
-            upstream_host="api.telegram.org",
         )
         self.assertEqual(path, "/file/bot123456:REAL/documents/file.txt")
 
@@ -277,7 +273,6 @@ class TestRewriteAuthorization(unittest.TestCase):
                 path_with_query="/bot000000%3AHUMR_PLACEHOLDER/sendMessage",
                 secrets={"bot_token": "123456:REAL"},
                 provider=provider,
-                upstream_host="api.telegram.org",
             )
 
     def test_slack_app_token_placeholder_selects_app_token(self) -> None:
@@ -288,7 +283,6 @@ class TestRewriteAuthorization(unittest.TestCase):
             path_with_query="/api/apps.connections.open",
             secrets={"app_token": "xapp-REAL", "bot_token": "xoxb-REAL"},
             provider=provider,
-            upstream_host="slack.com",
         )
         self.assertEqual(path, "/api/apps.connections.open")
         self.assertEqual(dict((n.lower(), v) for n, v in headers)[b"authorization"], b"Bearer xapp-REAL")
@@ -301,7 +295,6 @@ class TestRewriteAuthorization(unittest.TestCase):
             path_with_query="/api/chat.postMessage",
             secrets={"app_token": "xapp-REAL", "bot_token": "xoxb-REAL"},
             provider=provider,
-            upstream_host="slack.com",
         )
         self.assertEqual(dict((n.lower(), v) for n, v in headers)[b"authorization"], b"Bearer xoxb-REAL")
 
@@ -314,7 +307,6 @@ class TestRewriteAuthorization(unittest.TestCase):
                 path_with_query="/api/chat.postMessage",
                 secrets={"app_token": "xapp-REAL", "bot_token": "xoxb-REAL"},
                 provider=provider,
-                upstream_host="slack.com",
             )
 
     def test_openrouter_placeholder_bearer_is_rewritten(self) -> None:
@@ -324,7 +316,6 @@ class TestRewriteAuthorization(unittest.TestCase):
             path_with_query="/api/v1/chat/completions",
             secrets={"api_key": "sk-or-v1-real"},
             provider=provider,
-            upstream_host="openrouter.ai",
         )
         self.assertEqual(path, "/api/v1/chat/completions")
         self.assertEqual(dict((n.lower(), v) for n, v in headers)[b"authorization"], b"Bearer sk-or-v1-real")
@@ -336,7 +327,6 @@ class TestRewriteAuthorization(unittest.TestCase):
             path_with_query="/v1/chat/completions",
             secrets={"access_token": "nous-access"},
             provider=provider,
-            upstream_host="inference-api.nousresearch.com",
         )
         self.assertEqual(path, "/v1/chat/completions")
         self.assertEqual(dict((n.lower(), v) for n, v in headers)[b"authorization"], b"Bearer nous-access")
@@ -348,7 +338,6 @@ class TestRewriteAuthorization(unittest.TestCase):
             path_with_query="/v1/chat/completions",
             secrets={"api_key": "sk-real"},
             provider=provider,
-            upstream_host="api.openai.com",
         )
         self.assertEqual(path, "/v1/chat/completions")
         self.assertEqual(dict((n.lower(), v) for n, v in headers)[b"authorization"], b"Bearer sk-real")
@@ -364,7 +353,6 @@ class TestRewriteAuthorization(unittest.TestCase):
             path_with_query="/v1/messages",
             secrets={"api_key": "sk-ant-real"},
             provider=provider,
-            upstream_host="api.anthropic.com",
         )
         self.assertEqual(path, "/v1/messages")
         by_name = dict((n.lower(), v) for n, v in headers)
@@ -381,7 +369,6 @@ class TestRewriteAuthorization(unittest.TestCase):
                 path_with_query="/v1/messages",
                 secrets={"api_key": "sk-ant-real"},
                 provider=provider,
-                upstream_host="api.anthropic.com",
             )
 
 
@@ -493,12 +480,14 @@ class TestForwardHeaderNormalization(unittest.TestCase):
     def test_dechunked_request_gets_content_length_and_no_transfer_encoding(self) -> None:
         out = tls_http_message_relay._normalize_forward_headers(
             headers=[
-                (b"Host", b"github.com"),
+                (b"Host", b"spoofed.example"),
+                (b"host", b"also-spoofed.example"),
                 (b"Transfer-Encoding", b"chunked"),
                 (b"Connection", b"keep-alive"),
                 (b"Content-Type", b"application/json"),
             ],
             body_length=11,
+            upstream_host="github.com",
         )
 
         by_name = {name.lower(): value for name, value in out}
@@ -506,6 +495,8 @@ class TestForwardHeaderNormalization(unittest.TestCase):
         self.assertNotIn(b"connection", by_name)
         self.assertEqual(by_name[b"content-length"], b"11")
         self.assertEqual(by_name[b"host"], b"github.com")
+        hosts = [value for name, value in out if name.lower() == b"host"]
+        self.assertEqual(hosts, [b"github.com"])
 
     def test_existing_content_length_is_replaced(self) -> None:
         out = tls_http_message_relay._normalize_forward_headers(
@@ -514,6 +505,7 @@ class TestForwardHeaderNormalization(unittest.TestCase):
                 (b"Content-Length", b"999"),
             ],
             body_length=4,
+            upstream_host="api.telegram.org",
         )
 
         content_lengths = [value for name, value in out if name.lower() == b"content-length"]
@@ -528,10 +520,12 @@ class TestForwardHeaderNormalization(unittest.TestCase):
                 (b"Proxy-Authorization", b"Basic sandbox-proxy-credential"),
             ],
             body_length=0,
+            upstream_host="api.openai.com",
         )
 
         by_name = {name.lower(): value for name, value in out}
         self.assertEqual(by_name[b"authorization"], b"Bearer broker-injected-token")
+        self.assertEqual(by_name[b"host"], b"api.openai.com")
         self.assertNotIn(b"proxy-connection", by_name)
         self.assertNotIn(b"proxy-authorization", by_name)
 

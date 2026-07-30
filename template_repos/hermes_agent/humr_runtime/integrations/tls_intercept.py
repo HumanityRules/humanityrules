@@ -291,7 +291,6 @@ async def _intercept_and_forward(
                         path_with_query=path_with_query,
                         secrets=secrets,
                         provider=provider,
-                        upstream_host=host,
                     )
                 except tls_credential_injection.SecretSelectionError as exc:
                     logger.error("%s secret selection failed: %s", provider.slug, exc)
@@ -302,7 +301,7 @@ async def _intercept_and_forward(
                     )
                     return
             else:
-                forward_headers = tls_http_message_relay.strip_proxy_headers_and_set_host(headers=headers, upstream_host=host)
+                forward_headers = headers
                 forward_path = path_with_query
             try:
                 upstream_status, keep_alive = await tls_http_message_relay.forward_to_upstream(

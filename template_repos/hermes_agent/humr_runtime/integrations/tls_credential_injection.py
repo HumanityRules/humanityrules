@@ -6,13 +6,14 @@ wants it. Both take their rules from the provider's `credential_method` in
 `tls_provider_catalog`.
 
 Neither touches the network or the token cache — the caller looks the secrets
-up and passes them in. Supporting a new credential method is a dataclass in
-`tls_provider_catalog` plus one more branch in each function here.
+up and passes them in. HTTP transport normalization (Host, proxy headers, and
+framing) happens later in `tls_http_message_relay`. Supporting a new credential
+method is a dataclass in `tls_provider_catalog` plus one more branch in each
+function here.
 """
 
 import base64
 
-import tls_http_message_relay
 import tls_provider_catalog
 
 
@@ -53,31 +54,21 @@ def _strip_bearer_prefix(value: bytes) -> str:
     return text
 
 
-def _rewrite_authorization(headers: list[tuple[bytes, bytes]], token: str, auth_format: str, upstream_host: str) -> list[tuple[bytes, bytes]]:
+def _rewrite_authorization(headers: list[tuple[bytes, bytes]], token: str, auth_format: str) -> list[tuple[bytes, bytes]]:
+    """Replace every client Authorization field with one broker-owned value."""
     auth_value = _build_authorization_value(token=token, auth_format=auth_format)
-    host_override = upstream_host.encode()
-    rewritten: list[tuple[bytes, bytes]] = []
-    seen_auth = False
-    for name, value in headers:
-        if name == b"authorization":
-            rewritten.append((b"Authorization", auth_value))
-            seen_auth = True
-            continue
-        if name == b"host":
-            rewritten.append((b"Host", host_override))
-            continue
-        if name in (b"proxy-connection", b"proxy-authorization"):
-            continue
-        rewritten.append((name, value))
-    if not seen_auth:
-        rewritten.append((b"Authorization", auth_value))
-    return rewritten
+    return [*_strip_authorization(headers=headers), (b"Authorization", auth_value)]
+
+
+def _strip_authorization(headers: list[tuple[bytes, bytes]]) -> list[tuple[bytes, bytes]]:
+    """Remove Authorization when a provider carries its credential somewhere else."""
+    return [(name, value) for name, value in headers if name.lower() != b"authorization"]
 
 
 def _inject_headers(headers: list[tuple[bytes, bytes]], extra: dict[bytes, bytes]) -> list[tuple[bytes, bytes]]:
     """Force `extra` header values, replacing any the client sent (case-insensitive).
 
-    Used after `_rewrite_authorization` to add broker-owned headers (e.g.
+    Used after `_rewrite_authorization` or `_strip_authorization` to add broker-owned headers (e.g.
     `ChatGPT-Account-ID`) whose values come from HUMR, not the sandbox. A header
     the sandbox sent under the same name is dropped so the sandbox can't spoof
     it; every other client header (Codex's Cloudflare `originator`/`User-Agent`)
@@ -141,7 +132,6 @@ def rewrite_request_for_provider(
     path_with_query: str,
     secrets: dict[str, str],
     provider: tls_provider_catalog.TlsProviderSpec,
-    upstream_host: str,
 ) -> tuple[list[tuple[bytes, bytes]], str]:
     """Rewrite credentials for the provider-specific upstream API shape.
 
@@ -159,7 +149,6 @@ def rewrite_request_for_provider(
                 headers=headers,
                 token=_primary_secret(secrets),
                 auth_format=method.auth_format,
-                upstream_host=upstream_host,
             ),
             path_with_query,
         )
@@ -171,7 +160,6 @@ def rewrite_request_for_provider(
             headers=headers,
             token=bearer,
             auth_format=method.auth_format,
-            upstream_host=upstream_host,
         )
         extra: dict[bytes, bytes] = {}
         for secret_name, header_name in method.header_secrets.items():
@@ -185,7 +173,7 @@ def rewrite_request_for_provider(
         if method.placeholder not in path_with_query:
             raise SecretSelectionError("request URL must contain the HUMR placeholder")
         return (
-            tls_http_message_relay.strip_proxy_headers_and_set_host(headers=headers, upstream_host=upstream_host),
+            _strip_authorization(headers=headers),
             path_with_query.replace(method.placeholder, token),
         )
     if isinstance(method, tls_provider_catalog.VaultHeaderInject):
@@ -205,7 +193,6 @@ def rewrite_request_for_provider(
                 headers=headers,
                 token=token,
                 auth_format=method.auth_format,
-                upstream_host=upstream_host,
             ),
             path_with_query,
         )
@@ -219,7 +206,7 @@ def rewrite_request_for_provider(
         if incoming_value != method.placeholder:
             raise SecretSelectionError(f"request {method.header_name} did not carry the HUMR placeholder")
         token = _primary_secret(secrets)
-        stripped = tls_http_message_relay.strip_proxy_headers_and_set_host(headers=headers, upstream_host=upstream_host)
+        stripped = _strip_authorization(headers=headers)
         return (
             _inject_headers(headers=stripped, extra={method.header_name.encode(): token.encode()}),
             path_with_query,
