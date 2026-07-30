@@ -9,6 +9,7 @@ from humanityrules_app.models import (
     App,
     AppPermissions,
     AppTemplate,
+    BillingUsageEvent,
     DeploymentLog,
     DeploymentRecord,
     Environment,
@@ -346,8 +347,64 @@ class PolicyAdmin(admin.ModelAdmin):
 
 
 # =============================================================================
-# Async Jobs
+# Billing
 # =============================================================================
+
+
+@admin.register(BillingUsageEvent)
+class BillingUsageEventAdmin(admin.ModelAdmin):
+    list_display = ["occurred_at", "organization", "app_slug", "owner_username", "source", "subkey", "rated_at"]
+    list_filter = ["source", ("rated_at", admin.EmptyFieldListFilter), "organization"]
+    search_fields = [
+        "idempotency_key",
+        "app_slug",
+        "owner_username",
+        "subkey",
+        "organization__name",
+        "organization__slug",
+    ]
+    readonly_fields = [
+        "id",
+        "organization",
+        "app_id",
+        "app_slug",
+        "owner_username",
+        "source",
+        "subkey",
+        "quantities",
+        "occurred_at",
+        "idempotency_key",
+        "rated_at",
+        "created_at",
+    ]
+    date_hierarchy = "occurred_at"
+    ordering = ["-occurred_at"]
+    list_select_related = ["organization"]
+
+    fieldsets = (
+        ("Attribution", {
+            "fields": ("organization", "app_id", "app_slug", "owner_username"),
+        }),
+        ("Usage", {
+            "fields": ("source", "subkey", "quantities", "occurred_at"),
+        }),
+        ("Rating", {
+            "fields": ("rated_at",),
+        }),
+        ("Metadata", {
+            "fields": ("id", "idempotency_key", "created_at"),
+            "classes": ("collapse",),
+        }),
+    )
+
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        return False
+
+    def has_change_permission(self, request: HttpRequest, obj: BillingUsageEvent | None = None) -> bool:
+        return False
+
+    def has_delete_permission(self, request: HttpRequest, obj: BillingUsageEvent | None = None) -> bool:
+        return False
 
 
 # =============================================================================

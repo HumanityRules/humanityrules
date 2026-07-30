@@ -121,7 +121,7 @@ class TestBillingUsageIngestion(BillingUsageIngestTestBase):
         self.assertEqual(models.BillingUsageEvent.objects.count(), 2)
         event = models.BillingUsageEvent.objects.get(idempotency_key="evt-1")
         self.assertEqual(event.organization, self.organization)
-        self.assertEqual(event.app, self.app)
+        self.assertEqual(event.app_id, self.app.id)
         self.assertEqual(event.owner_username, "vmendi")
         self.assertEqual(event.source, "llm")
         self.assertEqual(event.subkey, "gpt-5.2-codex")
