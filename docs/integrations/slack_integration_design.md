@@ -169,10 +169,9 @@ Slack token presence activating the gateway binding mirrors the Telegram pattern
 Slack reuses the generic integration credential plumbing; the provider-specific
 parts fork in five places, everything else is shared:
 
-- **Credential method `VaultHeaderInject`** (`tls_provider_catalog.py`) — neither `OAuthHeader`
-  nor `VaultUrlRewrite` fit: Slack is *vault-pasted* (connect_mode `vault`, restart-
-  required, has `gateway_env` bindings) **and** *header-injected* (`Authorization: Bearer`,
-  not URL rewrite) **and** *multi-secret*.
+- **Wire behavior `HeaderPlaceholder`** (`tls_provider_catalog.py`) — Slack declares
+  `connect_mode="vault"` separately from its request handling. Its credential rides
+  `Authorization: Bearer`, and its two placeholders select between the app and bot secrets.
 - **Secret selection by placeholder reverse-map, not request path.** The gateway env
   hands the sandbox two distinct placeholder bearers (`xapp-…PLACEHOLDER`,
   `xoxb-…PLACEHOLDER`); the sandbox already sends the correct token per call (app token

@@ -2,7 +2,7 @@
 
 Hermes agent third-party integrations: OAuth broker, MCP aggregators, Merge connectors, gateway platforms (Slack, Telegram), and device-flow LLM providers. **When creating a new document in `docs/integrations/`, always add a reference to it here.**
 
-- **`docs/integrations/integrations_broker_design.md`** — Architecture for the unified integrations broker: TLS-intercept, direct MCP, Merge, vault, OAuth, and device-flow connections. Carries the map of which broker module in `humr_runtime/integrations/` owns what, the provider catalog field-by-field, and the five credential methods. Open when reasoning about the HUMR/customer trust boundary, adding an integration, or debugging the broker.
+- **`docs/integrations/integrations_broker_design.md`** — Architecture for the unified integrations broker: TLS-intercept, direct MCP, Merge, vault, OAuth, and device-flow connections. Carries the map of which broker module in `humr_runtime/integrations/` owns what, the provider catalog field-by-field, and the three credential wire behaviors. Open when reasoning about the HUMR/customer trust boundary, adding an integration, or debugging the broker.
 
 - **`docs/integrations/mcp_aggregator_design.md`** — Architecture for direct MCP server integration in Hermes (PostHog is enabled today; Notion's implementation is currently disabled). Open when adding MCP connectors, working on the aggregator, or reasoning about the sandbox ↔ MCP trust boundary.
 
