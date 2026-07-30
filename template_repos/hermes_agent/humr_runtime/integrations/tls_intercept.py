@@ -5,20 +5,20 @@ our CA bundle, so every outbound HTTPS request arrives here as a CONNECT. A host
 no provider claims falls through to an opaque tunnel — the agent reaches the rest
 of the internet without this proxy reading it. A host in the catalog gets
 terminated with a minted leaf cert, its credential swapped for the real secret,
-and each request replayed upstream.
+and each request sent to the real provider.
 
 That flow is this file. Each part it composes is one module:
 
 - `tls_provider_catalog` — which hosts are intercepted and how each provider's
   credential works. Static data; the only file a new provider needs.
 - `tls_certificate_authority` — the CA and the per-host leaf certs that let us
-  terminate TLS as the upstream.
+  terminate the sandbox's TLS connection.
 - `tls_token_store` — the real secrets and cache-independent connection state
   for a provider slug, refreshed from HUMR.
 - `tls_credential_injection` — whether a request is asking for HUMR's credential,
   and where the secret is written into it.
 - `tls_http_message_relay` — provider-agnostic HTTP/1.1: parse, frame, replay
-  upstream, stream the response back.
+  to the provider, stream the response back to the sandbox.
 - `tls_usage_metering` — billing usage metering. Owns the decision of which
   requests are metered (HUMR-funded credential + parseable dialect), observes
   the response relay through the relay's observer seam, and reports token
@@ -32,6 +32,7 @@ this runtime — never the other way around.
 
 import asyncio
 import contextlib
+import enum
 import logging
 import ssl
 from pathlib import Path
@@ -53,6 +54,18 @@ REFRESH_LEAD_SECONDS = 300
 # Public browser-facing status strings owned by the TLS-intercept subsystem contract.
 STATUS_CONNECTED = "connected"
 STATUS_NOT_CONNECTED = "not_connected"
+
+
+class ProviderCredentialSource(enum.Enum):
+    """Where the credential in a provider request came from."""
+
+    PASSTHROUGH = "passthrough"
+    USER_OR_ORG = "user_or_org"
+    PLATFORM = "platform"
+
+
+class _ProviderNotConnected(Exception):
+    """The requested provider has no credential available in HUMR."""
 
 
 def _status_item_for_provider(
@@ -103,10 +116,10 @@ class TlsInterceptRuntime:
 
     async def start_proxy_server(self, host: str, port: int) -> asyncio.Server:
         """Start the local HTTPS proxy server."""
-        async def handle_conn(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-            await _handle_proxy_conn(
-                reader=reader,
-                writer=writer,
+        async def handle_connection(sandbox_reader: asyncio.StreamReader, sandbox_writer: asyncio.StreamWriter) -> None:
+            await _handle_proxy_connection(
+                sandbox_reader=sandbox_reader,
+                sandbox_writer=sandbox_writer,
                 minter=self._cert_minter,
                 providers=self._providers,
                 host_to_provider=self._host_to_provider,
@@ -114,7 +127,7 @@ class TlsInterceptRuntime:
                 usage_reporter=self._usage_reporter,
             )
 
-        return await asyncio.start_server(client_connected_cb=handle_conn, host=host, port=port)
+        return await asyncio.start_server(client_connected_cb=handle_connection, host=host, port=port)
 
     async def status_items(self) -> list[dict]:
         """Return TLS-intercept integration cards."""
@@ -160,9 +173,9 @@ class TlsInterceptRuntime:
         return snapshot
 
 
-async def _handle_proxy_conn(
-    reader: asyncio.StreamReader,
-    writer: asyncio.StreamWriter,
+async def _handle_proxy_connection(
+    sandbox_reader: asyncio.StreamReader,
+    sandbox_writer: asyncio.StreamWriter,
     minter: tls_certificate_authority.CertMinter,
     providers: dict[str, tls_provider_catalog.TlsProviderSpec],
     host_to_provider: dict[str, str],
@@ -170,36 +183,41 @@ async def _handle_proxy_conn(
     usage_reporter: tls_usage_metering.UsageReporter | None,
 ) -> None:
     """Accept a CONNECT, then either intercept known hosts or tunnel."""
-    peer = writer.get_extra_info("peername")
+    peer = sandbox_writer.get_extra_info("peername")
     try:
-        request_line = await reader.readline()
+        request_line = await sandbox_reader.readline()
         if not request_line:
             return
         try:
             method, target, _ = request_line.decode("iso-8859-1").strip().split(" ", 2)
         except ValueError:
-            await tls_http_message_relay.send_raw(writer=writer, status=400, body=b"bad request line")
+            await tls_http_message_relay.send_raw(writer=sandbox_writer, status=400, body=b"bad request line")
             return
         while True:
-            header_line = await reader.readline()
+            header_line = await sandbox_reader.readline()
             if header_line in (b"\r\n", b"\n", b""):
                 break
         if method.upper() != "CONNECT":
-            await tls_http_message_relay.send_raw(writer=writer, status=405, body=b"only CONNECT is supported")
+            await tls_http_message_relay.send_raw(writer=sandbox_writer, status=405, body=b"only CONNECT is supported")
             return
         raw_host, _, port_str = target.partition(":")
         host = tls_provider_catalog.normalize_connect_host(host=raw_host)
         port = int(port_str) if port_str else 443
         provider_slug = host_to_provider.get(host)
         if provider_slug is None:
-            await _tunnel_opaque(client_reader=reader, client_writer=writer, host=host, port=port)
+            await _tunnel_opaque(
+                sandbox_reader=sandbox_reader,
+                sandbox_writer=sandbox_writer,
+                destination_host=host,
+                destination_port=port,
+            )
             return
         provider = providers[provider_slug]
-        await _intercept_and_forward(
-            client_reader=reader,
-            client_writer=writer,
-            host=host,
-            port=port,
+        await _serve_intercepted_connection(
+            sandbox_reader=sandbox_reader,
+            sandbox_writer=sandbox_writer,
+            provider_host=host,
+            provider_port=port,
             provider=provider,
             minter=minter,
             credential_state_store=credential_state_store,
@@ -211,156 +229,202 @@ async def _handle_proxy_conn(
         logger.exception("proxy connection failed (peer=%s)", peer)
     finally:
         with contextlib.suppress(Exception):
-            writer.close()
-            await writer.wait_closed()
+            sandbox_writer.close()
+            await sandbox_writer.wait_closed()
 
 
-async def _tunnel_opaque(client_reader: asyncio.StreamReader, client_writer: asyncio.StreamWriter, host: str, port: int) -> None:
-    """Straight CONNECT tunnel for hosts we do not intercept."""
-    try:
-        upstream_reader, upstream_writer = await asyncio.open_connection(host=host, port=port)
-    except OSError as exc:
-        await tls_http_message_relay.send_raw(writer=client_writer, status=502, body=f"upstream connect failed: {exc}".encode())
-        return
-    client_writer.write(b"HTTP/1.1 200 Connection established\r\n\r\n")
-    await client_writer.drain()
-    await tls_http_message_relay.pump_both_ways(a_reader=client_reader, a_writer=client_writer, b_reader=upstream_reader, b_writer=upstream_writer)
-
-
-async def _intercept_and_forward(
-    client_reader: asyncio.StreamReader,
-    client_writer: asyncio.StreamWriter,
-    host: str,
-    port: int,
+async def _serve_intercepted_connection(
+    sandbox_reader: asyncio.StreamReader,
+    sandbox_writer: asyncio.StreamWriter,
+    provider_host: str,
+    provider_port: int,
     provider: tls_provider_catalog.TlsProviderSpec,
     minter: tls_certificate_authority.CertMinter,
     credential_state_store: tls_token_store.CredentialStateStore,
     usage_reporter: tls_usage_metering.UsageReporter | None,
 ) -> None:
-    """TLS-terminate with a minted leaf, swap Authorization, and forward."""
-    client_writer.write(b"HTTP/1.1 200 Connection established\r\n\r\n")
-    await client_writer.drain()
-    ssl_ctx = minter.context_for(hostname=host)
+    """Terminate sandbox TLS and forward its HTTP requests to one provider."""
+    sandbox_writer.write(b"HTTP/1.1 200 Connection established\r\n\r\n")
+    await sandbox_writer.drain()
+    ssl_context = minter.context_for(hostname=provider_host)
     loop = asyncio.get_running_loop()
-    transport = client_writer.transport
+    transport = sandbox_writer.transport
     protocol = transport.get_protocol()
     try:
         new_transport = await loop.start_tls(
             transport=transport,
             protocol=protocol,
-            sslcontext=ssl_ctx,
+            sslcontext=ssl_context,
             server_side=True,
         )
     except ssl.SSLError as exc:
-        logger.error("TLS handshake with sandbox client failed for %s: %s", host, exc)
+        logger.error("TLS handshake with sandbox client failed for %s: %s", provider_host, exc)
         return
-    tls_reader = client_reader
-    tls_writer = asyncio.StreamWriter(transport=new_transport, protocol=protocol, reader=tls_reader, loop=loop)
+    sandbox_tls_reader = sandbox_reader
+    sandbox_tls_writer = asyncio.StreamWriter(
+        transport=new_transport,
+        protocol=protocol,
+        reader=sandbox_tls_reader,
+        loop=loop,
+    )
     try:
         while True:
-            request_line = await tls_reader.readline()
-            if not request_line:
-                return
-            headers_raw: list[bytes] = []
-            while True:
-                line = await tls_reader.readline()
-                headers_raw.append(line)
-                if line in (b"\r\n", b"\n", b""):
-                    break
-            headers = tls_http_message_relay.parse_headers(lines=headers_raw)
-            path_with_query = request_line.decode("iso-8859-1").split(" ", 2)[1]
-            
             try:
-                body = await tls_http_message_relay.read_body(reader=tls_reader, headers=headers)
+                sandbox_request = await tls_http_message_relay.read_sandbox_request(sandbox_reader=sandbox_tls_reader)
             except ValueError as exc:
-                # Unparseable framing: whatever follows on the socket can't
-                # be delimited, so answer 400 and close rather than read
-                # body bytes as the next request line.
-                await tls_http_message_relay.send_json_error(writer=tls_writer, status=400, message=f"bad request framing: {exc}")
+                await tls_http_message_relay.send_json_error(
+                    writer=sandbox_tls_writer,
+                    status=400,
+                    message=f"bad request: {exc}",
+                )
                 return
-            
-            try:
-                should_inject = tls_credential_injection.needs_injection(headers=headers, path_with_query=path_with_query, provider=provider)
-            except tls_credential_injection.SecretSelectionError as exc:
-                logger.error("%s secret selection failed: %s", provider.slug, exc)
-                await tls_http_message_relay.send_json_error(writer=tls_writer, status=400, message=f"{provider.slug}: {exc}")
+            if sandbox_request is None:
                 return
 
-            credential = None
-            if should_inject:
-                credential = await credential_state_store.credential_for_slug(slug=provider.slug)
-                if credential is None:
-                    await _send_provider_not_connected(writer=tls_writer, provider=provider)
-                    return
-                try:
-                    forward_headers, forward_path = tls_credential_injection.rewrite_request_for_provider(
-                        headers=headers,
-                        path_with_query=path_with_query,
-                        secrets=credential.secrets,
-                        provider=provider,
-                    )
-                except tls_credential_injection.SecretSelectionError as exc:
-                    logger.error("%s secret selection failed: %s", provider.slug, exc)
-                    await tls_http_message_relay.send_json_error(writer=tls_writer, status=400, message=f"{provider.slug}: {exc}")
-                    return
-            else:
-                forward_headers = headers
-                forward_path = path_with_query
-            
+            try:
+                provider_request, credential_source = await _build_provider_request(
+                    sandbox_request=sandbox_request,
+                    provider=provider,
+                    credential_state_store=credential_state_store,
+                )
+            except tls_credential_injection.SecretSelectionError as exc:
+                logger.error("%s secret selection failed: %s", provider.slug, exc)
+                await tls_http_message_relay.send_json_error(
+                    writer=sandbox_tls_writer,
+                    status=400,
+                    message=f"{provider.slug}: {exc}",
+                )
+                return
+            except _ProviderNotConnected:
+                await _send_provider_not_connected(sandbox_writer=sandbox_tls_writer, provider=provider)
+                return
+
             usage_tap = None
-            if credential is not None and usage_reporter is not None:
+            if credential_source is not ProviderCredentialSource.PASSTHROUGH and usage_reporter is not None:
                 usage_tap = tls_usage_metering.tap_for_request(
                     provider_slug=provider.slug,
-                    platform_shared=credential.platform_shared,
+                    platform_shared=credential_source is ProviderCredentialSource.PLATFORM,
                     record_usage=usage_reporter.record,
                 )
-            
+
             if usage_tap is not None:
-                # Drop Accept-Encoding so the upstream can't compress (usage stays readable).
+                # Drop Accept-Encoding so the provider can't compress (usage stays readable).
                 # Observe-only past this — a tap failure logs "unmetered"; the relay never notices.
-                forward_headers = [(name, value) for name, value in forward_headers if name.lower() != b"accept-encoding"]
-            
+                provider_request = tls_http_message_relay.ProviderRequest(
+                    method=provider_request.method,
+                    path_with_query=provider_request.path_with_query,
+                    headers=[(name, value) for name, value in provider_request.headers if name.lower() != b"accept-encoding"],
+                    body=provider_request.body,
+                )
+
             try:
-                upstream_status, keep_alive = await tls_http_message_relay.forward_to_upstream(
-                    host=host,
-                    port=port,
-                    method=request_line.decode("iso-8859-1").split(" ", 1)[0],
-                    path_with_query=forward_path,
-                    headers=forward_headers,
-                    body=body,
-                    client_writer=tls_writer,
+                forward_result = await tls_http_message_relay.forward_to_provider(
+                    provider_host=provider_host,
+                    provider_port=provider_port,
+                    request=provider_request,
+                    sandbox_writer=sandbox_tls_writer,
                     response_body_observer=usage_tap,
                 )
             except Exception as exc:
-                logger.exception("forward to %s failed", host)
-                await tls_http_message_relay.send_json_error(writer=tls_writer, status=502, message=f"broker upstream error: {exc}")
+                logger.exception("forward to %s failed", provider_host)
+                await tls_http_message_relay.send_json_error(
+                    writer=sandbox_tls_writer,
+                    status=502,
+                    message=f"broker provider error: {exc}",
+                )
                 return
-            
-            # Treat upstream 401 as "the cached token is no longer valid": evict it so the next request refetches from
-            # HUMR. Covers both transient-after-rotation and user-revoked-on-provider-side. We don't retry within this
-            # connection — the user's next request through the proxy hits the refreshed token. Anonymous pass-through
-            # 401s must not evict: they never used our token, so the cached entry is not implicated.
-            if upstream_status == 401 and should_inject:
-                await credential_state_store.invalidate(slug=provider.slug)
-                logger.info("evicted %s token cache after upstream 401 from %s", provider.slug, host)
 
-            if not keep_alive:
+            # Treat provider 401 as "the cached token is no longer valid": evict it so the next request refetches from
+            # HUMR. Covers both transient-after-rotation and user-revoked-on-provider-side. We don't retry within this
+            # connection — the user's next request through the proxy hits the refreshed token. A pass-through 401 must
+            # not evict: the broker did not place its cached credential in that request.
+            if forward_result.status_code == 401 and credential_source is not ProviderCredentialSource.PASSTHROUGH:
+                await credential_state_store.invalidate(slug=provider.slug)
+                logger.info("evicted %s token cache after provider 401 from %s", provider.slug, provider_host)
+
+            if not forward_result.sandbox_connection_can_continue:
                 return
-            
-            # The client asked to close after this exchange; don't sit in
+
+            # The sandbox asked to close after this request; don't sit in
             # readline() waiting for a request that will never come.
-            if tls_http_message_relay.connection_close_requested(headers=headers):
+            if tls_http_message_relay.connection_close_requested(headers=sandbox_request.headers):
                 return
     finally:
         with contextlib.suppress(Exception):
-            tls_writer.close()
-            await tls_writer.wait_closed()
+            sandbox_tls_writer.close()
+            await sandbox_tls_writer.wait_closed()
 
 
-async def _send_provider_not_connected(writer: asyncio.StreamWriter, provider: tls_provider_catalog.TlsProviderSpec) -> None:
-    """Return a Google-API-shaped not-connected error to the sandbox client."""
+async def _build_provider_request(
+    sandbox_request: tls_http_message_relay.SandboxRequest,
+    provider: tls_provider_catalog.TlsProviderSpec,
+    credential_state_store: tls_token_store.CredentialStateStore,
+) -> tuple[tls_http_message_relay.ProviderRequest, ProviderCredentialSource]:
+    """Build the request that should reach the provider."""
+    should_use_managed_credential = tls_credential_injection.needs_injection(
+        headers=sandbox_request.headers,
+        path_with_query=sandbox_request.path_with_query,
+        provider=provider,
+    )
+    if not should_use_managed_credential:
+        return (
+            tls_http_message_relay.ProviderRequest(
+                method=sandbox_request.method,
+                path_with_query=sandbox_request.path_with_query,
+                headers=sandbox_request.headers,
+                body=sandbox_request.body,
+            ),
+            ProviderCredentialSource.PASSTHROUGH,
+        )
+
+    credential = await credential_state_store.credential_for_slug(slug=provider.slug)
+    if credential is None:
+        raise _ProviderNotConnected
+    provider_headers, provider_path = tls_credential_injection.rewrite_request_for_provider(
+        headers=sandbox_request.headers,
+        path_with_query=sandbox_request.path_with_query,
+        secrets=credential.secrets,
+        provider=provider,
+    )
+    return (
+        tls_http_message_relay.ProviderRequest(
+            method=sandbox_request.method,
+            path_with_query=provider_path,
+            headers=provider_headers,
+            body=sandbox_request.body,
+        ),
+        ProviderCredentialSource.PLATFORM
+        if credential.platform_shared
+        else ProviderCredentialSource.USER_OR_ORG,
+    )
+
+
+async def _tunnel_opaque(
+    sandbox_reader: asyncio.StreamReader,
+    sandbox_writer: asyncio.StreamWriter,
+    destination_host: str,
+    destination_port: int,
+) -> None:
+    """Straight CONNECT tunnel for hosts we do not intercept."""
+    try:
+        destination_reader, destination_writer = await asyncio.open_connection(host=destination_host, port=destination_port)
+    except OSError as exc:
+        await tls_http_message_relay.send_raw(writer=sandbox_writer, status=502, body=f"destination connect failed: {exc}".encode())
+        return
+    sandbox_writer.write(b"HTTP/1.1 200 Connection established\r\n\r\n")
+    await sandbox_writer.drain()
+    await tls_http_message_relay.pump_both_ways(
+        sandbox_reader=sandbox_reader,
+        sandbox_writer=sandbox_writer,
+        destination_reader=destination_reader,
+        destination_writer=destination_writer,
+    )
+
+
+async def _send_provider_not_connected(sandbox_writer: asyncio.StreamWriter, provider: tls_provider_catalog.TlsProviderSpec) -> None:
+    """Tell the sandbox that the requested provider is not connected."""
     await tls_http_message_relay.send_json_error(
-        writer=writer,
+        writer=sandbox_writer,
         status=503,
         message=f"{provider.slug} integration not connected in HUMR — connect it from the Integrations pane.",
     )
