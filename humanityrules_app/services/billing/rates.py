@@ -104,6 +104,9 @@ RATE_CARDS: tuple[RateCard, ...] = (
             "gpt-5.6-terra": _llm_rates(input_="300", cache_read="30", output="1800", cache_write="0"),
             "gpt-5.6-luna": _llm_rates(input_="30", cache_read="3", output="180", cache_write="0"),
             "gpt-5.4-mini": _llm_rates(input_="110", cache_read="11", output="675", cache_write="0"),
+            # No published price anywhere (subscription-only Codex variant); assumed
+            # mini-class, anchored to gpt-5.1-codex-mini as the closest equivalent.
+            "gpt-5.3-codex-spark": _llm_rates(input_="35", cache_read="3.5", output="300", cache_write="0"),
         },
     ),
 )

@@ -81,7 +81,7 @@ Append-only. No updates, no deletes; corrections are new entries. One exception:
 4. **`idempotency_key`** — unique. Per-source formats, e.g. `grant:{subscription_id}:{period_start}`, `charge:{org_id}:{date}`. Duplicate insert is a no-op; this is what makes retried webhooks, re-run jobs, and resent usage reports safe.
 5. **`usage_event`** — nullable FK to BillingUsageEvent, set only on entries that correspond to exactly one event (e.g. a future single-event correction). Day-charge entries leave it NULL — one FK cannot name a day's many events. The event↔entry mapping is `rated_at` instead: rating stamps events with the same clock instant the posting date derives from, so `charge:{org_id}:{app_id}:{rated_at.date()}` reconstructs an event's entry exactly, midnight-straddling passes included.
 6. **`description`** — human-readable line for the billing page.
-7. **`metadata`** — JSON for type-specific facts: grants stamp `plan` + `plan_version`, charges stamp `rate_card_versions` (a sorted list — a day entry legitimately mixes cards when a late event prices by an older card) + usage breakdown + the exact Decimal sum (§5.3.4).
+7. **`metadata`** — JSON for type-specific facts: grants stamp `plan` + `plan_version`, charges stamp `rate_card_versions` (a sorted list — a day entry legitimately mixes cards when a late event prices by an older card) + usage breakdown + the exact Decimal sum (§5.3.4) + app attribution (`app_id`, `app_slug`), mirroring the event snapshot columns so charge history outlives App rows.
 8. **`created_at`**, **`updated_at`** — `updated_at` exists to make the day-charge exception visible and auditable: on every other entry it equals `created_at`, and a charge whose `updated_at` postdates its posting day is a broken invariant, checked by `humr_billing_verify`.
 
 Versions are stamped on the entries they influenced, at write time. No ledger-wide version columns.
@@ -122,6 +122,7 @@ Anchor: **1.5x** the per-token price HumR would pay on OpenRouter for the equiva
 2. **`gpt-5.6-terra`:** input 300, cache read 30, output 1,800, cache write 0.
 3. **`gpt-5.6-luna`:** input 30, cache read 3, output 180, cache write 0.
 4. **`gpt-5.4-mini`:** input 110, cache read 11, output 675, cache write 0.
+5. **`gpt-5.3-codex-spark`:** input 35, cache read 3.5, output 300, cache write 0 — no published price exists (subscription-only Codex variant); assumed mini-class and anchored to `gpt-5.1-codex-mini` ($0.25/$0.025/$2.00) as the closest equivalent.
 
 Rates are product prices, not costs: they charge what HumR would charge on a per-token provider, so the eventual Codex → OpenRouter/Baseten switch is an internal swap, not a customer-visible repricing. These rates are ~4x the indicative numbers this design was first sized against; whether the 2,000-credit Operator grant survives real burn is a shadow-period question (§11 step 4).
 
