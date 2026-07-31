@@ -35,7 +35,9 @@ sandbox receives:
   it events; it batches them and posts to HUMR through `HumrClient`
   (which stamps owner/app attribution). There is no on-disk spool: if
   HUMR is unreachable the batch is dropped with a log line. The failure
-  mode is undercharging, never a stuck agent.
+  mode is undercharging, never a stuck agent. Each accepted report comes
+  back carrying the organization's entitlement, which the reporter hands
+  on so `billing_entitlement_service` can enforce against current numbers.
 
 Events themselves are source-generic. Billable units ride in a
 `quantities` dict; `subkey` carries the source's sub-dimension (for
@@ -86,18 +88,25 @@ _TERMINAL_TYPE_MARKER_RE = re.compile(rb'"type"\s*:\s*"response\.(completed|fail
 _PARSED_PROVIDER_SLUGS = frozenset({"openai-codex"})
 
 
+def request_is_metered(provider_slug: str, platform_shared: bool) -> bool:
+    """Whether this request's response consumes HUMR credits.
+
+    The metering decision in one place: HUMR funded the injected credential
+    (platform_shared — customer-funded credentials consume no credits) and the
+    provider's dialect is one the tap can parse. Billing enforcement asks the
+    same question, so the broker can never refuse a request it would not have
+    charged for.
+    """
+    return platform_shared and provider_slug in _PARSED_PROVIDER_SLUGS
+
+
 def tap_for_request(provider_slug: str, platform_shared: bool, record_usage: Callable[[dict], None]) -> "UsageTap | None":
     """Return a tap when this request's response is metered, else None.
 
-    The metering decision in one place: HUMR funded the injected credential
-    (platform_shared — customer-funded credentials consume no credits) and
-    the provider's dialect is one the tap can parse. Callers strip the
-    request's Accept-Encoding exactly when a tap is returned, so the
-    response stays readable iff someone is reading it.
+    Callers strip the request's Accept-Encoding exactly when a tap is returned,
+    so the response stays readable iff someone is reading it.
     """
-    if not platform_shared:
-        return None
-    if provider_slug not in _PARSED_PROVIDER_SLUGS:
+    if not request_is_metered(provider_slug=provider_slug, platform_shared=platform_shared):
         return None
     return UsageTap(provider_slug=provider_slug, record_usage=record_usage)
 
@@ -335,10 +344,17 @@ class UsageReporter:
     Fire-and-forget by design: a full buffer or a failed post drops events
     with a log line. Idempotency keys are minted at event creation, so a
     durable spool can replace the drop later without double-charge risk.
+
+    Every accepted report answers with the organization's current entitlement.
+    That response is handed to `on_report_response` — the same seam `UsageTap`
+    uses for events — so the enforcement cache stays current for free while an
+    agent is spending, and this module stays ignorant of what enforcement does
+    with it.
     """
 
-    def __init__(self, humr_client: HumrClient) -> None:
+    def __init__(self, humr_client: HumrClient, on_report_response: Callable[[dict], None]) -> None:
         self._humr_client = humr_client
+        self._on_report_response = on_report_response
         self._events: list[dict] = []
         self._wake = asyncio.Event()
 
@@ -370,10 +386,12 @@ class UsageReporter:
             return
         batch = self._events
         self._events = []
-        status, _body = await self._humr_client.post_json(
+        status, body = await self._humr_client.post_json(
             path=REPORT_PATH,
             payload={"events": batch},
             timeout_seconds=_POST_TIMEOUT_SECONDS,
         )
         if not (200 <= status < 300):
             logger.error("dropped %d usage events after HTTP %d from control plane", len(batch), status)
+            return
+        self._on_report_response(body)
