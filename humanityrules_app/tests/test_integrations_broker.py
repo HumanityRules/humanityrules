@@ -84,7 +84,7 @@ broker = _load_broker_module()
 
 # Loading the broker put the integrations dir on sys.path and imported the
 # sibling modules; bind the ones the tests patch/construct directly.
-import billing_entitlement  # noqa: E402
+import billing_service  # noqa: E402
 import credentials_service  # noqa: E402
 import humr_client  # noqa: E402
 import tls_certificate_authority  # noqa: E402
@@ -138,8 +138,7 @@ def _make_tls_intercept_runtime(ca_dir: pathlib.Path, private_dir: pathlib.Path)
         refresh_lead_seconds=tls_intercept.REFRESH_LEAD_SECONDS,
         ca_dir=ca_dir,
         private_dir=private_dir,
-        usage_reporter=None,
-        entitlement_cache=None,
+        billing_service=None,
     )
 
 
@@ -1349,8 +1348,7 @@ class TestProxyConnectionStateMachine(unittest.IsolatedAsyncioTestCase):
                     provider=provider,
                     minter=minter,
                     credential_state_store=credential_state_store,
-                    usage_reporter=None,
-                    entitlement_cache=None,
+                    billing_service=None,
                 ),
                 timeout=1.0,
             )
@@ -1415,8 +1413,7 @@ class TestProxyConnectionStateMachine(unittest.IsolatedAsyncioTestCase):
                     providers=tls_provider_catalog.TLS_INTERCEPT_PROVIDERS,
                 ),
                 credential_state_store=credential_state_store,
-                usage_reporter=None,
-                entitlement_cache=None,
+                billing_service=None,
             )
 
         intercept.assert_awaited_once_with(
@@ -1427,8 +1424,7 @@ class TestProxyConnectionStateMachine(unittest.IsolatedAsyncioTestCase):
             provider=provider,
             minter=minter,
             credential_state_store=credential_state_store,
-            usage_reporter=None,
-            entitlement_cache=None,
+            billing_service=None,
         )
         self.assertTrue(sandbox_writer.closed)
 
@@ -1802,14 +1798,14 @@ def _make_control_parts(
         hermes_home=pathlib.Path("/nonexistent/hermes-home"),
     )
     device_stub = _StubDeviceFlow()
-    entitlement_cache = billing_entitlement.EntitlementCache(humr_client=client)
+    billing = billing_service.BillingService(humr_client=client)
     app = broker.control_api.build_control_app(
         mcp_aggregator=aggregator,
         tls_intercept_runtime=tls_intercept_runtime,
         oauth_device_flow=device_stub,
         credentials_service=service,
         humr_client=client,
-        entitlement_cache=entitlement_cache,
+        billing_service=billing,
         env_slug="default",
         org_slug=org_slug,
     )
@@ -1818,7 +1814,7 @@ def _make_control_parts(
         service=service,
         humr_client=client,
         device_flow=device_stub,
-        entitlement_cache=entitlement_cache,
+        billing_service=billing,
     )
 
 
@@ -1976,13 +1972,13 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         from starlette.testclient import TestClient
 
         parts = self._control_parts(aggregator=_ready_stub_aggregator(), org_slug="acme")
-        parts.entitlement_cache.absorb_report_response(body={"entitlement": {
+        parts.humr_client.get_json = AsyncMock(return_value=(200, {"entitlement": {
             "credits_remaining": 640,
             "monthly_grant": 2000,
             "renewal_date": None,
             "plan": "operator",
             "exhausted": False,
-        }})
+        }}))
 
         with TestClient(parts.app) as client:
             payload = client.get("/billing").json()

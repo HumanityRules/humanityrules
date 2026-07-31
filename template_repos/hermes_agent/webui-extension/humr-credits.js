@@ -108,7 +108,7 @@
     _card.dataset.state = exhausted ? 'out' : 'ok';
     _count.textContent = grant > 0 ? groupedNumber(remaining) + '/' + groupedNumber(grant) : groupedNumber(remaining);
 
-    _plan.textContent = typeof entitlementSnapshot.plan === 'string' && entitlement.plan
+    _plan.textContent = typeof entitlementSnapshot.plan === 'string' && entitlementSnapshot.plan
       ? entitlementSnapshot.plan.charAt(0).toUpperCase() + entitlementSnapshot.plan.slice(1) + ' plan'
       : '';
     _plan.hidden = !_plan.textContent;

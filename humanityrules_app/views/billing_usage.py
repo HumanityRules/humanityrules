@@ -3,7 +3,7 @@
 Each Hermes Agent container runs an integrations broker sidecar. That broker is
 the only runtime caller of this module. It meters model calls as they happen,
 batches them, and posts them here as ``BillingUsageEvent`` rows (see
-``tls_usage_metering`` in the hermes_agent template). Separately, it needs to
+``billing_usage_metering`` in the hermes_agent template). Separately, it needs to
 know whether the organization still has credits — the entitlement snapshot —
 so it can soft-refuse further spending when the balance is exhausted.
 

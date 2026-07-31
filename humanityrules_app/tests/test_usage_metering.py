@@ -1,4 +1,4 @@
-"""Tests for the broker's billing usage tap (tls_usage_metering).
+"""Tests for the broker's billing usage tap (billing_usage_metering).
 
 Covers the three layers separately: `UsageTap` as a pure parser over decoded
 body bytes, the relay's observer seam (decoded bytes reach the tap, a broken
@@ -19,12 +19,13 @@ _INTEGRATIONS_DIR = pathlib.Path(__file__).resolve().parents[2] / "template_repo
 if str(_INTEGRATIONS_DIR) not in sys.path:
     sys.path.insert(0, str(_INTEGRATIONS_DIR))
 
+import billing_service  # noqa: E402
+import billing_usage_metering  # noqa: E402
 import humr_client  # noqa: E402
 import tls_http_message_relay  # noqa: E402
 import tls_intercept  # noqa: E402
 import tls_provider_catalog  # noqa: E402
 import tls_token_store  # noqa: E402
-import tls_usage_metering  # noqa: E402
 
 
 _USAGE = {
@@ -59,8 +60,8 @@ class _RecordingReporter:
         self.events.append(event)
 
 
-def _fed_tap(reporter: _RecordingReporter) -> tls_usage_metering.UsageTap:
-    return tls_usage_metering.UsageTap(provider_slug="openai-codex", record_usage=reporter.record)
+def _fed_tap(reporter: _RecordingReporter) -> billing_usage_metering.UsageTap:
+    return billing_usage_metering.UsageTap(provider_slug="openai-codex", record_usage=reporter.record)
 
 
 def _run_tap(body: bytes, status: int, headers: list[tuple[bytes, bytes]], chunk_size: int) -> list[dict]:
@@ -182,7 +183,7 @@ class TestUsageTapSse(unittest.TestCase):
     def test_oversized_terminal_event_is_unmetered(self) -> None:
         huge = json.dumps({"type": "response.completed", "response": {"pad": "x" * 4096, "usage": _USAGE}})
         body = b"event: response.completed\ndata: " + huge.encode() + b"\n\n"
-        with patch.object(tls_usage_metering, "_MAX_CAPTURE_BYTES", 1024):
+        with patch.object(billing_usage_metering, "_MAX_CAPTURE_BYTES", 1024):
             self.assertEqual(_run_tap(body=body, status=200, headers=[], chunk_size=128), [])
 
     def test_overlong_uncaptured_line_is_skipped_without_losing_the_terminal_event(self) -> None:
@@ -190,7 +191,7 @@ class TestUsageTapSse(unittest.TestCase):
             b"event: response.output_text.delta\ndata: " + b"x" * 4096 + b"\n\n"
             + b"event: response.completed\ndata: " + json.dumps(_completed_payload(model="m")).encode() + b"\n\n"
         )
-        with patch.object(tls_usage_metering, "_MAX_CAPTURE_BYTES", 1024):
+        with patch.object(billing_usage_metering, "_MAX_CAPTURE_BYTES", 1024):
             events = _run_tap(body=body, status=200, headers=[], chunk_size=100)
 
         self.assertEqual(len(events), 1)
@@ -312,7 +313,7 @@ class TestRelayObserverSeam(unittest.IsolatedAsyncioTestCase):
 
     async def test_tap_receives_dechunked_bytes_and_meters(self) -> None:
         reporter = _RecordingReporter()
-        tap = tls_usage_metering.UsageTap(provider_slug="openai-codex", record_usage=reporter.record)
+        tap = billing_usage_metering.UsageTap(provider_slug="openai-codex", record_usage=reporter.record)
 
         status, sandbox_connection_can_continue, writer = await _forward(
             provider_response=_chunked_sse_response(model="gpt-5.2-codex"), observer=tap,
@@ -341,7 +342,7 @@ class TestRelayObserverSeam(unittest.IsolatedAsyncioTestCase):
 
 class TestUsageReporter(unittest.IsolatedAsyncioTestCase):
 
-    def _make_reporter(self) -> tuple[tls_usage_metering.UsageReporter, AsyncMock]:
+    def _make_reporter(self) -> tuple[billing_usage_metering.UsageReporter, AsyncMock]:
         client = humr_client.HumrClient(
             control_plane_url="https://humr.example",
             bearer="env-bearer",
@@ -350,7 +351,7 @@ class TestUsageReporter(unittest.IsolatedAsyncioTestCase):
         )
         post_json = AsyncMock(return_value=(200, {"ok": True}))
         client.post_json = post_json
-        reporter = tls_usage_metering.UsageReporter(humr_client=client, record_entitlement=lambda body: None)
+        reporter = billing_usage_metering.UsageReporter(humr_client=client, on_report_response=lambda body: None)
         return reporter, post_json
 
     async def test_flush_posts_buffered_events_in_one_batch(self) -> None:
@@ -362,7 +363,7 @@ class TestUsageReporter(unittest.IsolatedAsyncioTestCase):
 
         post_json.assert_awaited_once()
         kwargs = post_json.await_args.kwargs
-        self.assertEqual(kwargs["path"], tls_usage_metering.REPORT_PATH)
+        self.assertEqual(kwargs["path"], billing_usage_metering.REPORT_PATH)
         self.assertEqual([e["idempotency_key"] for e in kwargs["payload"]["events"]], ["a", "b"])
 
         post_json.reset_mock()
@@ -380,9 +381,32 @@ class TestUsageReporter(unittest.IsolatedAsyncioTestCase):
 
         post_json.assert_not_awaited()  # dropped, not retried
 
+    async def test_only_an_accepted_post_hands_the_response_to_its_callback(self) -> None:
+        client = humr_client.HumrClient(
+            control_plane_url="https://humr.example",
+            bearer="env-bearer",
+            owner_username="vmendi",
+            app_slug="hermes",
+        )
+        accepted_body = {"ok": True, "entitlement": {"credits_remaining": 140}}
+        post_json = AsyncMock(side_effect=((200, accepted_body), (502, {"error": "unreachable"})))
+        client.post_json = post_json
+        accepted_responses: list[dict] = []
+        reporter = billing_usage_metering.UsageReporter(
+            humr_client=client,
+            on_report_response=accepted_responses.append,
+        )
+
+        reporter.record({"idempotency_key": "accepted"})
+        await reporter.flush()
+        reporter.record({"idempotency_key": "rejected"})
+        await reporter.flush()
+
+        self.assertEqual(accepted_responses, [accepted_body])
+
     async def test_full_buffer_drops_new_events(self) -> None:
         reporter, _post_json = self._make_reporter()
-        with patch.object(tls_usage_metering, "_MAX_BUFFERED_EVENTS", 3):
+        with patch.object(billing_usage_metering, "_MAX_BUFFERED_EVENTS", 3):
             for index in range(5):
                 reporter.record({"idempotency_key": str(index)})
 
@@ -449,26 +473,15 @@ class _StubCredentialStateStore:
         return None
 
 
-class TestTapForRequest(unittest.TestCase):
-    """tap_for_request is the whole metering decision: HUMR-funded + parseable dialect."""
-
-    def test_platform_shared_codex_gets_a_tap(self) -> None:
-        tap = tls_usage_metering.tap_for_request(
-            provider_slug="openai-codex", platform_shared=True, record_usage=_RecordingReporter().record,
-        )
-        self.assertIsInstance(tap, tls_usage_metering.UsageTap)
-
-    def test_customer_funded_codex_is_not_metered(self) -> None:
-        tap = tls_usage_metering.tap_for_request(
-            provider_slug="openai-codex", platform_shared=False, record_usage=_RecordingReporter().record,
-        )
-        self.assertIsNone(tap)
-
-    def test_platform_shared_unparsed_provider_is_not_metered(self) -> None:
-        tap = tls_usage_metering.tap_for_request(
-            provider_slug="tavily", platform_shared=True, record_usage=_RecordingReporter().record,
-        )
-        self.assertIsNone(tap)
+def _billing_service_with_reporter(reporter: _RecordingReporter) -> billing_service.BillingService:
+    client = humr_client.HumrClient(
+        control_plane_url="https://humr.example",
+        bearer="env-bearer",
+        owner_username="vmendi",
+        app_slug="hermes",
+    )
+    with patch.object(billing_service.billing_usage_metering, "UsageReporter", return_value=reporter):
+        return billing_service.BillingService(humr_client=client)
 
 
 class TestMeteredInterceptWiring(unittest.IsolatedAsyncioTestCase):
@@ -482,7 +495,7 @@ class TestMeteredInterceptWiring(unittest.IsolatedAsyncioTestCase):
         platform_shared: bool,
         request_headers: bytes,
         provider_response: bytes,
-        usage_reporter: object | None,
+        billing_service_instance: billing_service.BillingService,
     ) -> tuple[_TlsRecordingWriter, _RecordingProviderWriter]:
         provider = tls_provider_catalog.TLS_INTERCEPT_PROVIDERS[provider_slug]
         sandbox_reader = asyncio.StreamReader()
@@ -520,8 +533,7 @@ class TestMeteredInterceptWiring(unittest.IsolatedAsyncioTestCase):
                     provider=provider,
                     minter=_StubCertMinter(),
                     credential_state_store=_StubCredentialStateStore(secrets=secrets, platform_shared=platform_shared),
-                    usage_reporter=usage_reporter,
-                    entitlement_cache=None,
+                    billing_service=billing_service_instance,
                 ),
                 timeout=1.0,
             )
@@ -529,6 +541,7 @@ class TestMeteredInterceptWiring(unittest.IsolatedAsyncioTestCase):
 
     async def test_platform_funded_codex_is_metered_and_accept_encoding_stripped(self) -> None:
         reporter = _RecordingReporter()
+        facade = _billing_service_with_reporter(reporter=reporter)
 
         sandbox_writer, provider_writer = await self._intercept(
             provider_slug="openai-codex",
@@ -537,7 +550,7 @@ class TestMeteredInterceptWiring(unittest.IsolatedAsyncioTestCase):
             platform_shared=True,
             request_headers=b"Accept-Encoding: gzip, br\r\n",
             provider_response=_chunked_sse_response(model="gpt-5.2-codex"),
-            usage_reporter=reporter,
+            billing_service_instance=facade,
         )
 
         self.assertNotIn(b"accept-encoding", provider_writer.all_bytes().lower())
@@ -548,6 +561,7 @@ class TestMeteredInterceptWiring(unittest.IsolatedAsyncioTestCase):
     async def test_customer_funded_codex_is_not_metered(self) -> None:
         """An org-shared or personal Codex credential consumes no credits — no tap, no header strip."""
         reporter = _RecordingReporter()
+        facade = _billing_service_with_reporter(reporter=reporter)
 
         _sandbox_writer, provider_writer = await self._intercept(
             provider_slug="openai-codex",
@@ -556,7 +570,7 @@ class TestMeteredInterceptWiring(unittest.IsolatedAsyncioTestCase):
             platform_shared=False,
             request_headers=b"Accept-Encoding: gzip, br\r\n",
             provider_response=_chunked_sse_response(model="gpt-5.2-codex"),
-            usage_reporter=reporter,
+            billing_service_instance=facade,
         )
 
         self.assertIn(b"accept-encoding", provider_writer.all_bytes().lower())
@@ -564,6 +578,7 @@ class TestMeteredInterceptWiring(unittest.IsolatedAsyncioTestCase):
 
     async def test_platform_funded_unparsed_provider_keeps_accept_encoding_and_reports_nothing(self) -> None:
         reporter = _RecordingReporter()
+        facade = _billing_service_with_reporter(reporter=reporter)
         response_body = json.dumps({"model": "gpt-5.2", "usage": _USAGE}).encode()
         provider_response = (
             b"HTTP/1.1 200 OK\r\n"
@@ -578,7 +593,7 @@ class TestMeteredInterceptWiring(unittest.IsolatedAsyncioTestCase):
             platform_shared=True,
             request_headers=b"Accept-Encoding: gzip\r\nAuthorization: Bearer HUMR_PLACEHOLDER\r\n",
             provider_response=provider_response,
-            usage_reporter=reporter,
+            billing_service_instance=facade,
         )
 
         self.assertIn(b"accept-encoding", provider_writer.all_bytes().lower())

@@ -42,7 +42,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
-import billing_entitlement_service
+import billing_service as billing
 from credentials_service import CredentialsService
 import device_flow
 from humr_client import HumrClient
@@ -117,7 +117,7 @@ def build_control_app(
     oauth_device_flow: device_flow.OAuthDeviceFlow,
     credentials_service: CredentialsService,
     humr_client: HumrClient,
-    entitlement_service: billing_entitlement_service.BillingEntitlementService,
+    billing_service: billing.BillingService,
     env_slug: str,
     org_slug: str,
 ) -> Starlette:
@@ -134,15 +134,14 @@ def build_control_app(
     async def billing_entitlement_snapshot_route(request: Request) -> Response:
         """Serve the credits card its snapshot, refreshed first if it has gone stale.
 
-        Raw numbers only: the card decides what counts as running low, so the
-        threshold lives in one place and moving it needs no broker redeploy.
-        A null entitlement means HUMR has not answered yet and the card shows
-        nothing.
+        Raw numbers only: presentation stays in the card and needs no broker
+        redeploy. A null entitlement means HUMR has not answered yet and the
+        card shows nothing.
         """
-        entitlement_snapshot = await entitlement_service.entitlement_snapshot_for_display()
+        entitlement_snapshot = await billing_service.entitlement_snapshot_for_display()
         return JSONResponse(content={
             "entitlement": entitlement_snapshot,
-            "upgrade_url": entitlement_service.upgrade_url(),
+            "upgrade_url": billing_service.upgrade_url(),
         })
 
     async def integrations_refresh_all_route(request: Request) -> Response:
