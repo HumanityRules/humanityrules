@@ -26,6 +26,7 @@ from . import environment_provisioning_executor
 from . import environment_teardown_executor
 from . import permissions_apply_executor
 from . import stale_job_reaper
+from humanityrules_app.services.billing import rating
 from humanityrules_app.services.cost import cost_refresh
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,11 @@ _STALE_REAP_INTERVAL_SECONDS = 60.0
 # How often this worker run proves it is alive. Must stay well under the
 # HUMR_DEAD_WORKER_TIMEOUT_MINUTES threshold the reaper uses.
 _HEARTBEAT_INTERVAL_SECONDS = 15.0
+
+# How often the unscoped worker rates metered usage into ledger charges. The
+# broker's entitlement snapshot is only as fresh as this tick, so enforcement
+# accuracy depends on the cadence.
+_RATING_INTERVAL_SECONDS = 60.0
 
 # This worker incarnation's JobWorkerRun id, stamped on claimed jobs. Assigned
 # on the first heartbeat of the loop; None before the worker has ever beaten.
@@ -406,6 +412,7 @@ def _worker_loop() -> None:
 
     last_beat_monotonic: float | None = None
     last_reap_monotonic: float | None = None
+    last_rating_monotonic: float | None = None
 
     while not _stop_flag.is_set():
         try:
@@ -422,6 +429,11 @@ def _worker_loop() -> None:
                     dead_worker_timeout=timedelta(minutes=settings.HUMR_DEAD_WORKER_TIMEOUT_MINUTES),
                 )
                 last_reap_monotonic = time.monotonic()
+
+            # Usage rating is one global tick — only the main worker runs it.
+            if not label and (last_rating_monotonic is None or time.monotonic() - last_rating_monotonic >= _RATING_INTERVAL_SECONDS):
+                rating.rate_pending_events(now=timezone.now())
+                last_rating_monotonic = time.monotonic()
 
             # Check for pending app deployments
             _start_pending_app_deployment(label=label)
