@@ -15,7 +15,7 @@
             <div class="flex items-center gap-3">
                 <div class="inline-flex rounded-md shadow-xs" role="group" aria-label="Billing time window">
                     {% for choice in billing_window_choices %}
-                    <a href="{% url 'platform_billing' %}?window={{ choice.key }}{% if expanded_event_page %}&amp;organization={{ expanded_organization.id }}&amp;app={{ expanded_app_id }}{% endif %}"
+                    <a href="{% url 'platform_billing' %}?window={{ choice.key }}{% if expanded_ledger_page %}&amp;organization={{ expanded_organization.id }}&amp;ledger=1{% elif expanded_event_page %}&amp;organization={{ expanded_organization.id }}&amp;app={{ expanded_app_id }}{% endif %}"
                        class="border px-3 py-2 text-sm font-medium first:rounded-l-md last:rounded-r-md
                               {% if choice.key == billing_window.key %}relative z-10 border-indigo-500 bg-indigo-50 text-indigo-700 dark:border-indigo-400 dark:bg-indigo-500/10 dark:text-indigo-300
                               {% else %}-ml-px border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-white/10 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-white/5{% endif %}">
@@ -23,28 +23,42 @@
                     </a>
                     {% endfor %}
                 </div>
-                <a href="{% url 'platform_billing' %}?window={{ billing_window.key }}{% if expanded_event_page %}&amp;organization={{ expanded_organization.id }}&amp;app={{ expanded_app_id }}&amp;page={{ expanded_event_page.page.number }}{% endif %}"
+                <a href="{% url 'platform_billing' %}?window={{ billing_window.key }}{% if expanded_ledger_page %}&amp;organization={{ expanded_organization.id }}&amp;ledger=1&amp;page={{ expanded_ledger_page.page.number }}{% elif expanded_event_page %}&amp;organization={{ expanded_organization.id }}&amp;app={{ expanded_app_id }}&amp;page={{ expanded_event_page.page.number }}{% endif %}"
                    class="rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-700 shadow-xs ring-1 ring-inset ring-gray-300 hover:bg-gray-50 dark:bg-gray-900 dark:text-gray-300 dark:ring-white/10 dark:hover:bg-white/5">
                     Refresh
                 </a>
             </div>
         </div>
 
-        <dl class="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <dl class="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            <div class="rounded-lg border border-gray-200 px-4 py-4 dark:border-white/10">
+                <dt class="text-sm font-medium text-gray-500 dark:text-gray-400">Credits charged</dt>
+                <dd class="mt-1 text-2xl font-semibold tabular-nums text-gray-900 dark:text-white">{{ snapshot.summary.credits_charged }}</dd>
+                <p class="mt-1 text-xs text-gray-400 dark:text-gray-500">Ledger charges posted in the selected period</p>
+            </div>
+            <div class="rounded-lg border border-gray-200 px-4 py-4 dark:border-white/10">
+                <dt class="text-sm font-medium text-gray-500 dark:text-gray-400">Negative shadow balances</dt>
+                <dd class="mt-1 text-2xl font-semibold tabular-nums text-gray-900 dark:text-white">{{ snapshot.summary.negative_balance_organization_count }}</dd>
+                <p class="mt-1 text-xs text-gray-400 dark:text-gray-500">Current snapshots; not an enforcement state</p>
+            </div>
             <div class="rounded-lg border border-gray-200 px-4 py-4 dark:border-white/10">
                 <dt class="text-sm font-medium text-gray-500 dark:text-gray-400">Events received</dt>
-                <dd class="mt-1 text-2xl font-semibold text-gray-900 dark:text-white">{{ snapshot.summary.event_count }}</dd>
-                <p class="mt-1 text-xs text-gray-400 dark:text-gray-500">Occurred in the selected period</p>
+                <dd class="mt-1 text-2xl font-semibold tabular-nums text-gray-900 dark:text-white">{{ snapshot.summary.event_count }}</dd>
+                <p class="mt-1 text-xs text-gray-400 dark:text-gray-500">Occurred in the selected period across {{ snapshot.summary.reporting_organization_count }} organization{{ snapshot.summary.reporting_organization_count|pluralize }}</p>
             </div>
-            <div class="rounded-lg border border-gray-200 px-4 py-4 dark:border-white/10">
-                <dt class="text-sm font-medium text-gray-500 dark:text-gray-400">Reporting organizations</dt>
-                <dd class="mt-1 text-2xl font-semibold text-gray-900 dark:text-white">{{ snapshot.summary.reporting_organization_count }}</dd>
-                <p class="mt-1 text-xs text-gray-400 dark:text-gray-500">With at least one event</p>
+            <div class="rounded-lg border {% if snapshot.summary.aged_pending_rating_count %}border-red-300 bg-red-50 dark:border-red-500/30 dark:bg-red-500/5{% else %}border-gray-200 dark:border-white/10{% endif %} px-4 py-4">
+                <dt class="text-sm font-medium text-gray-500 dark:text-gray-400">Rating backlog</dt>
+                <dd class="mt-1 text-2xl font-semibold tabular-nums text-gray-900 dark:text-white">{{ snapshot.summary.pending_rating_count }}</dd>
+                <p class="mt-1 text-xs {% if snapshot.summary.aged_pending_rating_count %}text-red-700 dark:text-red-400{% else %}text-gray-400 dark:text-gray-500{% endif %}">
+                    {{ snapshot.summary.aged_pending_rating_count }} older than 5 minutes{% if snapshot.summary.oldest_pending_received_at %}; oldest {{ snapshot.summary.oldest_pending_received_at|timesince }} ago{% endif %}
+                </p>
             </div>
-            <div class="rounded-lg border border-gray-200 px-4 py-4 dark:border-white/10">
-                <dt class="text-sm font-medium text-gray-500 dark:text-gray-400">Pending rating</dt>
-                <dd class="mt-1 text-2xl font-semibold text-gray-900 dark:text-white">{{ snapshot.summary.pending_rating_count }}</dd>
-                <p class="mt-1 text-xs text-gray-400 dark:text-gray-500">Unrated events in the period</p>
+            <div class="rounded-lg border {% if snapshot.summary.integrity_issue_organization_count %}border-red-300 bg-red-50 dark:border-red-500/30 dark:bg-red-500/5{% else %}border-gray-200 dark:border-white/10{% endif %} px-4 py-4">
+                <dt class="text-sm font-medium text-gray-500 dark:text-gray-400">Ledger integrity</dt>
+                <dd class="mt-1 text-2xl font-semibold tabular-nums text-gray-900 dark:text-white">{{ snapshot.summary.integrity_issue_organization_count }}</dd>
+                <p class="mt-1 text-xs {% if snapshot.summary.integrity_issue_organization_count %}text-red-700 dark:text-red-400{% else %}text-gray-400 dark:text-gray-500{% endif %}">
+                    Organization{{ snapshot.summary.integrity_issue_organization_count|pluralize }} with an invariant violation
+                </p>
             </div>
             <div class="rounded-lg border border-gray-200 px-4 py-4 dark:border-white/10">
                 <dt class="text-sm font-medium text-gray-500 dark:text-gray-400">Last event received</dt>
@@ -57,49 +71,104 @@
         </dl>
 
         <div class="mb-3">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Organizations and HAs</h2>
-            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Current HAs remain visible with no usage; removed HAs remain visible from their billing history.</p>
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Organization accounts</h2>
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Balances and integrity are current snapshots. Usage is grouped by occurrence time; credits are grouped by ledger posting time.</p>
         </div>
 
         <div class="overflow-x-auto rounded-lg border border-gray-200 dark:border-white/10">
             <table class="min-w-full table-auto">
                 <thead class="bg-gray-50 dark:bg-white/5">
                     <tr>
-                        <th scope="col" class="py-3 pl-4 pr-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Organization</th>
-                        <th scope="col" class="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">HA</th>
+                        <th scope="col" class="py-3 pl-4 pr-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Account / HA</th>
                         <th scope="col" class="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Owner</th>
+                        <th scope="col" class="px-3 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Balance</th>
+                        <th scope="col" class="px-3 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Credits charged</th>
                         <th scope="col" class="px-3 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Events</th>
-                        <th scope="col" class="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Last usage</th>
-                        <th scope="col" class="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Rating</th>
+                        <th scope="col" class="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Health</th>
+                        <th scope="col" class="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Last activity</th>
                         <th scope="col" class="py-3 pl-3 pr-4 text-right text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for group in snapshot.organization_groups %}
+                    <tr data-billing-row="{% if group.apps %}organization{% else %}organization-empty{% endif %}"
+                        class="{% if not forloop.first %}border-t border-gray-300 dark:border-white/15{% endif %} bg-gray-50/70 dark:bg-white/[0.025]">
+                        <td class="py-3 pl-4 pr-3 text-sm text-gray-900 dark:text-white">
+                            <div class="font-semibold" title="{{ group.organization.slug }}">{{ group.organization.name }}</div>
+                        </td>
+                        <td class="px-3 py-3 text-sm text-gray-400 dark:text-gray-500">—</td>
+                        <td class="px-3 py-3 text-right text-sm font-semibold tabular-nums text-gray-900 dark:text-white">
+                            {% if group.balance_credits is not None %}{{ group.balance_credits }}{% else %}<span class="font-normal text-gray-400 dark:text-gray-500">Not initialized</span>{% endif %}
+                        </td>
+                        <td class="px-3 py-3 text-right text-sm tabular-nums text-gray-900 dark:text-white">
+                            {{ group.credits_charged }}
+                        </td>
+                        <td class="px-3 py-3 text-right text-sm tabular-nums text-gray-900 dark:text-white">{{ group.event_count }}</td>
+                        <td class="px-3 py-3 text-sm">
+                            <div class="flex flex-wrap gap-1">
+                                {% if group.has_integrity_issue %}
+                                <span class="rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-800 dark:bg-red-500/10 dark:text-red-400" title="{{ group.integrity_issues|join:'; ' }}">Integrity issue</span>
+                                {% elif group.balance_credits is None %}
+                                <span class="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-400">No billing activity</span>
+                                {% else %}
+                                <span class="rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-800 dark:bg-green-500/10 dark:text-green-400">Ledger healthy</span>
+                                {% endif %}
+                                {% if group.aged_pending_rating_count %}
+                                <span class="rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-800 dark:bg-red-500/10 dark:text-red-400" title="Oldest pending received {{ group.oldest_pending_received_at|date:'c' }}">{{ group.aged_pending_rating_count }} aged</span>
+                                {% elif group.pending_rating_count %}
+                                <span class="rounded-full bg-yellow-100 px-2 py-0.5 text-xs text-yellow-800 dark:bg-yellow-500/10 dark:text-yellow-400">{{ group.pending_rating_count }} pending</span>
+                                {% endif %}
+                            </div>
+                        </td>
+                        <td class="px-3 py-3 text-sm whitespace-nowrap text-gray-500 dark:text-gray-400"
+                            {% if group.last_activity_at %}title="{{ group.last_activity_at|date:'c' }}"{% endif %}>
+                            {% if group.last_activity_at %}{{ group.last_activity_at|timesince }} ago{% else %}None{% endif %}
+                        </td>
+                        <td class="py-3 pl-3 pr-4 text-right text-sm whitespace-nowrap">
+                            <button type="button"
+                                    hx-get="{% url 'platform_billing_organization_ledger' organization_id=group.organization.id %}?window={{ billing_window.key }}"
+                                    hx-target="#billing-ledger-{{ group.organization.id }}"
+                                    hx-swap="innerHTML"
+                                    hx-push-url="{% url 'platform_billing' %}?window={{ billing_window.key }}&amp;organization={{ group.organization.id }}&amp;ledger=1"
+                                    class="text-xs font-medium text-indigo-600 hover:underline dark:text-indigo-400">Ledger</button>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td colspan="8" class="p-0">
+                            <div id="billing-ledger-{{ group.organization.id }}" class="px-3">
+                                {% if expanded_ledger_page and expanded_organization.id == group.organization.id %}
+                                {% include "humanityrules_app/platform_billing/_billing_ledger.html" with ledger_page=expanded_ledger_page organization=expanded_organization %}
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
                         {% for app in group.apps %}
                         <tr data-billing-row="{% if app.is_removed %}removed-app{% else %}app{% endif %}"
-                            class="{% if forloop.first and not forloop.parentloop.first %}border-t border-gray-300 dark:border-white/15{% elif not forloop.first %}border-t border-gray-100 dark:border-white/5{% endif %}">
-                            <td class="py-2 pl-4 pr-3 text-sm font-medium whitespace-nowrap text-gray-900 dark:text-white">{{ group.organization.name }}</td>
-                            <td class="px-3 py-2 text-sm whitespace-nowrap text-gray-900 dark:text-white">
+                            class="border-t border-gray-100 dark:border-white/5">
+                            <td class="py-2 pl-8 pr-3 text-sm whitespace-nowrap text-gray-900 dark:text-white">
                                 <span class="font-mono">{{ app.app_slug }}</span>
                                 {% if app.is_removed %}<span class="ml-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-white/5 dark:text-gray-400">Removed HA</span>{% endif %}
                             </td>
                             <td class="px-3 py-2 text-sm whitespace-nowrap text-gray-500 dark:text-gray-400">
                                 {% if app.owner_username %}<span class="font-mono">{{ app.owner_username }}</span>{% else %}—{% endif %}
                             </td>
+                            <td class="px-3 py-2 text-right text-sm text-gray-400 dark:text-gray-500">—</td>
+                            <td class="px-3 py-2 text-right text-sm tabular-nums text-gray-900 dark:text-white">{{ app.credits_charged }}</td>
                             <td class="px-3 py-2 text-right text-sm tabular-nums text-gray-900 dark:text-white">{{ app.event_count }}</td>
-                            <td class="px-3 py-2 text-sm whitespace-nowrap text-gray-500 dark:text-gray-400"
-                                {% if app.last_occurred_at %}title="{{ app.last_occurred_at|date:'c' }}"{% endif %}>
-                                {% if app.last_occurred_at %}{{ app.last_occurred_at|timesince }} ago{% else %}None in period{% endif %}
-                            </td>
                             <td class="px-3 py-2 text-sm whitespace-nowrap">
                                 {% if not app.event_count %}
                                 <span class="text-gray-400 dark:text-gray-500">—</span>
+                                {% elif app.aged_pending_rating_count %}
+                                <span class="rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-800 dark:bg-red-500/10 dark:text-red-400" title="Oldest pending received {{ app.oldest_pending_received_at|date:'c' }}">{{ app.aged_pending_rating_count }} aged</span>
                                 {% elif app.pending_rating_count %}
                                 <span class="rounded-full bg-yellow-100 px-2 py-0.5 text-xs text-yellow-800 dark:bg-yellow-500/10 dark:text-yellow-400">{{ app.pending_rating_count }} pending</span>
                                 {% else %}
                                 <span class="rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-800 dark:bg-green-500/10 dark:text-green-400">Rated</span>
                                 {% endif %}
+                            </td>
+                            <td class="px-3 py-2 text-sm whitespace-nowrap text-gray-500 dark:text-gray-400"
+                                {% if app.last_occurred_at %}title="{{ app.last_occurred_at|date:'c' }}"{% endif %}>
+                                {% if app.last_occurred_at %}{{ app.last_occurred_at|timesince }} ago{% else %}None in period{% endif %}
                             </td>
                             <td class="py-2 pl-3 pr-4 text-right text-sm whitespace-nowrap">
                                 <button type="button"
@@ -111,7 +180,7 @@
                             </td>
                         </tr>
                         <tr>
-                            <td colspan="7" class="p-0">
+                            <td colspan="8" class="p-0">
                                 <div id="billing-events-{{ app.app_id }}" class="px-3">
                                     {% if expanded_event_page and expanded_organization.id == group.organization.id and expanded_app_id == app.app_id %}
                                     {% include "humanityrules_app/platform_billing/_billing_app_events.html" with app_id=app.app_id event_page=expanded_event_page organization=expanded_organization %}
@@ -119,21 +188,10 @@
                                 </div>
                             </td>
                         </tr>
-                        {% empty %}
-                        <tr data-billing-row="organization-empty"
-                            class="{% if not forloop.first %}border-t border-gray-300 dark:border-white/15{% endif %}">
-                            <td class="py-2 pl-4 pr-3 text-sm font-medium whitespace-nowrap text-gray-900 dark:text-white">{{ group.organization.name }}</td>
-                            <td class="px-3 py-2 text-sm text-gray-400 dark:text-gray-500">No HAs</td>
-                            <td class="px-3 py-2 text-sm text-gray-400 dark:text-gray-500">—</td>
-                            <td class="px-3 py-2 text-right text-sm text-gray-400 dark:text-gray-500">0</td>
-                            <td class="px-3 py-2 text-sm text-gray-400 dark:text-gray-500">None in period</td>
-                            <td class="px-3 py-2 text-sm text-gray-400 dark:text-gray-500">—</td>
-                            <td class="py-2 pl-3 pr-4"></td>
-                        </tr>
                         {% endfor %}
                     {% empty %}
                     <tr>
-                        <td colspan="7" class="px-4 py-6 text-center text-sm text-gray-500 dark:text-gray-400">No organizations yet.</td>
+                        <td colspan="8" class="px-4 py-6 text-center text-sm text-gray-500 dark:text-gray-400">No organizations yet.</td>
                     </tr>
                     {% endfor %}
                 </tbody>
