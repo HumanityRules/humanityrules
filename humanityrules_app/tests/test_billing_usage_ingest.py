@@ -8,6 +8,7 @@ from django.test import Client, TestCase
 from django.utils import timezone
 
 from humanityrules_app import models
+from humanityrules_app.services.billing import grants
 from humanityrules_app.tests.app_test_factories import make_source_template
 
 
@@ -89,6 +90,13 @@ class BillingUsageIngestTestBase(TestCase):
         )
         return response.status_code, response.json()
 
+    def get_entitlement(self, token: str | None) -> tuple[int, dict]:
+        headers = {}
+        if token is not None:
+            headers["HTTP_AUTHORIZATION"] = f"Bearer {token}"
+        response = self.client.get("/api/runtime/billing-entitlement", **headers)
+        return response.status_code, response.json()
+
 
 class TestBillingUsageAuthentication(BillingUsageIngestTestBase):
     def test_missing_bearer_is_rejected(self) -> None:
@@ -117,7 +125,8 @@ class TestBillingUsageIngestion(BillingUsageIngestTestBase):
         )
 
         self.assertEqual(status, 200)
-        self.assertEqual(body, {"ok": True, "skipped": 0})
+        self.assertEqual(body["ok"], True)
+        self.assertEqual(body["skipped"], 0)
         self.assertEqual(models.BillingUsageEvent.objects.count(), 2)
         event = models.BillingUsageEvent.objects.get(idempotency_key="evt-1")
         self.assertEqual(event.organization, self.organization)
@@ -139,7 +148,8 @@ class TestBillingUsageIngestion(BillingUsageIngestTestBase):
 
         self.assertEqual(first_status, 200)
         self.assertEqual(second_status, 200)
-        self.assertEqual(second_body, {"ok": True, "skipped": 0})
+        self.assertEqual(second_body["ok"], True)
+        self.assertEqual(second_body["skipped"], 0)
         self.assertEqual(models.BillingUsageEvent.objects.count(), 2)
         # The duplicate did not overwrite the original event.
         self.assertEqual(models.BillingUsageEvent.objects.get(idempotency_key="evt-1").quantities["input_tokens"], 200)
@@ -183,7 +193,8 @@ class TestBillingUsageIngestion(BillingUsageIngestTestBase):
         status, body = self.post_events(events=[], token=self.raw_token)
 
         self.assertEqual(status, 200)
-        self.assertEqual(body, {"ok": True, "skipped": 0})
+        self.assertEqual(body["ok"], True)
+        self.assertEqual(body["skipped"], 0)
 
 
 class TestBillingUsageVersionSkew(BillingUsageIngestTestBase):
@@ -197,7 +208,8 @@ class TestBillingUsageVersionSkew(BillingUsageIngestTestBase):
         status, body = self.post_events(events=[_event(quantities=quantities)], token=self.raw_token)
 
         self.assertEqual(status, 200)
-        self.assertEqual(body, {"ok": True, "skipped": 0})
+        self.assertEqual(body["ok"], True)
+        self.assertEqual(body["skipped"], 0)
         stored = models.BillingUsageEvent.objects.get(idempotency_key="evt-1")
         self.assertEqual(stored.quantities, _quantities(cache_read_tokens=0, cache_write_tokens=0))
 
@@ -211,7 +223,8 @@ class TestBillingUsageVersionSkew(BillingUsageIngestTestBase):
         )
 
         self.assertEqual(status, 200)
-        self.assertEqual(body, {"ok": True, "skipped": 1})
+        self.assertEqual(body["ok"], True)
+        self.assertEqual(body["skipped"], 1)
         self.assertEqual([event.idempotency_key for event in models.BillingUsageEvent.objects.all()], ["evt-llm"])
 
     def test_a_skipped_event_still_fails_the_batch_when_malformed(self) -> None:
@@ -282,3 +295,71 @@ class TestBillingUsageValidation(BillingUsageIngestTestBase):
         self.assertEqual(status, 400)
         self.assertIn("500", body["error"])
         self.assertFalse(models.BillingUsageEvent.objects.exists())
+
+
+class TestEntitlementSnapshotOnIngest(BillingUsageIngestTestBase):
+    """Every ingest response carries the snapshot, so a spending org's broker cache stays fresh."""
+
+    def test_ingest_response_carries_the_snapshot(self) -> None:
+        grants.grant_trial_credits(organization=self.organization)
+
+        status, body = self.post_events(events=[_event()], token=self.raw_token)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(body["entitlement"], {
+            "credits_remaining": 500,
+            "monthly_grant": 500,
+            "renewal_date": None,
+            "plan": "trial",
+            "exhausted": False,
+        })
+
+    def test_rejected_batch_carries_no_snapshot(self) -> None:
+        status, body = self.post_events(events=[_event(quantities="not a dict")], token=self.raw_token)
+
+        self.assertEqual(status, 400)
+        self.assertNotIn("entitlement", body)
+
+
+class TestBillingEntitlementEndpoint(BillingUsageIngestTestBase):
+    """The on-demand snapshot the broker fetches when its cache has gone stale."""
+
+    def test_missing_bearer_is_rejected(self) -> None:
+        status, body = self.get_entitlement(token=None)
+
+        self.assertEqual(status, 401)
+        self.assertIn("error", body)
+
+    def test_wrong_bearer_is_rejected(self) -> None:
+        status, body = self.get_entitlement(token="wrong")
+
+        self.assertEqual(status, 401)
+        self.assertIn("error", body)
+
+    def test_bearer_resolves_the_environments_organization(self) -> None:
+        grants.grant_trial_credits(organization=self.organization)
+
+        status, body = self.get_entitlement(token=self.raw_token)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(body["entitlement"], {
+            "credits_remaining": 500,
+            "monthly_grant": 500,
+            "renewal_date": None,
+            "plan": "trial",
+            "exhausted": False,
+        })
+
+    def test_an_org_with_no_billing_activity_reads_as_empty_but_not_exhausted(self) -> None:
+        status, body = self.get_entitlement(token=self.raw_token)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(body["entitlement"]["credits_remaining"], 0)
+        self.assertFalse(body["entitlement"]["exhausted"])
+
+    def test_post_only_endpoints_stay_post_only(self) -> None:
+        response = self.client.get(
+            "/api/runtime/billing-usage-events", HTTP_AUTHORIZATION=f"Bearer {self.raw_token}",
+        )
+
+        self.assertEqual(response.status_code, 405)

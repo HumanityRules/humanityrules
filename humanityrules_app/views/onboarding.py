@@ -8,6 +8,7 @@ from .. import app_slugs
 from ..models import App, AppTemplate, Environment, Organization, OrganizationInvite, User, Workspace
 from ..services import abac_service
 from ..services import template_deploy_service
+from ..services.billing import grants
 from . import invites as invites_views
 
 
@@ -90,6 +91,7 @@ def onboarding(request: HttpRequest) -> HttpResponse:
                 )
 
                 abac_service.bootstrap_organization(organization=org, admin_user=user)
+                grants.grant_trial_credits(organization=org)
 
             # Clear session data and log in
             del request.session["pending_workos_user"]

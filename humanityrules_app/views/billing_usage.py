@@ -1,22 +1,36 @@
-"""Billing usage-event ingestion from each Hermes agent's integrations broker.
+"""How a deployed Hermes agent reports usage to HumR and learns what it may spend.
 
-The broker is a per-app sidecar (one per HA container; an environment hosts
-many), so one env bearer can report for several apps — the bearer names only
-the environment, and the payload's app_slug picks the app within it. Each
-broker batches BillingUsageEvents and posts them here (see
-`tls_usage_metering` in the hermes_agent template). Inserts are
-idempotent on the broker-minted key — retried or duplicated batches are
-no-ops.
+Each Hermes Agent container runs an integrations broker sidecar. That broker is
+the only runtime caller of this module. It meters model calls as they happen,
+batches them, and posts them here as ``BillingUsageEvent`` rows (see
+``tls_usage_metering`` in the hermes_agent template). Separately, it needs to
+know whether the organization still has credits — the entitlement snapshot —
+so it can soft-refuse further spending when the balance is exhausted.
 
-A malformed event rejects the whole batch: the reporter is trusted platform
-code, so malformed means a bug, not customer input. Version skew is not a
-bug and never rejects. Brokers ship inside HA images and redeploy long after
-the CP does, so an old broker reporting fewer quantity keys, or a new one
-reporting a source this CP predates, is the normal steady state — the
-missing keys read as 0 and the unknown-source events are skipped. The
-reverse skew (a broker ahead of the CP, i.e. a template shipped before the
-CP that understands it) does reject, because the CP cannot store a quantity
-rating will need.
+Both concerns share one auth story. The broker presents an environment bearer
+token. That token identifies the environment, not a particular app: one
+environment hosts many agents, and each has its own broker. Which app a report
+belongs to is named in the JSON body (``app_slug``), scoped to that
+environment.
+
+Two endpoints cover the loop:
+
+1. **POST usage events** — insert a batch of metered facts. Duplicate or
+   retried events are ignored via the broker-minted idempotency key. The
+   response includes a fresh entitlement snapshot, so an organization that is
+   actively spending refreshes its cache on every report without a second call.
+2. **GET entitlement** — the same snapshot on its own, for idle organizations
+   whose cached copy would otherwise go stale with no posts flowing.
+
+Validation follows from trust. The reporter is HumR platform code, not a
+customer form: a malformed event means a bug, so the whole batch is rejected.
+Version skew between broker and control plane is different — brokers ship
+inside agent images and often lag (or briefly lead) the control plane after a
+redeploy. An older broker omitting quantity keys, or reporting a source this
+control plane does not know, is the normal case: missing keys read as 0, and
+unknown-source events are skipped. The reverse — a broker sending quantity
+keys the control plane cannot store — is rejected, because rating would later
+need those quantities and we cannot invent them.
 """
 
 import datetime
@@ -26,9 +40,10 @@ import logging
 from django.http import HttpRequest, JsonResponse
 from django.utils import dateparse, timezone
 from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
 
 from humanityrules_app import models
+from humanityrules_app.services.billing import entitlements
 from . import env_bearer_auth
 
 logger = logging.getLogger(__name__)
@@ -151,4 +166,22 @@ def billing_usage_events(request: HttpRequest) -> JsonResponse:
             len(skipped_sources), app.slug, sorted({str(source) for source in skipped_sources}),
         )
     models.BillingUsageEvent.objects.bulk_create(rows, ignore_conflicts=True)
-    return JsonResponse({"ok": True, "skipped": len(skipped_sources)})
+    return JsonResponse({
+        "ok": True,
+        "skipped": len(skipped_sources),
+        "entitlement": entitlements.snapshot_payload(organization=organization),
+    })
+
+
+@require_GET
+def billing_entitlement(request: HttpRequest) -> JsonResponse:
+    """Serve the calling environment's organization its current entitlement snapshot."""
+    raw_token = env_bearer_auth.extract_bearer_token(request=request)
+    if raw_token is None:
+        return JsonResponse({"error": "missing bearer token"}, status=401)
+    environment = env_bearer_auth.resolve_env_from_token(raw_token=raw_token)
+    if environment is None:
+        return JsonResponse({"error": "invalid bearer token"}, status=401)
+
+    organization = environment.aws_account.organization
+    return JsonResponse({"entitlement": entitlements.snapshot_payload(organization=organization)})

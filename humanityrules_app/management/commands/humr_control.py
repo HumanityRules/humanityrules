@@ -763,17 +763,8 @@ class Command(BaseCommand):
         return True
 
     def _template_requires_owner(self, template):
-        """True iff the template is a Personal Assistant (policy-proxy-fronted + app-type=personal-assistant)."""
-        has_policy_proxy = any(
-            c.get("role") == "policy_proxy"
-            for c in (template.containers or [])
-        )
-        if not has_policy_proxy:
-            return False
-        for tag in (template.default_tags or []):
-            if tag.get("key") == "app-type" and tag.get("value") == "personal-assistant":
-                return True
-        return False
+        """True iff the template deploys a personal agent, which is what needs an owner."""
+        return template_deploy_service.is_agent_template(template=template)
 
     def _resolve_created_by(self, org, username):
         """Resolve the User to attribute the deploy to.

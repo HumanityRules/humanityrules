@@ -193,12 +193,12 @@ class BedrockPlatformCapabilityTests(SimpleTestCase):
 
 
 class EffectivePlatformCapabilityTests(TestCase):
-    """The config builder is the single point that turns org grants into deploy capabilities."""
+    """The config builder is the single point that turns plan entitlements into deploy capabilities."""
 
-    def _make_app(self, llm_preset: str, platform_capabilities: list[str]) -> AppModel:
+    def _make_app(self, llm_preset: str, bedrock_enabled: bool) -> AppModel:
         org = Organization.objects.create(
             name="Cap Org", slug="cap-org",
-            llm_preset=llm_preset, platform_capabilities=platform_capabilities,
+            llm_preset=llm_preset, plan_overrides={"bedrock_enabled": bedrock_enabled},
         )
         aws_account = AWSAccount.objects.create(organization=org, name="Cap AWS")
         workspace = Workspace.objects.create(organization=org, name="Engineering", slug="engineering")
@@ -213,29 +213,38 @@ class EffectivePlatformCapabilityTests(TestCase):
             cpu=256, memory=512,
         )
 
-    def test_org_grant_passes_through_to_the_app_config(self) -> None:
-        app = self._make_app(llm_preset="codex", platform_capabilities=["bedrock-runtime"])
+    def test_plan_override_passes_through_to_the_app_config(self) -> None:
+        app = self._make_app(llm_preset="codex", bedrock_enabled=True)
 
         app_config = app_config_builder.build_app_config_from_app(app)
 
         self.assertEqual(app_config.platform_capabilities, ["bedrock-runtime"])
 
     def test_ungranted_org_deploys_with_no_capabilities(self) -> None:
-        app = self._make_app(llm_preset="codex", platform_capabilities=[])
+        app = self._make_app(llm_preset="codex", bedrock_enabled=False)
+
+        app_config = app_config_builder.build_app_config_from_app(app)
+
+        self.assertEqual(app_config.platform_capabilities, [])
+
+    def test_trial_plan_alone_grants_nothing(self) -> None:
+        app = self._make_app(llm_preset="codex", bedrock_enabled=False)
+        app.organization.plan_overrides = {}
+        app.organization.save(update_fields=["plan_overrides"])
 
         app_config = app_config_builder.build_app_config_from_app(app)
 
         self.assertEqual(app_config.platform_capabilities, [])
 
     def test_bedrock_preset_with_the_grant_is_accepted(self) -> None:
-        app = self._make_app(llm_preset="bedrock", platform_capabilities=["bedrock-runtime"])
+        app = self._make_app(llm_preset="bedrock", bedrock_enabled=True)
 
         app_config = app_config_builder.build_app_config_from_app(app)
 
         self.assertEqual(app_config.platform_capabilities, ["bedrock-runtime"])
 
     def test_bedrock_preset_without_the_grant_fails_the_build(self) -> None:
-        app = self._make_app(llm_preset="bedrock", platform_capabilities=[])
+        app = self._make_app(llm_preset="bedrock", bedrock_enabled=False)
 
         with self.assertRaises(app_config_builder.PlatformCapabilityNotGranted) as caught:
             app_config_builder.build_app_config_from_app(app)

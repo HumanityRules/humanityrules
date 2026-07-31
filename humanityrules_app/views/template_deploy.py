@@ -89,17 +89,8 @@ def _selected_label(options: list[dict], value: str, placeholder: str) -> str:
 
 
 def _template_requires_owner(template: models.AppTemplate) -> bool:
-    """True iff the template's default_tags mark it as a Personal Assistant."""
-    has_policy_proxy = any(
-        c.get("role") == "policy_proxy"
-        for c in (template.containers or [])
-    )
-    if not has_policy_proxy:
-        return False
-    for tag in (template.default_tags or []):
-        if tag.get("key") == "app-type" and tag.get("value") == "personal-assistant":
-            return True
-    return False
+    """True iff the template deploys a personal agent, which is what needs an owner."""
+    return template_deploy_service.is_agent_template(template=template)
 
 
 def _username_for_prefill(username: str) -> str:

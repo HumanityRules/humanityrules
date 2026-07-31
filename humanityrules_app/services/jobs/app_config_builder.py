@@ -9,6 +9,7 @@ from humanityrules_app.models import App, AppTemplate, Organization, ResourceTag
 from humanityrules_app.services import infra_customer
 from humanityrules_app.services import llm_preset_service
 from humanityrules_app.services import template_deploy_service
+from humanityrules_app.services.billing import plans
 from humanityrules_app.services.infra_customer.appconfig import (
     AppConfig,
     ContainerConfig,
@@ -49,24 +50,35 @@ class ContainerSecretCollision(ValueError):
 
 
 class PlatformCapabilityNotGranted(ValueError):
-    """The app's configuration needs a platform capability its org was never granted."""
+    """The app's configuration needs a platform capability its org's plan does not enable."""
 
 
 def effective_platform_capabilities(organization: Organization) -> list[str]:
-    """Resolve the platform capabilities a deploy for *organization* carries.
+    """Return the platform-capability slugs this organization's deploys receive.
 
-    The one calculation point: the org's grants are the whole answer, and both
-    the ECS task-role grants and the container's HUMR_PLATFORM_CAPABILITIES come
-    from this list, so the IAM and the in-container gates cannot disagree.
+    A platform capability is an infra feature HumR grants a deployed agent —
+    for example Bedrock runtime access. Which ones an organization gets is
+    decided by its effective plan (plan tier plus any ``plan_overrides``), then
+    mapped to a fixed list of slugs by ``PlanConfig.platform_capability_slugs``.
+
+    That list has to be computed in exactly one place. Deploy wiring feeds the
+    same result into both the ECS task-role IAM grants and the container env
+    var ``HUMR_PLATFORM_CAPABILITIES``. If those two paths ever diverged, the
+    agent could believe a capability was available while AWS denied the call,
+    or the reverse.
+
+    Also refuses a deploy whose LLM preset is Bedrock when the plan does not
+    enable ``bedrock-runtime``: the default model would have no IAM behind it.
     """
-    capabilities = list(organization.platform_capabilities or [])
+    capabilities = plans.effective_plan(organization=organization).platform_capability_slugs()
     preset = llm_preset_service.resolve_preset_name(organization=organization)
     bedrock_runtime = infra_customer.deploy_app.PLATFORM_CAPABILITY_BEDROCK_RUNTIME
     if preset == Organization.LlmPreset.BEDROCK.value and bedrock_runtime not in capabilities:
         raise PlatformCapabilityNotGranted(
-            f"Organization '{organization.slug}' defaults its assistants to Bedrock but was not "
-            f"granted the '{bedrock_runtime}' platform capability; the deployed agent would have "
-            "no IAM behind its default model. Grant it on the organization, or change the LLM preset."
+            f"Organization '{organization.slug}' defaults its assistants to Bedrock but its plan "
+            f"does not enable the '{bedrock_runtime}' platform capability; the deployed agent would "
+            "have no IAM behind its default model. Set plan_overrides = {\"bedrock_enabled\": true} "
+            "on the organization, move it to a plan that enables Bedrock, or change the LLM preset."
         )
     return capabilities
 
