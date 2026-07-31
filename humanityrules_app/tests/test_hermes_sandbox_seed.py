@@ -101,7 +101,7 @@ class TestHermesSandboxSeed(unittest.TestCase):
 
         self.assertEqual(
             set(extensions),
-            {"humr-integrations", "humr-widgets", "humr-webapps", "humr-permissions"},
+            {"humr-integrations", "humr-widgets", "humr-webapps", "humr-permissions", "humr-credits"},
         )
         extension_order = [entry["id"] for entry in manifest["extensions"]]
         widgets_index = extension_order.index("humr-widgets")
@@ -123,6 +123,8 @@ class TestHermesSandboxSeed(unittest.TestCase):
         self.assertEqual(extensions["humr-widgets"]["stylesheets"], ["humr-widgets.css"])
         self.assertEqual(extensions["humr-webapps"]["scripts"], ["humr-panel.js", "humr-webapps.js"])
         self.assertEqual(extensions["humr-permissions"]["scripts"], ["humr-permissions.js"])
+        self.assertEqual(extensions["humr-credits"]["scripts"], ["humr-credits.js"])
+        self.assertEqual(extensions["humr-credits"]["stylesheets"], ["humr-credits.css"])
 
     def test_runtime_uses_webui_managed_extension_root(self) -> None:
         dockerfile = (_hermes_agent_dir() / "Dockerfile").read_text(encoding="utf-8")

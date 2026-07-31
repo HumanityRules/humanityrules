@@ -1,14 +1,38 @@
-"""Browser-facing control API (127.0.0.1:9951).
+"""URL facade the WebUI hits for broker-managed controls.
 
-Starlette app mounted by `humr_broker` and reached same-origin from the WebUI
-via Caddy's /__humr_broker/* route. Unifies TLS-intercept provider management,
-MCP-aggregator OAuth routes, and Merge passthroughs under /integrations, and the
-self-referential permissions editor under /permissions.
+This module builds the Starlette app that answers under ``/__humr_broker/*``.
+It is not the owner of most of that surface: look at the route table at the
+bottom of ``build_control_app``. Some handlers are thin one-line delegates
+defined here; others are mounted wholesale from sibling modules
+(``mcp_aggregator``, ``permissions_control``). The point of the file is one
+browser-facing URL namespace — not the credential, OAuth, Merge, or
+permissions logic behind it. If you open this file hunting for those, follow
+the mount or the delegate instead.
 
-Pure transport: every route parses the request, delegates to
-`credentials_service` (state changes) or reads cached status from the
-runtimes, and serializes the result. No credential choreography lives here,
-and no HUMR bearer — outbound HUMR calls happen inside the service's HumrClient.
+Three things that *do* belong here:
+
+1. Card visibility. ``_card_visible`` is the only real policy in this module.
+   ``GET /integrations`` does not just serialize cached status — it filters
+   which connector cards an org is allowed to see (platform-only connectors
+   stay off customer UIs; a platform-served Codex card is hidden so customers
+   cannot infer which model backs the platform default). Hiding a card is UI
+   gating only: credential resolution and TLS interception keep running.
+
+2. The status join. TLS-intercept providers and MCP-aggregator items are
+   different runtimes. This endpoint flattens them into one ``items`` list
+   because the WebUI renders one card grid. That join is a presentation
+   contract, not a domain model.
+
+3. Stale-tolerant reads, plus two apply-side routes that exist because of
+   that. Status is served from cache and refreshed lazily (proxy hot path
+   or near expiry). ``POST .../invalidate`` is the WebUI telling the broker
+   that HUMR already holds a new credential (vault save, OAuth return) and
+   the broker should drop that provider's cache, rewrite gateway env, and
+   restart as needed — not a generic "give me fresh cards" call. Disconnect
+   never uses this HTTP route; it goes through ``credentials_disconnect``,
+   which invalidates inside ``credentials_service``. ``POST .../refresh_all``
+   is the explicit Refresh button (MCP catalog reload + all-providers TLS
+   invalidate in one shot).
 """
 
 import logging
@@ -18,6 +42,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
+import billing_entitlement_service
 from credentials_service import CredentialsService
 import device_flow
 from humr_client import HumrClient
@@ -65,15 +90,14 @@ async def _handle_unified_status(
     """Flat list combining TLS-intercept providers and MCP-aggregator items.
 
     Reads cached TLS-intercept entries; refresh happens lazily (proxy hot
-    path or near expiry). Callers that need fresh state must POST
-    /__humr_broker/integrations/tls_intercept/{provider}/invalidate for one provider
-    (e.g. after a Disconnect on HUMR) or /__humr_broker/integrations/refresh_all
-    for the explicit-Refresh path (MCP catalog reload + all-providers TLS
-    invalidate in one shot).
+    path or near expiry). Per-provider apply after a vault/OAuth connect is
+    ``POST .../tls_intercept/{provider}/invalidate``; the Refresh button is
+    ``POST .../refresh_all``.
     """
     items = await tls_intercept_runtime.status_items()
     items.extend(await mcp_aggregator.status_items())
     items = [item for item in items if _card_visible(item=item, org_slug=org_slug)]
+
     return JSONResponse(content={
         "humr_control_plane_url": humr_client.control_plane_url,
         "env_slug": env_slug,
@@ -93,11 +117,12 @@ def build_control_app(
     oauth_device_flow: device_flow.OAuthDeviceFlow,
     credentials_service: CredentialsService,
     humr_client: HumrClient,
+    entitlement_service: billing_entitlement_service.BillingEntitlementService,
     env_slug: str,
     org_slug: str,
 ) -> Starlette:
-    """Wire the unified /__humr_broker/* router for browser-facing integration management."""
-    async def status_route(request: Request) -> Response:
+    """Wire the browser-facing /__humr_broker/* facade (integrations, billing, permissions)."""
+    async def integration_status_route(request: Request) -> Response:
         return await _handle_unified_status(
             mcp_aggregator=mcp_aggregator,
             tls_intercept_runtime=tls_intercept_runtime,
@@ -106,7 +131,21 @@ def build_control_app(
             org_slug=org_slug,
         )
 
-    async def refresh_all_route(request: Request) -> Response:
+    async def billing_entitlement_snapshot_route(request: Request) -> Response:
+        """Serve the credits card its snapshot, refreshed first if it has gone stale.
+
+        Raw numbers only: the card decides what counts as running low, so the
+        threshold lives in one place and moving it needs no broker redeploy.
+        A null entitlement means HUMR has not answered yet and the card shows
+        nothing.
+        """
+        entitlement_snapshot = await entitlement_service.entitlement_snapshot_for_display()
+        return JSONResponse(content={
+            "entitlement": entitlement_snapshot,
+            "upgrade_url": entitlement_service.upgrade_url(),
+        })
+
+    async def integrations_refresh_all_route(request: Request) -> Response:
         """Explicit-Refresh: MCP catalog reload + all-providers TLS invalidate in one shot."""
         status, payload = await credentials_service.refresh_all_integrations()
         return JSONResponse(content=payload, status_code=status)
@@ -165,8 +204,9 @@ def build_control_app(
     tls = "/integrations/tls_intercept/{provider}"
     routes = [
         Route(path="/healthz", endpoint=_handle_healthz, methods=["GET"]),
-        Route(path="/integrations", endpoint=status_route, methods=["GET"]),
-        Route(path="/integrations/refresh_all", endpoint=refresh_all_route, methods=["POST"]),
+        Route(path="/billing", endpoint=billing_entitlement_snapshot_route, methods=["GET"]),
+        Route(path="/integrations", endpoint=integration_status_route, methods=["GET"]),
+        Route(path="/integrations/refresh_all", endpoint=integrations_refresh_all_route, methods=["POST"]),
 
         Route(path=f"{tls}/invalidate", endpoint=credentials_invalidate_route, methods=["POST"]),
         Route(path=f"{tls}/setup-session", endpoint=credentials_setup_session_route, methods=["POST"]),

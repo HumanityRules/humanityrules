@@ -4,7 +4,8 @@ One `HumrClient` instance, built by the broker at startup, owns the
 control-plane URL, the env bearer, and the owner/app identity that every
 per-env integration endpoint requires. Everything in the broker that talks
 to HUMR (token refresh, device-flow completion, disconnect, vault setup
-sessions) goes through it — the bearer never leaves this module.
+sessions, usage reporting, entitlement refresh) goes through it — the bearer
+never leaves this module.
 """
 
 import logging
@@ -45,6 +46,27 @@ class HumrClient:
         except Exception as exc:
             logger.error("control plane request failed path=%s: %s", path, exc)
             return 502, {"error": "control plane request failed"}
+        return self._parsed(response=response, path=path)
+
+    async def get_json(self, path: str, timeout_seconds: int) -> tuple[int, dict]:
+        """GET JSON from HUMR and return `(status, parsed body)`.
+
+        Same failure contract as `post_json`: callers only ever branch on the
+        status code. Nothing is merged into the request — a GET has no body to
+        carry owner/app identity, and the endpoints reached this way resolve
+        everything they need from the env bearer.
+        """
+        url = f"{self.control_plane_url}{path}"
+        try:
+            async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+                response = await client.get(url=url, headers={"Authorization": f"Bearer {self._bearer}"})
+        except Exception as exc:
+            logger.error("control plane request failed path=%s: %s", path, exc)
+            return 502, {"error": "control plane request failed"}
+        return self._parsed(response=response, path=path)
+
+    def _parsed(self, response: httpx.Response, path: str) -> tuple[int, dict]:
+        """Parse a HUMR response body, turning an unparseable success into a 502."""
         try:
             return response.status_code, response.json()
         except Exception as exc:

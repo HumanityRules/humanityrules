@@ -84,6 +84,7 @@ broker = _load_broker_module()
 
 # Loading the broker put the integrations dir on sys.path and imported the
 # sibling modules; bind the ones the tests patch/construct directly.
+import billing_entitlement  # noqa: E402
 import credentials_service  # noqa: E402
 import humr_client  # noqa: E402
 import tls_certificate_authority  # noqa: E402
@@ -138,6 +139,7 @@ def _make_tls_intercept_runtime(ca_dir: pathlib.Path, private_dir: pathlib.Path)
         ca_dir=ca_dir,
         private_dir=private_dir,
         usage_reporter=None,
+        entitlement_cache=None,
     )
 
 
@@ -1348,6 +1350,7 @@ class TestProxyConnectionStateMachine(unittest.IsolatedAsyncioTestCase):
                     minter=minter,
                     credential_state_store=credential_state_store,
                     usage_reporter=None,
+                    entitlement_cache=None,
                 ),
                 timeout=1.0,
             )
@@ -1413,6 +1416,7 @@ class TestProxyConnectionStateMachine(unittest.IsolatedAsyncioTestCase):
                 ),
                 credential_state_store=credential_state_store,
                 usage_reporter=None,
+                entitlement_cache=None,
             )
 
         intercept.assert_awaited_once_with(
@@ -1424,6 +1428,7 @@ class TestProxyConnectionStateMachine(unittest.IsolatedAsyncioTestCase):
             minter=minter,
             credential_state_store=credential_state_store,
             usage_reporter=None,
+            entitlement_cache=None,
         )
         self.assertTrue(sandbox_writer.closed)
 
@@ -1797,16 +1802,24 @@ def _make_control_parts(
         hermes_home=pathlib.Path("/nonexistent/hermes-home"),
     )
     device_stub = _StubDeviceFlow()
+    entitlement_cache = billing_entitlement.EntitlementCache(humr_client=client)
     app = broker.control_api.build_control_app(
         mcp_aggregator=aggregator,
         tls_intercept_runtime=tls_intercept_runtime,
         oauth_device_flow=device_stub,
         credentials_service=service,
         humr_client=client,
+        entitlement_cache=entitlement_cache,
         env_slug="default",
         org_slug=org_slug,
     )
-    return types.SimpleNamespace(app=app, service=service, humr_client=client, device_flow=device_stub)
+    return types.SimpleNamespace(
+        app=app,
+        service=service,
+        humr_client=client,
+        device_flow=device_stub,
+        entitlement_cache=entitlement_cache,
+    )
 
 
 def _make_credentials_service(
@@ -1957,6 +1970,39 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("x", items_by_slug)
         self.assertIn("openai-codex", items_by_slug)
+
+    async def test_billing_route_serves_the_credits_card_its_snapshot(self) -> None:
+        """/billing hands the card raw numbers plus where to go to fix them."""
+        from starlette.testclient import TestClient
+
+        parts = self._control_parts(aggregator=_ready_stub_aggregator(), org_slug="acme")
+        parts.entitlement_cache.absorb_report_response(body={"entitlement": {
+            "credits_remaining": 640,
+            "monthly_grant": 2000,
+            "renewal_date": None,
+            "plan": "operator",
+            "exhausted": False,
+        }})
+
+        with TestClient(parts.app) as client:
+            payload = client.get("/billing").json()
+
+        self.assertEqual(payload["entitlement"]["credits_remaining"], 640)
+        self.assertEqual(payload["entitlement"]["monthly_grant"], 2000)
+        self.assertEqual(payload["upgrade_url"], "https://humr.example/settings/billing/")
+
+    async def test_billing_route_serves_a_null_entitlement_before_humr_answers(self) -> None:
+        """An unreachable control plane leaves the card with nothing to show, not an error."""
+        from starlette.testclient import TestClient
+
+        parts = self._control_parts(aggregator=_ready_stub_aggregator(), org_slug="acme")
+        parts.humr_client.get_json = AsyncMock(return_value=(502, {"error": "control plane request failed"}))
+
+        with TestClient(parts.app) as client:
+            response = client.get("/billing")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["entitlement"])
 
     async def test_model_provider_status_marks_model_picker_affecting_items(self) -> None:
         """The WebUI extension refreshes model dropdowns only for LLM providers."""

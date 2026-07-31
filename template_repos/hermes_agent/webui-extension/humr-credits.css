@@ -1,0 +1,102 @@
+/* HUMR WebUI extension — the credits card at the bottom of the sidebar.
+   A rounded inset card, visibly detached from the panel content above it.
+   Pinned to the bottom by flex `order` rather than DOM position: the HumR
+   panel panes append themselves to the same sidebar whenever their extension
+   happens to mount, and order keeps the card last regardless. */
+
+.sidebar > .humr-credits-card {
+  order: 2;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 8px 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.sidebar > .humr-credits-card[hidden] {
+  display: none;
+}
+
+/* One phrase on the left — "Credits 0/500" — and the single action on the
+   right. The label-count pair stays glued together; only title↔action gets
+   the elastic gap. */
+.humr-credits-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.humr-credits-title {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.humr-credits-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text);
+}
+
+.humr-credits-count {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+/* Out of credits is the only state allowed to draw the eye. */
+.humr-credits-card[data-state="out"] .humr-credits-label,
+.humr-credits-card[data-state="out"] .humr-credits-count {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.humr-credits-plan {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.humr-credits-renewal {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.humr-credits-plan[hidden],
+.humr-credits-renewal[hidden] {
+  display: none;
+}
+
+.humr-credits-upgrade {
+  align-self: flex-start;
+  font-size: 11px;
+  font-weight: 600;
+  text-decoration: none;
+  color: var(--accent-text);
+}
+
+.humr-credits-upgrade[hidden] {
+  display: none;
+}
+
+.humr-credits-upgrade:hover {
+  text-decoration: underline;
+}
+
+/* Below 641px the sidebar's nav becomes a 52px absolute icon rail and the
+   active panel is stretched to the full sidebar height. Give the card the same
+   inset, and let the panel go back to sharing the column with it. */
+@media (max-width: 640px) {
+  .sidebar > .humr-credits-card {
+    margin-left: 60px;
+  }
+
+  .sidebar .panel-view {
+    height: auto;
+  }
+}

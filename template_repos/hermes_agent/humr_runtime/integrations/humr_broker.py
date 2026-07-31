@@ -14,8 +14,8 @@ It starts:
 
 2. The control API on 127.0.0.1:9951, reached same-origin by the WebUI
    extensions via Caddy's /__humr_broker/* route. This API mounts the
-   MCP-aggregator management routes under /integrations and the permissions
-   relay under /permissions.
+   MCP-aggregator management routes under /integrations, the permissions
+   relay under /permissions, and the credits snapshot under /billing.
 
 The aggregator's port 9952 is sandbox-only MCP traffic. Refresh tokens, HUMR's
 OAuth client secrets, and the env bearer never enter the sandbox.
@@ -50,6 +50,7 @@ from pathlib import Path
 
 import uvicorn
 
+import billing_entitlement_service
 import control_api
 from credentials_service import CredentialsService
 import device_flow
@@ -139,7 +140,11 @@ async def _run(
         owner_username=owner_username,
         app_slug=app_slug,
     )
-    usage_reporter = tls_usage_metering.UsageReporter(humr_client=humr_client)
+    entitlement_service = billing_entitlement_service.BillingEntitlementService(humr_client=humr_client)
+    usage_reporter = tls_usage_metering.UsageReporter(
+        humr_client=humr_client,
+        on_report_response=entitlement_service.absorb_report_response,
+    )
     tls_intercept_runtime = tls_intercept.TlsInterceptRuntime(
         providers=tls_provider_catalog.TLS_INTERCEPT_PROVIDERS,
         humr_client=humr_client,
@@ -147,6 +152,7 @@ async def _run(
         ca_dir=ca_dir,
         private_dir=private_dir,
         usage_reporter=usage_reporter,
+        entitlement_service=entitlement_service,
     )
 
     public_base_url = os.environ.get("HUMR_APP_PUBLIC_URL")
@@ -197,6 +203,7 @@ async def _run(
         oauth_device_flow=oauth_device_flow,
         credentials_service=credentials_service,
         humr_client=humr_client,
+        entitlement_service=entitlement_service,
         env_slug=env_slug,
         org_slug=org_slug,
     )

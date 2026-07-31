@@ -350,7 +350,8 @@ class TestUsageReporter(unittest.IsolatedAsyncioTestCase):
         )
         post_json = AsyncMock(return_value=(200, {"ok": True}))
         client.post_json = post_json
-        return tls_usage_metering.UsageReporter(humr_client=client), post_json
+        reporter = tls_usage_metering.UsageReporter(humr_client=client, record_entitlement=lambda body: None)
+        return reporter, post_json
 
     async def test_flush_posts_buffered_events_in_one_batch(self) -> None:
         reporter, post_json = self._make_reporter()
@@ -520,6 +521,7 @@ class TestMeteredInterceptWiring(unittest.IsolatedAsyncioTestCase):
                     minter=_StubCertMinter(),
                     credential_state_store=_StubCredentialStateStore(secrets=secrets, platform_shared=platform_shared),
                     usage_reporter=usage_reporter,
+                    entitlement_cache=None,
                 ),
                 timeout=1.0,
             )
