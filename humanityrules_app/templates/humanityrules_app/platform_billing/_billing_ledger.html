@@ -1,0 +1,89 @@
+<div class="my-3 rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-white/10 dark:bg-white/[0.03]">
+    <div class="mb-3 flex items-start justify-between gap-4">
+        <div>
+            <h3 class="text-sm font-semibold text-gray-900 dark:text-white">
+                Ledger for {{ organization.name }}
+            </h3>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {{ billing_window.label }} · filtered by posting time · append-only account movements
+            </p>
+        </div>
+        <button type="button"
+                hx-get="{% url 'platform_billing' %}?window={{ billing_window.key }}"
+                hx-target="#billing-ledger-{{ organization.id }}"
+                hx-select="#billing-ledger-{{ organization.id }}"
+                hx-swap="outerHTML"
+                hx-push-url="true"
+                class="text-xs font-medium text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">Close</button>
+    </div>
+
+    {% if ledger_page.page.object_list %}
+    <div class="overflow-x-auto rounded-md border border-gray-200 bg-white dark:border-white/10 dark:bg-gray-900">
+        <table class="min-w-full table-auto">
+            <thead class="bg-gray-50 dark:bg-white/5">
+                <tr>
+                    <th scope="col" class="py-2 pl-3 pr-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Posted</th>
+                    <th scope="col" class="px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Type</th>
+                    <th scope="col" class="px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">HA</th>
+                    <th scope="col" class="px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Description</th>
+                    <th scope="col" class="px-2 py-2 text-right text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Amount</th>
+                    <th scope="col" class="px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Provenance</th>
+                    <th scope="col" class="py-2 pl-2 pr-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Idempotency key</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for entry in ledger_page.page.object_list %}
+                <tr class="border-t border-gray-100 dark:border-white/5">
+                    <td class="py-2 pl-3 pr-2 text-xs whitespace-nowrap text-gray-700 dark:text-gray-300" title="{{ entry.created_at|date:'c' }}">{{ entry.created_at|date:"Y-m-d H:i:s T" }}</td>
+                    <td class="px-2 py-2 text-xs whitespace-nowrap">
+                        <span class="rounded-full bg-gray-100 px-2 py-0.5 text-gray-700 dark:bg-white/5 dark:text-gray-300">{{ entry.get_type_display }}</span>
+                    </td>
+                    <td class="px-2 py-2 font-mono text-xs whitespace-nowrap text-gray-700 dark:text-gray-300">{{ entry.metadata.app_slug|default:"—" }}</td>
+                    <td class="px-2 py-2 text-xs text-gray-700 dark:text-gray-300">{{ entry.description|default:"—" }}</td>
+                    <td class="px-2 py-2 text-right text-xs font-semibold tabular-nums {% if entry.amount > 0 %}text-green-700 dark:text-green-400{% elif entry.amount < 0 %}text-gray-900 dark:text-white{% else %}text-gray-500 dark:text-gray-400{% endif %}">
+                        {% if entry.amount > 0 %}+{% endif %}{{ entry.amount }}
+                    </td>
+                    <td class="px-2 py-2 text-xs text-gray-500 dark:text-gray-400">
+                        {% if entry.type == "charge" %}
+                        <div>{{ entry.metadata.event_count }} event{{ entry.metadata.event_count|pluralize }} · exact {{ entry.metadata.exact_credits }}</div>
+                        <div>Rate card{{ entry.metadata.rate_card_versions|length|pluralize }} {{ entry.metadata.rate_card_versions|join:", " }}</div>
+                        {% elif entry.metadata %}
+                        <span class="font-mono break-all">{{ entry.metadata }}</span>
+                        {% else %}
+                        —
+                        {% endif %}
+                    </td>
+                    <td class="py-2 pl-2 pr-3 font-mono text-xs break-all text-gray-500 dark:text-gray-400">{{ entry.idempotency_key }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% if ledger_page.page.has_other_pages %}
+    <div class="mt-3 flex items-center justify-between gap-4 text-xs text-gray-500 dark:text-gray-400">
+        <span>Page {{ ledger_page.page.number }} of {{ ledger_page.page.paginator.num_pages }} · {{ ledger_page.page.paginator.count }} entries</span>
+        <div class="flex gap-3">
+            {% if ledger_page.page.has_previous %}
+            <button type="button"
+                    hx-get="{% url 'platform_billing_organization_ledger' organization_id=organization.id %}?window={{ billing_window.key }}&amp;page={{ ledger_page.page.previous_page_number }}"
+                    hx-target="#billing-ledger-{{ organization.id }}"
+                    hx-swap="innerHTML"
+                    hx-push-url="{% url 'platform_billing' %}?window={{ billing_window.key }}&amp;organization={{ organization.id }}&amp;ledger=1&amp;page={{ ledger_page.page.previous_page_number }}"
+                    class="font-medium text-indigo-600 hover:underline dark:text-indigo-400">Previous</button>
+            {% endif %}
+            {% if ledger_page.page.has_next %}
+            <button type="button"
+                    hx-get="{% url 'platform_billing_organization_ledger' organization_id=organization.id %}?window={{ billing_window.key }}&amp;page={{ ledger_page.page.next_page_number }}"
+                    hx-target="#billing-ledger-{{ organization.id }}"
+                    hx-swap="innerHTML"
+                    hx-push-url="{% url 'platform_billing' %}?window={{ billing_window.key }}&amp;organization={{ organization.id }}&amp;ledger=1&amp;page={{ ledger_page.page.next_page_number }}"
+                    class="font-medium text-indigo-600 hover:underline dark:text-indigo-400">Next</button>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+    {% else %}
+    <p class="rounded-md border border-dashed border-gray-300 px-4 py-5 text-center text-sm text-gray-500 dark:border-white/10 dark:text-gray-400">No ledger entries were posted in this period.</p>
+    {% endif %}
+</div>
