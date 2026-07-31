@@ -51,6 +51,8 @@ The deploy path still needs slugs: `effective_plan` derives `["bedrock-runtime",
 
 Migration: drop the org field, move the existing demo grant to `plan_overrides = {"bedrock_enabled": true}`, repoint the deploy path and the model-picker gate at `effective_plan`.
 
+Every existing org lands on `trial` with the 500-credit trial grant backfilled. The grant's idempotency key, `grant:trial:{org_id}`, is the same one the signup path writes, so backfill and signup cannot double-grant. No org is special-cased; friends-and-family orgs that burn through the grant get comped through `plan_overrides` or hand-written ledger grants, the normal escape hatches.
+
 ### 2.4 Plan numbers
 
 1. **Operator:** $39/month, 2,000 credits/month, always-on, 1 agent.
@@ -175,7 +177,7 @@ Environment reporting is trusted. Operator runs on HumR infra; Team/Enterprise (
 
 1. The agent surfaces the 402 error text naturally in conversation, so even with zero UI work the user learns why calls fail.
 2. The broker exposes its cached snapshot same-origin to the WebUI: `GET /__humr_broker/billing` on the existing control API (`/__humr_broker/*` Caddy route, same pattern as the integrations cards). One poller per agent app (each app's WebUI polls its own broker); enforcement and display read the same state and cannot disagree.
-3. The webui-extension renders a credits card in the bottom-left sidebar area (Lovable-style): a quiet meter normally, "running low — upgrade" below a warning threshold (~20% remaining), "out of credits — upgrade or renews on {date}" at exhaustion. Same component, three states. Upgrade links to the CP billing page.
+3. The webui-extension renders a credits card in the bottom-left sidebar area (Lovable-style): a quiet meter normally, "running low — upgrade" below a warning threshold (~20% remaining), "out of credits" at exhaustion. Same component, three states. The renewal date appears only on plans with a monthly grant; trial's one-time grant has none, so its exhausted state says "upgrade" alone. Upgrade links to the CP billing page.
 
 ## 8. Stripe and plan lifecycle
 

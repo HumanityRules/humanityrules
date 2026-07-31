@@ -6,6 +6,7 @@ from django.db import models
 from django.utils import timezone
 
 import humanityrules_app.app_slugs as app_slugs
+from humanityrules_app.services.billing import plans
 
 
 class User(AbstractUser):
@@ -71,6 +72,12 @@ class Organization(models.Model):
         BEDROCK = "bedrock", "Bedrock"
         CODEX = "codex", "OpenAI Codex"
 
+    class Plan(models.TextChoices):
+        TRIAL = plans.TRIAL, "Trial"
+        OPERATOR = plans.OPERATOR, "Operator"
+        TEAM = plans.TEAM, "Team"
+        ENTERPRISE = plans.ENTERPRISE, "Enterprise"
+
     id = models.UUIDField(
         primary_key=True,
         default=uuid.uuid7,
@@ -101,17 +108,31 @@ class Organization(models.Model):
             "Codex; set to Bedrock per-customer in admin for the demo."
         ),
     )
-    # Platform-owned infrastructure capabilities this org is entitled to, e.g.
-    # ["bedrock-runtime"]. The grant lives here, on the tenant; the deploy path
-    # resolves it into AppConfig.platform_capabilities, which CDK turns into
-    # ECS task-role grants and the container reads as HUMR_PLATFORM_CAPABILITIES.
-    # Not user-managed app permissions.
-    platform_capabilities = models.JSONField(default=list, blank=True)
+    plan = models.CharField(
+        max_length=32,
+        choices=Plan.choices,
+        default=Plan.TRIAL,
+        help_text="Entitlement tier; the numbers behind it live in services/billing/plans.py.",
+    )
+    # Per-org exceptions to the plan config: {plan field name: replacement
+    # value}. Read only through services.billing.plans.effective_plan, which is
+    # what keeps every gate agreeing about one organization.
+    plan_overrides = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Entitlement fields this org overrides, e.g. {\"bedrock_enabled\": true}. Never price.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self) -> str:
         return self.name
+
+    def save(self, *args, **kwargs) -> None:
+        # A typo'd override key would otherwise be a silently dead entitlement:
+        # the admin sees it in the JSON, no gate ever reads it.
+        plans.validate_overrides(overrides=self.plan_overrides)
+        super().save(*args, **kwargs)
 
 
 class OrganizationMembership(models.Model):

@@ -12,6 +12,7 @@ from humanityrules_app import app_slugs
 from humanityrules_app import models
 from humanityrules_app.services import llm_preset_service
 from humanityrules_app.services import sandbox_service
+from humanityrules_app.services.billing import plans
 from humanityrules_app.services.jobs import app_job_service
 
 logger = logging.getLogger(__name__)
@@ -145,6 +146,51 @@ def _stamp_template_tags(
         )
 
 
+def is_agent_template(template: models.AppTemplate) -> bool:
+    """True iff the template deploys a personal agent: policy-proxy-fronted and tagged as one.
+
+    The same predicate answers two questions — an agent needs an owner at deploy
+    time, and an agent is what the plan's max_agents counts.
+    """
+    has_policy_proxy = any(
+        container.get("role") == "policy_proxy"
+        for container in (template.containers or [])
+    )
+    if not has_policy_proxy:
+        return False
+    return any(
+        tag.get("key") == "app-type" and tag.get("value") == "personal-assistant"
+        for tag in (template.default_tags or [])
+    )
+
+
+def _live_agent_app_count(organization: models.Organization) -> int:
+    """Agent apps the organization still holds; a removal in flight no longer counts against it."""
+    agent_template_ids = [
+        template.id for template in models.AppTemplate.objects.all()
+        if is_agent_template(template=template)
+    ]
+    return (
+        models.App.objects
+        .filter(organization=organization, source_template_id__in=agent_template_ids)
+        .exclude(job_status__in=models.App.REMOVAL_JOB_STATUSES)
+        .count()
+    )
+
+
+def _raise_for_agent_limit(organization: models.Organization, template: models.AppTemplate) -> None:
+    """Reject an agent deploy that would take the organization past its plan's max_agents."""
+    if not is_agent_template(template=template):
+        return
+    max_agents = plans.effective_plan(organization=organization).max_agents
+    live_agents = _live_agent_app_count(organization=organization)
+    if live_agents >= max_agents:
+        raise ValueError(
+            f"Your plan includes {max_agents} agent(s) and you already have {live_agents}. "
+            "Remove an existing agent or upgrade your plan to deploy another."
+        )
+
+
 def _raise_for_hostname_label_conflict(environment: models.Environment, app_slug: str) -> None:
     """Reject a slug whose hostname label an existing app already holds on the environment's hosted zone."""
     hosted_zone = environment.shared_alb_hosted_zone
@@ -197,6 +243,8 @@ def deploy_from_template(
                 f"Environment '{locked_environment.name}' is not ready for app operations "
                 f"(status: {locked_environment.status})."
             )
+
+        _raise_for_agent_limit(organization=organization, template=template)
 
         # The App row and its sandbox slug claim become visible together. Holding
         # the environment lock prevents teardown admission from interleaving.

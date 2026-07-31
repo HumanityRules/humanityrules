@@ -203,6 +203,9 @@ urlpatterns = [
     path("api/runtime/policy-proxy-activity", views.policy_proxy_activity, name="policy_proxy_activity"),
     #  - billing_usage_events: batched LLM usage facts from each integrations broker
     path("api/runtime/billing-usage-events", views.billing_usage_events, name="billing_usage_events"),
+    #  - billing_entitlement: pull the org's credit snapshot. Brokers normally refresh that
+    #    cache from every usage-event response; this covers the case where nothing is spending.
+    path("api/runtime/billing-entitlement", views.billing_entitlement, name="billing_entitlement"),
 
     #  - Permissions editor (self-referential): the env-resident humr_broker relays the Hermes WebUI's
     #    /permissions/* calls here with the env bearer. Target (app, environment) is resolved from the
