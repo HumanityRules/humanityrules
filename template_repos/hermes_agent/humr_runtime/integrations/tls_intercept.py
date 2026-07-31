@@ -30,10 +30,15 @@ Second, for each HTTP request on that readable connection, the proxy:
 2. Looks up the real secrets for that provider, refreshing from HUMR when
    the cache is stale or empty.
 3. Rewrites the request so the secret is where the upstream expects it.
-4. Opens a fresh TLS connection to the real provider, sends the rewritten
+4. Refuses the request with a 402 when it would be billed to an organization
+   whose credits are exhausted. Only metered requests are refused: traffic
+   that costs no credits — connectors, and model calls on the customer's own
+   credential — is never blocked, because blocking it would break workflows
+   for no economic reason.
+5. Opens a fresh TLS connection to the real provider, sends the rewritten
    request, and streams the response back — optionally watching the body
    for billable usage when HUMR itself funded the credential.
-5. If the provider answers 401 on a request we injected into, drops the
+6. If the provider answers 401 on a request we injected into, drops the
    cached secret so the next call refetches. A 401 on anonymous traffic
    never touches the cache; we did not put our secret in that request.
 
@@ -53,6 +58,8 @@ above. The pieces it composes each do one job and nothing else:
 - `tls_http_message_relay` — provider-agnostic HTTP/1.1 read/write/stream.
 - `tls_usage_metering` — decide whether a response is billable and report
   usage; absent a reporter, the proxy behaves identically.
+- `billing_entitlement_service` — the cached answer to "may this organization still
+  spend?"; absent a cache, nothing is ever refused.
 
 This runtime only manages its own in-memory credential cache. The broader
 choreography after a connect or disconnect — re-rendering gateway env,
@@ -68,6 +75,7 @@ import logging
 import ssl
 from pathlib import Path
 
+import billing_entitlement_service
 from humr_client import HumrClient
 import tls_certificate_authority
 import tls_credential_injection
@@ -132,8 +140,10 @@ class TlsInterceptRuntime:
         ca_dir: Path,
         private_dir: Path,
         usage_reporter: tls_usage_metering.UsageReporter | None,
+        entitlement_service: billing_entitlement_service.BillingEntitlementService | None,
     ) -> None:
         self._usage_reporter = usage_reporter
+        self._entitlement_service = entitlement_service
         self._providers = dict(providers)
         self._host_to_provider = tls_provider_catalog.build_host_to_provider(providers=self._providers)
         self._credential_state_store = tls_token_store.CredentialStateStore(
@@ -155,6 +165,7 @@ class TlsInterceptRuntime:
                 host_to_provider=self._host_to_provider,
                 credential_state_store=self._credential_state_store,
                 usage_reporter=self._usage_reporter,
+                entitlement_service=self._entitlement_service,
             )
 
         return await asyncio.start_server(client_connected_cb=handle_connection, host=host, port=port)
@@ -211,6 +222,7 @@ async def _handle_proxy_connection(
     host_to_provider: dict[str, str],
     credential_state_store: tls_token_store.CredentialStateStore,
     usage_reporter: tls_usage_metering.UsageReporter | None,
+    entitlement_service: billing_entitlement_service.BillingEntitlementService | None,
 ) -> None:
     """Accept a CONNECT, then either intercept known hosts or tunnel."""
     peer = sandbox_writer.get_extra_info("peername")
@@ -252,6 +264,7 @@ async def _handle_proxy_connection(
             minter=minter,
             credential_state_store=credential_state_store,
             usage_reporter=usage_reporter,
+            entitlement_service=entitlement_service,
         )
     except (ConnectionResetError, BrokenPipeError):
         return
@@ -272,6 +285,7 @@ async def _serve_intercepted_connection(
     minter: tls_certificate_authority.CertMinter,
     credential_state_store: tls_token_store.CredentialStateStore,
     usage_reporter: tls_usage_metering.UsageReporter | None,
+    entitlement_service: billing_entitlement_service.BillingEntitlementService | None,
 ) -> None:
     """Terminate sandbox TLS and forward its HTTP requests to one provider."""
     sandbox_writer.write(b"HTTP/1.1 200 Connection established\r\n\r\n")
@@ -337,11 +351,30 @@ async def _serve_intercepted_connection(
                 await _send_provider_not_connected(sandbox_writer=sandbox_tls_writer, provider=provider)
                 return
 
+            platform_shared = credential_source is ProviderCredentialSource.PLATFORM
+
+            # Refuse before forwarding, and only what HUMR would have charged
+            # for. Scheduled and background agent work reaches the proxy the
+            # same way a chat turn does, so it hits this same wall with no
+            # special case.
+            if entitlement_service is not None and tls_usage_metering.request_is_metered(
+                provider_slug=provider.slug, platform_shared=platform_shared,
+            ):
+                refusal = await _billing_refusal(entitlement_service=entitlement_service, provider_slug=provider.slug)
+                if refusal is not None:
+                    logger.info("refused %s request: organization credits exhausted", provider.slug)
+                    await tls_http_message_relay.send_json_response(
+                        writer=sandbox_tls_writer,
+                        status=402,
+                        payload=refusal,
+                    )
+                    return
+
             usage_tap = None
-            if credential_source is not ProviderCredentialSource.PASSTHROUGH and usage_reporter is not None:
+            if usage_reporter is not None:
                 usage_tap = tls_usage_metering.tap_for_request(
                     provider_slug=provider.slug,
-                    platform_shared=credential_source is ProviderCredentialSource.PLATFORM,
+                    platform_shared=platform_shared,
                     record_usage=usage_reporter.record,
                 )
 
@@ -391,6 +424,19 @@ async def _serve_intercepted_connection(
         with contextlib.suppress(Exception):
             sandbox_tls_writer.close()
             await sandbox_tls_writer.wait_closed()
+
+
+async def _billing_refusal(entitlement_service: billing_entitlement_service.BillingEntitlementService, provider_slug: str) -> dict | None:
+    """The 402 body for a metered request HUMR will not fund, or None to let it through.
+
+    Guarded the way the usage tap is: billing is an overlay on the proxy path,
+    and a bug in it must cost a charge, never a request.
+    """
+    try:
+        return await entitlement_service.refusal_for_metered_request()
+    except Exception:
+        logger.exception("%s: billing check failed; letting the request through", provider_slug)
+        return None
 
 
 async def _build_provider_request(

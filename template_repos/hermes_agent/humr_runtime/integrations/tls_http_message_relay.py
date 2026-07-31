@@ -603,15 +603,15 @@ def _http_reason(status: int) -> str:
         100: "Continue", 101: "Switching Protocols", 103: "Early Hints",
         200: "OK", 201: "Created", 204: "No Content", 301: "Moved Permanently",
         302: "Found", 304: "Not Modified", 400: "Bad Request", 401: "Unauthorized",
-        403: "Forbidden", 404: "Not Found", 409: "Conflict", 410: "Gone",
+        402: "Payment Required", 403: "Forbidden", 404: "Not Found", 409: "Conflict", 410: "Gone",
         429: "Too Many Requests", 500: "Internal Server Error", 502: "Bad Gateway",
         503: "Service Unavailable",
     }.get(status, "OK")
 
 
-async def send_json_error(writer: asyncio.StreamWriter, status: int, message: str) -> None:
-    """Write a small JSON error response and drain it."""
-    body = json.dumps({"error": {"code": status, "message": message}}).encode()
+async def send_json_response(writer: asyncio.StreamWriter, status: int, payload: dict) -> None:
+    """Write a small JSON response of the caller's own shape and drain it."""
+    body = json.dumps(payload).encode()
     writer.write(
         b"HTTP/1.1 " + str(status).encode() + b" " + _http_reason(status=status).encode() + b"\r\n"
         b"Content-Type: application/json\r\n"
@@ -619,6 +619,11 @@ async def send_json_error(writer: asyncio.StreamWriter, status: int, message: st
         b"Connection: close\r\n\r\n" + body
     )
     await writer.drain()
+
+
+async def send_json_error(writer: asyncio.StreamWriter, status: int, message: str) -> None:
+    """Write a small JSON error response and drain it."""
+    await send_json_response(writer=writer, status=status, payload={"error": {"code": status, "message": message}})
 
 
 async def send_raw(writer: asyncio.StreamWriter, status: int, body: bytes) -> None:
