@@ -228,5 +228,6 @@ urlpatterns = [
     path("platform/fleet/app/<uuid:app_id>/log/", views.fleet_deployment_log, name="fleet_deployment_log"),
     # Staff-only platform billing dashboard (cross-org by design; gated by is_staff)
     path("platform/billing/", views.platform_billing, name="platform_billing"),
+    path("platform/billing/organization/<uuid:organization_id>/ledger/", views.platform_billing_organization_ledger, name="platform_billing_organization_ledger"),
     path("platform/billing/organization/<uuid:organization_id>/app/<uuid:app_id>/events/", views.platform_billing_app_events, name="platform_billing_app_events"),
 ]
