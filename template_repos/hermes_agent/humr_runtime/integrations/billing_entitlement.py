@@ -106,7 +106,7 @@ def _refusal_body(entitlement_snapshot: dict, upgrade_url: str) -> dict:
         "error": {
             "type": "insufficient_credits",
             "code": "credits_exhausted",
-            "message": f"This Humanity Rules organization is out of credits, so the model call was not sent. {resolution}",
+            "message": f"Your organization is out of credits, so the model call was not sent. {resolution}",
         },
         "entitlement": entitlement_snapshot,
         "upgrade_url": upgrade_url,

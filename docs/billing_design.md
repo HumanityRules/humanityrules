@@ -177,7 +177,7 @@ Environment reporting is trusted. Operator runs on HumR infra; Team/Enterprise (
 
 1. The agent surfaces the 402 error text naturally in conversation, so even with zero UI work the user learns why calls fail.
 2. The broker exposes its cached snapshot same-origin to the WebUI: `GET /__humr_broker/billing` on the existing control API (`/__humr_broker/*` Caddy route, same pattern as the integrations cards). One poller per agent app (each app's WebUI polls its own broker); enforcement and display read the same state and cannot disagree.
-3. The webui-extension renders a credits card in the bottom-left sidebar area (Lovable-style): a quiet meter normally, "running low — upgrade" below a warning threshold (~20% remaining), "out of credits" at exhaustion. Same component, three states. The renewal date appears only on plans with a monthly grant; trial's one-time grant has none, so its exhausted state says "upgrade" alone. Upgrade links to the CP billing page.
+3. The webui-extension renders a credits card at the bottom of the sidebar (Lovable-style, a small rounded card): "Credits {remaining}/{grant}" with an Upgrade link beside it, then the plan name, then the renewal date. Two states — quiet normally, drawing the eye at exhaustion; there is no separate running-low state and no meter bar. The Upgrade link (to the CP billing page) is always present. Negative balances display as zero: enforcement legitimately runs to −10%, and a negative number in the sidebar reads as a bug. The renewal line appears only when the snapshot carries a renewal date; trial's one-time grant never does, and none exists until subscriptions ship. The card renders nothing at all until the broker has a usable snapshot.
 
 ## 8. Stripe and plan lifecycle
 
