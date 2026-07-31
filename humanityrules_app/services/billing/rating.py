@@ -253,6 +253,10 @@ def _upsert_day_charge(
     previous_metadata = entry.metadata if entry is not None else {}
     previous_amount = entry.amount if entry is not None else Decimal(0)
     metadata = _accumulated_metadata(previous_metadata=previous_metadata, rated_events=rated_events)
+    # App attribution mirrors the event snapshot columns: charge history must
+    # outlive App rows, and the description is display text, not data.
+    metadata["app_id"] = str(app_id)
+    metadata["app_slug"] = app_slug
     exact_credits = Decimal(metadata["exact_credits"])
     amount = exact_credits.quantize(Decimal(1), rounding=decimal.ROUND_HALF_EVEN)
     description = f"Agent usage on {posting_date.isoformat()} ({app_slug})"
