@@ -126,7 +126,6 @@ def rate_pending_events(now: datetime.datetime) -> None:
         .distinct()
     )
     if not organization_ids:
-        logger.info(f"rating pass found no unrated events occurring since {horizon_start.isoformat()}")
         return
 
     logger.info(
