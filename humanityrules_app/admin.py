@@ -9,6 +9,8 @@ from humanityrules_app.models import (
     App,
     AppPermissions,
     AppTemplate,
+    BillingBalance,
+    BillingLedgerEntry,
     BillingUsageEvent,
     DeploymentLog,
     DeploymentRecord,
@@ -404,6 +406,67 @@ class BillingUsageEventAdmin(admin.ModelAdmin):
         return False
 
     def has_delete_permission(self, request: HttpRequest, obj: BillingUsageEvent | None = None) -> bool:
+        return False
+
+
+@admin.register(BillingLedgerEntry)
+class BillingLedgerEntryAdmin(admin.ModelAdmin):
+    list_display = ["created_at", "organization", "type", "amount", "idempotency_key", "description"]
+    list_filter = ["type", "organization"]
+    search_fields = ["idempotency_key", "description", "organization__name", "organization__slug"]
+    readonly_fields = [
+        "id",
+        "organization",
+        "type",
+        "amount",
+        "idempotency_key",
+        "usage_event",
+        "description",
+        "metadata",
+        "created_at",
+    ]
+    date_hierarchy = "created_at"
+    ordering = ["-created_at"]
+    list_select_related = ["organization"]
+
+    fieldsets = (
+        ("Movement", {
+            "fields": ("organization", "type", "amount", "description"),
+        }),
+        ("Provenance", {
+            "fields": ("usage_event", "metadata"),
+        }),
+        ("Metadata", {
+            "fields": ("id", "idempotency_key", "created_at"),
+            "classes": ("collapse",),
+        }),
+    )
+
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        return False
+
+    def has_change_permission(self, request: HttpRequest, obj: BillingLedgerEntry | None = None) -> bool:
+        return False
+
+    def has_delete_permission(self, request: HttpRequest, obj: BillingLedgerEntry | None = None) -> bool:
+        return False
+
+
+@admin.register(BillingBalance)
+class BillingBalanceAdmin(admin.ModelAdmin):
+    list_display = ["organization", "credits", "updated_at"]
+    search_fields = ["organization__name", "organization__slug"]
+    readonly_fields = ["id", "organization", "credits", "updated_at"]
+    ordering = ["organization__name"]
+    list_select_related = ["organization"]
+
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        return False
+
+    def has_change_permission(self, request: HttpRequest, obj: BillingBalance | None = None) -> bool:
+        return False
+
+    def has_delete_permission(self, request: HttpRequest, obj: BillingBalance | None = None) -> bool:
         return False
 
 

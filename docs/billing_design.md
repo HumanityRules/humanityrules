@@ -73,16 +73,16 @@ Four new models plus the plan field and overrides on Organization. All queries o
 
 ### 4.2 BillingLedgerEntry
 
-Append-only. No updates, no deletes; corrections are new entries.
+Append-only. No updates, no deletes; corrections are new entries. One exception: the current day's charge entry accumulates in place until its day closes (§5.3.3).
 
 1. **`organization`** — FK, indexed.
 2. **`type`** — `grant` / `charge` / `adjustment` / `expiry`.
 3. **`amount`** — signed Decimal credits. Positive grants, negative charges/expiry.
 4. **`idempotency_key`** — unique. Per-source formats, e.g. `grant:{subscription_id}:{period_start}`, `charge:{org_id}:{date}`. Duplicate insert is a no-op; this is what makes retried webhooks, re-run jobs, and resent usage reports safe.
-5. **`usage_event`** — nullable FK to BillingUsageEvent, set on charges.
+5. **`usage_event`** — nullable FK to BillingUsageEvent, set only on entries that correspond to exactly one event (e.g. a future single-event correction). Day-charge entries leave it NULL — one FK cannot name a day's many events. The event↔entry mapping is `rated_at` instead: rating stamps events with the same clock instant the posting date derives from, so `charge:{org_id}:{app_id}:{rated_at.date()}` reconstructs an event's entry exactly, midnight-straddling passes included.
 6. **`description`** — human-readable line for the billing page.
-7. **`metadata`** — JSON for type-specific facts: grants stamp `plan` + `plan_version`, charges stamp `rate_card_version` + usage breakdown.
-8. **`created_at`** — nothing else; nothing updates.
+7. **`metadata`** — JSON for type-specific facts: grants stamp `plan` + `plan_version`, charges stamp `rate_card_versions` (a sorted list — a day entry legitimately mixes cards when a late event prices by an older card) + usage breakdown + the exact Decimal sum (§5.3.4).
+8. **`created_at`**, **`updated_at`** — `updated_at` exists to make the day-charge exception visible and auditable: on every other entry it equals `created_at`, and a charge whose `updated_at` postdates its posting day is a broken invariant, checked by `humr_billing_verify`.
 
 Versions are stamped on the entries they influenced, at write time. No ledger-wide version columns.
 
@@ -99,7 +99,7 @@ Source-agnostic, on the AppDailyCost pattern: the billable units live in a per-s
 1. **`organization`**, **`app_id`** + **`app_slug`**, **`owner_username`** — attribution as reported by the broker. App attribution is a snapshot (plain id + slug columns, no FK): app removal and environment teardown delete App rows, and billing history must outlive them — including rating's `charge:{org_id}:{app_id}:{date}` key for events rated after the app is gone. Session-level attribution inside the agent is deliberately not captured.
 2. **`source`** — `llm` for now; `tavily`, `x`, `bedrock` reserved.
 3. **`subkey`** — source-specific sub-dimension; for `llm`, the provider model id as observed.
-4. **`quantities`** — JSON dict of the source's billable units, schema-validated per source at ingest (exact key set, non-negative ints). For `llm`: `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, `reasoning_tokens` — disjoint buckets (input excludes cache reads; reasoning is informational, already inside output).
+4. **`quantities`** — JSON dict of the source's billable units, schema-validated per source at ingest (known keys only, non-negative ints; an absent key reads as 0 — see §6.3). For `llm`: `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, `reasoning_tokens`. Only `input_tokens` (cache reads removed) and `output_tokens` are priceable on their own. `reasoning_tokens` is informational, already inside `output_tokens`. `cache_write_tokens` is recorded as the provider reports it — the Codex backend sends the field on every response, so far always 0 — and its relationship to `input_tokens` is unestablished, so rating must not price it until that is settled.
 5. **`occurred_at`** — event time at the broker; rating selects the rate card active at this time.
 6. **`idempotency_key`** — unique, minted by the broker at event creation.
 7. **`rated_at`** — null until rating has charged it; unpriced events stay visibly unrated (§6.3).
@@ -114,24 +114,25 @@ This covers time-versioning only. Per-org grandfathering (two orgs on different 
 
 ### 5.2 Contents
 
-One effective model row, anonymous to customers (the UI says "agent usage", never a model name). Keyed internally by observed model id so a second model slots in. Four buckets priced separately — blended per-token rates misprice cache-heavy agent workloads.
+Rates are keyed by **curated model-family prefixes**, longest-prefix-wins, not exact ids: the broker reports whatever id the Codex backend chose, and observed traffic already carries dated snapshots (`gpt-5.4-mini-2026-03-17`) that rotate without notice — exact matching would stall rating on every rotation. A prefix matches only exactly or at a `-` boundary — bare `startswith` would price a hypothetical `gpt-5.55` at `gpt-5.5` rates, so it refuses as a new family instead. A genuinely new family (`gpt-6`) likewise refuses. Suffixes are not assumed cosmetic: the `gpt-5.6` celestial variants (`-sol`, `-terra`, `-luna`) are distinct price tiers spanning 25x, so each is its own family and there is deliberately no bare `gpt-5.6` entry — an unseen variant (`gpt-5.6-nova`) refuses rather than pricing at another tier's rate. One guard on top: an id carrying a tier token (`mini`, `nano`, `pro`) that its matched prefix lacks is refused, not priced (a hypothetical `gpt-5.5-mini` silently priced at `gpt-5.5` rates is the mispricing this catches). Prefix matching is a Codex-era bridge; after the per-token provider switch HumR chooses the ids it calls. Models stay anonymous to customers (the UI says "agent usage", never a model name). Four buckets priced separately — blended per-token rates misprice cache-heavy agent workloads.
 
-Anchor: **1.5x** the per-token price HumR would pay on OpenRouter for the equivalent model, rounded to friendly credit numbers. Indicative starting values (verify live provider prices at implementation time; they drift):
+Anchor: **1.5x** the per-token price HumR would pay on OpenRouter for the equivalent model, rounded to friendly credit numbers. v1 (provider prices verified live 2026-07-30), credits per 1M tokens:
 
-1. Input: ~190 credits per 1M tokens.
-2. Output (reasoning folds in, matching OpenAI billing): ~1,500 credits per 1M tokens.
-3. Cache read: ~19 credits per 1M tokens.
-4. Cache write: 0 — OpenAI doesn't charge it.
+1. **`gpt-5.5`, `gpt-5.6-sol`:** input 750, cache read 75, output 4,500 (reasoning folds in, matching OpenAI billing), cache write 0 — OpenAI doesn't charge it.
+2. **`gpt-5.6-terra`:** input 300, cache read 30, output 1,800, cache write 0.
+3. **`gpt-5.6-luna`:** input 30, cache read 3, output 180, cache write 0.
+4. **`gpt-5.4-mini`:** input 110, cache read 11, output 675, cache write 0.
 
-Rates are product prices, not costs: they charge what HumR would charge on a per-token provider, so the eventual Codex → OpenRouter/Baseten switch is an internal swap, not a customer-visible repricing.
+Rates are product prices, not costs: they charge what HumR would charge on a per-token provider, so the eventual Codex → OpenRouter/Baseten switch is an internal swap, not a customer-visible repricing. These rates are ~4x the indicative numbers this design was first sized against; whether the 2,000-credit Operator grant survives real burn is a shadow-period question (§11 step 4).
 
 ### 5.3 Rating rules
 
 1. The rating function is the only code that turns usage into credits. Input: BillingUsageEvent. Output: credit amount + breakdown dict for entry metadata.
-2. Unknown model or source: refuse and flag, never guess or charge zero. Same rule as the Bedrock cost subsystem.
-3. Charge granularity: rate per event, but write one charge entry per org/app/day (idempotency key `charge:{org_id}:{app_id}:{date}`, amount accumulated transactionally). Keeps the ledger human-readable. The current day's entry accumulates; closed days are frozen forever.
-4. The rating job is one global periodic task running every minute: pick up unrated events (partial index on `rated_at IS NULL`, `skip_locked` against overlapping runs), then per org in its own transaction — lock the balance, upsert day entries, mark events rated. Enforcement depends on this cadence: the broker's balance snapshot is only as fresh as rating.
-5. `services/cost/` (Bedrock USD cost) stays separate. It answers "what did it cost us in USD"; rating answers "what do we charge in credits". Different numbers, different owners.
+2. Unknown family or source: refuse and flag, never guess or charge zero (same rule as the Bedrock cost subsystem). Refused events stay unrated and are retried every run, so adding the family to the rate card prices them retroactively at their `occurred_at` card. The retry window is the job's 30-day horizon (rule 5); events unpriced longer never charge — undercharging is the accepted failure mode (§6.3).
+3. Charge granularity: rate per event, but write one charge entry per org/app/day (idempotency key `charge:{org_id}:{app_id}:{date}`, amount accumulated transactionally). Keeps the ledger human-readable. The day is the **rating date** (posting date, UTC, derived once inside the rating transaction), not the event's `occurred_at` — so the job can only ever write to today's entry, and past entries are immutable by construction with no close signal or grace-window machinery. A late-arriving event is still priced by the card at its `occurred_at` (§5.1); it just lands in a later bucket, with the true usage time in the event row. "Billed on day X" and "used on day X" only diverge for events straddling midnight.
+4. Rounding: credits at rest are integers (§3), but events rate fractionally. Each upsert adds the event's precise Decimal amount to an exact running sum kept in the day entry's metadata and sets `amount = round(exact_sum)` (`ROUND_HALF_EVEN`, Decimal's default); the balance moves by the delta of the rounded amounts, so `balance = SUM(entries)` holds exactly. Per-event rounding is forbidden — it biases systematically (a day of 0.4-credit events would charge zero); recomputing from the exact sum keeps every amount within half a credit of truth with no drift.
+5. The rating job is one global periodic tick in the CP job worker (`services/jobs/job_worker.py`), running every minute: pick up unrated events with `occurred_at` inside the last 30 days (partial index on `rated_at IS NULL`, `skip_locked` against overlapping runs), then per org in its own transaction — lock the balance, upsert day entries, mark events rated. A per-org pass caps at 2,000 events so no transaction holds the balance lock unboundedly; the remainder waits for the next tick. The horizon bounds the scan set against permanently-unrateable rows with no quarantine flag. Enforcement depends on this cadence: the broker's balance snapshot is only as fresh as rating. The job logs verbosely — pickups, prices, refusals, upserts, balance deltas; shadow-period observability is a requirement, not noise.
+6. `services/cost/` (Bedrock USD cost) stays separate. It answers "what did it cost us in USD"; rating answers "what do we charge in credits". Different numbers, different owners.
 
 ## 6. Metering at the integrations broker
 
@@ -153,6 +154,7 @@ Environment reporting is trusted. Operator runs on HumR infra; Team/Enterprise (
 2. No spool. CP unreachable = drop the batch with a log line. The failure mode is undercharging, acceptable while inference cost is flat. Idempotency keys are minted at event creation anyway, so a spool can be added later without double-charge risk.
 3. Attribution: the broker is a per-app sidecar (an environment hosts many agent apps, each with its own broker), and it already knows `owner_username` + `app_slug` — every event carries org, app, and owning user. The env bearer names only the environment, which is why the payload must carry the app identity.
 4. The CP endpoint validates the env bearer, resolves the org, and inserts BillingUsageEvents (duplicate keys ignored). Rating runs as a periodic job over unrated events.
+5. Version skew is the steady state, not an error: brokers ship inside HA images and redeploy long after the CP does. A malformed event still rejects the whole batch — the reporter is trusted platform code, so malformed means a bug — but an old broker omitting a quantity key (reads as 0) or reporting a source this CP predates (that event is skipped, the rest of the batch ingests) must never cost the batch. Only the reverse skew rejects: a broker *ahead* of the CP is a template shipped before the CP that understands it, and there the CP cannot store a quantity rating will need. Deploy the CP first.
 
 ### 6.4 Sources outside the broker
 
