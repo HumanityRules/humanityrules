@@ -87,7 +87,8 @@ class TestRateCardSelection(SimpleTestCase):
         self.assertIsNotNone(card)
         self.assertEqual(card.version, "v1")
         self.assertEqual(
-            sorted(card.llm), ["gpt-5.4-mini", "gpt-5.5", "gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"],
+            sorted(card.llm),
+            ["gpt-5.3-codex-spark", "gpt-5.4-mini", "gpt-5.5", "gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"],
         )
 
 
@@ -370,6 +371,8 @@ class TestRatingPassCharges(RatingPassTestBase):
         self.assertEqual(entry.metadata["rate_card_versions"], ["v1"])
         self.assertEqual(entry.metadata["event_count"], 1)
         self.assertEqual(entry.metadata["usage"]["gpt-5.6-sol"]["output_tokens"], 350)
+        self.assertEqual(entry.metadata["app_id"], str(self.app_id))
+        self.assertEqual(entry.metadata["app_slug"], "rating-agent")
         self.assertEqual(self.balance_credits(organization=self.organization), Decimal(-2))
         self.assert_invariant_holds(organization=self.organization)
 
