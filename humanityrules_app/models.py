@@ -1804,6 +1804,138 @@ class BillingUsageEvent(models.Model):
         return f"BillingUsageEvent {self.idempotency_key} org={self.organization_id} {self.source}/{self.subkey}"
 
 
+class BillingLedgerEntry(models.Model):
+    """A single credit movement on an organization's account — the money record.
+
+    Credits are the unit customers spend. Usage arrives as
+    :class:`BillingUsageEvent` rows (raw metering facts: tokens, timestamps,
+    attribution). This model is what those facts become after rating, and what
+    grants, adjustments, and expiry write directly: signed whole-credit amounts
+    that explain every change to :class:`BillingBalance`.
+
+    Think of the ledger as a check register. Each row says "this org gained or
+    lost N credits, for this reason, at this time." The balance is only the
+    running total of these rows; if you ever need to audit why a number moved,
+    you start here.
+
+    Most of the ledger is append-only. Once a row exists, we do not edit or
+    delete it — a correction is a *new* entry that offsets the old one. That
+    keeps history honest and makes "what did the balance look like on Tuesday?"
+    a sum over rows, not a reconstruction from mutations.
+
+    The one deliberate exception is today's charge. Rating does not write one
+    ledger row per usage event (that would flood the billing page). Instead it
+    maintains one charge entry per organization, app, and UTC calendar day —
+    keyed ``charge:{org_id}:{app_id}:{date}`` — and folds each newly rated event
+    into that day's row by updating its amount in place. The day used for the
+    key is the *rating* (posting) date taken inside the rating transaction, not
+    the event's ``occurred_at``. Because the job can therefore only ever reopen
+    *today's* entry, every past day's charge is immutable without any separate
+    "close the day" step. A late-arriving event is still *priced* with the rate
+    card that was active when the usage happened; it simply lands in a later
+    day's bucket, with the true usage time retained on the event row.
+
+    ``idempotency_key`` is unique across the table and is how every writer stays
+    safe under retries. Stripe webhooks, grant jobs, and usage reports may all
+    fire twice; a duplicate key means "this movement already happened — do
+    nothing." For day charges the same key is also the handle rating uses to
+    find and reopen today's accumulating entry.
+
+    Plan and rate-card versions are not columns on this table. They are stamped
+    into ``metadata`` on the specific entries they influenced (grants record the
+    plan, charges the rate card and a usage breakdown), so an old row always
+    explains itself even after the config in code has moved on.
+
+    ``usage_event`` is set when an entry corresponds to exactly one metered
+    fact. Day charge entries leave it null because they aggregate many events;
+    for those, the audit trail is the breakdown in ``metadata`` plus each
+    contributing event's ``rated_at`` (whose UTC date is the charge's posting
+    date).
+    """
+
+    class Type(models.TextChoices):
+        GRANT = "grant", "Grant"
+        CHARGE = "charge", "Charge"
+        ADJUSTMENT = "adjustment", "Adjustment"
+        EXPIRY = "expiry", "Expiry"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
+    organization = models.ForeignKey(
+        "humanityrules_app.Organization", on_delete=models.CASCADE, related_name="billing_ledger_entries",
+    )
+    type = models.CharField(max_length=16, choices=Type.choices)
+    amount = models.DecimalField(
+        max_digits=20,
+        decimal_places=0,
+        help_text="Signed whole credits: positive for grants, negative for charges and expiry.",
+    )
+    idempotency_key = models.CharField(
+        max_length=128,
+        unique=True,
+        help_text="Per-source key, e.g. 'charge:{org_id}:{app_id}:{date}'. A duplicate insert is a no-op.",
+    )
+    usage_event = models.ForeignKey(
+        "humanityrules_app.BillingUsageEvent",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="ledger_entries",
+        help_text="The single metered fact behind this entry; null on day charges, which aggregate many.",
+    )
+    description = models.TextField(blank=True, help_text="Human-readable line for the billing page.")
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Type-specific facts: grants stamp plan + plan_version, charges rate card versions + usage breakdown.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        help_text="Equals created_at except on today's accumulating day charge — the one mutable row.",
+    )
+
+    class Meta:
+        verbose_name = "Billing Ledger Entry"
+        verbose_name_plural = "Billing Ledger Entries"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["organization", "created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"BillingLedgerEntry {self.idempotency_key} org={self.organization_id} {self.type} {self.amount}"
+
+
+class BillingBalance(models.Model):
+    """An organization's credit balance: the ledger's transactional projection.
+
+    Exists to be the row every credit write takes ``SELECT FOR UPDATE`` on, so
+    concurrent writers serialize per organization. Invariant: ``credits`` equals
+    the sum of that organization's ledger entries at all times, checkable with
+    ``manage.py humr_billing_verify``. Every write path goes through the lock
+    plus an idempotency key — no exceptions, or reconciliation happens by hand.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
+    organization = models.OneToOneField(
+        "humanityrules_app.Organization", on_delete=models.CASCADE, related_name="billing_balance",
+    )
+    credits = models.DecimalField(
+        max_digits=20,
+        decimal_places=0,
+        default=0,
+        help_text="Whole credits remaining; equals the sum of this organization's ledger entries.",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Billing Balance"
+        verbose_name_plural = "Billing Balances"
+
+    def __str__(self) -> str:
+        return f"BillingBalance org={self.organization_id} {self.credits}"
+
+
 class JobWorkerRun(models.Model):
     """One incarnation of a job worker process, heartbeating while alive.
 
