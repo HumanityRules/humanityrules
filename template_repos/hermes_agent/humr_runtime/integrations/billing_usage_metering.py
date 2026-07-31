@@ -1,24 +1,15 @@
-"""Observe billable LLM usage as it streams through the TLS-intercept proxy,
-and report it to HUMR.
+"""Observe billable LLM usage and report it to HUMR.
 
-Not every proxied request is a billing event. The agent may call a model
-provider with the user's own key, with an org-shared key, or with a
-credential HUMR itself funds (the platform tier). Only the last of those
-consumes HUMR credits — customer-funded traffic must not. And even among
-platform-funded calls, this module can only meter providers whose response
-shape it knows how to read. Today that is a single dialect: the OpenAI
-Responses API used by Codex. Other model providers are expected to move
-behind a HUMR-owned gateway before they are billed, so the parser here is
-not meant to grow provider by provider.
+The billing facade decides whether a request consumes credits. For an allowed
+metered request, it builds a `UsageTap` from this module and hands it to the TLS
+relay. The relay feeds the tap decoded response bytes after removing HTTP
+framing. The intercept strips `Accept-Encoding` exactly when that tap is
+attached, so upstream response bytes stay readable to the observer.
 
-`tap_for_request` is the whole metering decision in one place. The
-intercept layer asks it after credential injection, passing the provider
-slug and whether the injected credential was platform-shared. It gets
-back either a `UsageTap` to attach to the response relay, or `None`.
-When a tap is returned, the intercept also strips `Accept-Encoding` so
-the upstream cannot compress the body into something the tap cannot read.
-When no reporter is configured at all, the proxy behaves as if this
-module did not exist.
+Today the tap understands one response dialect: the OpenAI Responses API used
+by Codex. Other model providers are expected to move behind a HUMR-owned gateway
+before they are billed, so this parser is not meant to grow provider by
+provider.
 
 The two pieces are both observe-only — they never alter the bytes the
 sandbox receives:
@@ -37,7 +28,7 @@ sandbox receives:
   HUMR is unreachable the batch is dropped with a log line. The failure
   mode is undercharging, never a stuck agent. Each accepted report comes
   back carrying the organization's entitlement, which the reporter hands
-  on so `billing_entitlement_service` can enforce against current numbers.
+  to its accepted-response callback.
 
 Events themselves are source-generic. Billable units ride in a
 `quantities` dict; `subkey` carries the source's sub-dimension (for
@@ -58,10 +49,10 @@ import re
 import uuid
 from collections.abc import Callable
 
-from humr_client import HumrClient
+import humr_client
 
 
-logger = logging.getLogger("tls_usage_metering")
+logger = logging.getLogger("billing_usage_metering")
 
 
 REPORT_PATH = "/api/runtime/billing-usage-events"
@@ -83,32 +74,6 @@ _MARKER_SNIFF_BYTES = 256
 
 _TERMINAL_EVENT_NAMES = frozenset({b"response.completed", b"response.failed", b"response.incomplete"})
 _TERMINAL_TYPE_MARKER_RE = re.compile(rb'"type"\s*:\s*"response\.(completed|failed|incomplete)"')
-
-# The provider slugs whose response dialect UsageTap can extract usage from.
-_PARSED_PROVIDER_SLUGS = frozenset({"openai-codex"})
-
-
-def request_is_metered(provider_slug: str, platform_shared: bool) -> bool:
-    """Whether this request's response consumes HUMR credits.
-
-    The metering decision in one place: HUMR funded the injected credential
-    (platform_shared — customer-funded credentials consume no credits) and the
-    provider's dialect is one the tap can parse. Billing enforcement asks the
-    same question, so the broker can never refuse a request it would not have
-    charged for.
-    """
-    return platform_shared and provider_slug in _PARSED_PROVIDER_SLUGS
-
-
-def tap_for_request(provider_slug: str, platform_shared: bool, record_usage: Callable[[dict], None]) -> "UsageTap | None":
-    """Return a tap when this request's response is metered, else None.
-
-    Callers strip the request's Accept-Encoding exactly when a tap is returned,
-    so the response stays readable iff someone is reading it.
-    """
-    if not request_is_metered(provider_slug=provider_slug, platform_shared=platform_shared):
-        return None
-    return UsageTap(provider_slug=provider_slug, record_usage=record_usage)
 
 
 def _is_count(value: object) -> bool:
@@ -352,7 +317,7 @@ class UsageReporter:
     with it.
     """
 
-    def __init__(self, humr_client: HumrClient, on_report_response: Callable[[dict], None]) -> None:
+    def __init__(self, humr_client: humr_client.HumrClient, on_report_response: Callable[[dict], None]) -> None:
         self._humr_client = humr_client
         self._on_report_response = on_report_response
         self._events: list[dict] = []

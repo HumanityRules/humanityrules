@@ -1,6 +1,6 @@
 'use strict';
 
-// Tests for the sidebar credits card: the three states it renders, the facts
+// Tests for the sidebar credits card: the states it renders, the facts
 // it refuses to invent, and how it polls its own broker.
 
 const assert = require('node:assert/strict');
@@ -290,24 +290,16 @@ test('mounting waits for the sidebar, then polls the broker same-origin', async 
   assert.ok(harness.card());
 });
 
-test('a healthy balance renders a quiet meter and nothing else', async () => {
+test('a healthy balance renders the count, plan, and upgrade link', async () => {
   const harness = await mounted(entitlement({ credits_remaining: 1200 }));
 
   assert.equal(harness.card().hidden, false);
   assert.equal(harness.card().dataset.state, 'ok');
   assert.equal(harness.part('humr-credits-label').textContent, 'Credits');
-  assert.equal(harness.part('humr-credits-count').textContent, '1,200 / 2,000');
-  assert.equal(harness.part('humr-credits-meter-fill').style.width, '60%');
-  assert.equal(harness.part('humr-credits-note').hidden, true);
-  assert.equal(harness.part('humr-credits-upgrade').hidden, true);
-});
-
-test('below the warning threshold the card says running low and offers upgrading', async () => {
-  const harness = await mounted(entitlement({ credits_remaining: 300 }));
-
-  assert.equal(harness.card().dataset.state, 'low');
-  assert.equal(harness.part('humr-credits-note').textContent, 'Running low');
-  assert.equal(harness.part('humr-credits-note').hidden, false);
+  assert.equal(harness.part('humr-credits-count').textContent, '1,200/2,000');
+  assert.equal(harness.part('humr-credits-plan').textContent, 'Operator plan');
+  assert.equal(harness.part('humr-credits-plan').hidden, false);
+  assert.equal(harness.part('humr-credits-renewal').hidden, true);
   const upgrade = harness.part('humr-credits-upgrade');
   assert.equal(upgrade.hidden, false);
   assert.equal(upgrade.getAttribute('href'), 'https://humr.example/settings/billing/');
@@ -315,29 +307,36 @@ test('below the warning threshold the card says running low and offers upgrading
   assert.equal(upgrade.getAttribute('rel'), 'noopener');
 });
 
-test('twenty percent remaining is not yet running low', async () => {
-  const harness = await mounted(entitlement({ credits_remaining: 400 }));
+test('a lower positive balance remains in the quiet state', async () => {
+  const harness = await mounted(entitlement({ credits_remaining: 300 }));
 
   assert.equal(harness.card().dataset.state, 'ok');
+  assert.equal(harness.part('humr-credits-count').textContent, '300/2,000');
 });
 
 test("a trial's exhausted state offers upgrading alone", async () => {
   const harness = await mounted(entitlement({ credits_remaining: -50, exhausted: true, plan: 'trial', renewal_date: null }));
 
   assert.equal(harness.card().dataset.state, 'out');
-  assert.equal(harness.part('humr-credits-label').textContent, 'Out of credits');
-  // Negative balances are a real state at the broker; the card floors them at zero.
-  assert.equal(harness.part('humr-credits-count').textContent, '0 / 2,000');
-  assert.equal(harness.part('humr-credits-meter-fill').style.width, '0%');
-  assert.equal(harness.part('humr-credits-note').hidden, true);
+  assert.equal(harness.part('humr-credits-label').textContent, 'Credits');
+  assert.equal(harness.part('humr-credits-count').textContent, '0/2,000');
+  assert.equal(harness.part('humr-credits-plan').textContent, 'Trial plan');
+  assert.equal(harness.part('humr-credits-renewal').hidden, true);
   assert.equal(harness.part('humr-credits-upgrade').hidden, false);
 });
 
 test('a renewing plan adds the renewal date to the exhausted state', async () => {
   const harness = await mounted(entitlement({ credits_remaining: -200, exhausted: true, renewal_date: '2026-08-15' }));
 
-  assert.equal(harness.part('humr-credits-note').hidden, false);
-  assert.equal(harness.part('humr-credits-note').textContent, 'Credits renew on Aug 15, 2026');
+  assert.equal(harness.part('humr-credits-renewal').hidden, false);
+  assert.equal(harness.part('humr-credits-renewal').textContent, 'Credits renew on Aug 15, 2026');
+});
+
+test('the plan row stays hidden when the snapshot carries no plan string', async () => {
+  const harness = await mounted(entitlement({ plan: null }));
+
+  assert.equal(harness.part('humr-credits-plan').textContent, '');
+  assert.equal(harness.part('humr-credits-plan').hidden, true);
 });
 
 test('the card stays hidden until HUMR has answered with real numbers', async () => {
@@ -357,7 +356,7 @@ test('a failed poll leaves the last good numbers on screen', async () => {
   harness.fetchQueue.push(response({ error: 'nope' }, false));
   await harness.runNextTimer();
 
-  assert.equal(harness.part('humr-credits-count').textContent, '1,200 / 2,000');
+  assert.equal(harness.part('humr-credits-count').textContent, '1,200/2,000');
   assert.equal(harness.card().hidden, false);
 });
 
@@ -369,8 +368,8 @@ test('polling continues on an interval and repaints the new numbers', async () =
   await harness.runNextTimer();
   await harness.settle();
 
-  assert.equal(harness.part('humr-credits-count').textContent, '40 / 2,000');
-  assert.equal(harness.card().dataset.state, 'low');
+  assert.equal(harness.part('humr-credits-count').textContent, '40/2,000');
+  assert.equal(harness.card().dataset.state, 'ok');
   assert.equal(harness.timers.size, 1, 'the next poll must already be scheduled');
 });
 
@@ -386,6 +385,6 @@ test('a hidden tab stops polling and a returning one refreshes at once', async (
   await harness.document.dispatch('visibilitychange');
   await harness.settle();
 
-  assert.equal(harness.part('humr-credits-count').textContent, '900 / 2,000');
+  assert.equal(harness.part('humr-credits-count').textContent, '900/2,000');
   assert.equal(harness.timers.size, 1);
 });

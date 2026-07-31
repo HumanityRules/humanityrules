@@ -23,20 +23,19 @@ no snapshot at all the broker never blocks, and an exhausted organization whose
 control plane is unreachable keeps being refused on the last thing HUMR actually
 said rather than being silently let through.
 
-Refusal targets exactly the requests that would have been metered — the
-predicate lives in `tls_usage_metering.request_is_metered` and is asked by both
-sides. Customer-funded model traffic and every connector call consume no
-credits, so exhaustion never touches them.
+The billing facade decides which requests are metered. This member only answers
+the narrower question it owns: given a metered request, does the latest HUMR
+state require a refusal?
 """
 
 import asyncio
 import logging
 import time
 
-from humr_client import HumrClient
+import humr_client
 
 
-logger = logging.getLogger("billing_entitlement_service")
+logger = logging.getLogger("billing_entitlement")
 
 
 ENTITLEMENT_PATH = "/api/runtime/billing-entitlement"
@@ -114,14 +113,14 @@ def _refusal_body(entitlement_snapshot: dict, upgrade_url: str) -> dict:
     }
 
 
-class BillingEntitlementService:
-    """The broker's authority on whether the organization may still spend.
+class BillingEntitlement:
+    """The broker's cached answer to whether the organization may still spend.
 
     Its working state is one cached snapshot of HUMR's answer, replaced on the
     event-driven triggers described in the module docstring.
     """
 
-    def __init__(self, humr_client: HumrClient) -> None:
+    def __init__(self, humr_client: humr_client.HumrClient) -> None:
         self._humr_client = humr_client
         self._entitlement_snapshot: dict | None = None
         self._fetched_at: float | None = None
@@ -183,6 +182,8 @@ class BillingEntitlementService:
                 path=ENTITLEMENT_PATH,
                 timeout_seconds=_FETCH_TIMEOUT_SECONDS,
             )
+            if self._generation != generation:
+                return  # a report response installed a newer answer during the GET
             if not (200 <= status < 300):
                 logger.error("entitlement snapshot refresh got HTTP %d; keeping last-known state", status)
                 return
