@@ -10,7 +10,7 @@ and copy the response home without distorting it.
 
 That ignorance is load-bearing. Keeping credentials and provider policy out
 of this file is what keeps the HTTP machinery tractable — and what lets
-billing (`tls_usage_metering`) watch a response through a narrow observer
+billing (`billing_usage_metering`) watch a response through a narrow observer
 seam without the relay knowing why anyone is watching.
 
 The main shapes:
