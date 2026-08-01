@@ -7,7 +7,8 @@ plan_overrides = {"bedrock_enabled": true}; the deploy path derives the slug
 list back out of the booleans.
 
 Every org lands on trial. The 500-credit trial grant is a ledger write, not a
-column, so it is not written here — see humr_billing_backfill_trial_grants.
+column, so it is not written here; existing orgs were granted by a one-shot
+backfill command (since deleted) through the same locked write path as signup.
 """
 
 from django.apps.registry import Apps

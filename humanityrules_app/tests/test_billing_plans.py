@@ -2,10 +2,9 @@
 
 The rules that are expensive to get wrong live here: a typo'd override is a save
 error rather than a silently dead entitlement, capabilities reach the deploy path
-from the plan booleans and nowhere else, the trial grant is written once through
-the balance lock no matter how many times signup and backfill both run, the agent
-cap counts live agents, and the broker's snapshot stops spending at −10% of the
-grant rather than at zero.
+from the plan booleans and nowhere else, the trial grant is written exactly once
+through the balance lock, the agent cap counts live agents, and the broker's
+snapshot stops spending at −10% of the grant rather than at zero.
 """
 
 from decimal import Decimal
@@ -346,46 +345,6 @@ class TestTrialGrant(TestCase):
         call_command("humr_billing_verify", org_slug=self.organization.slug, stdout=StringIO())
 
 
-class TestTrialGrantBackfill(TestCase):
-    """Backfill and signup write the same key, so no organization can be granted twice."""
-
-    def setUp(self) -> None:
-        self.first = models.Organization.objects.create(name="Old One", slug="old-one")
-        self.second = models.Organization.objects.create(name="Old Two", slug="old-two")
-
-    def run_backfill(self) -> str:
-        out = StringIO()
-        call_command("humr_billing_backfill_trial_grants", org_slug=None, stdout=out)
-        return out.getvalue()
-
-    def test_every_existing_organization_gets_the_grant(self) -> None:
-        output = self.run_backfill()
-
-        self.assertIn("2 written", output)
-        for organization in (self.first, self.second):
-            with self.subTest(organization=organization.slug):
-                balance = models.BillingBalance.objects.get(organization=organization)
-                self.assertEqual(balance.credits, Decimal(500))
-
-    def test_re_running_grants_nothing_more(self) -> None:
-        self.run_backfill()
-        output = self.run_backfill()
-
-        self.assertIn("0 written", output)
-        self.assertEqual(models.BillingLedgerEntry.objects.count(), 2)
-
-    def test_an_organization_granted_at_signup_is_skipped(self) -> None:
-        grants.grant_trial_credits(organization=self.first)
-
-        output = self.run_backfill()
-
-        self.assertIn("1 written", output)
-        self.assertEqual(
-            models.BillingLedgerEntry.objects.filter(organization=self.first).count(), 1,
-        )
-        self.assertEqual(models.BillingBalance.objects.get(organization=self.first).credits, Decimal(500))
-
-
 class TestAgentLimit(TestCase):
     """max_agents is enforced where agents are created, as a validation error."""
 
@@ -612,12 +571,11 @@ class TestTrialGrantAtSignup(TestCase):
         self.assertEqual(entry.amount, Decimal(500))
         self.assertEqual(models.BillingBalance.objects.get(organization=organization).credits, Decimal(500))
 
-    def test_the_backfill_cannot_double_grant_a_signed_up_org(self) -> None:
+    def test_repeating_the_grant_cannot_double_grant_a_signed_up_org(self) -> None:
         self._seed_pending_workos_session(email="friend@example.com")
         self.client.post("/onboarding/", {"organization_name": "Friend Co"})
 
-        call_command("humr_billing_backfill_trial_grants", org_slug=None, stdout=StringIO())
-
         organization = models.Organization.objects.get(slug="friend-co")
+        self.assertFalse(grants.grant_trial_credits(organization=organization))
         self.assertEqual(models.BillingLedgerEntry.objects.filter(organization=organization).count(), 1)
         self.assertEqual(models.BillingBalance.objects.get(organization=organization).credits, Decimal(500))
