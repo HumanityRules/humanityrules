@@ -11,8 +11,9 @@ in-flight turns make exact-zero enforcement dishonest without reservation
 machinery, so a fixed negative allowance is both simpler and truthful; negative
 balances roll into the next grant.
 
-``renewal_date`` is null until subscriptions exist. Trial's grant is one-time
-and has no renewal at all, so null stays its permanent answer.
+``renewal_date`` comes from the Stripe mirror only while its status still
+derives Operator entitlements. Trial's grant is one-time and has no renewal,
+and terminal or incomplete subscriptions expose no date.
 """
 
 from dataclasses import dataclass
@@ -47,10 +48,16 @@ def entitlement_snapshot(organization: models.Organization) -> EntitlementSnapsh
     plan = plans.effective_plan(organization=organization)
     balance = models.BillingBalance.objects.filter(organization=organization).first()
     credits_remaining = balance.credits if balance is not None else Decimal(0)
+    subscription = models.BillingSubscription.objects.filter(
+        organization=organization,
+        status__in=models.BillingSubscription.OPERATOR_STATUSES,
+        current_period_end__isnull=False,
+    ).first()
+    renewal_date = subscription.current_period_end.date().isoformat() if subscription is not None else None
     return EntitlementSnapshot(
         credits_remaining=int(credits_remaining),
         monthly_grant=plan.monthly_credit_grant,
-        renewal_date=None,
+        renewal_date=renewal_date,
         plan=organization.plan,
         exhausted=credits_remaining <= exhaustion_floor(monthly_grant=plan.monthly_credit_grant),
     )

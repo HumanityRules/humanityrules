@@ -196,6 +196,11 @@ LOGIN_URL = '/auth/login/'
 WORKOS_CLIENT_ID = os.environ.get("WORKOS_CLIENT_ID")
 WORKOS_API_KEY = os.environ.get("WORKOS_API_KEY")
 
+# Stripe billing
+STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY")
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET")
+STRIPE_OPERATOR_PRICE_ID = os.environ.get("STRIPE_OPERATOR_PRICE_ID")
+
 # GitHub App Configuration
 GITHUB_APP_ID = os.environ.get("GITHUB_APP_ID")
 GITHUB_APP_SLUG = os.environ.get("GITHUB_APP_SLUG", "humanity-rules")
