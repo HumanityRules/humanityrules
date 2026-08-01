@@ -85,8 +85,6 @@ import tls_provider_catalog
 logger = logging.getLogger("tls_intercept")
 
 
-REFRESH_LEAD_SECONDS = 300
-
 # Public browser-facing status strings owned by the TLS-intercept subsystem contract.
 STATUS_CONNECTED = "connected"
 STATUS_NOT_CONNECTED = "not_connected"
@@ -125,7 +123,6 @@ class TlsInterceptRuntime:
         self,
         providers: dict[str, tls_provider_catalog.TlsProviderSpec],
         humr_client: HumrClient,
-        refresh_lead_seconds: int,
         ca_dir: Path,
         private_dir: Path,
         billing_service: billing.BillingService | None,
@@ -136,7 +133,6 @@ class TlsInterceptRuntime:
         self._credential_state_store = tls_credential_state.CredentialStateStore(
             provider_slugs=tuple(self._providers),
             humr_client=humr_client,
-            refresh_lead_seconds=refresh_lead_seconds,
         )
         self._cert_minter = tls_certificate_authority.CertMinter(ca_dir=ca_dir, private_dir=private_dir)
         self._cert_minter.bootstrap()
@@ -336,10 +332,13 @@ async def _serve_intercepted_connection(
 
             # Scheduled and background work reaches this same billing boundary
             # as an interactive chat turn, with no special case.
-            billing_decision = await _billing_decision(
-                billing_service=billing_service,
-                provider_slug=provider.slug,
-                platform_shared=injected_credential is not None and injected_credential.platform_shared,
+            billing_decision = (
+                await billing_service.decision_for_request(
+                    provider_slug=provider.slug,
+                    platform_shared=injected_credential is not None and injected_credential.platform_shared,
+                )
+                if billing_service is not None
+                else billing.FORWARD_UNTOUCHED
             )
             if billing_decision.refusal is not None:
                 logger.info("refused %s request: organization credits exhausted", provider.slug)
@@ -398,27 +397,6 @@ async def _serve_intercepted_connection(
         with contextlib.suppress(Exception):
             sandbox_tls_writer.close()
             await sandbox_tls_writer.wait_closed()
-
-
-async def _billing_decision(
-    billing_service: billing.BillingService | None,
-    provider_slug: str,
-    platform_shared: bool,
-) -> billing.BillingDecision:
-    """Ask billing once, failing open because billing is an overlay on the proxy path."""
-    if billing_service is None:
-        return billing.BillingDecision(refusal=None, usage_tap=None)
-    try:
-        billing_decision = await billing_service.decision_for_request(
-            provider_slug=provider_slug,
-            platform_shared=platform_shared,
-        )
-        if not isinstance(billing_decision, billing.BillingDecision):
-            raise TypeError("billing service returned an invalid decision")
-        return billing_decision
-    except Exception:
-        logger.exception("%s: billing decision failed; letting the request through", provider_slug)
-        return billing.BillingDecision(refusal=None, usage_tap=None)
 
 
 async def _build_provider_request(

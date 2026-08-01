@@ -126,7 +126,6 @@ def _make_credential_state_store() -> tls_credential_state.CredentialStateStore:
     return tls_credential_state.CredentialStateStore(
         provider_slugs=tuple(tls_provider_catalog.TLS_INTERCEPT_PROVIDERS),
         humr_client=_make_humr_client(),
-        refresh_lead_seconds=tls_intercept.REFRESH_LEAD_SECONDS,
     )
 
 
@@ -135,7 +134,6 @@ def _make_tls_intercept_runtime(ca_dir: pathlib.Path, private_dir: pathlib.Path)
     return broker.tls_intercept.TlsInterceptRuntime(
         providers=tls_provider_catalog.TLS_INTERCEPT_PROVIDERS,
         humr_client=_make_humr_client(),
-        refresh_lead_seconds=tls_intercept.REFRESH_LEAD_SECONDS,
         ca_dir=ca_dir,
         private_dir=private_dir,
         billing_service=None,
