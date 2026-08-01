@@ -1,35 +1,36 @@
 ---
 name: simplify-mental-model
-description: Simplify code and system design by reducing the concepts, relationships, dependencies, and inferences needed to understand and predict behavior. Use when asked to simplify or refactor for clarity, improve naming or control flow, clarify state and responsibility boundaries, reduce coupling, correct dependency direction, or review whether a design is genuinely simpler while preserving behavior.
+description: Simplify code or system design through a staged, user-gated process.
+disable-model-invocation: true
 ---
 
 # Simplify Mental Model
 
-Optimize for the smallest accurate mental model. Accept a little more code or a longer name when it removes ambiguity, inference, or navigation.
+## What "Simpler" Means
 
-Treat a dependency as anything one part must know about another, not only an import or package dependency.
+Complexity is what it costs a reader to build an accurate mental model. It has four dimensions:
 
-## Build the Current Mental Model
+1. Retention: how many concepts and relationships they must hold simultaneously.
+2. Navigation: how many files or definitions they must visit to follow an important code path.
+3. Inference: how many facts they must derive rather than read directly.
+4. Prediction: how well the entry point lets them predict what happens next.
 
-1. Start at the entry point a new reader would use.
-2. Describe the main path as a short sequence of domain actors, actions, and boundaries.
-3. Identify the concepts, states, relationships, and dependencies a reader must hold simultaneously.
-4. Separate essential domain complexity from complexity introduced by the implementation.
+A change is a simplification when it lowers these costs while keeping the model accurate. 
 
-## Find Sources of Mental Load
+Code volume is not a dimension: more code or a longer name can still be a simplification.
 
-Look for:
+Treat a dependency as anything one part must know about another, not only an import.
 
-1. Generic names that omit the actor, role, source, destination, or result.
-2. Phase names that describe an implementation ritual rather than where the operation is going.
-3. Names that describe an object's history instead of its current meaning.
-4. Main-path orchestration obscured by protocol mechanics or policy details.
-5. Downstream decisions that reconstruct facts already known upstream.
-6. Types, wrappers, helpers, or layers that introduce vocabulary without compressing explanation.
-7. Components that know policy or domain facts their responsibility does not require.
-8. Dependencies that point against the direction of responsibility or force unrelated changes to move together.
+## Symptoms of Mental Load
 
-## Design a Smaller Model
+1. Names that are not enough, at the point of use, to know what the thing means or does now.
+2. An important code path that does not read as a sequence of steps, because each step's detail is inlined instead of named.
+3. Downstream decisions that reconstruct facts already known upstream.
+4. Abstractions that introduce vocabulary without compressing explanation.
+5. Components that know facts their responsibility does not require.
+6. Dependencies that point against the direction of responsibility or force unrelated changes to move together.
+
+## Remedies
 
 1. Use stable domain actors consistently across names and boundaries.
 2. Choose the shortest name that preserves the concept, not the shortest name possible. Prefer explicit directional names when direction matters.
@@ -39,33 +40,26 @@ Look for:
 6. Pass or return a fact when it becomes known instead of making downstream code infer it from construction details.
 7. Place decisions in the layer that owns the policy. Let lower-level mechanisms expose capabilities and results without knowing the caller's policy.
 8. Make each component depend only on concepts required by its responsibility. Prefer dependencies on narrower, more stable concepts.
-9. Remove indirection, abstractions, states, and external dependencies that do not earn their conceptual cost.
-10. Preserve behavior unless the user explicitly authorizes a behavior change.
+9. Remove indirection, state, and dependencies that do not earn their conceptual cost.
 
-## Compare Before and After
+## Protocol
 
-Evaluate the change by asking:
+### Stage 1 — Brainstorm (turn-based, with the user)
 
-1. How many concepts and relationships must a reader remember?
-2. How many files or definitions must they visit to understand the main path?
-3. Which facts must they infer rather than read directly?
-4. Can they predict what happens next from the entry point?
-5. Does each dependency make conceptual sense, and does it point in the direction of responsibility?
-6. Does every remaining abstraction eliminate more explanation than it introduces?
-7. What does each new type let the reader forget?
+Each step ends by presenting to the user and waiting for their reply before moving on.
 
+1. Build the current mental model: start at the entry point a new reader would use, describe the important code paths as domain actors, actions, and boundaries, and separate essential domain complexity from complexity introduced by the implementation. Present it; the user corrects or says continue.
+2. Find symptoms of mental load. Present them; the user confirms, adds, or strikes items.
+3. Design the smaller model using the remedies. Present it; the user iterates.
+4. Iterate until the user explicitly agrees to code changes.
 
-## Review with a Subagent
+### Stage 2 — Implement (subagent)
 
-Give a fresh-context reviewer subagent the relevant code or diff without giving it the intended conclusions. Ask the reviewer to:
+1. Hand the agreed target model plus this skill to an implementation subagent, which builds and runs the tests itself. Preserve behavior unless the user authorized a change.
+2. When the subagent reports back, relay a summary of the result, including any deviation from the agreed model. Do not review, build, or test yourself.
 
-1. Explain the system's main path in its own words.
-2. Identify terms it cannot understand at their point of use.
-3. Identify hidden knowledge dependencies and reversed responsibility boundaries.
-4. Call out abstractions that add more concepts than they remove.
+### Stage 3 — Review (user first, user drives)
 
-Iterate on concrete confusion until the remaining complexity is essential or outside the task's scope.
-
-## Report the Result
-
-Explain the resulting mental model as a short flow. Identify the concepts, inferences, and dependencies removed, plus any deliberate tradeoff such as a longer name or an additional type.
+1. The user reviews first.
+2. When asked, review the result against the agreed model and the cost dimensions, and report findings.
+3. The user decides which findings to act on and drives the changes.

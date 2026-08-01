@@ -1,6 +1,6 @@
 # Project synopsis
 
-**Humanity Rules (HumR) is the enterprise home for personal AI agents.** It gives employees an always-on agent that remembers context, works across channels, and continues after the laptop closes—without requiring them to install privileged software or operate agent infrastructure.
+**Humanity Rules (HumR) is the enterprise home for AI agents.** It gives employees an always-on agent that remembers context, works across channels, and continues after the laptop closes—without requiring them to install privileged software or operate agent infrastructure.
 
 HumR lets employees build directly with agents, turn successful workflows into apps, and share those apps with their teams in a governed, auditable way.
 
@@ -17,6 +17,10 @@ HumR’s product POV is that agents should be easy enough for non-technical empl
 
 **Always use `uv run` to execute Python commands.** This project uses uv for dependency management — never run Python or project scripts directly.
 
+# Documentation
+
+See **`docs/AGENTS.md`** for the documentation index.
+
 
 # Writing Python Code
 
@@ -26,11 +30,6 @@ HumR’s product POV is that agents should be easy enough for non-technical empl
 # Multi-tenancy
 
 **Every query on a tenant-owned model must be scoped to the caller's org.** When fetching a row by a client-supplied id, the org filter (direct or transitive) is part of the lookup — never a separate verify-after step.
-
-
-# Django templates
-
-**`{# #}` comments are single-line only — they leak into the rendered page if wrapped across lines.** Use `{% comment %}...{% endcomment %}` for any multi-line comment.
 
 
 # Browser Testing
@@ -43,25 +42,10 @@ HumR’s product POV is that agents should be easy enough for non-technical empl
 **Work directly on the `main` branch.** Do not create a branch unless explicitly asked.
 
 
-# Documentation
+# Writing rules for agents
 
-See **`docs/AGENTS.md`** for the documentation index.
-
-
-# Journal
-
-**Do not write to `docs/journal.md` unless explicitly ordered.** The journal is updated only when the user asks (e.g., `/journal` or `/journal commit`).
-
-
-# Markdown formatting
+**Prefer numbered lists in replies.** When presenting options, recommendations, or multi-item analysis to the user, use numbered lists instead of bullet points so they can refer to items by number ("do 2 and 4").
 
 **Avoid markdown tables.** They render poorly in terminals and diffs. Use bulleted lists with bold labels instead.
 
-
-# Writing rules for agents
-
-**Agent-facing rules nudge for what the agent already knows, and convey what it had to discover by acting.** When adding to AGENTS.md or a skill, skip explanations and examples the next agent could write itself from its own memory, which is the same as yours. Keep the codebase-specific facts — for example paths, model and function names, project conventions — that it couldn't otherwise know.
-
-**Freshness misleads.** Whatever occupied your attention while doing the work feels load-bearing in the document you write at the end. To a reader who didn't share that hour — including yourself days later — most of it isn't. The test: would this sentence earn its place if you'd written it cold, with no recent context? If it only makes sense in light of what you just did, drop it.
-
-**Prefer numbered lists in replies.** When presenting options, recommendations, or multi-item analysis to the user, use numbered lists instead of bullet points so they can refer to items by number ("do 2 and 4").
+**Do not write to `docs/journal.md` unless explicitly ordered.** The journal is updated only when the user asks (e.g., `/journal` or `/journal commit`).
