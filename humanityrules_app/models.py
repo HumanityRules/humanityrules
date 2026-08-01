@@ -1765,6 +1765,41 @@ class CostRefreshJob(models.Model):
         return f"CostRefreshJob {self.id} app={self.app_id} {self.status}"
 
 
+class BillingSubscription(models.Model):
+    """Stripe's subscription state for one organization, mirrored for billing decisions.
+
+    Webhook handlers are the only writers: each event copies what Stripe now
+    says into this row. Everything that needs subscription state — the plan
+    transition, the entitlement snapshot's renewal date, the billing page —
+    reads this row and never calls Stripe. It is deliberately not the direct
+    source of ``Organization.plan``: friends-and-family organizations and
+    enterprises invoiced outside Stripe may have a hand-set plan with no Stripe
+    record.
+    """
+
+    # Stripe statuses that keep an organization on the Operator plan.
+    OPERATOR_STATUSES = frozenset({"active", "trialing", "past_due"})
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
+    organization = models.OneToOneField(
+        "humanityrules_app.Organization", on_delete=models.CASCADE, related_name="billing_subscription",
+    )
+    stripe_customer_id = models.CharField(max_length=255)
+    stripe_subscription_id = models.CharField(max_length=255, unique=True)
+    status = models.CharField(max_length=32, help_text="Stripe's subscription status, stored verbatim.")
+    current_period_start = models.DateTimeField(null=True, blank=True)
+    current_period_end = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Billing Subscription"
+        verbose_name_plural = "Billing Subscriptions"
+
+    def __str__(self) -> str:
+        return f"BillingSubscription org={self.organization_id} {self.stripe_subscription_id} {self.status}"
+
+
 class BillingUsageEvent(models.Model):
     """One metered usage fact reported by an agent app's broker.
 
