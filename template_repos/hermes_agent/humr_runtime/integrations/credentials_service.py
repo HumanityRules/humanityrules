@@ -104,7 +104,7 @@ class CredentialsService:
         if not (200 <= status < 300):
             return False
         with contextlib.suppress(RuntimeError):
-            await self.credentials_invalidate(slug=provider)
+            await self.resync_provider(slug=provider)
         await self._apply_auth_marker(provider=provider, action="connect")
         return True
 
@@ -117,7 +117,7 @@ class CredentialsService:
         success we flip this provider's cache-independent connection state to
         disconnected (so a transient follow-up refresh can't leave the card
         connected) and drop its cached token; any process restart is selected
-        from the provider spec inside `credentials_invalidate`.
+        from the provider spec inside `resync_provider`.
         """
         status, payload = await self._humr_client.post_json(
             path="/api/integrations/credentials/disconnect",
@@ -132,7 +132,7 @@ class CredentialsService:
         # can't leave the card showing connected after the user just disconnected.
         await self._tls_intercept_runtime.mark_disconnected(slug=provider)
         try:
-            await self.credentials_invalidate(slug=provider)
+            await self.resync_provider(slug=provider)
         except RuntimeError as exc:
             return 502, {**payload, "ok": False, "error": str(exc)}
         await self._apply_auth_marker(provider=provider, action="disconnect")
@@ -146,14 +146,15 @@ class CredentialsService:
             timeout_seconds=30,
         )
 
-    async def credentials_invalidate(self, slug: str) -> None:
-        """Drop one provider's cached token after a known state change, then re-project.
+    async def resync_provider(self, slug: str) -> None:
+        """Resync one provider from HUMR truth after a known state change: drop the
+        known-stale cached token, refetch, and re-project onto disk/processes.
 
         Raises RuntimeError when a required process restart (or models-cache
         delete) failed; a transient HUMR refresh failure is absorbed instead —
         see `_refresh_and_apply`.
         """
-        await self._tls_intercept_runtime.invalidate(slug=slug)
+        await self._tls_intercept_runtime.drop_cached_token(slug=slug)
         await self._refresh_and_apply(slug=slug)
 
     async def refresh_all_integrations(self) -> tuple[int, dict]:
@@ -162,7 +163,7 @@ class CredentialsService:
         Returns the browser-facing `(status, payload)`. If a refresh ran
         within REFRESH_COOLDOWN_SECONDS we return 429 without firing either
         side — otherwise smashing the Refresh button would repeatedly trigger
-        the catalog reload and the invalidate choreography (HUMR round-trip +
+        the catalog reload and the resync choreography (HUMR round-trip +
         gateway-env rewrite + gateway restart for vault providers). Once past
         the cooldown gate, the two sides run concurrently — they share no
         state and the slower of the two sets the round-trip latency.
@@ -172,9 +173,9 @@ class CredentialsService:
             return 429, {"error": "refresh_cooldown", "retry_after_seconds": remaining}
         self._last_refresh_all_ts = time.time()
 
-        async def _safe_invalidate_all() -> str | None:
+        async def _safe_resync_all() -> str | None:
             try:
-                await self._tls_intercept_runtime.invalidate_all()
+                await self._tls_intercept_runtime.drop_all_cached_tokens()
                 await self._refresh_and_apply(slug=None)
             except RuntimeError as exc:
                 return str(exc)
@@ -182,7 +183,7 @@ class CredentialsService:
 
         catalog_payload, tls_error = await asyncio.gather(
             self._mcp_aggregator.refresh_catalog(),
-            _safe_invalidate_all(),
+            _safe_resync_all(),
         )
         if tls_error is not None:
             return 502, {"ok": False, "error": tls_error}
@@ -196,7 +197,7 @@ class CredentialsService:
         return None
 
     async def _refresh_and_apply(self, slug: str | None) -> None:
-        """Refresh from HUMR after an invalidate, then project the result onto disk/processes.
+        """Refresh from HUMR after a cached-token drop, then project the result onto disk/processes.
 
         When `slug` is set (a single provider was just connected/disconnected),
         only that provider is re-fetched from HUMR — refreshing every disconnected
@@ -206,11 +207,11 @@ class CredentialsService:
         if slug is None:
             humr_reachable = await self._tls_intercept_runtime.refresh_all()
         else:
-            humr_reachable = await self._tls_intercept_runtime.refresh_slug(slug=slug)
+            humr_reachable = await self._tls_intercept_runtime.refresh(slug=slug)
         if not humr_reachable:
             # Rendering from a cache that missed its refresh would strip
             # integrations from the gateway env; keep file and processes as-is.
-            logger.error("refresh after invalidate(slug=%s) failed transiently; managed env left untouched", slug)
+            logger.error("resync refresh (slug=%s) failed transiently; managed env left untouched", slug)
             return
         await self._apply_refreshed_state(slug=slug)
 
@@ -242,7 +243,7 @@ class CredentialsService:
                     f"{process_name} restart failed (process-compose returned {status}); "
                     f"please redeploy the app to apply the new credentials"
                 )
-            logger.info("%s restart kicked off after invalidate(slug=%s)", process_name, slug)
+            logger.info("%s restart kicked off after resync(slug=%s)", process_name, slug)
 
     async def _sync_auth_markers(self, specs_in_scope: tuple[tls_provider_catalog.TlsProviderSpec, ...]) -> None:
         """Mirror broker-connected state into local marker auth stores."""

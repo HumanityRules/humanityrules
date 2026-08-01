@@ -15,7 +15,7 @@
     cardSpecs = {},
   } = namespace;
   const { elem, statusLabelFor, byCategoryThenLabel } = util;
-  const { fetchIntegrations, refreshAll, invalidateTlsCache } = broker;
+  const { fetchIntegrations, refreshAll, resyncTlsProvider } = broker;
   const { logoImg, waitForLogos, waitForWebui, refreshModelDropdowns } = webui;
   const { showTransitionModal, showOauthErrorModal } = modals;
   const { consumeOAuthSentinel, oauthErrorMessage } = oauthSentinelApi;
@@ -105,8 +105,8 @@
       })
       : null;
     try {
-      // The broker reloads MCP state and invalidates every TLS provider. A 429
-      // returns before invalidation, preventing repeated gateway restarts.
+      // The broker reloads MCP state and resyncs every TLS provider. A 429
+      // returns before the resync, preventing repeated gateway restarts.
       const response = await refreshAll();
       if (response.status === 429) {
         let retry = 30;
@@ -487,7 +487,7 @@
     const oauthSentinel = consumeOAuthSentinel();
     if (oauthSentinel && oauthSentinel.transition === 'error') {
       // The flow died after the consent redirect; nothing changed broker-side,
-      // so a plain render + explanation is enough (no cache invalidate).
+      // so a plain render + explanation is enough (no resync).
       window.switchPanel('integrations');
       const refreshing = refreshAndRender();
       showOauthErrorModal(oauthErrorMessage(oauthSentinel.code));
@@ -510,7 +510,7 @@
       await refreshAndRender();
       await waitForLogos(10000);
       // Cache hint only: the proxy's 401 path can recover if this fails.
-      try { await invalidateTlsCache(oauthSentinel.provider); } catch (_) { /* best-effort */ }
+      try { await resyncTlsProvider(oauthSentinel.provider); } catch (_) { /* best-effort */ }
       await waitForWebui(15000);
       await refreshAndRender();
 

@@ -167,11 +167,11 @@
     return mcpPath(slug, 'oauth/start') + '?return_to=' + returnTo + '&origin=' + origin;
   }
 
-  // Tell the broker to drop one provider's cached TLS-intercept token after a
+  // Tell the broker to resync one provider from HUMR truth after a
   // known connect/disconnect/config change (vault save, oauth-sentinel return).
   // The explicit-Refresh-all path goes through /__humr_broker/integrations/refresh_all
-  // instead, which fans out catalog reload + all-providers TLS invalidate.
-  // Per-provider: POST .../tls_intercept/{slug}/invalidate.
+  // instead, which fans out catalog reload + all-providers TLS resync.
+  // Per-provider: POST .../tls_intercept/{slug}/resync.
   //
   // For env-backed providers the broker also rewrites the managed profile env
   // block and restarts whichever process-compose entries the provider declares.
@@ -179,8 +179,8 @@
   // broker) propagate to the caller. Cache-hint callers (oauth-sentinel return)
   // catch and ignore: the proxy's 401-evict path recovers stale tokens on the
   // first real call.
-  async function invalidateTlsCache(providerSlug) {
-    const url = tlsInterceptPath(providerSlug, 'invalidate');
+  async function resyncTlsProvider(providerSlug) {
+    const url = tlsInterceptPath(providerSlug, 'resync');
     const response = await fetch(url, { method: 'POST' });
     if (response.ok) return;
     let payload = {};
@@ -348,7 +348,7 @@
   // Floating "in progress" dialog shown after an oauth-sentinel return, while
   // the broker primes its cache (and any managed-env WebUI restart settles).
   // status_items() reads cache-only, so the first render after a connect would
-  // otherwise paint a stale "not connected" card until the invalidate
+  // otherwise paint a stale "not connected" card until the resync
   // round-trip lands. The dialog signals work-in-progress over the still-
   // visible page and blocks interaction; init() removes it once the real
   // render completes and logos have reloaded. No Cancel: the round-trip is
@@ -458,7 +458,7 @@
       mcpPath,
       buildTlsConnectUrl,
       buildMcpConnectUrl,
-      invalidateTlsCache,
+      resyncTlsProvider,
     },
     webui: {
       logoImg,

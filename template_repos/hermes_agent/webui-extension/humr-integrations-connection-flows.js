@@ -10,7 +10,7 @@
   const { util, broker, modals, cardSpecs } = window.HumrIntegrations;
   const { elem, formatDate, throwForErrorResponse } = util;
   const { openConnectModal } = modals;
-  const { tlsInterceptPath, mcpPath, buildTlsConnectUrl, buildMcpConnectUrl, invalidateTlsCache } = broker;
+  const { tlsInterceptPath, mcpPath, buildTlsConnectUrl, buildMcpConnectUrl, resyncTlsProvider } = broker;
 
   const VAULT_NETWORK_ERROR = (
     'Could not reach the Humanity Rules vault. Try again. ' +
@@ -98,16 +98,16 @@
   }
 
   // Post-save/connect sequence shared by the vault form modals and the
-  // link+poll modal: the credential is already stored on HUMR, so invalidate
-  // the broker cache (which rewrites the gateway env and restarts the
-  // gateway), and swap the action row to a Close button.
+  // link+poll modal: the credential is already stored on HUMR, so resync the
+  // broker (drops the cached token, rewrites the gateway env, and restarts
+  // the gateway), and swap the action row to a Close button.
   // `verb` is 'Saved' or 'Connected' depending on how the credential landed.
   async function applyVaultCredentials({ integration, statusEl, actions, close, verb }) {
     statusEl.textContent = verb + '. Applying credentials…';
     statusEl.style.display = '';
     let restarted = true;
     try {
-      await invalidateTlsCache(integration.slug);
+      await resyncTlsProvider(integration.slug);
     } catch (err) {
       restarted = false;
       statusEl.textContent =

@@ -51,7 +51,7 @@ above. The pieces it composes each do one job and nothing else:
   behavior, env bindings, connect UX).
 - `tls_certificate_authority` — the CA and the per-host certificates that
   let us terminate the sandbox's TLS.
-- `tls_token_store` — the in-memory secrets and "is this provider
+- `tls_credential_state` — the in-memory secrets and "is this provider
   connected?" state, refreshed from HUMR.
 - `tls_credential_injection` — turn a sandbox request + a wire behavior
   into a concrete rewrite plan, then apply it once secrets are in hand.
@@ -77,9 +77,9 @@ import billing_service as billing
 from humr_client import HumrClient
 import tls_certificate_authority
 import tls_credential_injection
+import tls_credential_state
 import tls_http_message_relay
 import tls_provider_catalog
-import tls_token_store
 
 
 logger = logging.getLogger("tls_intercept")
@@ -98,7 +98,7 @@ class _ProviderNotConnected(Exception):
 
 def _status_item_for_provider(
     provider: tls_provider_catalog.TlsProviderSpec,
-    state: tls_token_store.ProviderConnectionState | None,
+    state: tls_credential_state.ProviderConnectionState | None,
 ) -> dict:
     """Join a static provider spec with its dynamic state for the integrations payload."""
     is_connected = state is not None and state.connected
@@ -133,7 +133,7 @@ class TlsInterceptRuntime:
         self._billing_service = billing_service
         self._providers = dict(providers)
         self._host_to_provider = tls_provider_catalog.build_host_to_provider(providers=self._providers)
-        self._credential_state_store = tls_token_store.CredentialStateStore(
+        self._credential_state_store = tls_credential_state.CredentialStateStore(
             provider_slugs=tuple(self._providers),
             humr_client=humr_client,
             refresh_lead_seconds=refresh_lead_seconds,
@@ -169,19 +169,19 @@ class TlsInterceptRuntime:
         connection_states = await self._credential_state_store.connection_snapshot()
         return frozenset(slug for slug, state in connection_states.items() if state.connected)
 
-    async def invalidate(self, slug: str) -> None:
+    async def drop_cached_token(self, slug: str) -> None:
         """Drop one provider's cached token entry."""
-        await self._credential_state_store.invalidate(slug=slug)
+        await self._credential_state_store.drop_cached_token(slug=slug)
 
-    async def invalidate_all(self) -> None:
+    async def drop_all_cached_tokens(self) -> None:
         """Drop every cached token entry."""
-        await self._credential_state_store.invalidate_all()
+        await self._credential_state_store.drop_all_cached_tokens()
 
     async def mark_disconnected(self, slug: str) -> None:
         """Mark a provider disconnected after a confirmed disconnect (drops cache + flips connection state)."""
         await self._credential_state_store.mark_disconnected(slug=slug)
 
-    async def refresh_slug(self, slug: str) -> bool:
+    async def refresh(self, slug: str) -> bool:
         """Force a single-provider refetch; False when the HUMR round-trip failed transiently."""
         return await self._credential_state_store.refresh(slug=slug)
 
@@ -206,7 +206,7 @@ async def _handle_proxy_connection(
     minter: tls_certificate_authority.CertMinter,
     providers: dict[str, tls_provider_catalog.TlsProviderSpec],
     host_to_provider: dict[str, str],
-    credential_state_store: tls_token_store.CredentialStateStore,
+    credential_state_store: tls_credential_state.CredentialStateStore,
     billing_service: billing.BillingService | None,
 ) -> None:
     """Accept a CONNECT, then either intercept known hosts or tunnel."""
@@ -267,7 +267,7 @@ async def _serve_intercepted_connection(
     provider_port: int,
     provider: tls_provider_catalog.TlsProviderSpec,
     minter: tls_certificate_authority.CertMinter,
-    credential_state_store: tls_token_store.CredentialStateStore,
+    credential_state_store: tls_credential_state.CredentialStateStore,
     billing_service: billing.BillingService | None,
 ) -> None:
     """Terminate sandbox TLS and forward its HTTP requests to one provider."""
@@ -384,7 +384,7 @@ async def _serve_intercepted_connection(
             # connection — the user's next request through the proxy hits the refreshed token. A pass-through 401 must
             # not evict: the broker did not place its cached credential in that request.
             if forward_result.status_code == 401 and injected_credential is not None:
-                await credential_state_store.invalidate(slug=provider.slug)
+                await credential_state_store.drop_cached_token(slug=provider.slug)
                 logger.info("evicted %s token cache after provider 401 from %s", provider.slug, provider_host)
 
             if not forward_result.sandbox_connection_can_continue:
@@ -424,8 +424,8 @@ async def _billing_decision(
 async def _build_provider_request(
     sandbox_request: tls_http_message_relay.SandboxRequest,
     provider: tls_provider_catalog.TlsProviderSpec,
-    credential_state_store: tls_token_store.CredentialStateStore,
-) -> tuple[tls_http_message_relay.ProviderRequest, tls_token_store.ActiveCredential | None]:
+    credential_state_store: tls_credential_state.CredentialStateStore,
+) -> tuple[tls_http_message_relay.ProviderRequest, tls_credential_state.ActiveCredential | None]:
     """
     Build a provider request from the sandbox request.
 
