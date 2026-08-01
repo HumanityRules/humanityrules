@@ -69,7 +69,6 @@ called back.
 
 import asyncio
 import contextlib
-import enum
 import logging
 import ssl
 from pathlib import Path
@@ -91,14 +90,6 @@ REFRESH_LEAD_SECONDS = 300
 # Public browser-facing status strings owned by the TLS-intercept subsystem contract.
 STATUS_CONNECTED = "connected"
 STATUS_NOT_CONNECTED = "not_connected"
-
-
-class ProviderCredentialSource(enum.Enum):
-    """Where the credential in a provider request came from."""
-
-    PASSTHROUGH = "passthrough"
-    USER_OR_ORG = "user_or_org"
-    PLATFORM = "platform"
 
 
 class _ProviderNotConnected(Exception):
@@ -318,7 +309,7 @@ async def _serve_intercepted_connection(
                 return
 
             try:
-                provider_request, credential_source = await _build_provider_request(
+                provider_request, injected_credential = await _build_provider_request(
                     sandbox_request=sandbox_request,
                     provider=provider,
                     credential_state_store=credential_state_store,
@@ -343,14 +334,12 @@ async def _serve_intercepted_connection(
                 await _send_provider_not_connected(sandbox_writer=sandbox_tls_writer, provider=provider)
                 return
 
-            platform_shared = credential_source is ProviderCredentialSource.PLATFORM
-
             # Scheduled and background work reaches this same billing boundary
             # as an interactive chat turn, with no special case.
             billing_decision = await _billing_decision(
                 billing_service=billing_service,
                 provider_slug=provider.slug,
-                platform_shared=platform_shared,
+                platform_shared=injected_credential is not None and injected_credential.platform_shared,
             )
             if billing_decision.refusal is not None:
                 logger.info("refused %s request: organization credits exhausted", provider.slug)
@@ -394,7 +383,7 @@ async def _serve_intercepted_connection(
             # HUMR. Covers both transient-after-rotation and user-revoked-on-provider-side. We don't retry within this
             # connection — the user's next request through the proxy hits the refreshed token. A pass-through 401 must
             # not evict: the broker did not place its cached credential in that request.
-            if forward_result.status_code == 401 and credential_source is not ProviderCredentialSource.PASSTHROUGH:
+            if forward_result.status_code == 401 and injected_credential is not None:
                 await credential_state_store.invalidate(slug=provider.slug)
                 logger.info("evicted %s token cache after provider 401 from %s", provider.slug, provider_host)
 
@@ -436,12 +425,13 @@ async def _build_provider_request(
     sandbox_request: tls_http_message_relay.SandboxRequest,
     provider: tls_provider_catalog.TlsProviderSpec,
     credential_state_store: tls_token_store.CredentialStateStore,
-) -> tuple[tls_http_message_relay.ProviderRequest, ProviderCredentialSource]:
+) -> tuple[tls_http_message_relay.ProviderRequest, tls_token_store.ActiveCredential | None]:
     """
     Build a provider request from the sandbox request.
 
-    Injects credentials when the provider's wire behavior requires them;
-    otherwise returns the sandbox request unchanged (passthrough).
+    Injects credentials when the provider's wire behavior requires them and
+    returns the credential it injected; otherwise returns the sandbox request
+    unchanged with None (passthrough).
     """
     injection_plan = tls_credential_injection.plan_injection(
         headers=sandbox_request.headers,
@@ -456,7 +446,7 @@ async def _build_provider_request(
                 headers=sandbox_request.headers,
                 body=sandbox_request.body,
             ),
-            ProviderCredentialSource.PASSTHROUGH,
+            None,
         )
 
     credential = await credential_state_store.credential_for_slug(slug=provider.slug)
@@ -477,9 +467,7 @@ async def _build_provider_request(
             headers=provider_headers,
             body=sandbox_request.body,
         ),
-        ProviderCredentialSource.PLATFORM
-        if credential.platform_shared
-        else ProviderCredentialSource.USER_OR_ORG,
+        credential,
     )
 
 
