@@ -11,7 +11,7 @@ To prioritize readability and eliminate "magic" behavior, we enforce strict expl
 
 ### 1. Enforce Explicit Argument Passing
 * **Directive:** Do not use default parameter values in function or method definitions. All parameters must be mandatory.
-* **Reasoning:** "Magic defaults" hide complexity and obscure the function's dependencies. We prefer explicit calls where every argument is visible at the call site.
+* **Reasoning:** "Magic defaults" hide complexity and obscure the function's dependencies. Use explicit calls where every argument is visible at the call site.
 * **Implementation:** If a value is logically optional, the caller must explicitly pass `None`.
 
 **Bad (Implicit Defaults):**
@@ -135,9 +135,8 @@ async def _handle_stream_event(message: SDKStreamEvent, ctx: StreamingContext) -
 - Complex default values or annotations that benefit from vertical alignment (though we avoid defaults per rule 1)
 
 ### 6. Prefer Single-Line Docstrings for Simple Functions
-* **Directive:** Use a brief single-line docstring for functions. Reserve multi-line docstrings (with Args/Returns/Raises sections) for complex functions where the signature alone doesn't convey important details.
+* **Directive:** Use a brief single-line docstring for functions. Reserve multi-line docstrings for complex functions where the signature alone doesn't convey important details or is not enough to help the reader build a mental model.
 * **Reasoning:** Verbose docstrings that restate what the function name and types already communicate add noise. A concise one-liner maintains consistency while avoiding redundancy.
-* **Implementation:** Write a single-line docstring that adds context beyond the function name, or simply summarizes intent.
 
 **Bad (overly verbose):**
 ```python
@@ -163,8 +162,8 @@ async def _aget_last_user_message(conversation: Conversation) -> str:
 ```
 
 **When multi-line docstrings are valuable:**
-- Non-obvious behavior or side effects
-- Complex algorithms that need explanation
+- Non-obvious behavior
+- Helping the reader build a mental model
 - Public API functions where discoverability matters
 - Unusual parameter constraints not captured by types
 
@@ -184,6 +183,11 @@ def check_access(request, resource, action):
 def check_access(request: HttpRequest, resource: Workspace, action: str) -> bool:
     ...
 ```
+
+
+## Module-Top Comments
+
+**Write the comment at the top of a file for someone new to the system.** It must help the reader build a mental model of what's going on in the file. Prefer an explanatory style over a terse one-liner. Situate the file in the surrounding system (callers, collaborators, why it exists).
 
 
 ## Django 6.0 Async ORM
