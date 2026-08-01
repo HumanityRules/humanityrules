@@ -83,7 +83,7 @@ The same `_render_gateway_env_file()` in `credentials_service.py` runs:
    Supervisor's `wait_for_port` on the broker control port doubles as
    the synchronization point: by the time it returns, the file is on
    disk and the gateway can boot.
-2. **After any credential change** — the `credentials_invalidate` /
+2. **After any credential change** — the `resync_provider` /
    `refresh_all_integrations` chokepoint, which covers vault save, vault
    or OAuth disconnect, device-flow completion, and explicit "Refresh
    all". Each drops the cache, refetches from HUMR, and re-renders.
@@ -137,7 +137,7 @@ seeded by `webui.sh` through
 
 Broker writes `.env` successfully but the process-compose REST call
 fails (process-compose down, transient network glitch). The vault
-Save's success response chains through invalidate → broker write →
+Save's success response chains through resync → broker write →
 restart-call. If the restart call fails, the broker answers 502 and the
 WebUI surfaces "Saved, but applying the credentials failed. Redeploy
 this Hermes app to apply them." A real fault worth seeing.
