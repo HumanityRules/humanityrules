@@ -1,3 +1,5 @@
+"""Export the control-plane view callables consumed by the central URL map."""
+
 from .landing import devopshero_landing, landing
 from .dashboard import dashboard
 from .platform_fleet import (
@@ -48,6 +50,8 @@ from .settings import (
     settings_personal,
     settings_organization,
     settings_billing,
+    settings_billing_checkout,
+    settings_billing_portal,
 )
 from .integrations.org_aws import (
     aws_install_account_callback,
@@ -213,6 +217,8 @@ __all__ = [
     "settings_personal",
     "settings_organization",
     "settings_billing",
+    "settings_billing_checkout",
+    "settings_billing_portal",
     "integrations_root",
     "integrations_org_aws_accounts",
     "integrations_org_aws_accounts_add",
