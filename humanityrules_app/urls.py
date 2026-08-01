@@ -196,6 +196,8 @@ urlpatterns = [
     path("api/aws/install-account-callback", views.aws_install_account_callback, name="aws_install_account_callback"),
     #  - github_webhook: receives push/installation events from GitHub
     path("api/github/webhook", views.github_webhook, name="github_webhook"),
+    #  - stripe_webhook: receives signed subscription and invoice lifecycle events from Stripe
+    path("api/stripe/webhook", views.stripe_webhook, name="stripe_webhook"),
     #  - pdp_evaluate: called by policy proxies to authorize each request against ABAC
     path("api/pdp/evaluate", views.pdp_evaluate, name="pdp_evaluate"),
     path("api/pdp/evaluate-public", views.pdp_evaluate_public, name="pdp_evaluate_public"),
