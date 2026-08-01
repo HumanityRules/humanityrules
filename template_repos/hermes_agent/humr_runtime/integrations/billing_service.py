@@ -14,11 +14,15 @@ and the two reads needed by the control API; neither internal object crosses
 this boundary.
 """
 
+import logging
 from dataclasses import dataclass
 
 import billing_entitlement
 import billing_usage_metering
 import humr_client
+
+
+logger = logging.getLogger("billing_service")
 
 
 _PARSED_PROVIDER_SLUGS = frozenset({"openai-codex"})
@@ -41,6 +45,9 @@ class BillingDecision:
             raise ValueError("a billing decision cannot both refuse and meter a request")
 
 
+FORWARD_UNTOUCHED = BillingDecision(refusal=None, usage_tap=None)
+
+
 class BillingService:
     """Compose billing policy, entitlement state, metering, and delivery."""
 
@@ -52,17 +59,25 @@ class BillingService:
         )
 
     async def decision_for_request(self, provider_slug: str, platform_shared: bool) -> BillingDecision:
-        """Decide whether to refuse, meter, or plainly forward one request."""
-        if not _request_is_metered(provider_slug=provider_slug, platform_shared=platform_shared):
-            return BillingDecision(refusal=None, usage_tap=None)
-        refusal = await self._entitlement.refusal_for_metered_request()
-        if refusal is not None:
-            return BillingDecision(refusal=refusal, usage_tap=None)
-        usage_tap = billing_usage_metering.UsageTap(
-            provider_slug=provider_slug,
-            record_usage=self._usage_reporter.record,
-        )
-        return BillingDecision(refusal=None, usage_tap=usage_tap)
+        """Return the billing action without raising; internal failures log and forward untouched.
+
+        Billing is an overlay on the proxy path, so a billing failure must not
+        prevent the request from reaching its provider.
+        """
+        try:
+            if not _request_is_metered(provider_slug=provider_slug, platform_shared=platform_shared):
+                return FORWARD_UNTOUCHED
+            refusal = await self._entitlement.refusal_for_metered_request()
+            if refusal is not None:
+                return BillingDecision(refusal=refusal, usage_tap=None)
+            usage_tap = billing_usage_metering.UsageTap(
+                provider_slug=provider_slug,
+                record_usage=self._usage_reporter.record,
+            )
+            return BillingDecision(refusal=None, usage_tap=usage_tap)
+        except Exception:
+            logger.exception("%s: billing decision failed; forwarding request untouched", provider_slug)
+            return FORWARD_UNTOUCHED
 
     async def run_usage_flush_loop(self) -> None:
         """Run the usage reporter's flush loop."""

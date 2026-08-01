@@ -63,6 +63,8 @@ from humr_client import HumrClient
 logger = logging.getLogger("tls_credential_state")
 
 
+REFRESH_LEAD_SECONDS = 300
+
 # Internal tags from HUMR's refresh endpoint. For each requested slug, HUMR returns one of:
 # - has_token:  a fresh secrets map (with expiry/config/metadata).
 # - absent:     user not connected, or HUMR just deleted the row after
@@ -257,11 +259,10 @@ class CredentialStateStore:
     lock together.
     """
 
-    def __init__(self, provider_slugs: tuple[str, ...], humr_client: HumrClient, refresh_lead_seconds: int) -> None:
+    def __init__(self, provider_slugs: tuple[str, ...], humr_client: HumrClient) -> None:
         self._provider_slugs = provider_slugs
         self._provider_slug_set = frozenset(provider_slugs)
         self._humr_client = humr_client
-        self._refresh_lead_seconds = refresh_lead_seconds
         self._lock = asyncio.Lock()
         self._cache: dict[str, _TokenCacheEntry] = {}
         self._connection_states: dict[str, ProviderConnectionState] = {}
@@ -353,7 +354,7 @@ class CredentialStateStore:
         now = time.monotonic()
         self._prune_expired_locked(now=now)
         entry = self._cache.get(slug)
-        if entry is not None and entry.is_fresh(now=now, refresh_lead_seconds=self._refresh_lead_seconds):
+        if entry is not None and entry.is_fresh(now=now, refresh_lead_seconds=REFRESH_LEAD_SECONDS):
             return entry
         await self._refresh_locked(slugs=[slug])
         return self._cache.get(slug)

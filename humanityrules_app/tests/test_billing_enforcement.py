@@ -470,13 +470,6 @@ class _StubCredentialStateStore:
         return None
 
 
-class _ExplodingBillingService:
-    """Billing facade stand-in whose decision raises."""
-
-    async def decision_for_request(self, provider_slug: str, platform_shared: bool) -> billing_service.BillingDecision:
-        raise RuntimeError("billing boom")
-
-
 async def _exhausted_billing_service() -> tuple[billing_service.BillingService, AsyncMock]:
     client = humr_client.HumrClient(
         control_plane_url="https://humr.example",
@@ -607,14 +600,17 @@ class TestExhaustedInterceptWiring(unittest.IsolatedAsyncioTestCase):
         self.assertIn(b"POST /backend-api/codex/responses", provider_writer.all_bytes())
 
     async def test_a_broken_billing_check_lets_the_request_through(self) -> None:
-        sandbox_writer, provider_writer = await self._intercept(
-            provider_slug="openai-codex",
-            host="chatgpt.com",
-            secrets={"access_token": "tok", "chatgpt_account_id": "acct"},
-            platform_shared=True,
-            request_headers=b"Accept-Encoding: gzip, br\r\n",
-            billing_service_instance=_ExplodingBillingService(),
-        )
+        facade, entitlement, _reporter = _make_facade(refusal=None)
+
+        with patch.object(entitlement, "refusal_for_metered_request", AsyncMock(side_effect=RuntimeError("billing boom"))):
+            sandbox_writer, provider_writer = await self._intercept(
+                provider_slug="openai-codex",
+                host="chatgpt.com",
+                secrets={"access_token": "tok", "chatgpt_account_id": "acct"},
+                platform_shared=True,
+                request_headers=b"Accept-Encoding: gzip, br\r\n",
+                billing_service_instance=facade,
+            )
 
         self.assertNotIn(b"402", sandbox_writer.all_bytes())
         self.assertIn(b"POST /backend-api/codex/responses", provider_writer.all_bytes())
