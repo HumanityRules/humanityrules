@@ -25,7 +25,7 @@ import humr_client  # noqa: E402
 import tls_http_message_relay  # noqa: E402
 import tls_intercept  # noqa: E402
 import tls_provider_catalog  # noqa: E402
-import tls_token_store  # noqa: E402
+import tls_credential_state  # noqa: E402
 
 
 _USAGE = {
@@ -466,10 +466,10 @@ class _StubCredentialStateStore:
         self._secrets = secrets
         self._platform_shared = platform_shared
 
-    async def credential_for_slug(self, slug: str) -> tls_token_store.ActiveCredential:
-        return tls_token_store.ActiveCredential(secrets=self._secrets, platform_shared=self._platform_shared)
+    async def credential_for_slug(self, slug: str) -> tls_credential_state.ActiveCredential:
+        return tls_credential_state.ActiveCredential(secrets=self._secrets, platform_shared=self._platform_shared)
 
-    async def invalidate(self, slug: str) -> None:
+    async def drop_cached_token(self, slug: str) -> None:
         return None
 
 

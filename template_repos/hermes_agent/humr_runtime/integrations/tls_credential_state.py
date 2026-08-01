@@ -46,7 +46,7 @@ triggered by broker bootstrap, by a request whose cache entry is missing
 or near expiry, by a known state change (connect / disconnect / vault
 save / device-flow completion), or by an explicit Refresh in the UI.
 A single lock serializes cache mutation and any read that needs a
-consistent view, so a parked fetch cannot write past an invalidate.
+consistent view, so a parked fetch cannot write past a concurrent token drop.
 """
 
 import asyncio
@@ -60,7 +60,7 @@ from typing import Literal
 from humr_client import HumrClient
 
 
-logger = logging.getLogger("tls_token_store")
+logger = logging.getLogger("tls_credential_state")
 
 
 # Internal tags from HUMR's refresh endpoint. For each requested slug, HUMR returns one of:
@@ -252,7 +252,7 @@ class CredentialStateStore:
     Replaces the older per-slug `_refresh_locks` + `_cache_lock` pair —
     the additional cross-slug parallelism that bought us doesn't matter
     in this broker (low concurrent traffic, in-VPC HUMR),
-    and a single lock makes "a parked fetch wrote past an invalidate"
+    and a single lock makes "a parked fetch wrote past a concurrent token drop"
     structurally impossible: fetch and apply always run under the same
     lock together.
     """
@@ -283,12 +283,12 @@ class CredentialStateStore:
             platform_shared = state is not None and bool(state.metadata.get("platform_shared"))
             return ActiveCredential(secrets=dict(entry.secrets), platform_shared=platform_shared)
 
-    async def invalidate(self, slug: str) -> None:
+    async def drop_cached_token(self, slug: str) -> None:
         """Drop the cached token for a provider."""
         async with self._lock:
             self._cache.pop(slug, None)
 
-    async def invalidate_all(self) -> None:
+    async def drop_all_cached_tokens(self) -> None:
         """Drop every cached token entry."""
         async with self._lock:
             self._cache.clear()
@@ -301,7 +301,7 @@ class CredentialStateStore:
         disconnect handler holds HUMR's authoritative row-deletion, so applying it
         directly here keeps a transient follow-up refresh — which leaves connection state
         untouched — from leaving the card connected after the user just disconnected.
-        Unlike `invalidate` (used for connect-of-another-slug and the 401 evict,
+        Unlike `drop_cached_token` (used for connect-of-another-slug and the 401 evict,
         where truth is only known after the next refresh), the disconnect outcome
         is already known, so it's safe to flip the connection state here.
         """
@@ -363,7 +363,7 @@ class CredentialStateStore:
 
         Holding the lock across both fetch and apply (rather than
         dropping it during the network call) is what prevents a parked
-        fetch from overwriting a concurrent invalidate. The cost is
+        fetch from overwriting a concurrent token drop. The cost is
         small in practice: ~tens of ms per refresh, and at most one
         refresh per provider per token lifetime hits this path.
 

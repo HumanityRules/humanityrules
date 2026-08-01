@@ -25,14 +25,14 @@ Three things that *do* belong here:
 
 3. Stale-tolerant reads, plus two apply-side routes that exist because of
    that. Status is served from cache and refreshed lazily (proxy hot path
-   or near expiry). ``POST .../invalidate`` is the WebUI telling the broker
+   or near expiry). ``POST .../resync`` is the WebUI telling the broker
    that HUMR already holds a new credential (vault save, OAuth return) and
-   the broker should drop that provider's cache, rewrite gateway env, and
-   restart as needed — not a generic "give me fresh cards" call. Disconnect
-   never uses this HTTP route; it goes through ``credentials_disconnect``,
-   which invalidates inside ``credentials_service``. ``POST .../refresh_all``
-   is the explicit Refresh button (MCP catalog reload + all-providers TLS
-   invalidate in one shot).
+   the broker should drop that provider's cache, refetch HUMR truth, rewrite
+   gateway env, and restart as needed — not a generic "give me fresh cards"
+   call. Disconnect never uses this HTTP route; it goes through
+   ``credentials_disconnect``, which resyncs inside ``credentials_service``.
+   ``POST .../refresh_all`` is the explicit Refresh button (MCP catalog
+   reload + all-providers resync in one shot).
 """
 
 import logging
@@ -91,7 +91,7 @@ async def _handle_unified_status(
 
     Reads cached TLS-intercept entries; refresh happens lazily (proxy hot
     path or near expiry). Per-provider apply after a vault/OAuth connect is
-    ``POST .../tls_intercept/{provider}/invalidate``; the Refresh button is
+    ``POST .../tls_intercept/{provider}/resync``; the Refresh button is
     ``POST .../refresh_all``.
     """
     items = await tls_intercept_runtime.status_items()
@@ -145,15 +145,15 @@ def build_control_app(
         })
 
     async def integrations_refresh_all_route(request: Request) -> Response:
-        """Explicit-Refresh: MCP catalog reload + all-providers TLS invalidate in one shot."""
+        """Explicit-Refresh: MCP catalog reload + all-providers TLS resync in one shot."""
         status, payload = await credentials_service.refresh_all_integrations()
         return JSONResponse(content=payload, status_code=status)
 
-    async def credentials_invalidate_route(request: Request) -> Response:
-        """Drop one provider's cached TLS-intercept token after known state changes."""
+    async def resync_provider_route(request: Request) -> Response:
+        """Resync one TLS-intercept provider from HUMR truth after a known state change."""
         provider = request.path_params["provider"]
         try:
-            await credentials_service.credentials_invalidate(slug=provider)
+            await credentials_service.resync_provider(slug=provider)
         except RuntimeError as exc:
             return JSONResponse(
                 content={"ok": False, "provider": provider, "error": str(exc)},
@@ -207,7 +207,7 @@ def build_control_app(
         Route(path="/integrations", endpoint=integration_status_route, methods=["GET"]),
         Route(path="/integrations/refresh_all", endpoint=integrations_refresh_all_route, methods=["POST"]),
 
-        Route(path=f"{tls}/invalidate", endpoint=credentials_invalidate_route, methods=["POST"]),
+        Route(path=f"{tls}/resync", endpoint=resync_provider_route, methods=["POST"]),
         Route(path=f"{tls}/setup-session", endpoint=credentials_setup_session_route, methods=["POST"]),
         Route(path=f"{tls}/disconnect", endpoint=credentials_disconnect_route, methods=["POST"]),
 
