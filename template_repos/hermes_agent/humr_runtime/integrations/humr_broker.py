@@ -143,7 +143,6 @@ async def _run(
     tls_intercept_runtime = tls_intercept.TlsInterceptRuntime(
         providers=tls_provider_catalog.TLS_INTERCEPT_PROVIDERS,
         humr_client=humr_client,
-        refresh_lead_seconds=tls_intercept.REFRESH_LEAD_SECONDS,
         ca_dir=ca_dir,
         private_dir=private_dir,
         billing_service=billing,
