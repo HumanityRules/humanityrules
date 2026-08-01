@@ -1,3 +1,5 @@
+"""Map control-plane browser and runtime API URLs to the exported view callables."""
+
 from django.urls import path
 
 from . import views
@@ -105,6 +107,8 @@ urlpatterns = [
     path("settings/personal/", views.settings_personal, name="settings_personal"),
     path("settings/organization/", views.settings_organization, name="settings_organization"),
     path("settings/billing/", views.settings_billing, name="settings_billing"),
+    path("settings/billing/checkout", views.settings_billing_checkout, name="settings_billing_checkout"),
+    path("settings/billing/portal", views.settings_billing_portal, name="settings_billing_portal"),
 
 
     # Authentication
