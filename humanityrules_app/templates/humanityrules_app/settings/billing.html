@@ -1,8 +1,66 @@
 {% extends "humanityrules_app/settings/settings.html" %}
 
 {% block settings_content %}
-<div>
-    <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Billing</h2>
-    <p class="text-gray-600 dark:text-gray-400">Manage your subscription and billing information.</p>
+<div class="max-w-2xl space-y-8">
+
+    <section>
+        <h2 class="text-base font-semibold text-gray-900 dark:text-white mb-1">Billing</h2>
+        <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">Your organization's plan and agent usage.</p>
+
+        <div class="rounded-lg border border-gray-200 dark:border-white/10">
+            <div class="px-4 py-4 border-b border-gray-100 dark:border-white/10 sm:flex sm:items-center sm:justify-between">
+                <div class="text-sm font-semibold text-gray-900 dark:text-white">{{ billing.plan_name }}</div>
+                {% if billing.renewal_date %}
+                <div class="mt-1 text-sm text-gray-500 dark:text-gray-400 sm:mt-0">
+                    Renews on {{ billing.renewal_date|date:"M j, Y" }}
+                </div>
+                {% endif %}
+            </div>
+
+            <div class="px-4 py-6">
+                <div class="text-3xl font-semibold tracking-tight text-gray-900 dark:text-white">
+                    {{ billing.credits_remaining }} of {{ billing.monthly_grant }} credits remaining
+                </div>
+                <div class="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                    {{ billing.current_period_burn }} credits used this period
+                </div>
+            </div>
+        </div>
+    </section>
+
+    {% if billing.show_upgrade or billing.show_manage_billing %}
+    <section>
+        <div class="flex flex-wrap items-center gap-3">
+            {% if billing.show_upgrade %}
+            <form method="post" action="{% url 'settings_billing_checkout' %}">
+                {% csrf_token %}
+                <button type="submit"
+                        {% if not billing.stripe_configured %}disabled{% endif %}
+                        class="rounded-md px-4 py-2 text-sm font-semibold shadow-sm
+                               {% if billing.stripe_configured %}bg-indigo-500 text-white hover:bg-indigo-400{% else %}cursor-not-allowed bg-gray-200 text-gray-500 dark:bg-white/10 dark:text-gray-500{% endif %}">
+                    Upgrade to Operator (${{ billing.operator_price_usd }}/month)
+                </button>
+            </form>
+            {% endif %}
+
+            {% if billing.show_manage_billing %}
+            <form method="post" action="{% url 'settings_billing_portal' %}">
+                {% csrf_token %}
+                <button type="submit"
+                        {% if not billing.stripe_configured %}disabled{% endif %}
+                        class="rounded-md px-4 py-2 text-sm font-semibold shadow-sm
+                               {% if billing.stripe_configured %}bg-white text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 dark:bg-white/5 dark:text-white dark:ring-white/10 dark:hover:bg-white/10{% else %}cursor-not-allowed bg-gray-200 text-gray-500 dark:bg-white/10 dark:text-gray-500{% endif %}">
+                    Manage billing
+                </button>
+            </form>
+            {% endif %}
+        </div>
+
+        {% if not billing.stripe_configured %}
+        <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">Payments aren't set up yet.</p>
+        {% endif %}
+    </section>
+    {% endif %}
+
 </div>
 {% endblock %}
