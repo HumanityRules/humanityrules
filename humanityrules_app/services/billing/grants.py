@@ -1,32 +1,29 @@
-"""How HumR puts credits *into* an organization's account.
+"""How HumR posts plan credits and expires the previous billing period.
 
-HumR bills in credits (1 credit ≈ $0.01 of rated usage). The source of truth
-for how many credits an organization has is an append-only ledger
-(``BillingLedgerEntry``): every addition or subtraction is a new row. The
-``BillingBalance`` row is only a cached sum of that ledger — kept so we can
-read the current total quickly and lock one row when writing. Charges
-subtract; this module is the other direction — entries of type ``grant``,
-which add credits.
+HumR bills in credits (1 credit ≈ $0.01 of rated usage). The append-only
+``BillingLedgerEntry`` is the money record; ``BillingBalance`` is its cached
+sum and the row every writer locks so concurrent writers serialize for one
+organization. A ledger entry is safe only when its writer holds that lock and
+the entry carries a unique idempotency key.
 
-Why that matters for this file: every credit movement, grant or charge, must
-(1) take a ``SELECT FOR UPDATE`` on that org's balance row so concurrent writers
-serialize, and (2) carry a unique idempotency key so retries, races, and
-re-runs cannot double-apply. Skip either rule and the balance can diverge from
-``SUM(ledger)``, which we only repair by hand. This module is the grant side of
-that contract.
+The one-time trial allotment is a single positive grant. An Operator renewal
+is an atomic pair under one balance lock: write off the previous balance, then
+post the new period's grant, resetting the balance to that grant. Writing off a
+positive balance expires unused entitlement; writing off a negative balance
+forgives grace overspend bounded by the enforcement floor.
 
-Callers of this write path include the one-time trial allotment at signup
-(and the management command that backfills orgs that never got one), and
-monthly Operator renewals from Stripe's invoice-paid webhook. The trial
-amount comes from the org's effective plan (including any admin
-``plan_overrides``), so an org whose trial grant was raised by an override
-receives that raised number, not the registry default. Signup and backfill
-share the key ``grant:trial:{org_id}``, so whichever runs first (or twice)
-wins once — the second call is a no-op. Renewals use the same locked write
-with a different, period-scoped key shape — not a separate "just bump the
-balance" shortcut.
+Stripe delivers webhooks at least once, so the paid invoice that triggered a
+renewal can arrive again — possibly days later, after the customer has spent
+from the new grant. The renewal therefore checks for the period's grant entry
+first and, when it already exists, writes nothing at all: re-running just the
+write-off would wipe those newly spent credits.
+
+Both paths read the organization's effective plan after overrides. Grant
+metadata stamps the plan and config version that supplied the amount, leaving
+old ledger rows explainable after the in-code registry changes.
 """
 
+import datetime
 import logging
 from decimal import Decimal
 from uuid import UUID
@@ -39,19 +36,54 @@ from humanityrules_app.services.billing import plans
 logger = logging.getLogger(__name__)
 
 
-def _write_grant(
-    organization_id: UUID,
-    credits: Decimal,
+def _write_locked_entry(
+    balance: models.BillingBalance,
+    entry_type: str,
+    amount: Decimal,
     idempotency_key: str,
     description: str,
     metadata: dict,
 ) -> bool:
-    """Post a positive credit grant under the balance lock; False when the key already exists."""
-    if credits <= 0:
-        raise ValueError(f"a grant must be positive, got {credits}")
+    """Post one grant or expiry using an already-locked balance; False means the key already exists."""
+    if entry_type == models.BillingLedgerEntry.Type.GRANT and amount <= 0:
+        raise ValueError(f"a grant must be positive, got {amount}")
+    if entry_type == models.BillingLedgerEntry.Type.EXPIRY and amount == 0:
+        raise ValueError(f"an expiry must be non-zero, got {amount}")
+    if entry_type not in {models.BillingLedgerEntry.Type.GRANT, models.BillingLedgerEntry.Type.EXPIRY}:
+        raise ValueError(f"grants.py posts only grant and expiry entries, got {entry_type!r}")
 
+    entry_exists = models.BillingLedgerEntry.objects.filter(
+        organization_id=balance.organization_id,
+        idempotency_key=idempotency_key,
+    ).exists()
+    if entry_exists:
+        logger.info(f"entry {idempotency_key} already posted for organization {balance.organization_id}; no-op")
+        return False
+
+    models.BillingLedgerEntry.objects.create(
+        organization_id=balance.organization_id,
+        type=entry_type,
+        amount=amount,
+        idempotency_key=idempotency_key,
+        usage_event=None,
+        description=description,
+        metadata=metadata,
+    )
+    previous_credits = balance.credits
+    balance.credits = previous_credits + amount
+    balance.save(update_fields=["credits", "updated_at"])
+    logger.info(
+        f"entry {idempotency_key} posted {amount} credit(s) to organization {balance.organization_id}: "
+        f"balance {previous_credits} -> {balance.credits}"
+    )
+    return True
+
+
+def _write_grant(organization_id: UUID, credits: Decimal, idempotency_key: str, description: str, metadata: dict) -> bool:
+    """Post a positive credit grant under the balance lock; False when the key already exists."""
     models.BillingBalance.objects.get_or_create(
-        organization_id=organization_id, defaults={"credits": Decimal(0)},
+        organization_id=organization_id,
+        defaults={"credits": Decimal(0)},
     )
     with transaction.atomic():
         balance = (
@@ -60,31 +92,14 @@ def _write_grant(
             .filter(organization_id=organization_id)
             .get()
         )
-        already_granted = models.BillingLedgerEntry.objects.filter(
-            organization_id=organization_id, idempotency_key=idempotency_key,
-        ).exists()
-
-        if already_granted:
-            logger.info(f"grant {idempotency_key} already posted for organization {organization_id}; no-op")
-            return False
-
-        models.BillingLedgerEntry.objects.create(
-            organization_id=organization_id,
-            type=models.BillingLedgerEntry.Type.GRANT,
+        return _write_locked_entry(
+            balance=balance,
+            entry_type=models.BillingLedgerEntry.Type.GRANT,
             amount=credits,
             idempotency_key=idempotency_key,
-            usage_event=None,
             description=description,
             metadata=metadata,
         )
-        previous_credits = balance.credits
-        balance.credits = previous_credits + credits
-        balance.save(update_fields=["credits", "updated_at"])
-        logger.info(
-            f"grant {idempotency_key} posted {credits} credit(s) to organization {organization_id}: "
-            f"balance {previous_credits} -> {balance.credits}"
-        )
-        return True
 
 
 def grant_trial_credits(organization: models.Organization) -> bool:
@@ -102,3 +117,53 @@ def grant_trial_credits(organization: models.Organization) -> bool:
         description="Trial credits",
         metadata={"plan": organization.plan, "plan_version": plans.PLAN_VERSION},
     )
+
+
+def grant_operator_period_credits(organization: models.Organization, stripe_subscription_id: str, period_start: datetime.date) -> bool:
+    """Reset the balance to one Operator period's grant; False when that period already posted."""
+    period = period_start.isoformat()
+    grant_key = f"grant:{stripe_subscription_id}:{period}"
+    expiry_key = f"expiry:{stripe_subscription_id}:{period}"
+    plan = plans.effective_plan(organization=organization)
+    grant_amount = Decimal(plan.monthly_credit_grant)
+
+    if grant_amount <= 0:
+        raise ValueError(f"an Operator period grant must be positive, got {grant_amount}")
+
+    models.BillingBalance.objects.get_or_create(
+        organization=organization,
+        defaults={"credits": Decimal(0)},
+    )
+    with transaction.atomic():
+        balance = (
+            models.BillingBalance.objects
+            .select_for_update()
+            .filter(organization=organization)
+            .get()
+        )
+        grant_exists = models.BillingLedgerEntry.objects.filter(
+            organization=organization,
+            idempotency_key=grant_key,
+        ).exists()
+        if grant_exists:
+            logger.info(f"Operator period {grant_key} already posted for organization {organization.id}; no-op")
+            return False
+
+        if balance.credits != 0:
+            _write_locked_entry(
+                balance=balance,
+                entry_type=models.BillingLedgerEntry.Type.EXPIRY,
+                amount=-balance.credits,
+                idempotency_key=expiry_key,
+                description="Previous period balance written off at renewal",
+                metadata={"subscription_id": stripe_subscription_id, "period_start": period},
+            )
+
+        return _write_locked_entry(
+            balance=balance,
+            entry_type=models.BillingLedgerEntry.Type.GRANT,
+            amount=grant_amount,
+            idempotency_key=grant_key,
+            description="Operator monthly credits",
+            metadata={"plan": organization.plan, "plan_version": plans.PLAN_VERSION},
+        )

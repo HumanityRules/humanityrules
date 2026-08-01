@@ -4,7 +4,7 @@ The rules that are expensive to get wrong live here: a typo'd override is a save
 error rather than a silently dead entitlement, capabilities reach the deploy path
 from the plan booleans and nowhere else, the trial grant is written exactly once
 through the balance lock, the agent cap counts live agents, and the broker's
-snapshot stops spending at −10% of the grant rather than at zero.
+snapshot stops spending at −5% of the grant rather than at zero.
 """
 
 from decimal import Decimal
@@ -462,7 +462,7 @@ class TestAgentLimit(TestCase):
 
 
 class TestEntitlementSnapshot(TestCase):
-    """What the broker enforces: the balance, the grant it is measured against, and the −10% floor."""
+    """What the broker enforces: the balance, the grant it is measured against, and the −5% floor."""
 
     def setUp(self) -> None:
         self.organization = models.Organization.objects.create(name="Snap Org", slug="snap-org")
@@ -495,36 +495,36 @@ class TestEntitlementSnapshot(TestCase):
         self.assertFalse(entitlements.entitlement_snapshot(organization=self.organization).exhausted)
 
     def test_just_above_the_floor_still_spends(self) -> None:
-        self.set_balance(credits=Decimal(-49))
+        self.set_balance(credits=Decimal(-24))
 
         self.assertFalse(entitlements.entitlement_snapshot(organization=self.organization).exhausted)
 
     def test_the_floor_itself_is_exhausted(self) -> None:
-        self.set_balance(credits=Decimal(-50))
+        self.set_balance(credits=Decimal(-25))
 
         snapshot = entitlements.entitlement_snapshot(organization=self.organization)
 
-        self.assertEqual(snapshot.credits_remaining, -50)
+        self.assertEqual(snapshot.credits_remaining, -25)
         self.assertTrue(snapshot.exhausted)
 
     def test_the_floor_follows_the_plans_grant(self) -> None:
         self.organization.plan = plans.OPERATOR
         self.organization.save(update_fields=["plan"])
-        self.set_balance(credits=Decimal(-150))
+        self.set_balance(credits=Decimal(-99))
 
         snapshot = entitlements.entitlement_snapshot(organization=self.organization)
 
         self.assertEqual(snapshot.monthly_grant, 2000)
         self.assertFalse(snapshot.exhausted)
 
-        self.set_balance(credits=Decimal(-200))
+        self.set_balance(credits=Decimal(-100))
 
         self.assertTrue(entitlements.entitlement_snapshot(organization=self.organization).exhausted)
 
     def test_the_floor_follows_an_override(self) -> None:
         self.organization.plan_overrides = {"monthly_credit_grant": 5000}
         self.organization.save(update_fields=["plan_overrides"])
-        self.set_balance(credits=Decimal(-400))
+        self.set_balance(credits=Decimal(-249))
 
         snapshot = entitlements.entitlement_snapshot(organization=self.organization)
 

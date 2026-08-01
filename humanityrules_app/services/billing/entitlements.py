@@ -6,13 +6,16 @@ maintains and the organization's effective plan. The broker caches it and
 refreshes event-driven: every usage-event post returns a fresh copy, and the
 runtime GET serves idle organizations whose cache went stale.
 
-Exhaustion is a floor at −10% of the plan's grant, not zero. Delayed events and
+Exhaustion is a floor at −5% of the plan's grant, not zero. Delayed events and
 in-flight turns make exact-zero enforcement dishonest without reservation
-machinery, so a fixed negative allowance is both simpler and truthful; negative
-balances roll into the next grant.
+machinery, so a fixed negative allowance is both simpler and truthful. Renewal
+writes the balance off and re-grants, so grace overspend is absorbed there and
+the new period starts at the full grant.
 
-``renewal_date`` is null until subscriptions exist. Trial's grant is one-time
-and has no renewal at all, so null stays its permanent answer.
+``renewal_date`` is the Stripe mirror's period end while the subscription still
+keeps the organization on Operator (``BillingSubscription.OPERATOR_STATUSES``).
+A trial has no subscription and a canceled one no longer renews, so both read
+as None.
 """
 
 from dataclasses import dataclass
@@ -23,7 +26,7 @@ from humanityrules_app.services.billing import plans
 
 # How far past zero an organization may spend before the broker refuses model
 # calls, as a fraction of its plan's grant.
-EXHAUSTION_GRACE_FRACTION = Decimal("0.10")
+EXHAUSTION_GRACE_FRACTION = Decimal("0.05")
 
 
 @dataclass(frozen=True)
@@ -38,7 +41,7 @@ class EntitlementSnapshot:
 
 
 def exhaustion_floor(monthly_grant: int) -> Decimal:
-    """The balance at or below which spending stops: −10% of the plan's grant."""
+    """The balance at or below which spending stops: −5% of the plan's grant."""
     return -(Decimal(monthly_grant) * EXHAUSTION_GRACE_FRACTION)
 
 
@@ -47,10 +50,16 @@ def entitlement_snapshot(organization: models.Organization) -> EntitlementSnapsh
     plan = plans.effective_plan(organization=organization)
     balance = models.BillingBalance.objects.filter(organization=organization).first()
     credits_remaining = balance.credits if balance is not None else Decimal(0)
+    subscription = models.BillingSubscription.objects.filter(
+        organization=organization,
+        status__in=models.BillingSubscription.OPERATOR_STATUSES,
+        current_period_end__isnull=False,
+    ).first()
+    renewal_date = subscription.current_period_end.date().isoformat() if subscription is not None else None
     return EntitlementSnapshot(
         credits_remaining=int(credits_remaining),
         monthly_grant=plan.monthly_credit_grant,
-        renewal_date=None,
+        renewal_date=renewal_date,
         plan=organization.plan,
         exhausted=credits_remaining <= exhaustion_floor(monthly_grant=plan.monthly_credit_grant),
     )

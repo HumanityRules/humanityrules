@@ -114,6 +114,7 @@ from .health import health_check
 from .pdp import pdp_evaluate, pdp_evaluate_public
 from .policy_proxy_activity import policy_proxy_activity
 from .billing_usage import billing_entitlement, billing_usage_events
+from .stripe_webhook import stripe_webhook
 from .template_deploy import (
     template_deploy_picker,
     template_deploy_form,
@@ -265,6 +266,7 @@ __all__ = [
     "policy_proxy_activity",
     "billing_usage_events",
     "billing_entitlement",
+    "stripe_webhook",
     "integrations_org_github_connect",
     "integrations_org_github_callback",
     "integrations_org_github_setup",
