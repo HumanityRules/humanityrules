@@ -43,12 +43,12 @@ def billing_page_context(organization: models.Organization) -> BillingPageContex
     effective_plan = plans.effective_plan(organization=organization)
     balance = models.BillingBalance.objects.filter(organization=organization).first()
     subscription = models.BillingSubscription.objects.filter(organization=organization).first()
-    operator_subscription = (
+    subscription_keeps_operator = (
         subscription is not None
         and subscription.status in models.BillingSubscription.OPERATOR_STATUSES
     )
 
-    if operator_subscription and subscription.current_period_start is not None:
+    if subscription_keeps_operator and subscription.current_period_start is not None:
         period_anchor = subscription.current_period_start
     else:
         latest_grant_at = (
@@ -73,7 +73,7 @@ def billing_page_context(organization: models.Organization) -> BillingPageContex
     credits_remaining = int(balance.credits) if balance is not None else 0
     renewal_date = (
         subscription.current_period_end.date()
-        if operator_subscription and subscription.current_period_end is not None
+        if subscription_keeps_operator and subscription.current_period_end is not None
         else None
     )
     operator_price = plans.PLANS[plans.OPERATOR].price_usd_month
