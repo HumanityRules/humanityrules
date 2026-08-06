@@ -1,3 +1,4 @@
+import datetime
 import urllib.parse
 import uuid
 
@@ -1789,6 +1790,15 @@ class BillingSubscription(models.Model):
     status = models.CharField(max_length=32, help_text="Stripe's subscription status, stored verbatim.")
     current_period_start = models.DateTimeField(null=True, blank=True)
     current_period_end = models.DateTimeField(null=True, blank=True)
+    cancel_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text="When Stripe will terminate the subscription; set while a cancellation is pending.",
+    )
+    canceled_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text="When the cancellation was requested, not when it takes effect.",
+    )
+    latest_subscription_event_created_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1798,6 +1808,45 @@ class BillingSubscription(models.Model):
 
     def __str__(self) -> str:
         return f"BillingSubscription org={self.organization_id} {self.stripe_subscription_id} {self.status}"
+
+    @property
+    def is_pending_cancellation(self) -> bool:
+        """True while the subscription still grants Operator but Stripe holds a termination date for it.
+
+        The status check matters: a subscription that already ended can retain
+        its ``cancel_at`` residue, and that is history, not a pending state.
+        """
+        return self.status in self.OPERATOR_STATUSES and self.cancel_at is not None
+
+    @property
+    def scheduled_end_at(self) -> datetime.datetime | None:
+        """The date access will end, only while a cancellation is pending."""
+        return self.cancel_at if self.is_pending_cancellation else None
+
+
+class StripeWebhookEvent(models.Model):
+    """One verified Stripe webhook event, kept as durable proof it was processed.
+
+    The Stripe event id is the primary key, since Stripe redelivers events and
+    that id is the only reliable way to recognize a duplicate delivery.
+    Webhook handling creates this row inside the same transaction as every
+    mirror, plan, and ledger write the event triggers, so a row existing here
+    always means the whole event was applied — or deliberately treated as a
+    no-op — never applied halfway.
+    """
+
+    stripe_event_id = models.CharField(max_length=255, primary_key=True)
+    event_type = models.CharField(max_length=255)
+    stripe_created_at = models.DateTimeField()
+    payload = models.JSONField()
+    received_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Stripe Webhook Event"
+        verbose_name_plural = "Stripe Webhook Events"
+
+    def __str__(self) -> str:
+        return f"StripeWebhookEvent {self.stripe_event_id} {self.event_type}"
 
 
 class BillingUsageEvent(models.Model):
