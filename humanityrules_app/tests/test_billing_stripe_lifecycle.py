@@ -28,9 +28,26 @@ PERIOD_START = datetime.datetime(2026, 8, 1, tzinfo=datetime.UTC)
 PERIOD_END = datetime.datetime(2026, 9, 1, tzinfo=datetime.UTC)
 
 
+def _stripe_event_at(event_type: str, stripe_object: dict, event_id: str, event_created_at: datetime.datetime) -> dict:
+    """Build a Stripe event envelope with explicit delivery identity and ordering."""
+    return {
+        "id": event_id,
+        "type": event_type,
+        "created": int(event_created_at.timestamp()),
+        "data": {"object": stripe_object},
+    }
+
+
 def _stripe_event(event_type: str, stripe_object: dict) -> dict:
     """Build the plain event envelope passed to the lifecycle dispatcher."""
-    return {"type": event_type, "data": {"object": stripe_object}}
+    stripe_object_id = stripe_object.get("id")
+    object_id = stripe_object_id if isinstance(stripe_object_id, str) else "unknown"
+    return _stripe_event_at(
+        event_type=event_type,
+        stripe_object=stripe_object,
+        event_id=f"evt_{event_type.replace('.', '_')}_{object_id}",
+        event_created_at=PERIOD_START,
+    )
 
 
 def _subscription_object(
@@ -46,6 +63,8 @@ def _subscription_object(
         "id": stripe_subscription_id,
         "customer": stripe_customer_id,
         "status": status,
+        "cancel_at": None,
+        "canceled_at": None,
         "metadata": {"organization_id": str(organization.id)},
         "items": {
             "data": [{
@@ -270,6 +289,68 @@ class TestWebhookVerificationBoundary(TestCase):
             )
 
 
+class TestWebhookEventPersistence(TestCase):
+    """Verified events are durable exactly once, with effects in the same transaction."""
+
+    def test_unhandled_event_retains_the_full_envelope(self) -> None:
+        event = _stripe_event(
+            event_type="checkout.session.completed",
+            stripe_object={"id": "cs_retained", "metadata": {"source": "test"}},
+        )
+        before_receive = datetime.datetime.now(tz=datetime.UTC)
+
+        stripe_lifecycle.apply_webhook_event(event=event)
+
+        after_receive = datetime.datetime.now(tz=datetime.UTC)
+        stored_event = models.StripeWebhookEvent.objects.get(stripe_event_id=event["id"])
+        self.assertEqual(stored_event.event_type, "checkout.session.completed")
+        self.assertEqual(stored_event.stripe_created_at, PERIOD_START)
+        self.assertEqual(stored_event.payload, event)
+        self.assertGreaterEqual(stored_event.received_at, before_receive)
+        self.assertLessEqual(stored_event.received_at, after_receive)
+
+    def test_redelivery_is_skipped_before_dispatch(self) -> None:
+        event = _stripe_event(
+            event_type="checkout.session.completed",
+            stripe_object={"id": "cs_redelivered"},
+        )
+
+        with patch.object(stripe_lifecycle, "_dispatch_webhook_event") as dispatch:
+            stripe_lifecycle.apply_webhook_event(event=event)
+            stripe_lifecycle.apply_webhook_event(event=event)
+
+        dispatch.assert_called_once_with(
+            event=event,
+            event_type="checkout.session.completed",
+            event_created_at=PERIOD_START,
+        )
+        self.assertEqual(models.StripeWebhookEvent.objects.filter(stripe_event_id=event["id"]).count(), 1)
+
+    def test_apply_failure_rolls_back_the_event_and_its_mirror_writes(self) -> None:
+        organization = models.Organization.objects.create(name="Rollback Org", slug="rollback-org")
+        subscription_object = _subscription_object(
+            organization=organization,
+            stripe_subscription_id="sub_rollback",
+            stripe_customer_id="cus_rollback",
+            status="active",
+            period_start=PERIOD_START,
+            period_end=PERIOD_END,
+        )
+        event = _stripe_event(
+            event_type="customer.subscription.created",
+            stripe_object=subscription_object,
+        )
+
+        with (
+            patch.object(stripe_lifecycle, "transition_organization_plan", side_effect=RuntimeError("apply failed")),
+            self.assertRaisesRegex(RuntimeError, "apply failed"),
+        ):
+            stripe_lifecycle.apply_webhook_event(event=event)
+
+        self.assertFalse(models.StripeWebhookEvent.objects.filter(stripe_event_id=event["id"]).exists())
+        self.assertFalse(models.BillingSubscription.objects.filter(organization=organization).exists())
+
+
 class TestSubscriptionWebhookMirroring(TestCase):
     """Created, updated, and deleted events upsert the mirror and then transition the plan."""
 
@@ -297,6 +378,9 @@ class TestSubscriptionWebhookMirroring(TestCase):
         self.assertEqual(subscription.status, "active")
         self.assertEqual(subscription.current_period_start, PERIOD_START)
         self.assertEqual(subscription.current_period_end, PERIOD_END)
+        self.assertIsNone(subscription.cancel_at)
+        self.assertIsNone(subscription.canceled_at)
+        self.assertEqual(subscription.latest_subscription_event_created_at, PERIOD_START)
         self.assertEqual(self.organization.plan, plans.OPERATOR)
 
     def test_updated_event_falls_back_to_subscription_id_and_updates_the_existing_row(self) -> None:
@@ -387,6 +471,116 @@ class TestSubscriptionWebhookMirroring(TestCase):
 
         error_log.assert_not_called()
         self.assertFalse(models.BillingSubscription.objects.exists())
+
+    def test_older_subscription_event_is_retained_but_superseded_by_newer_state(self) -> None:
+        subscription_object = _subscription_object(
+            organization=self.organization,
+            stripe_subscription_id="sub_reordered",
+            stripe_customer_id="cus_reordered",
+            status="active",
+            period_start=PERIOD_START,
+            period_end=PERIOD_END,
+        )
+        deleted_event = _stripe_event_at(
+            event_type="customer.subscription.deleted",
+            stripe_object=subscription_object,
+            event_id="evt_reordered_deleted",
+            event_created_at=PERIOD_END,
+        )
+        older_updated_event = _stripe_event_at(
+            event_type="customer.subscription.updated",
+            stripe_object=subscription_object,
+            event_id="evt_reordered_updated",
+            event_created_at=PERIOD_START,
+        )
+
+        stripe_lifecycle.apply_webhook_event(event=deleted_event)
+        with patch.object(stripe_lifecycle.logger, "info") as info_log:
+            stripe_lifecycle.apply_webhook_event(event=older_updated_event)
+
+        subscription = models.BillingSubscription.objects.get(organization=self.organization)
+        self.organization.refresh_from_db()
+        self.assertEqual(subscription.status, "canceled")
+        self.assertEqual(subscription.latest_subscription_event_created_at, PERIOD_END)
+        self.assertEqual(self.organization.plan, plans.TRIAL)
+        self.assertEqual(models.StripeWebhookEvent.objects.count(), 2)
+        info_log.assert_called_once()
+        self.assertIn("superseded by newer state", info_log.call_args.args[0])
+
+    def test_equal_subscription_event_timestamp_applies_normally(self) -> None:
+        subscription_object = _subscription_object(
+            organization=self.organization,
+            stripe_subscription_id="sub_equal_timestamp",
+            stripe_customer_id="cus_equal_timestamp",
+            status="active",
+            period_start=PERIOD_START,
+            period_end=PERIOD_END,
+        )
+        stripe_lifecycle.apply_webhook_event(event=_stripe_event_at(
+            event_type="customer.subscription.deleted",
+            stripe_object=subscription_object,
+            event_id="evt_equal_deleted",
+            event_created_at=PERIOD_END,
+        ))
+
+        stripe_lifecycle.apply_webhook_event(event=_stripe_event_at(
+            event_type="customer.subscription.updated",
+            stripe_object=subscription_object,
+            event_id="evt_equal_updated",
+            event_created_at=PERIOD_END,
+        ))
+
+        subscription = models.BillingSubscription.objects.get(organization=self.organization)
+        self.organization.refresh_from_db()
+        self.assertEqual(subscription.status, "active")
+        self.assertEqual(subscription.latest_subscription_event_created_at, PERIOD_END)
+        self.assertEqual(self.organization.plan, plans.OPERATOR)
+
+    def test_pending_cancellation_fields_clear_when_the_subscription_resumes(self) -> None:
+        pending_object = _subscription_object(
+            organization=self.organization,
+            stripe_subscription_id="sub_resumed",
+            stripe_customer_id="cus_resumed",
+            status="active",
+            period_start=PERIOD_START,
+            period_end=PERIOD_END,
+        )
+        pending_object["cancel_at"] = int(PERIOD_END.timestamp())
+        pending_object["canceled_at"] = int(PERIOD_START.timestamp())
+        stripe_lifecycle.apply_webhook_event(event=_stripe_event_at(
+            event_type="customer.subscription.updated",
+            stripe_object=pending_object,
+            event_id="evt_cancellation_pending",
+            event_created_at=PERIOD_START,
+        ))
+
+        subscription = models.BillingSubscription.objects.get(organization=self.organization)
+        self.assertEqual(subscription.cancel_at, PERIOD_END)
+        self.assertEqual(subscription.canceled_at, PERIOD_START)
+        self.assertTrue(subscription.is_pending_cancellation)
+        self.assertEqual(subscription.scheduled_end_at, PERIOD_END)
+
+        resumed_object = _subscription_object(
+            organization=self.organization,
+            stripe_subscription_id="sub_resumed",
+            stripe_customer_id="cus_resumed",
+            status="active",
+            period_start=PERIOD_START,
+            period_end=PERIOD_END,
+        )
+        resumed_object["metadata"] = {}
+        stripe_lifecycle.apply_webhook_event(event=_stripe_event_at(
+            event_type="customer.subscription.updated",
+            stripe_object=resumed_object,
+            event_id="evt_cancellation_resumed",
+            event_created_at=PERIOD_END,
+        ))
+
+        subscription.refresh_from_db()
+        self.assertIsNone(subscription.cancel_at)
+        self.assertIsNone(subscription.canceled_at)
+        self.assertFalse(subscription.is_pending_cancellation)
+        self.assertEqual(subscription.latest_subscription_event_created_at, PERIOD_END)
 
 
 class TestSubscriptionPlanTransition(TestCase):
@@ -764,13 +958,17 @@ class TestStripeWebhookView(TestCase):
 
         self.assertEqual(response.status_code, 400)
         apply_event.assert_not_called()
+        self.assertFalse(models.StripeWebhookEvent.objects.exists())
         error_log.assert_called_once_with(
             "Stripe webhook rejected: invalid Stripe webhook signature (ValueError: timestamp outside tolerance)"
         )
 
     @override_settings(STRIPE_WEBHOOK_SECRET="whsec_humr")
     def test_valid_event_is_applied_and_acknowledged(self) -> None:
-        event = {"type": "customer.subscription.updated", "data": {"object": {}}}
+        event = _stripe_event(
+            event_type="customer.subscription.updated",
+            stripe_object={"id": "sub_view_dispatch"},
+        )
         with (
             patch.object(stripe_lifecycle, "verify_and_parse_webhook", return_value=event) as verify,
             patch.object(stripe_lifecycle, "apply_webhook_event") as apply_event,
@@ -788,6 +986,24 @@ class TestStripeWebhookView(TestCase):
         apply_event.assert_called_once_with(event=event)
 
     @override_settings(STRIPE_WEBHOOK_SECRET="whsec_humr")
+    def test_verified_unhandled_event_is_persisted_and_acknowledged(self) -> None:
+        event = _stripe_event(
+            event_type="checkout.session.completed",
+            stripe_object={"id": "cs_verified_unhandled"},
+        )
+        with patch.object(stripe_lifecycle, "verify_and_parse_webhook", return_value=event):
+            response = self.client.post(
+                "/api/stripe/webhook",
+                data=b"{}",
+                content_type="application/json",
+                HTTP_STRIPE_SIGNATURE="valid",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        stored_event = models.StripeWebhookEvent.objects.get(stripe_event_id=event["id"])
+        self.assertEqual(stored_event.payload, event)
+
+    @override_settings(STRIPE_WEBHOOK_SECRET="whsec_humr")
     def test_non_post_method_is_rejected(self) -> None:
         response = self.client.get("/api/stripe/webhook")
 
@@ -795,7 +1011,7 @@ class TestStripeWebhookView(TestCase):
 
 
 class TestSubscriptionRenewalEntitlement(TestCase):
-    """Only Operator-deriving subscription states expose the mirror's period end date."""
+    """Only renewing Operator subscriptions expose the mirror's period end date."""
 
     def test_operator_deriving_statuses_expose_the_iso_renewal_date(self) -> None:
         for index, status in enumerate(models.BillingSubscription.OPERATOR_STATUSES):
@@ -815,6 +1031,22 @@ class TestSubscriptionRenewalEntitlement(TestCase):
                 snapshot = entitlements.entitlement_snapshot(organization=organization)
 
                 self.assertEqual(snapshot.renewal_date, "2026-09-01")
+
+    def test_pending_cancellation_suppresses_the_renewal_date(self) -> None:
+        organization = models.Organization.objects.create(name="Ending Operator", slug="ending-operator")
+        subscription = _create_mirror(
+            organization=organization,
+            stripe_subscription_id="sub_ending_operator",
+            status="active",
+            period_start=PERIOD_START,
+            period_end=PERIOD_END,
+        )
+        subscription.cancel_at = PERIOD_END
+        subscription.save(update_fields=["cancel_at", "updated_at"])
+
+        snapshot = entitlements.entitlement_snapshot(organization=organization)
+
+        self.assertIsNone(snapshot.renewal_date)
 
     def test_terminal_status_and_unknown_period_have_no_renewal_date(self) -> None:
         terminal = models.Organization.objects.create(name="Terminal", slug="terminal-renewal")

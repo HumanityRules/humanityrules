@@ -25,6 +25,7 @@ class BillingPageContext:
     monthly_grant: int
     current_period_burn: int
     renewal_date: datetime.date | None
+    plan_end_date: datetime.date | None
     show_upgrade: bool
     show_manage_billing: bool
     stripe_configured: bool
@@ -71,11 +72,13 @@ def billing_page_context(organization: models.Organization) -> BillingPageContex
         or Decimal(0)
     )
     credits_remaining = int(balance.credits) if balance is not None else 0
+    plan_end_at = subscription.scheduled_end_at if subscription is not None else None
     renewal_date = (
         subscription.current_period_end.date()
-        if subscription_keeps_operator and subscription.current_period_end is not None
+        if subscription_keeps_operator and plan_end_at is None and subscription.current_period_end is not None
         else None
     )
+    plan_end_date = plan_end_at.date() if plan_end_at is not None else None
     operator_price = plans.PLANS[plans.OPERATOR].price_usd_month
     if operator_price is None:
         raise RuntimeError("the Operator plan must have a monthly USD price")
@@ -86,6 +89,7 @@ def billing_page_context(organization: models.Organization) -> BillingPageContex
         monthly_grant=effective_plan.monthly_credit_grant,
         current_period_burn=int(abs(charge_total)),
         renewal_date=renewal_date,
+        plan_end_date=plan_end_date,
         show_upgrade=organization.plan == plans.TRIAL,
         show_manage_billing=subscription is not None and bool(subscription.stripe_customer_id),
         stripe_configured=bool(settings.STRIPE_SECRET_KEY and settings.STRIPE_OPERATOR_PRICE_ID),
