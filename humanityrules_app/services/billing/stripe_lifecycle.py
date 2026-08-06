@@ -20,6 +20,7 @@ also makes the mirror's writer rule explicit: only the handlers below mutate a
 """
 
 import datetime
+import json
 import logging
 from uuid import UUID
 
@@ -93,19 +94,33 @@ def create_portal_url(organization: models.Organization, return_url: str) -> str
 
 
 def verify_and_parse_webhook(payload: bytes, signature_header: str) -> dict:
-    """Verify Stripe's signature and return the event as recursive plain dictionaries."""
+    """Verify Stripe's signature and return the event as plain dictionaries.
+
+    The SDK's event wrapper is deliberately bypassed: every handler downstream
+    consumes plain dicts, so the signed payload's own JSON is the event. Only
+    the SDK's signature check is used. Every failure raises the same error
+    type, but signature failures and payload-shape failures carry distinct
+    messages so the webhook view's log tells them apart.
+    """
     try:
-        event = stripe.Webhook.construct_event(
-            payload=payload,
-            sig_header=signature_header,
+        payload_text = payload.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise WebhookVerificationError("Stripe webhook payload is not UTF-8") from error
+
+    try:
+        stripe.WebhookSignature.verify_header(
+            payload=payload_text,
+            header=signature_header,
             secret=settings.STRIPE_WEBHOOK_SECRET,
+            tolerance=stripe.Webhook.DEFAULT_TOLERANCE,
         )
-        if hasattr(event, "to_dict_recursive"):
-            parsed_event = event.to_dict_recursive()
-        else:
-            parsed_event = dict(event)
     except Exception as error:
-        raise WebhookVerificationError("invalid Stripe webhook signature or payload") from error
+        raise WebhookVerificationError("invalid Stripe webhook signature") from error
+
+    try:
+        parsed_event = json.loads(payload_text)
+    except ValueError as error:
+        raise WebhookVerificationError("signed Stripe webhook payload is not valid JSON") from error
 
     if not isinstance(parsed_event, dict):
         raise WebhookVerificationError("Stripe webhook did not contain an event object")
