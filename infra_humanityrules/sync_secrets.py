@@ -53,6 +53,11 @@ SECRET_DEFINITIONS = {
         "TELEGRAM_MANAGER_BOT_TOKEN",
         "TELEGRAM_MANAGER_BOT_USERNAME",
     ],
+    "humr/prod/stripe": [
+        "STRIPE_SECRET_KEY",
+        "STRIPE_WEBHOOK_SECRET",
+        "STRIPE_OPERATOR_PRICE_ID",
+    ],
     # Shared sandbox: skipped automatically when the key is absent from .env.
     "humr/prod/sandbox": [
         "HUMR_SANDBOX_EXTERNAL_ID",

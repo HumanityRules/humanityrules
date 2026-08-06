@@ -9,7 +9,10 @@ expiry-plus-grant behavior that keeps the ledger and balance aligned.
 """
 
 import datetime
+import hashlib
+import hmac
 import importlib
+import time
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -214,28 +217,57 @@ class TestStripeHostedSessions(TestCase):
             )
 
 
+def _signature_header(payload: bytes, secret: str) -> str:
+    """Sign a payload exactly as Stripe does for webhook delivery."""
+    timestamp = int(time.time())
+    signature = hmac.new(secret.encode(), f"{timestamp}.".encode() + payload, hashlib.sha256).hexdigest()
+    return f"t={timestamp},v1={signature}"
+
+
 class TestWebhookVerificationBoundary(TestCase):
-    """Signature parsing converts the SDK event recursively before it leaves the Stripe boundary."""
+    """The signed payload's own JSON is the event; only Stripe's signature check gates it."""
 
     @override_settings(STRIPE_WEBHOOK_SECRET="whsec_humr")
     def test_verified_event_becomes_a_plain_dict(self) -> None:
-        parsed = {"type": "customer.subscription.updated", "data": {"object": {"id": "sub_one"}}}
-        stripe_event = MagicMock()
-        stripe_event.to_dict_recursive.return_value = parsed
+        payload = b'{"type": "customer.subscription.updated", "data": {"object": {"id": "sub_one"}}}'
 
-        with patch.object(stripe_lifecycle.stripe.Webhook, "construct_event", return_value=stripe_event) as construct:
-            event = stripe_lifecycle.verify_and_parse_webhook(payload=b"{}", signature_header="t=1,v1=signature")
+        event = stripe_lifecycle.verify_and_parse_webhook(
+            payload=payload,
+            signature_header=_signature_header(payload=payload, secret="whsec_humr"),
+        )
 
-        self.assertEqual(event, parsed)
-        construct.assert_called_once_with(payload=b"{}", sig_header="t=1,v1=signature", secret="whsec_humr")
+        self.assertEqual(event, {"type": "customer.subscription.updated", "data": {"object": {"id": "sub_one"}}})
 
     @override_settings(STRIPE_WEBHOOK_SECRET="whsec_humr")
-    def test_sdk_verification_failure_becomes_the_service_error(self) -> None:
-        with (
-            patch.object(stripe_lifecycle.stripe.Webhook, "construct_event", side_effect=RuntimeError("bad signature")),
-            self.assertRaises(stripe_lifecycle.WebhookVerificationError),
-        ):
-            stripe_lifecycle.verify_and_parse_webhook(payload=b"{}", signature_header="bad")
+    def test_bad_signature_becomes_the_service_error(self) -> None:
+        with self.assertRaises(stripe_lifecycle.WebhookVerificationError) as raised:
+            stripe_lifecycle.verify_and_parse_webhook(payload=b"{}", signature_header="t=1,v1=deadbeef")
+
+        self.assertEqual(str(raised.exception), "invalid Stripe webhook signature")
+        self.assertIsNotNone(raised.exception.__cause__)
+
+    @override_settings(STRIPE_WEBHOOK_SECRET="whsec_humr")
+    def test_signed_invalid_json_is_reported_as_a_payload_failure_not_a_signature_failure(self) -> None:
+        payload = b"not json"
+
+        with self.assertRaises(stripe_lifecycle.WebhookVerificationError) as raised:
+            stripe_lifecycle.verify_and_parse_webhook(
+                payload=payload,
+                signature_header=_signature_header(payload=payload, secret="whsec_humr"),
+            )
+
+        self.assertEqual(str(raised.exception), "signed Stripe webhook payload is not valid JSON")
+        self.assertIsInstance(raised.exception.__cause__, ValueError)
+
+    @override_settings(STRIPE_WEBHOOK_SECRET="whsec_humr")
+    def test_non_object_event_becomes_the_service_error(self) -> None:
+        payload = b"[1, 2, 3]"
+
+        with self.assertRaises(stripe_lifecycle.WebhookVerificationError):
+            stripe_lifecycle.verify_and_parse_webhook(
+                payload=payload,
+                signature_header=_signature_header(payload=payload, secret="whsec_humr"),
+            )
 
 
 class TestSubscriptionWebhookMirroring(TestCase):
@@ -450,7 +482,7 @@ class TestSubscriptionPlanTransition(TestCase):
 
 
 class TestPaidInvoiceRenewal(TestCase):
-    """A paid invoice transitions first, then replaces positive credit or rolls debt into the grant."""
+    """A paid invoice transitions first, then resets the balance to the period's grant."""
 
     def test_out_of_order_paid_invoice_creates_the_mirror_then_expires_and_grants(self) -> None:
         organization = models.Organization.objects.create(
@@ -495,7 +527,7 @@ class TestPaidInvoiceRenewal(TestCase):
             {"plan": plans.OPERATOR, "plan_version": plans.PLAN_VERSION},
         )
 
-    def test_negative_remainder_rolls_into_the_new_grant_without_expiry(self) -> None:
+    def test_negative_balance_is_written_off_before_the_new_grant(self) -> None:
         organization = models.Organization.objects.create(name="Debt Org", slug="debt-org")
         _seed_balance(organization=organization, credits=Decimal(-50))
         invoice = _invoice_object(
@@ -510,13 +542,18 @@ class TestPaidInvoiceRenewal(TestCase):
         stripe_lifecycle.apply_webhook_event(event=_stripe_event(event_type="invoice.paid", stripe_object=invoice))
 
         balance = models.BillingBalance.objects.get(organization=organization)
-        renewal_entries = models.BillingLedgerEntry.objects.filter(
-            organization=organization,
-            idempotency_key__contains="sub_debt",
+        renewal_entries = list(
+            models.BillingLedgerEntry.objects
+            .filter(organization=organization, idempotency_key__contains="sub_debt")
+            .order_by("created_at")
         )
-        self.assertEqual(balance.credits, Decimal(1950))
-        self.assertEqual(renewal_entries.count(), 1)
-        self.assertEqual(renewal_entries.get().type, models.BillingLedgerEntry.Type.GRANT)
+        self.assertEqual(balance.credits, Decimal(2000))
+        self.assertEqual(
+            [entry.type for entry in renewal_entries],
+            [models.BillingLedgerEntry.Type.EXPIRY, models.BillingLedgerEntry.Type.GRANT],
+        )
+        self.assertEqual([entry.amount for entry in renewal_entries], [Decimal(50), Decimal(2000)])
+        self.assertEqual(renewal_entries[0].description, "Previous period balance written off at renewal")
 
     def test_replaying_paid_invoice_makes_the_entire_expiry_grant_pair_a_no_op(self) -> None:
         organization = models.Organization.objects.create(name="Replay Org", slug="replay-org")
@@ -710,14 +747,13 @@ class TestStripeWebhookView(TestCase):
         error_log.assert_called_once()
 
     @override_settings(STRIPE_WEBHOOK_SECRET="whsec_humr")
-    def test_invalid_signature_returns_400_without_applying(self) -> None:
+    def test_invalid_signature_returns_400_and_logs_the_underlying_cause(self) -> None:
+        verification_error = stripe_lifecycle.WebhookVerificationError("invalid Stripe webhook signature")
+        verification_error.__cause__ = ValueError("timestamp outside tolerance")
         with (
-            patch.object(
-                stripe_lifecycle,
-                "verify_and_parse_webhook",
-                side_effect=stripe_lifecycle.WebhookVerificationError("bad"),
-            ),
+            patch.object(stripe_lifecycle, "verify_and_parse_webhook", side_effect=verification_error),
             patch.object(stripe_lifecycle, "apply_webhook_event") as apply_event,
+            patch.object(stripe_webhook_view.logger, "error") as error_log,
         ):
             response = self.client.post(
                 "/api/stripe/webhook",
@@ -728,6 +764,9 @@ class TestStripeWebhookView(TestCase):
 
         self.assertEqual(response.status_code, 400)
         apply_event.assert_not_called()
+        error_log.assert_called_once_with(
+            "Stripe webhook rejected: invalid Stripe webhook signature (ValueError: timestamp outside tolerance)"
+        )
 
     @override_settings(STRIPE_WEBHOOK_SECRET="whsec_humr")
     def test_valid_event_is_applied_and_acknowledged(self) -> None:

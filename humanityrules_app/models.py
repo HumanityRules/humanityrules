@@ -1768,11 +1768,13 @@ class CostRefreshJob(models.Model):
 class BillingSubscription(models.Model):
     """Stripe's subscription state for one organization, mirrored for billing decisions.
 
-    Webhook handlers are the only writers. The row exists so HumR can apply
-    Stripe lifecycle events idempotently without making Stripe a runtime
-    dependency of entitlement reads. It is deliberately not the direct source
-    of ``Organization.plan``: friends-and-family organizations and enterprises
-    invoiced outside Stripe may have a hand-set plan with no Stripe record.
+    Webhook handlers are the only writers: each event copies what Stripe now
+    says into this row. Everything that needs subscription state — the plan
+    transition, the entitlement snapshot's renewal date, the billing page —
+    reads this row and never calls Stripe. It is deliberately not the direct
+    source of ``Organization.plan``: friends-and-family organizations and
+    enterprises invoiced outside Stripe may have a hand-set plan with no Stripe
+    record.
     """
 
     # Stripe statuses that keep an organization on the Operator plan.
