@@ -2,15 +2,21 @@
 
 HumR bills in credits (1 credit ≈ $0.01 of rated usage). The append-only
 ``BillingLedgerEntry`` is the money record; ``BillingBalance`` is its cached
-sum and the row every writer locks so concurrent movements serialize for one
-organization. A movement is safe only when it holds that lock and carries a
-unique idempotency key.
+sum and the row every writer locks so concurrent writers serialize for one
+organization. A ledger entry is safe only when its writer holds that lock and
+the entry carries a unique idempotency key.
 
 The one-time trial allotment is a single positive grant. An Operator renewal
-is an atomic pair under one balance lock: expire any positive remainder, then
-post the new period's grant. A negative balance is not expired and therefore
-rolls into the new grant. Replaying the period's grant key makes the entire
-pair a no-op, so a retried invoice webhook cannot expire newly spent credits.
+is an atomic pair under one balance lock: write off the previous balance, then
+post the new period's grant, resetting the balance to that grant. Writing off a
+positive balance expires unused entitlement; writing off a negative balance
+forgives grace overspend bounded by the enforcement floor.
+
+Stripe delivers webhooks at least once, so the paid invoice that triggered a
+renewal can arrive again — possibly days later, after the customer has spent
+from the new grant. The renewal therefore checks for the period's grant entry
+first and, when it already exists, writes nothing at all: re-running just the
+write-off would wipe those newly spent credits.
 
 Both paths read the organization's effective plan after overrides. Grant
 metadata stamps the plan and config version that supplied the amount, leaving
@@ -30,7 +36,7 @@ from humanityrules_app.services.billing import plans
 logger = logging.getLogger(__name__)
 
 
-def _write_locked_movement(
+def _write_locked_entry(
     balance: models.BillingBalance,
     entry_type: str,
     amount: Decimal,
@@ -41,17 +47,17 @@ def _write_locked_movement(
     """Post one grant or expiry using an already-locked balance; False means the key already exists."""
     if entry_type == models.BillingLedgerEntry.Type.GRANT and amount <= 0:
         raise ValueError(f"a grant must be positive, got {amount}")
-    if entry_type == models.BillingLedgerEntry.Type.EXPIRY and amount >= 0:
-        raise ValueError(f"an expiry must be negative, got {amount}")
+    if entry_type == models.BillingLedgerEntry.Type.EXPIRY and amount == 0:
+        raise ValueError(f"an expiry must be non-zero, got {amount}")
     if entry_type not in {models.BillingLedgerEntry.Type.GRANT, models.BillingLedgerEntry.Type.EXPIRY}:
-        raise ValueError(f"the grant writer cannot post movement type {entry_type!r}")
+        raise ValueError(f"grants.py posts only grant and expiry entries, got {entry_type!r}")
 
-    movement_exists = models.BillingLedgerEntry.objects.filter(
+    entry_exists = models.BillingLedgerEntry.objects.filter(
         organization_id=balance.organization_id,
         idempotency_key=idempotency_key,
     ).exists()
-    if movement_exists:
-        logger.info(f"movement {idempotency_key} already posted for organization {balance.organization_id}; no-op")
+    if entry_exists:
+        logger.info(f"entry {idempotency_key} already posted for organization {balance.organization_id}; no-op")
         return False
 
     models.BillingLedgerEntry.objects.create(
@@ -67,7 +73,7 @@ def _write_locked_movement(
     balance.credits = previous_credits + amount
     balance.save(update_fields=["credits", "updated_at"])
     logger.info(
-        f"movement {idempotency_key} posted {amount} credit(s) to organization {balance.organization_id}: "
+        f"entry {idempotency_key} posted {amount} credit(s) to organization {balance.organization_id}: "
         f"balance {previous_credits} -> {balance.credits}"
     )
     return True
@@ -86,7 +92,7 @@ def _write_grant(organization_id: UUID, credits: Decimal, idempotency_key: str, 
             .filter(organization_id=organization_id)
             .get()
         )
-        return _write_locked_movement(
+        return _write_locked_entry(
             balance=balance,
             entry_type=models.BillingLedgerEntry.Type.GRANT,
             amount=credits,
@@ -114,7 +120,7 @@ def grant_trial_credits(organization: models.Organization) -> bool:
 
 
 def grant_operator_period_credits(organization: models.Organization, stripe_subscription_id: str, period_start: datetime.date) -> bool:
-    """Expire a positive remainder and grant one Operator period; False when that period already posted."""
+    """Reset the balance to one Operator period's grant; False when that period already posted."""
     period = period_start.isoformat()
     grant_key = f"grant:{stripe_subscription_id}:{period}"
     expiry_key = f"expiry:{stripe_subscription_id}:{period}"
@@ -143,17 +149,17 @@ def grant_operator_period_credits(organization: models.Organization, stripe_subs
             logger.info(f"Operator period {grant_key} already posted for organization {organization.id}; no-op")
             return False
 
-        if balance.credits > 0:
-            _write_locked_movement(
+        if balance.credits != 0:
+            _write_locked_entry(
                 balance=balance,
                 entry_type=models.BillingLedgerEntry.Type.EXPIRY,
                 amount=-balance.credits,
                 idempotency_key=expiry_key,
-                description="Unused credits expired at renewal",
+                description="Previous period balance written off at renewal",
                 metadata={"subscription_id": stripe_subscription_id, "period_start": period},
             )
 
-        return _write_locked_movement(
+        return _write_locked_entry(
             balance=balance,
             entry_type=models.BillingLedgerEntry.Type.GRANT,
             amount=grant_amount,

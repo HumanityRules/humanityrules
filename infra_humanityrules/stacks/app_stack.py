@@ -76,6 +76,7 @@ class AppStack(Stack):
         env_sso_secret = secretsmanager.Secret.from_secret_name_v2(self, "EnvSsoSecret", "humr/prod/env-sso")
         merge_secret = secretsmanager.Secret.from_secret_name_v2(self, "MergeSecret", "humr/prod/merge")
         telegram_secret = secretsmanager.Secret.from_secret_name_v2(self, "TelegramSecret", "humr/prod/telegram")
+        stripe_secret = secretsmanager.Secret.from_secret_name_v2(self, "StripeSecret", "humr/prod/stripe")
 
         # All secrets needed by the app (shared between migration and app containers)
         app_secrets = {
@@ -105,6 +106,9 @@ class AppStack(Stack):
             "MERGE_TOOL_PACK_ID": ecs.Secret.from_secrets_manager(merge_secret, field="MERGE_TOOL_PACK_ID"),
             "TELEGRAM_MANAGER_BOT_TOKEN": ecs.Secret.from_secrets_manager(telegram_secret, field="TELEGRAM_MANAGER_BOT_TOKEN"),
             "TELEGRAM_MANAGER_BOT_USERNAME": ecs.Secret.from_secrets_manager(telegram_secret, field="TELEGRAM_MANAGER_BOT_USERNAME"),
+            "STRIPE_SECRET_KEY": ecs.Secret.from_secrets_manager(stripe_secret, field="STRIPE_SECRET_KEY"),
+            "STRIPE_WEBHOOK_SECRET": ecs.Secret.from_secrets_manager(stripe_secret, field="STRIPE_WEBHOOK_SECRET"),
+            "STRIPE_OPERATOR_PRICE_ID": ecs.Secret.from_secrets_manager(stripe_secret, field="STRIPE_OPERATOR_PRICE_ID"),
         }
 
         # Shared sandbox: wire the external id (secret) + plain config into both containers.

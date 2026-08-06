@@ -2,11 +2,15 @@
 
 Checkout starts an Operator subscription and stamps the organization id on
 both the Checkout Session and the future subscription. Stripe then drives all
-state through signed webhooks. Subscription events own the local
-``BillingSubscription`` mirror's status, while invoice events own its paid
-period. One transition function turns the last subscription status into
-``Organization.plan``; paid invoices atomically expire a positive prior-period
-remainder before granting the new period's credits.
+state through signed webhooks, delivered at least once and in no guaranteed
+order. Two kinds matter here, and both update the organization's one
+``BillingSubscription`` mirror row: ``customer.subscription.*`` events copy
+whatever Stripe now says (status, billing period), and a paid-invoice event
+records the period that was just paid and posts its credit grant — but never
+writes status, because a paid invoice redelivered after a cancellation must
+not revive the subscription. After either kind, one transition function turns
+the mirrored status into ``Organization.plan``; the grant resets the balance
+to the new period's credits (see ``grants.py``).
 
 This is the only module that imports Stripe. Checkout and portal callers get
 plain URL strings, the webhook view gets a plain event dict, and models plus
@@ -16,6 +20,7 @@ also makes the mirror's writer rule explicit: only the handlers below mutate a
 """
 
 import datetime
+import json
 import logging
 from uuid import UUID
 
@@ -89,27 +94,41 @@ def create_portal_url(organization: models.Organization, return_url: str) -> str
 
 
 def verify_and_parse_webhook(payload: bytes, signature_header: str) -> dict:
-    """Verify Stripe's signature and return the event as recursive plain dictionaries."""
+    """Verify Stripe's signature and return the event as plain dictionaries.
+
+    The SDK's event wrapper is deliberately bypassed: every handler downstream
+    consumes plain dicts, so the signed payload's own JSON is the event. Only
+    the SDK's signature check is used. Every failure raises the same error
+    type, but signature failures and payload-shape failures carry distinct
+    messages so the webhook view's log tells them apart.
+    """
     try:
-        event = stripe.Webhook.construct_event(
-            payload=payload,
-            sig_header=signature_header,
+        payload_text = payload.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise WebhookVerificationError("Stripe webhook payload is not UTF-8") from error
+
+    try:
+        stripe.WebhookSignature.verify_header(
+            payload=payload_text,
+            header=signature_header,
             secret=settings.STRIPE_WEBHOOK_SECRET,
+            tolerance=stripe.Webhook.DEFAULT_TOLERANCE,
         )
-        if hasattr(event, "to_dict_recursive"):
-            parsed_event = event.to_dict_recursive()
-        else:
-            parsed_event = dict(event)
     except Exception as error:
-        raise WebhookVerificationError("invalid Stripe webhook signature or payload") from error
+        raise WebhookVerificationError("invalid Stripe webhook signature") from error
+
+    try:
+        parsed_event = json.loads(payload_text)
+    except ValueError as error:
+        raise WebhookVerificationError("signed Stripe webhook payload is not valid JSON") from error
 
     if not isinstance(parsed_event, dict):
         raise WebhookVerificationError("Stripe webhook did not contain an event object")
     return parsed_event
 
 
-def _string_id(value: object) -> str | None:
-    """Return a non-empty Stripe id string and reject every other value shape."""
+def _nonempty_string(value: object) -> str | None:
+    """Return the value when it is a non-empty string, else None."""
     return value if isinstance(value, str) and value else None
 
 
@@ -135,7 +154,7 @@ def _organization_from_metadata(metadata: object) -> models.Organization | None:
 
 
 def _resolve_organization(metadata: object, stripe_subscription_id: str | None) -> models.Organization | None:
-    """Resolve metadata first, then use an existing mirror when an older event lacks it."""
+    """Checkout stamps the organization id into subscription metadata; events that carry none resolve through the mirror row instead."""
     organization = _organization_from_metadata(metadata=metadata)
     if organization is not None:
         return organization
@@ -172,10 +191,10 @@ def _invoice_subscription_identity(invoice: dict) -> tuple[str | None, object, s
         return None, None, None
     subscription_reference = subscription_details.get("subscription")
     if isinstance(subscription_reference, dict):
-        stripe_subscription_id = _string_id(value=subscription_reference.get("id"))
-        subscription_status = _string_id(value=subscription_reference.get("status"))
+        stripe_subscription_id = _nonempty_string(value=subscription_reference.get("id"))
+        subscription_status = _nonempty_string(value=subscription_reference.get("status"))
     else:
-        stripe_subscription_id = _string_id(value=subscription_reference)
+        stripe_subscription_id = _nonempty_string(value=subscription_reference)
         subscription_status = None
     return stripe_subscription_id, subscription_details.get("metadata"), subscription_status
 
@@ -262,7 +281,7 @@ def transition_organization_plan(subscription: models.BillingSubscription) -> No
 
 def _apply_subscription_event(event_type: str, subscription_object: dict) -> None:
     """Mirror one subscription event and apply its plan transition."""
-    stripe_subscription_id = _string_id(value=subscription_object.get("id"))
+    stripe_subscription_id = _nonempty_string(value=subscription_object.get("id"))
     organization = _resolve_organization(
         metadata=subscription_object.get("metadata"),
         stripe_subscription_id=stripe_subscription_id,
@@ -271,13 +290,13 @@ def _apply_subscription_event(event_type: str, subscription_object: dict) -> Non
         logger.error(f"cannot resolve organization for Stripe subscription event {event_type} ({stripe_subscription_id})")
         return
 
-    status = "canceled" if event_type == "customer.subscription.deleted" else _string_id(
+    status = "canceled" if event_type == "customer.subscription.deleted" else _nonempty_string(
         value=subscription_object.get("status"),
     )
     current_period_start, current_period_end = _subscription_period(subscription_object=subscription_object)
     subscription = _upsert_subscription_mirror(
         organization=organization,
-        stripe_customer_id=_string_id(value=subscription_object.get("customer")),
+        stripe_customer_id=_nonempty_string(value=subscription_object.get("customer")),
         stripe_subscription_id=stripe_subscription_id,
         status=status,
         current_period_start=current_period_start,
@@ -299,7 +318,7 @@ def _apply_paid_invoice(invoice: dict) -> None:
     mirror_exists = models.BillingSubscription.objects.filter(organization=organization).exists()
     subscription = _upsert_subscription_mirror(
         organization=organization,
-        stripe_customer_id=_string_id(value=invoice.get("customer")),
+        stripe_customer_id=_nonempty_string(value=invoice.get("customer")),
         stripe_subscription_id=stripe_subscription_id,
         status=None if mirror_exists else "active",
         current_period_start=current_period_start,
@@ -338,7 +357,7 @@ def _apply_failed_invoice(invoice: dict) -> None:
         return
     _upsert_subscription_mirror(
         organization=organization,
-        stripe_customer_id=_string_id(value=invoice.get("customer")),
+        stripe_customer_id=_nonempty_string(value=invoice.get("customer")),
         stripe_subscription_id=stripe_subscription_id,
         status=subscription_status,
         current_period_start=None,

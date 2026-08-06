@@ -1,6 +1,6 @@
 ---
 name: humanizer
-description: Write or rewrite user-facing copy so it reads human-written, then prove it with an adversarial evaluator loop. Use whenever drafting or editing marketing/landing copy, website text, or any public-facing prose in this project, and whenever the user says text "sounds like AI", asks to "humanize" or "de-slop" it, or wants copy checked for AI tells — even if they don't name this skill.
+description: Write or rewrite user-facing copy so it reads human-written, then prove it with an adversarial evaluator loop. Use only when the user explicitly invokes `$humanizer`; never invoke it automatically based on the task or wording.
 ---
 
 # Humanizer
