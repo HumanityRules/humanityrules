@@ -32,7 +32,10 @@ def stripe_webhook(request: HttpRequest) -> JsonResponse:
             payload=request.body,
             signature_header=signature_header,
         )
-    except stripe_lifecycle.WebhookVerificationError:
+    except stripe_lifecycle.WebhookVerificationError as error:
+        cause = error.__cause__
+        cause_detail = f" ({type(cause).__name__}: {cause})" if cause is not None else ""
+        logger.error(f"Stripe webhook rejected: {error}{cause_detail}")
         return JsonResponse({"error": "invalid Stripe signature"}, status=400)
 
     stripe_lifecycle.apply_webhook_event(event=event)
