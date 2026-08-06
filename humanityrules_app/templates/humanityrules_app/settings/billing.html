@@ -10,7 +10,12 @@
         <div class="rounded-lg border border-gray-200 dark:border-white/10">
             <div class="px-4 py-4 border-b border-gray-100 dark:border-white/10 sm:flex sm:items-center sm:justify-between">
                 <div class="text-sm font-semibold text-gray-900 dark:text-white">{{ billing.plan_name }}</div>
-                {% if billing.renewal_date %}
+                {% if billing.plan_end_date %}
+                <div class="mt-1 text-sm text-gray-500 dark:text-gray-400 sm:mt-0">
+                    <div>Ends on {{ billing.plan_end_date|date:"M j, Y" }}</div>
+                    <div>You can resume anytime from Manage billing.</div>
+                </div>
+                {% elif billing.renewal_date %}
                 <div class="mt-1 text-sm text-gray-500 dark:text-gray-400 sm:mt-0">
                     Renews on {{ billing.renewal_date|date:"M j, Y" }}
                 </div>

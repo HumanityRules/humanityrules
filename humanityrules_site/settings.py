@@ -196,9 +196,11 @@ LOGIN_URL = '/auth/login/'
 WORKOS_CLIENT_ID = os.environ.get("WORKOS_CLIENT_ID")
 WORKOS_API_KEY = os.environ.get("WORKOS_API_KEY")
 
-# Stripe billing
+# Stripe billing. STRIPE_WEBHOOK_SECRET signs the deployed endpoint and is what
+# sync_secrets.py ships to production; the NGROK variant signs the local ngrok
+# endpoint, exists only in the developer .env, and wins when present.
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY")
-STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET")
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET_NGROK") or os.environ.get("STRIPE_WEBHOOK_SECRET")
 STRIPE_OPERATOR_PRICE_ID = os.environ.get("STRIPE_OPERATOR_PRICE_ID")
 
 # GitHub App Configuration

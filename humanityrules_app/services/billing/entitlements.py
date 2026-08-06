@@ -13,9 +13,9 @@ writes the balance off and re-grants, so grace overspend is absorbed there and
 the new period starts at the full grant.
 
 ``renewal_date`` is the Stripe mirror's period end while the subscription still
-keeps the organization on Operator (``BillingSubscription.OPERATOR_STATUSES``).
-A trial has no subscription and a canceled one no longer renews, so both read
-as None.
+keeps the organization on Operator (``BillingSubscription.OPERATOR_STATUSES``)
+and is not pending cancellation. A trial, canceled subscription, or Operator
+subscription scheduled to end therefore reads as None.
 """
 
 from dataclasses import dataclass
@@ -55,7 +55,11 @@ def entitlement_snapshot(organization: models.Organization) -> EntitlementSnapsh
         status__in=models.BillingSubscription.OPERATOR_STATUSES,
         current_period_end__isnull=False,
     ).first()
-    renewal_date = subscription.current_period_end.date().isoformat() if subscription is not None else None
+    renewal_date = (
+        subscription.current_period_end.date().isoformat()
+        if subscription is not None and not subscription.is_pending_cancellation
+        else None
+    )
     return EntitlementSnapshot(
         credits_remaining=int(credits_remaining),
         monthly_grant=plan.monthly_credit_grant,

@@ -135,6 +135,27 @@ class TestBillingPageContext(TestCase):
 
         self.assertEqual(billing.current_period_burn, 150)
         self.assertEqual(billing.renewal_date, period_end.date())
+        self.assertIsNone(billing.plan_end_date)
+        self.assertTrue(billing.show_manage_billing)
+
+    def test_pending_cancellation_exposes_an_end_date_instead_of_a_renewal(self) -> None:
+        self.organization.plan = plans.OPERATOR
+        self.organization.save(update_fields=["plan"])
+        period_end = self.now + datetime.timedelta(days=20)
+        subscription = _create_subscription(
+            organization=self.organization,
+            status="active",
+            current_period_start=self.now,
+            current_period_end=period_end,
+            stripe_customer_id="cus_pending_cancellation",
+        )
+        subscription.cancel_at = period_end
+        subscription.save(update_fields=["cancel_at", "updated_at"])
+
+        billing = billing_page.billing_page_context(organization=self.organization)
+
+        self.assertIsNone(billing.renewal_date)
+        self.assertEqual(billing.plan_end_date, period_end.date())
         self.assertTrue(billing.show_manage_billing)
 
     def test_latest_grant_is_the_fallback_anchor(self) -> None:
@@ -354,6 +375,34 @@ class TestSettingsBillingViews(TestCase):
         self.assertContains(response, "Upgrade to Operator ($39/month)")
         self.assertContains(response, "Payments aren't set up yet.")
         self.assertContains(response, "disabled")
+        self.assertNotContains(response, "Renews on")
+        self.assertNotContains(response, "Ends on")
+
+    def test_htmx_page_distinguishes_renewal_from_pending_cancellation(self) -> None:
+        self.organization.plan = plans.OPERATOR
+        self.organization.save(update_fields=["plan", "updated_at"])
+        period_end = datetime.datetime(2026, 9, 1, tzinfo=datetime.UTC)
+        subscription = _create_subscription(
+            organization=self.organization,
+            status="active",
+            current_period_start=period_end - datetime.timedelta(days=31),
+            current_period_end=period_end,
+            stripe_customer_id="cus_date_line",
+        )
+        self.client.force_login(user=self.admin)
+
+        renewing_response = self.client.get(path="/settings/billing/", HTTP_HX_REQUEST="true")
+
+        self.assertContains(renewing_response, "Renews on Sep 1, 2026")
+        self.assertNotContains(renewing_response, "Ends on")
+        subscription.cancel_at = period_end
+        subscription.save(update_fields=["cancel_at", "updated_at"])
+
+        ending_response = self.client.get(path="/settings/billing/", HTTP_HX_REQUEST="true")
+
+        self.assertContains(ending_response, "Ends on Sep 1, 2026")
+        self.assertContains(ending_response, "You can resume anytime from Manage billing.")
+        self.assertNotContains(ending_response, "Renews on")
 
     @override_settings(STRIPE_SECRET_KEY="sk_test_humr", STRIPE_OPERATOR_PRICE_ID="price_operator")
     def test_checkout_redirects_to_the_hosted_url(self) -> None:

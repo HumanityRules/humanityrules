@@ -3,14 +3,24 @@
 Checkout starts an Operator subscription and stamps the organization id on
 both the Checkout Session and the future subscription. Stripe then drives all
 state through signed webhooks, delivered at least once and in no guaranteed
-order. Two kinds matter here, and both update the organization's one
-``BillingSubscription`` mirror row: ``customer.subscription.*`` events copy
-whatever Stripe now says (status, billing period), and a paid-invoice event
-records the period that was just paid and posts its credit grant — but never
-writes status, because a paid invoice redelivered after a cancellation must
-not revive the subscription. After either kind, one transition function turns
-the mirrored status into ``Organization.plan``; the grant resets the balance
-to the new period's credits (see ``grants.py``).
+order. Every verified event is persisted in ``StripeWebhookEvent`` before it
+is applied, keyed on Stripe's own event id, so a redelivered event is
+recognized and skipped instead of applied twice. Recording the event and
+applying its effects happen in the same database transaction, so a
+``StripeWebhookEvent`` row existing means everything it triggered committed
+too.
+
+Two event families update the organization's one ``BillingSubscription``
+mirror row. ``customer.subscription.*`` events copy Stripe's full current
+state — including whether cancellation is pending — but are dropped if their
+envelope timestamp is older than the newest subscription event already
+mirrored, since out-of-order delivery means a later webhook can arrive before
+an earlier one. A paid-invoice event records the period that was just paid
+and posts its credit grant, but leaves an existing status untouched, because
+a late-arriving invoice must never resurrect a subscription that was
+canceled since. After either kind, one transition function turns the
+mirrored status into ``Organization.plan``; the grant resets the balance to
+the new period's credits (see ``grants.py``).
 
 This is the only module that imports Stripe. Checkout and portal callers get
 plain URL strings, the webhook view gets a plain event dict, and models plus
@@ -25,6 +35,7 @@ import logging
 from uuid import UUID
 
 from django.conf import settings
+from django.db import transaction
 
 import stripe
 
@@ -279,8 +290,14 @@ def transition_organization_plan(subscription: models.BillingSubscription) -> No
     organization.save(update_fields=["plan", "updated_at"])
 
 
-def _apply_subscription_event(event_type: str, subscription_object: dict) -> None:
-    """Mirror one subscription event and apply its plan transition."""
+def _apply_subscription_event(event_type: str, event_created_at: datetime.datetime, subscription_object: dict) -> None:
+    """Mirror one subscription event and apply its plan transition, unless a newer event already won.
+
+    Locks the organization row before comparing timestamps, so two webhooks
+    for the same subscription delivered concurrently cannot both read the
+    same stale "latest event" and race each other into the wrong final
+    mirror state.
+    """
     stripe_subscription_id = _nonempty_string(value=subscription_object.get("id"))
     organization = _resolve_organization(
         metadata=subscription_object.get("metadata"),
@@ -288,6 +305,19 @@ def _apply_subscription_event(event_type: str, subscription_object: dict) -> Non
     )
     if organization is None:
         logger.error(f"cannot resolve organization for Stripe subscription event {event_type} ({stripe_subscription_id})")
+        return
+
+    organization = models.Organization.objects.select_for_update().get(id=organization.id)
+    current_subscription = models.BillingSubscription.objects.filter(organization=organization).first()
+    if (
+        current_subscription is not None
+        and current_subscription.latest_subscription_event_created_at is not None
+        and event_created_at < current_subscription.latest_subscription_event_created_at
+    ):
+        logger.info(
+            f"Stripe subscription event {event_type} for {stripe_subscription_id} was superseded by newer state "
+            f"from {current_subscription.latest_subscription_event_created_at.isoformat()}; mirror unchanged"
+        )
         return
 
     status = "canceled" if event_type == "customer.subscription.deleted" else _nonempty_string(
@@ -303,6 +333,17 @@ def _apply_subscription_event(event_type: str, subscription_object: dict) -> Non
         current_period_end=current_period_end,
     )
     if subscription is not None:
+        # Written verbatim including nulls, unlike the upsert's absent-means-unchanged
+        # fields: a resumed cancellation arrives as cancel_at null and must clear.
+        subscription.cancel_at = _datetime_from_timestamp(value=subscription_object.get("cancel_at"))
+        subscription.canceled_at = _datetime_from_timestamp(value=subscription_object.get("canceled_at"))
+        subscription.latest_subscription_event_created_at = event_created_at
+        subscription.save(update_fields=[
+            "cancel_at",
+            "canceled_at",
+            "latest_subscription_event_created_at",
+            "updated_at",
+        ])
         transition_organization_plan(subscription=subscription)
 
 
@@ -365,9 +406,18 @@ def _apply_failed_invoice(invoice: dict) -> None:
     )
 
 
-def apply_webhook_event(event: dict) -> None:
+def _event_envelope(event: dict) -> tuple[str, str, datetime.datetime]:
+    """Extract the id, type, and Stripe-assigned creation time used to store and order this event."""
+    stripe_event_id = _nonempty_string(value=event.get("id"))
+    event_type = _nonempty_string(value=event.get("type"))
+    event_created_at = _datetime_from_timestamp(value=event.get("created"))
+    if stripe_event_id is None or event_type is None or event_created_at is None:
+        raise ValueError("verified Stripe webhook is missing id, type, or created")
+    return stripe_event_id, event_type, event_created_at
+
+
+def _dispatch_webhook_event(event: dict, event_type: str, event_created_at: datetime.datetime) -> None:
     """Apply one supported Stripe event; unrelated event types are silent no-ops."""
-    event_type = event.get("type")
     if event_type not in HANDLED_EVENT_TYPES:
         return
     event_data = event.get("data")
@@ -377,8 +427,41 @@ def apply_webhook_event(event: dict) -> None:
         return
 
     if event_type in SUBSCRIPTION_EVENT_TYPES:
-        _apply_subscription_event(event_type=event_type, subscription_object=stripe_object)
+        _apply_subscription_event(
+            event_type=event_type,
+            event_created_at=event_created_at,
+            subscription_object=stripe_object,
+        )
     elif event_type == "invoice.paid":
         _apply_paid_invoice(invoice=stripe_object)
     else:
         _apply_failed_invoice(invoice=stripe_object)
+
+
+@transaction.atomic
+def apply_webhook_event(event: dict) -> None:
+    """Persist and apply one verified Stripe event exactly once.
+
+    The Stripe event id is the row's primary key, so a redelivered event is
+    recognized by the get_or_create lookup instead of inserted again. A fresh
+    row is created and its effects are dispatched inside the same
+    transaction, so either both happen or neither does; an existing row means
+    the event was already fully handled, and dispatch is skipped.
+    """
+    stripe_event_id, event_type, event_created_at = _event_envelope(event=event)
+    _webhook_event, created = models.StripeWebhookEvent.objects.get_or_create(
+        stripe_event_id=stripe_event_id,
+        defaults={
+            "event_type": event_type,
+            "stripe_created_at": event_created_at,
+            "payload": event,
+        },
+    )
+    if not created:
+        logger.info(f"Stripe webhook event {stripe_event_id} was already applied; redelivery skipped")
+        return
+    _dispatch_webhook_event(
+        event=event,
+        event_type=event_type,
+        event_created_at=event_created_at,
+    )
