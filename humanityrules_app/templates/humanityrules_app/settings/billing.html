@@ -21,9 +21,6 @@ counted down.
 
     {% if is_activating %}
     <section>
-        <h2 class="text-base font-semibold text-gray-900 dark:text-white mb-1">Billing</h2>
-        <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">Your organization's plan and agent usage.</p>
-
         <div class="rounded-lg border border-gray-200 px-4 py-6 dark:border-white/10">
             <div class="flex items-start gap-3">
                 <svg class="mt-0.5 size-5 shrink-0 animate-spin text-indigo-500"
@@ -44,13 +41,14 @@ counted down.
     {% else %}
 
     <section>
-        <h2 class="text-base font-semibold text-gray-900 dark:text-white mb-1">Billing</h2>
-        <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">Your organization's plan and agent usage.</p>
-
         <div class="rounded-lg border border-gray-200 dark:border-white/10">
             <div class="px-4 py-4 sm:flex sm:items-center sm:justify-between {% if billing.show_credits %}border-b border-gray-100 dark:border-white/10{% endif %}">
                 <div class="text-sm font-semibold text-gray-900 dark:text-white">{{ billing.plan_name }}</div>
-                {% if billing.plan_end_date %}
+                {% if billing.plan_key == 'trial' %}
+                <div class="mt-1 text-sm text-gray-500 dark:text-gray-400 sm:mt-0">
+                    {{ billing.monthly_grant }} one-time credits{% if billing.trial_runtime_days %} · {{ billing.trial_runtime_days }} days of runtime{% endif %}{% if billing.max_agents %} · {{ billing.max_agents }} agent{{ billing.max_agents|pluralize }}{% endif %}
+                </div>
+                {% elif billing.plan_end_date %}
                 <div class="mt-1 text-sm text-gray-500 dark:text-gray-400 sm:mt-0">
                     <div>Ends on {{ billing.plan_end_date|date:"M j, Y" }}</div>
                     <div>You can resume anytime from Manage billing.</div>
@@ -77,26 +75,7 @@ counted down.
 
     <section>
         <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-3">Plans</h3>
-        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-
-            <div class="flex flex-col rounded-2xl p-6 {% if billing.plan_key == 'trial' %}bg-indigo-50/40 ring-2 ring-indigo-500 dark:bg-indigo-500/5 dark:ring-indigo-400{% else %}ring-1 ring-gray-200 dark:ring-white/10{% endif %}">
-                <div class="flex items-center justify-between gap-x-2">
-                    <h4 class="text-sm font-semibold text-gray-900 dark:text-white">Trial</h4>
-                    {% if billing.plan_key == 'trial' %}
-                    <span class="rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400">Current plan</span>
-                    {% endif %}
-                </div>
-                <div class="mt-4 flex items-baseline gap-x-1">
-                    <span class="text-3xl font-semibold tracking-tight text-gray-900 dark:text-white">Free</span>
-                </div>
-                <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">Try your first agent for free.</p>
-                <ul class="mt-6 space-y-2 text-sm text-gray-600 dark:text-gray-300">
-                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="500 credits, one time" %}
-                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="7 days of agent runtime" %}
-                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="1 agent" %}
-                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="Runs on HumR's cloud, model included" %}
-                </ul>
-            </div>
+        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
 
             <div class="flex flex-col rounded-2xl p-6 {% if billing.plan_key == 'operator' %}bg-indigo-50/40 ring-2 ring-indigo-500 dark:bg-indigo-500/5 dark:ring-indigo-400{% else %}ring-1 ring-gray-200 dark:ring-white/10{% endif %}">
                 <div class="flex items-center justify-between gap-x-2">
@@ -112,9 +91,12 @@ counted down.
                 <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">Your always-on agent, hosted by us.</p>
                 <ul class="mt-6 space-y-2 text-sm text-gray-600 dark:text-gray-300">
                     {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="2,000 credits per month" %}
-                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="Always-on agent" %}
-                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="1 agent" %}
+                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="One always-on agent" %}
+                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="Turn agent workflows into web apps and share them" %}
                     {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="Runs on HumR's cloud, model included" %}
+                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="No infrastructure to manage" %}
+                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="Connectors for GitHub, Google, Slack and more" %}
+                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="Connected accounts stay safe: credentials live in the broker, never inside the agent" %}
                 </ul>
                 {% if billing.show_upgrade %}
                 <div class="mt-auto pt-6">
@@ -147,10 +129,13 @@ counted down.
                 </div>
                 <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">Your cloud, your models, agents for the whole team.</p>
                 <ul class="mt-6 space-y-2 text-sm text-gray-600 dark:text-gray-300">
-                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="Unlimited agents" %}
-                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="Runs in your AWS account" %}
+                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="Unlimited always-on agents" %}
+                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="Runs in your AWS account: deep integration, agents live in your private VPC" %}
+                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="Conversations and files stay in your cloud" %}
+                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="Agents and apps on your own domain" %}
                     {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="Bring your own model: Bedrock or any provider" %}
-                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="Always-on agents" %}
+                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="Fine-grained access control with ABAC policies" %}
+                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="Connected accounts stay safe: credentials live in the broker, never inside the agent" %}
                 </ul>
                 {% if billing.plan_key != 'team' %}
                 <div class="mt-auto pt-6">
@@ -175,7 +160,8 @@ counted down.
                 <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">For organizations that need controls and guarantees.</p>
                 <ul class="mt-6 space-y-2 text-sm text-gray-600 dark:text-gray-300">
                     {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="Everything in Team" %}
-                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="SSO" %}
+                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="SSO with any identity provider (SAML or OIDC)" %}
+                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="Directory sync (SCIM)" %}
                     {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="Compliance" %}
                     {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="Dedicated support" %}
                 </ul>
