@@ -20,7 +20,9 @@ from humanityrules_app.services.billing import plans
 class BillingPageContext:
     """Every value the organization billing page is allowed to render."""
 
+    plan_key: str
     plan_name: str
+    show_credits: bool
     credits_remaining: int
     monthly_grant: int
     current_period_burn: int
@@ -30,6 +32,7 @@ class BillingPageContext:
     show_manage_billing: bool
     stripe_configured: bool
     operator_price_usd: str
+    team_agent_price_usd: str
 
 
 def billing_page_context(organization: models.Organization) -> BillingPageContext:
@@ -82,9 +85,16 @@ def billing_page_context(organization: models.Organization) -> BillingPageContex
     operator_price = plans.PLANS[plans.OPERATOR].price_usd_month
     if operator_price is None:
         raise RuntimeError("the Operator plan must have a monthly USD price")
+    team_agent_price = plans.PLANS[plans.TEAM].price_usd_agent_month
+    if team_agent_price is None:
+        raise RuntimeError("the Team plan must have a per-agent monthly USD price")
 
     return BillingPageContext(
+        plan_key=organization.plan,
         plan_name=organization.plan.title(),
+        # Customer-cloud plans bring their own model, so no credits exist to show;
+        # a comped grant through plan_overrides brings the numbers back.
+        show_credits=effective_plan.monthly_credit_grant > 0,
         credits_remaining=max(credits_remaining, 0),
         monthly_grant=effective_plan.monthly_credit_grant,
         current_period_burn=int(abs(charge_total)),
@@ -94,4 +104,5 @@ def billing_page_context(organization: models.Organization) -> BillingPageContex
         show_manage_billing=subscription is not None and bool(subscription.stripe_customer_id),
         stripe_configured=bool(settings.STRIPE_SECRET_KEY and settings.STRIPE_OPERATOR_PRICE_ID),
         operator_price_usd=str(operator_price),
+        team_agent_price_usd=str(team_agent_price),
     )

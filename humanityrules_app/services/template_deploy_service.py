@@ -183,6 +183,8 @@ def _raise_for_agent_limit(organization: models.Organization, template: models.A
     if not is_agent_template(template=template):
         return
     max_agents = plans.effective_plan(organization=organization).max_agents
+    if max_agents is None:
+        return
     live_agents = _live_agent_app_count(organization=organization)
     if live_agents >= max_agents:
         raise ValueError(

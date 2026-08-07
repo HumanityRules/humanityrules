@@ -573,6 +573,9 @@
   .mt-12 {
     margin-top: calc(var(--spacing) * 12);
   }
+  .mt-auto {
+    margin-top: auto;
+  }
   .mt-px {
     margin-top: 1px;
   }
@@ -1296,6 +1299,12 @@
       margin-block-end: calc(calc(var(--spacing) * 10) * calc(1 - var(--tw-space-y-reverse)));
     }
   }
+  .gap-x-1 {
+    column-gap: calc(var(--spacing) * 1);
+  }
+  .gap-x-2 {
+    column-gap: calc(var(--spacing) * 2);
+  }
   .gap-x-3 {
     column-gap: calc(var(--spacing) * 3);
   }
@@ -1406,6 +1415,9 @@
   }
   .self-center {
     align-self: center;
+  }
+  .self-start {
+    align-self: flex-start;
   }
   .self-stretch {
     align-self: stretch;
@@ -1801,6 +1813,12 @@
   }
   .bg-indigo-50 {
     background-color: var(--color-indigo-50);
+  }
+  .bg-indigo-50\/40 {
+    background-color: color-mix(in srgb, oklch(96.2% 0.018 272.314) 40%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      background-color: color-mix(in oklab, var(--color-indigo-50) 40%, transparent);
+    }
   }
   .bg-indigo-100 {
     background-color: var(--color-indigo-100);
@@ -2771,6 +2789,9 @@
   }
   .ring-gray-800 {
     --tw-ring-color: var(--color-gray-800);
+  }
+  .ring-indigo-500 {
+    --tw-ring-color: var(--color-indigo-500);
   }
   .ring-navy-900 {
     --tw-ring-color: var(--color-navy-900);
@@ -3829,6 +3850,11 @@
       grid-template-columns: repeat(3, minmax(0, 1fr));
     }
   }
+  .lg\:grid-cols-4 {
+    @media (width >= 64rem) {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+  }
   .lg\:text-6xl {
     @media (width >= 64rem) {
       font-size: var(--text-6xl);
@@ -4141,6 +4167,14 @@
   .dark\:bg-indigo-500 {
     &:where(.dark, .dark *) {
       background-color: var(--color-indigo-500);
+    }
+  }
+  .dark\:bg-indigo-500\/5 {
+    &:where(.dark, .dark *) {
+      background-color: color-mix(in srgb, oklch(58.5% 0.233 277.117) 5%, transparent);
+      @supports (color: color-mix(in lab, red, red)) {
+        background-color: color-mix(in oklab, var(--color-indigo-500) 5%, transparent);
+      }
     }
   }
   .dark\:bg-indigo-500\/10 {
@@ -4520,6 +4554,11 @@
   .dark\:ring-gray-600 {
     &:where(.dark, .dark *) {
       --tw-ring-color: var(--color-gray-600);
+    }
+  }
+  .dark\:ring-indigo-400 {
+    &:where(.dark, .dark *) {
+      --tw-ring-color: var(--color-indigo-400);
     }
   }
   .dark\:ring-red-500\/30 {
