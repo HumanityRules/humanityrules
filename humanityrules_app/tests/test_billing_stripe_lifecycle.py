@@ -352,7 +352,7 @@ class TestWebhookEventPersistence(TestCase):
 
 
 class TestSubscriptionWebhookMirroring(TestCase):
-    """Created, updated, and deleted events upsert the mirror and then transition the plan."""
+    """Created, updated, and deleted events mirror state before the shared reconcile step."""
 
     def setUp(self) -> None:
         self.organization = models.Organization.objects.create(name="Mirror Org", slug="mirror-org")
@@ -382,6 +382,67 @@ class TestSubscriptionWebhookMirroring(TestCase):
         self.assertIsNone(subscription.canceled_at)
         self.assertEqual(subscription.latest_subscription_event_created_at, PERIOD_START)
         self.assertEqual(self.organization.plan, plans.OPERATOR)
+
+    def test_second_live_subscription_logs_tripwire_and_replaces_the_mirror(self) -> None:
+        _create_mirror(
+            organization=self.organization,
+            stripe_subscription_id="sub_existing_live",
+            status="active",
+            period_start=PERIOD_START,
+            period_end=PERIOD_END,
+        )
+        subscription_object = _subscription_object(
+            organization=self.organization,
+            stripe_subscription_id="sub_second_live",
+            stripe_customer_id="cus_second_live",
+            status="active",
+            period_start=PERIOD_START,
+            period_end=PERIOD_END,
+        )
+
+        with patch.object(stripe_lifecycle.logger, "error") as error_log:
+            stripe_lifecycle.apply_webhook_event(
+                event=_stripe_event(event_type="customer.subscription.created", stripe_object=subscription_object),
+            )
+
+        error_log.assert_called_once()
+        message = error_log.call_args.args[0]
+        subscription = models.BillingSubscription.objects.get(organization=self.organization)
+        self.organization.refresh_from_db()
+        self.assertIn(str(self.organization.id), message)
+        self.assertIn("sub_existing_live", message)
+        self.assertIn("sub_second_live", message)
+        self.assertIn("manual intervention required", message)
+        self.assertEqual(subscription.stripe_subscription_id, "sub_second_live")
+        self.assertEqual(subscription.stripe_customer_id, "cus_second_live")
+        self.assertEqual(subscription.status, "active")
+        self.assertEqual(self.organization.plan, plans.OPERATOR)
+
+    def test_replacing_a_canceled_subscription_does_not_log_the_tripwire(self) -> None:
+        _create_mirror(
+            organization=self.organization,
+            stripe_subscription_id="sub_canceled_old",
+            status="canceled",
+            period_start=PERIOD_START,
+            period_end=PERIOD_END,
+        )
+        subscription_object = _subscription_object(
+            organization=self.organization,
+            stripe_subscription_id="sub_new_after_cancel",
+            stripe_customer_id="cus_new_after_cancel",
+            status="active",
+            period_start=PERIOD_START,
+            period_end=PERIOD_END,
+        )
+
+        with patch.object(stripe_lifecycle.logger, "error") as error_log:
+            stripe_lifecycle.apply_webhook_event(
+                event=_stripe_event(event_type="customer.subscription.created", stripe_object=subscription_object),
+            )
+
+        error_log.assert_not_called()
+        subscription = models.BillingSubscription.objects.get(organization=self.organization)
+        self.assertEqual(subscription.stripe_subscription_id, "sub_new_after_cancel")
 
     def test_updated_event_falls_back_to_subscription_id_and_updates_the_existing_row(self) -> None:
         existing = _create_mirror(
@@ -676,9 +737,9 @@ class TestSubscriptionPlanTransition(TestCase):
 
 
 class TestPaidInvoiceRenewal(TestCase):
-    """A paid invoice transitions first, then resets the balance to the period's grant."""
+    """Paid invoices record facts; reconciliation grants only after Operator state exists."""
 
-    def test_out_of_order_paid_invoice_creates_the_mirror_then_expires_and_grants(self) -> None:
+    def test_invoice_first_on_initial_subscribe_waits_for_subscription_state_then_grants(self) -> None:
         organization = models.Organization.objects.create(
             name="Out of Order",
             slug="out-of-order",
@@ -696,8 +757,33 @@ class TestPaidInvoiceRenewal(TestCase):
 
         stripe_lifecycle.apply_webhook_event(event=_stripe_event(event_type="invoice.paid", stripe_object=invoice))
 
-        organization.refresh_from_db()
         subscription = models.BillingSubscription.objects.get(organization=organization)
+        organization.refresh_from_db()
+        self.assertIsNone(subscription.status)
+        self.assertEqual(subscription.latest_paid_period_start, PERIOD_START)
+        self.assertEqual(organization.plan, plans.TRIAL)
+        self.assertEqual(models.BillingBalance.objects.get(organization=organization).credits, Decimal(125))
+        self.assertFalse(
+            models.BillingLedgerEntry.objects.filter(
+                organization=organization,
+                idempotency_key="grant:sub_out_of_order:2026-08-01",
+            ).exists()
+        )
+
+        subscription_object = _subscription_object(
+            organization=organization,
+            stripe_subscription_id="sub_out_of_order",
+            stripe_customer_id="cus_out_of_order",
+            status="active",
+            period_start=PERIOD_START,
+            period_end=PERIOD_END,
+        )
+        stripe_lifecycle.apply_webhook_event(
+            event=_stripe_event(event_type="customer.subscription.created", stripe_object=subscription_object),
+        )
+
+        subscription = models.BillingSubscription.objects.get(organization=organization)
+        organization.refresh_from_db()
         balance = models.BillingBalance.objects.get(organization=organization)
         renewal_entries = list(
             models.BillingLedgerEntry.objects
@@ -708,6 +794,7 @@ class TestPaidInvoiceRenewal(TestCase):
         self.assertEqual(subscription.status, "active")
         self.assertEqual(subscription.current_period_start, PERIOD_START)
         self.assertEqual(subscription.current_period_end, PERIOD_END)
+        self.assertEqual(subscription.latest_paid_period_start, PERIOD_START)
         self.assertEqual(balance.credits, Decimal(2500))
         self.assertEqual([entry.type for entry in renewal_entries], ["expiry", "grant"])
         self.assertEqual([entry.amount for entry in renewal_entries], [Decimal(-125), Decimal(2500)])
@@ -721,8 +808,200 @@ class TestPaidInvoiceRenewal(TestCase):
             {"plan": plans.OPERATOR, "plan_version": plans.PLAN_VERSION},
         )
 
+    def test_invoice_first_on_resubscribe_uses_new_operator_grant_after_created_event(self) -> None:
+        organization = models.Organization.objects.create(name="Resubscribe Org", slug="resubscribe-org")
+        _create_mirror(
+            organization=organization,
+            stripe_subscription_id="sub_canceled_previous",
+            status="canceled",
+            period_start=PERIOD_START - datetime.timedelta(days=31),
+            period_end=PERIOD_START,
+        )
+        _seed_balance(organization=organization, credits=Decimal(500))
+        invoice = _invoice_object(
+            organization_id=str(organization.id),
+            stripe_subscription_id="sub_resubscribed",
+            stripe_customer_id="cus_resubscribed",
+            period_start=PERIOD_START,
+            period_end=PERIOD_END,
+            subscription_status="active",
+        )
+
+        stripe_lifecycle.apply_webhook_event(event=_stripe_event(event_type="invoice.paid", stripe_object=invoice))
+
+        subscription = models.BillingSubscription.objects.get(organization=organization)
+        organization.refresh_from_db()
+        self.assertEqual(subscription.stripe_subscription_id, "sub_resubscribed")
+        self.assertEqual(subscription.status, "canceled")
+        self.assertEqual(subscription.latest_paid_period_start, PERIOD_START)
+        self.assertEqual(organization.plan, plans.TRIAL)
+        self.assertFalse(
+            models.BillingLedgerEntry.objects.filter(
+                organization=organization,
+                idempotency_key="grant:sub_resubscribed:2026-08-01",
+            ).exists()
+        )
+
+        subscription_object = _subscription_object(
+            organization=organization,
+            stripe_subscription_id="sub_resubscribed",
+            stripe_customer_id="cus_resubscribed",
+            status="active",
+            period_start=PERIOD_START,
+            period_end=PERIOD_END,
+        )
+        stripe_lifecycle.apply_webhook_event(
+            event=_stripe_event(event_type="customer.subscription.created", stripe_object=subscription_object),
+        )
+
+        organization.refresh_from_db()
+        renewal_entries = list(
+            models.BillingLedgerEntry.objects
+            .filter(organization=organization, idempotency_key__contains="sub_resubscribed")
+            .order_by("created_at")
+        )
+        self.assertEqual(organization.plan, plans.OPERATOR)
+        self.assertEqual(models.BillingBalance.objects.get(organization=organization).credits, Decimal(2000))
+        self.assertEqual([entry.type for entry in renewal_entries], ["expiry", "grant"])
+        self.assertEqual([entry.amount for entry in renewal_entries], [Decimal(-500), Decimal(2000)])
+
+    def test_subscription_first_on_resubscribe_does_not_reuse_the_previous_paid_period(self) -> None:
+        organization = models.Organization.objects.create(name="Created First Resubscribe", slug="created-first-resubscribe")
+        old_subscription = _subscription_object(
+            organization=organization,
+            stripe_subscription_id="sub_old_before_resubscribe",
+            stripe_customer_id="cus_created_first_resubscribe",
+            status="active",
+            period_start=PERIOD_START,
+            period_end=PERIOD_END,
+        )
+        stripe_lifecycle.apply_webhook_event(
+            event=_stripe_event(event_type="customer.subscription.created", stripe_object=old_subscription),
+        )
+        old_invoice = _invoice_object(
+            organization_id=str(organization.id),
+            stripe_subscription_id="sub_old_before_resubscribe",
+            stripe_customer_id="cus_created_first_resubscribe",
+            period_start=PERIOD_START,
+            period_end=PERIOD_END,
+            subscription_status=None,
+        )
+        stripe_lifecycle.apply_webhook_event(event=_stripe_event(event_type="invoice.paid", stripe_object=old_invoice))
+        stripe_lifecycle.apply_webhook_event(
+            event=_stripe_event(event_type="customer.subscription.deleted", stripe_object=old_subscription),
+        )
+
+        next_period_end = datetime.datetime(2026, 10, 1, tzinfo=datetime.UTC)
+        new_subscription = _subscription_object(
+            organization=organization,
+            stripe_subscription_id="sub_new_created_first",
+            stripe_customer_id="cus_created_first_resubscribe",
+            status="active",
+            period_start=PERIOD_END,
+            period_end=next_period_end,
+        )
+        stripe_lifecycle.apply_webhook_event(
+            event=_stripe_event(event_type="customer.subscription.created", stripe_object=new_subscription),
+        )
+
+        subscription = models.BillingSubscription.objects.get(organization=organization)
+        organization.refresh_from_db()
+        self.assertEqual(organization.plan, plans.OPERATOR)
+        self.assertEqual(subscription.current_period_start, PERIOD_END)
+        self.assertEqual(subscription.latest_paid_period_start, PERIOD_START)
+        self.assertFalse(
+            models.BillingLedgerEntry.objects.filter(
+                organization=organization,
+                idempotency_key="grant:sub_new_created_first:2026-08-01",
+            ).exists()
+        )
+
+        new_invoice = _invoice_object(
+            organization_id=str(organization.id),
+            stripe_subscription_id="sub_new_created_first",
+            stripe_customer_id="cus_created_first_resubscribe",
+            period_start=PERIOD_END,
+            period_end=next_period_end,
+            subscription_status=None,
+        )
+        stripe_lifecycle.apply_webhook_event(event=_stripe_event(event_type="invoice.paid", stripe_object=new_invoice))
+
+        grant_entries = models.BillingLedgerEntry.objects.filter(
+            organization=organization,
+            type=models.BillingLedgerEntry.Type.GRANT,
+        )
+        self.assertEqual(grant_entries.count(), 2)
+        self.assertTrue(grant_entries.filter(idempotency_key="grant:sub_new_created_first:2026-09-01").exists())
+        self.assertEqual(models.BillingBalance.objects.get(organization=organization).credits, Decimal(2000))
+
+    def test_late_paid_invoice_from_superseded_subscription_cannot_replace_live_mirror_facts(self) -> None:
+        organization = models.Organization.objects.create(name="Late Old Invoice", slug="late-old-invoice")
+        _create_mirror(
+            organization=organization,
+            stripe_subscription_id="sub_old_canceled",
+            status="canceled",
+            period_start=PERIOD_START,
+            period_end=PERIOD_END,
+        )
+        next_period_end = datetime.datetime(2026, 10, 1, tzinfo=datetime.UTC)
+        live_subscription = _subscription_object(
+            organization=organization,
+            stripe_subscription_id="sub_new_live",
+            stripe_customer_id="cus_new_live",
+            status="active",
+            period_start=PERIOD_END,
+            period_end=next_period_end,
+        )
+        stripe_lifecycle.apply_webhook_event(
+            event=_stripe_event(event_type="customer.subscription.created", stripe_object=live_subscription),
+        )
+        live_invoice = _invoice_object(
+            organization_id=str(organization.id),
+            stripe_subscription_id="sub_new_live",
+            stripe_customer_id="cus_new_live",
+            period_start=PERIOD_END,
+            period_end=next_period_end,
+            subscription_status=None,
+        )
+        stripe_lifecycle.apply_webhook_event(event=_stripe_event(event_type="invoice.paid", stripe_object=live_invoice))
+
+        superseded_invoice = _invoice_object(
+            organization_id=str(organization.id),
+            stripe_subscription_id="sub_old_canceled",
+            stripe_customer_id="cus_old_canceled",
+            period_start=PERIOD_START,
+            period_end=PERIOD_END,
+            subscription_status=None,
+        )
+        with patch.object(stripe_lifecycle.logger, "error") as error_log:
+            stripe_lifecycle.apply_webhook_event(
+                event=_stripe_event(event_type="invoice.paid", stripe_object=superseded_invoice),
+            )
+
+        subscription = models.BillingSubscription.objects.get(organization=organization)
+        organization.refresh_from_db()
+        error_log.assert_called_once()
+        message = error_log.call_args.args[0]
+        self.assertIn("sub_old_canceled", message)
+        self.assertIn("sub_new_live", message)
+        self.assertIn(str(organization.id), message)
+        self.assertEqual(subscription.stripe_subscription_id, "sub_new_live")
+        self.assertEqual(subscription.stripe_customer_id, "cus_new_live")
+        self.assertEqual(subscription.status, "active")
+        self.assertEqual(subscription.current_period_start, PERIOD_END)
+        self.assertEqual(subscription.current_period_end, next_period_end)
+        self.assertEqual(subscription.latest_paid_period_start, PERIOD_END)
+        self.assertEqual(organization.plan, plans.OPERATOR)
+
     def test_negative_balance_is_written_off_before_the_new_grant(self) -> None:
         organization = models.Organization.objects.create(name="Debt Org", slug="debt-org")
+        _create_mirror(
+            organization=organization,
+            stripe_subscription_id="sub_debt",
+            status="active",
+            period_start=PERIOD_START,
+            period_end=PERIOD_END,
+        )
         _seed_balance(organization=organization, credits=Decimal(-50))
         invoice = _invoice_object(
             organization_id=str(organization.id),
@@ -751,6 +1030,13 @@ class TestPaidInvoiceRenewal(TestCase):
 
     def test_replaying_paid_invoice_makes_the_entire_expiry_grant_pair_a_no_op(self) -> None:
         organization = models.Organization.objects.create(name="Replay Org", slug="replay-org")
+        _create_mirror(
+            organization=organization,
+            stripe_subscription_id="sub_replay",
+            status="active",
+            period_start=PERIOD_START,
+            period_end=PERIOD_END,
+        )
         _seed_balance(organization=organization, credits=Decimal(80))
         invoice = _invoice_object(
             organization_id=str(organization.id),
@@ -773,7 +1059,7 @@ class TestPaidInvoiceRenewal(TestCase):
         self.assertEqual(renewal_entries.filter(type=models.BillingLedgerEntry.Type.GRANT).count(), 1)
         self.assertEqual(models.BillingBalance.objects.get(organization=organization).credits, Decimal(2000))
 
-    def test_late_paid_invoice_preserves_canceled_status_and_trial_plan(self) -> None:
+    def test_redelivered_paid_invoice_after_cancellation_never_revives_or_grants(self) -> None:
         organization = models.Organization.objects.create(
             name="Canceled Org",
             slug="canceled-org",
@@ -804,7 +1090,7 @@ class TestPaidInvoiceRenewal(TestCase):
             stripe_customer_id="cus_sub_canceled",
             period_start=PERIOD_END,
             period_end=next_period_end,
-            subscription_status=None,
+            subscription_status="active",
         )
 
         stripe_lifecycle.apply_webhook_event(event=_stripe_event(event_type="invoice.paid", stripe_object=invoice))
@@ -814,7 +1100,73 @@ class TestPaidInvoiceRenewal(TestCase):
         self.assertEqual(subscription.status, "canceled")
         self.assertEqual(subscription.current_period_start, PERIOD_END)
         self.assertEqual(subscription.current_period_end, next_period_end)
+        self.assertEqual(subscription.latest_paid_period_start, PERIOD_END)
         self.assertEqual(organization.plan, plans.TRIAL)
+        self.assertFalse(models.BillingLedgerEntry.objects.filter(organization=organization).exists())
+
+    def test_failed_renewal_period_advance_without_paid_invoice_never_grants(self) -> None:
+        organization = models.Organization.objects.create(name="Failed Renewal", slug="failed-renewal")
+        subscription_object = _subscription_object(
+            organization=organization,
+            stripe_subscription_id="sub_failed_renewal",
+            stripe_customer_id="cus_failed_renewal",
+            status="active",
+            period_start=PERIOD_START,
+            period_end=PERIOD_END,
+        )
+        stripe_lifecycle.apply_webhook_event(
+            event=_stripe_event(event_type="customer.subscription.created", stripe_object=subscription_object),
+        )
+        invoice = _invoice_object(
+            organization_id=str(organization.id),
+            stripe_subscription_id="sub_failed_renewal",
+            stripe_customer_id="cus_failed_renewal",
+            period_start=PERIOD_START,
+            period_end=PERIOD_END,
+            subscription_status=None,
+        )
+        stripe_lifecycle.apply_webhook_event(event=_stripe_event(event_type="invoice.paid", stripe_object=invoice))
+
+        next_period_end = datetime.datetime(2026, 10, 1, tzinfo=datetime.UTC)
+        advanced_subscription = _subscription_object(
+            organization=organization,
+            stripe_subscription_id="sub_failed_renewal",
+            stripe_customer_id="cus_failed_renewal",
+            status="past_due",
+            period_start=PERIOD_END,
+            period_end=next_period_end,
+        )
+        stripe_lifecycle.apply_webhook_event(event=_stripe_event_at(
+            event_type="customer.subscription.updated",
+            stripe_object=advanced_subscription,
+            event_id="evt_failed_renewal_advanced",
+            event_created_at=PERIOD_END,
+        ))
+        failed_invoice = _invoice_object(
+            organization_id=str(organization.id),
+            stripe_subscription_id="sub_failed_renewal",
+            stripe_customer_id="cus_failed_renewal",
+            period_start=PERIOD_END,
+            period_end=next_period_end,
+            subscription_status="past_due",
+        )
+        stripe_lifecycle.apply_webhook_event(event=_stripe_event_at(
+            event_type="invoice.payment_failed",
+            stripe_object=failed_invoice,
+            event_id="evt_failed_renewal_payment_failed",
+            event_created_at=PERIOD_END,
+        ))
+
+        subscription = models.BillingSubscription.objects.get(organization=organization)
+        grant_entries = models.BillingLedgerEntry.objects.filter(
+            organization=organization,
+            type=models.BillingLedgerEntry.Type.GRANT,
+        )
+        self.assertEqual(subscription.current_period_start, PERIOD_END)
+        self.assertEqual(subscription.latest_paid_period_start, PERIOD_START)
+        self.assertEqual(grant_entries.count(), 1)
+        self.assertTrue(grant_entries.filter(idempotency_key="grant:sub_failed_renewal:2026-08-01").exists())
+        self.assertFalse(grant_entries.filter(idempotency_key="grant:sub_failed_renewal:2026-09-01").exists())
 
     def test_paid_invoice_without_a_line_item_period_logs_and_skips_the_grant(self) -> None:
         organization = models.Organization.objects.create(name="Missing Period", slug="missing-period")
@@ -835,14 +1187,15 @@ class TestPaidInvoiceRenewal(TestCase):
 
         error_log.assert_called_once()
         subscription = models.BillingSubscription.objects.get(organization=organization)
-        self.assertEqual(subscription.status, "active")
+        self.assertIsNone(subscription.status)
         self.assertIsNone(subscription.current_period_start)
         self.assertIsNone(subscription.current_period_end)
+        self.assertIsNone(subscription.latest_paid_period_start)
         self.assertFalse(models.BillingLedgerEntry.objects.filter(organization=organization).exists())
 
 
 class TestFailedInvoice(TestCase):
-    """Payment failures may refresh the mirror but never transition the plan during smart retries."""
+    """Payment failures are retained and reconciled but own no mirror facts."""
 
     def setUp(self) -> None:
         self.organization = models.Organization.objects.create(
@@ -858,7 +1211,7 @@ class TestFailedInvoice(TestCase):
             period_end=PERIOD_END,
         )
 
-    def test_expanded_subscription_status_can_create_an_out_of_order_mirror(self) -> None:
+    def test_expanded_subscription_status_cannot_create_an_out_of_order_mirror(self) -> None:
         organization = models.Organization.objects.create(name="Early Failure", slug="early-failure")
         invoice = _invoice_object(
             organization_id=str(organization.id),
@@ -873,48 +1226,54 @@ class TestFailedInvoice(TestCase):
             event=_stripe_event(event_type="invoice.payment_failed", stripe_object=invoice),
         )
 
-        subscription = models.BillingSubscription.objects.get(organization=organization)
         organization.refresh_from_db()
-        self.assertEqual(subscription.status, "past_due")
+        self.assertFalse(models.BillingSubscription.objects.filter(organization=organization).exists())
         self.assertEqual(organization.plan, plans.TRIAL)
+        self.assertFalse(models.BillingLedgerEntry.objects.filter(organization=organization).exists())
+        self.assertTrue(models.StripeWebhookEvent.objects.filter(
+            event_type="invoice.payment_failed",
+        ).exists())
 
-    def test_carried_subscription_status_updates_the_mirror_without_changing_plan(self) -> None:
+    def test_delayed_expanded_status_after_deletion_cannot_resurrect_subscription(self) -> None:
+        subscription_object = _subscription_object(
+            organization=self.organization,
+            stripe_subscription_id="sub_retry",
+            stripe_customer_id="cus_retry",
+            status="active",
+            period_start=PERIOD_START,
+            period_end=PERIOD_END,
+        )
+        stripe_lifecycle.apply_webhook_event(
+            event=_stripe_event_at(
+                event_type="customer.subscription.deleted",
+                stripe_object=subscription_object,
+                event_id="evt_subscription_deleted_before_delayed_failure",
+                event_created_at=PERIOD_END,
+            ),
+        )
         invoice = _invoice_object(
             organization_id=str(self.organization.id),
             stripe_subscription_id="sub_retry",
             stripe_customer_id="cus_retry",
             period_start=PERIOD_START,
             period_end=PERIOD_END,
-            subscription_status="unpaid",
+            subscription_status="past_due",
         )
 
         stripe_lifecycle.apply_webhook_event(
-            event=_stripe_event(event_type="invoice.payment_failed", stripe_object=invoice),
+            event=_stripe_event_at(
+                event_type="invoice.payment_failed",
+                stripe_object=invoice,
+                event_id="evt_delayed_expanded_payment_failure",
+                event_created_at=PERIOD_START,
+            ),
         )
 
         self.subscription.refresh_from_db()
         self.organization.refresh_from_db()
-        self.assertEqual(self.subscription.status, "unpaid")
-        self.assertEqual(self.organization.plan, plans.OPERATOR)
-
-    def test_missing_subscription_status_logs_and_leaves_the_mirror_unchanged(self) -> None:
-        invoice = _invoice_object(
-            organization_id=str(self.organization.id),
-            stripe_subscription_id="sub_retry",
-            stripe_customer_id="cus_retry",
-            period_start=PERIOD_START,
-            period_end=PERIOD_END,
-            subscription_status=None,
-        )
-
-        with patch.object(stripe_lifecycle.logger, "error") as error_log:
-            stripe_lifecycle.apply_webhook_event(
-                event=_stripe_event(event_type="invoice.payment_failed", stripe_object=invoice),
-            )
-
-        self.subscription.refresh_from_db()
-        self.assertEqual(self.subscription.status, "active")
-        error_log.assert_called_once()
+        self.assertEqual(self.subscription.status, "canceled")
+        self.assertEqual(self.organization.plan, plans.TRIAL)
+        self.assertFalse(models.BillingLedgerEntry.objects.filter(organization=self.organization).exists())
 
 
 class TestStripeWebhookView(TestCase):

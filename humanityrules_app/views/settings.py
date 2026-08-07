@@ -14,12 +14,14 @@ from django.utils import timezone
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_POST
 
-from humanityrules_app.services.billing import billing_page, stripe_lifecycle
+from humanityrules_app.services.billing import billing_page, plans, stripe_lifecycle
 
 from ..models import Organization, OrganizationInvite, OrganizationMembership
 from . import base
 
 logger = logging.getLogger(__name__)
+
+CHECKOUT_SESSION_ID_QUERY_PARAMETER = "checkout_session_id"
 
 
 @login_required
@@ -94,14 +96,29 @@ def settings_billing(request: HttpRequest) -> HttpResponse:
     if forbidden:
         return forbidden
 
+    checkout_session_id = request.GET.get(CHECKOUT_SESSION_ID_QUERY_PARAMETER)
+
     if not request.htmx:
+        if checkout_session_id:
+            organization = request.user.current_organization
+            if organization.plan == plans.TRIAL:
+                logger.info(
+                    f"Stripe Checkout session {checkout_session_id!r} returned successfully for organization "
+                    f"{organization.id}; waiting for webhook activation"
+                )
         context = base.get_app_shell_context(request=request, current_page="settings")
-        context["content_url"] = "/settings/billing/"
+        context["content_url"] = request.get_full_path()
         return render(request=request, template_name="humanityrules_app/app_shell.html", context=context)
 
     organization = request.user.current_organization
+    is_activating = bool(checkout_session_id) and organization.plan == plans.TRIAL
     context = base.get_app_shell_context(request=request, current_page="settings")
     context["active_tab"] = "billing"
+    context["is_activating"] = is_activating
+    context["activation_poll_url"] = request.get_full_path()
+    if is_activating:
+        return render(request=request, template_name="humanityrules_app/settings/billing.html", context=context)
+
     context["billing"] = billing_page.billing_page_context(organization=organization)
     return render(request=request, template_name="humanityrules_app/settings/billing.html", context=context)
 
@@ -122,11 +139,12 @@ def settings_billing_checkout(request: HttpRequest) -> HttpResponse:
         logger.error(f"cannot start billing checkout for organization {organization.id}: checkout is unavailable")
         return HttpResponseRedirect(redirect_to=billing_path, status=303)
 
-    return_url = request.build_absolute_uri(location=billing_path)
+    cancel_url = request.build_absolute_uri(location=billing_path)
+    success_url = f"{cancel_url}?{CHECKOUT_SESSION_ID_QUERY_PARAMETER}={{CHECKOUT_SESSION_ID}}"
     checkout_url = stripe_lifecycle.create_operator_checkout_url(
         organization=organization,
-        success_url=return_url,
-        cancel_url=return_url,
+        success_url=success_url,
+        cancel_url=cancel_url,
     )
     return HttpResponseRedirect(redirect_to=checkout_url, status=303)
 
