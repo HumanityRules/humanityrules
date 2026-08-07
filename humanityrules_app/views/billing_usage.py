@@ -169,7 +169,7 @@ def billing_usage_events(request: HttpRequest) -> JsonResponse:
     return JsonResponse({
         "ok": True,
         "skipped": len(skipped_sources),
-        "entitlement": entitlements.snapshot_payload(organization=organization),
+        "entitlement": entitlements.entitlement_snapshot(organization=organization),
     })
 
 
@@ -184,4 +184,4 @@ def billing_entitlement(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"error": "invalid bearer token"}, status=401)
 
     organization = environment.aws_account.organization
-    return JsonResponse({"entitlement": entitlements.snapshot_payload(organization=organization)})
+    return JsonResponse({"entitlement": entitlements.entitlement_snapshot(organization=organization)})

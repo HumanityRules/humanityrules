@@ -6,7 +6,7 @@ maintains and the organization's effective plan. The broker caches it and
 refreshes event-driven: every usage-event post returns a fresh copy, and the
 runtime GET serves idle organizations whose cache went stale.
 
-Exhaustion is a floor at −5% of the plan's grant, not zero. Delayed events and
+Exhaustion is a floor at -5% of the plan's grant, not zero. Delayed events and
 in-flight turns make exact-zero enforcement dishonest without reservation
 machinery, so a fixed negative allowance is both simpler and truthful. Renewal
 writes the balance off and re-grants, so grace overspend is absorbed there and
@@ -18,7 +18,6 @@ and is not pending cancellation. A trial, canceled subscription, or Operator
 subscription scheduled to end therefore reads as None.
 """
 
-from dataclasses import dataclass
 from decimal import Decimal
 
 from humanityrules_app import models
@@ -29,24 +28,13 @@ from humanityrules_app.services.billing import plans
 EXHAUSTION_GRACE_FRACTION = Decimal("0.05")
 
 
-@dataclass(frozen=True)
-class EntitlementSnapshot:
-    """What the broker needs to decide whether this organization may spend."""
-
-    credits_remaining: int
-    monthly_grant: int
-    renewal_date: str | None
-    plan: str
-    exhausted: bool
-
-
 def exhaustion_floor(monthly_grant: int) -> Decimal:
     """The balance at or below which spending stops: −5% of the plan's grant."""
     return -(Decimal(monthly_grant) * EXHAUSTION_GRACE_FRACTION)
 
 
-def entitlement_snapshot(organization: models.Organization) -> EntitlementSnapshot:
-    """The organization's current spending entitlement, as the broker enforces it."""
+def entitlement_snapshot(organization: models.Organization) -> dict[str, int | str | bool | None]:
+    """Return the broker's JSON-ready view of this organization's spending entitlement."""
     plan = plans.effective_plan(organization=organization)
     balance = models.BillingBalance.objects.filter(organization=organization).first()
     credits_remaining = balance.credits if balance is not None else Decimal(0)
@@ -60,22 +48,10 @@ def entitlement_snapshot(organization: models.Organization) -> EntitlementSnapsh
         if subscription is not None and not subscription.is_pending_cancellation
         else None
     )
-    return EntitlementSnapshot(
-        credits_remaining=int(credits_remaining),
-        monthly_grant=plan.monthly_credit_grant,
-        renewal_date=renewal_date,
-        plan=organization.plan,
-        exhausted=credits_remaining <= exhaustion_floor(monthly_grant=plan.monthly_credit_grant),
-    )
-
-
-def snapshot_payload(organization: models.Organization) -> dict:
-    """The snapshot as the JSON body the broker reads."""
-    snapshot = entitlement_snapshot(organization=organization)
     return {
-        "credits_remaining": snapshot.credits_remaining,
-        "monthly_grant": snapshot.monthly_grant,
-        "renewal_date": snapshot.renewal_date,
-        "plan": snapshot.plan,
-        "exhausted": snapshot.exhausted,
+        "credits_remaining": int(credits_remaining),
+        "monthly_grant": plan.monthly_credit_grant,
+        "renewal_date": renewal_date,
+        "plan": organization.plan,
+        "exhausted": credits_remaining <= exhaustion_floor(monthly_grant=plan.monthly_credit_grant),
     }

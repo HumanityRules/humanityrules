@@ -141,7 +141,7 @@ def settings_billing_checkout(request: HttpRequest) -> HttpResponse:
 
     cancel_url = request.build_absolute_uri(location=billing_path)
     success_url = f"{cancel_url}?{CHECKOUT_SESSION_ID_QUERY_PARAMETER}={{CHECKOUT_SESSION_ID}}"
-    checkout_url = stripe_lifecycle.create_operator_checkout_url(
+    checkout_url = stripe_lifecycle.create_stripe_operator_checkout_url(
         organization=organization,
         success_url=success_url,
         cancel_url=cancel_url,
@@ -166,7 +166,7 @@ def settings_billing_portal(request: HttpRequest) -> HttpResponse:
         return HttpResponseRedirect(redirect_to=billing_path, status=303)
 
     return_url = request.build_absolute_uri(location=billing_path)
-    portal_url = stripe_lifecycle.create_portal_url(
+    portal_url = stripe_lifecycle.create_stripe_portal_url(
         organization=organization,
         return_url=return_url,
     )

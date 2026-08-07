@@ -30,8 +30,8 @@ Run in the background and redirect to a scratchpad log (the harness task file st
 
 ## Prose pass
 
-After Codex is green and reviewed, a Sonnet 5 subagent gets the diff and the design doc, with this single objective, verbatim:
+After Codex is green and reviewed, a Sonnet 5 subagent gets the diff and the design doc, with this single objective:
 
-> Rewrite the new and changed comments and docstrings so it is easy for a new reader — someone reading this code for the first time — to build the mental model.
+> Rewrite the new and changed comments and docstrings so it is easy for a new reader — someone reading this code for the first time — to build a mental model of how the system works. Use plain human language.
 
 Apply its edits directly. No verification loop — Victor's reading is the acceptance test.

@@ -466,7 +466,7 @@ class TestSettingsBillingViews(TestCase):
         self.client.force_login(user=self.admin)
         with patch.object(
             stripe_lifecycle,
-            "create_operator_checkout_url",
+            "create_stripe_operator_checkout_url",
             return_value="https://checkout.example/session",
         ) as create_checkout:
             response = self.client.post(path="/settings/billing/checkout")
@@ -495,7 +495,7 @@ class TestSettingsBillingViews(TestCase):
         self.client.force_login(user=self.admin)
         with patch.object(
             stripe_lifecycle,
-            "create_portal_url",
+            "create_stripe_portal_url",
             return_value="https://billing.example/portal",
         ) as create_portal:
             response = self.client.post(path="/settings/billing/portal")
@@ -513,7 +513,7 @@ class TestSettingsBillingViews(TestCase):
         self.organization.save(update_fields=["plan"])
         self.client.force_login(user=self.admin)
         with (
-            patch.object(stripe_lifecycle, "create_operator_checkout_url") as create_checkout,
+            patch.object(stripe_lifecycle, "create_stripe_operator_checkout_url") as create_checkout,
             patch.object(settings_view.logger, "error") as error_log,
         ):
             response = self.client.post(path="/settings/billing/checkout")
@@ -527,7 +527,7 @@ class TestSettingsBillingViews(TestCase):
     def test_portal_rejects_an_organization_without_available_billing_management(self) -> None:
         self.client.force_login(user=self.admin)
         with (
-            patch.object(stripe_lifecycle, "create_portal_url") as create_portal,
+            patch.object(stripe_lifecycle, "create_stripe_portal_url") as create_portal,
             patch.object(settings_view.logger, "error") as error_log,
         ):
             response = self.client.post(path="/settings/billing/portal")
@@ -541,8 +541,8 @@ class TestSettingsBillingViews(TestCase):
     def test_unconfigured_stripe_redirects_back_without_calling_lifecycle(self) -> None:
         self.client.force_login(user=self.admin)
         with (
-            patch.object(stripe_lifecycle, "create_operator_checkout_url") as create_checkout,
-            patch.object(stripe_lifecycle, "create_portal_url") as create_portal,
+            patch.object(stripe_lifecycle, "create_stripe_operator_checkout_url") as create_checkout,
+            patch.object(stripe_lifecycle, "create_stripe_portal_url") as create_portal,
             patch.object(settings_view.logger, "error") as error_log,
         ):
             checkout_response = self.client.post(path="/settings/billing/checkout")
@@ -571,8 +571,8 @@ class TestSettingsBillingViews(TestCase):
         csrf_client = Client(enforce_csrf_checks=True)
         csrf_client.force_login(user=self.admin)
         with (
-            patch.object(stripe_lifecycle, "create_operator_checkout_url") as create_checkout,
-            patch.object(stripe_lifecycle, "create_portal_url") as create_portal,
+            patch.object(stripe_lifecycle, "create_stripe_operator_checkout_url") as create_checkout,
+            patch.object(stripe_lifecycle, "create_stripe_portal_url") as create_portal,
         ):
             checkout_response = csrf_client.post(path="/settings/billing/checkout")
             portal_response = csrf_client.post(path="/settings/billing/portal")

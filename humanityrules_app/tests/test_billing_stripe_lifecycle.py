@@ -166,7 +166,7 @@ class TestStripeHostedSessions(TestCase):
         stripe_client.v1.checkout.sessions.create.return_value = SimpleNamespace(url="https://checkout.example/session")
 
         with patch.object(stripe_lifecycle.stripe, "StripeClient", return_value=stripe_client) as client_constructor:
-            checkout_url = stripe_lifecycle.create_operator_checkout_url(
+            checkout_url = stripe_lifecycle.create_stripe_operator_checkout_url(
                 organization=self.organization,
                 success_url="https://humr.example/success",
                 cancel_url="https://humr.example/cancel",
@@ -193,7 +193,7 @@ class TestStripeHostedSessions(TestCase):
         stripe_client.v1.checkout.sessions.create.return_value = SimpleNamespace(url="https://checkout.example/new")
 
         with patch.object(stripe_lifecycle.stripe, "StripeClient", return_value=stripe_client):
-            stripe_lifecycle.create_operator_checkout_url(
+            stripe_lifecycle.create_stripe_operator_checkout_url(
                 organization=self.organization,
                 success_url="https://humr.example/success",
                 cancel_url="https://humr.example/cancel",
@@ -217,7 +217,7 @@ class TestStripeHostedSessions(TestCase):
         )
 
         with patch.object(stripe_lifecycle.stripe, "StripeClient", return_value=stripe_client):
-            portal_url = stripe_lifecycle.create_portal_url(
+            portal_url = stripe_lifecycle.create_stripe_portal_url(
                 organization=self.organization,
                 return_url="https://humr.example/billing",
             )
@@ -230,7 +230,7 @@ class TestStripeHostedSessions(TestCase):
 
     def test_portal_refuses_an_organization_without_a_stripe_customer(self) -> None:
         with self.assertRaisesMessage(ValueError, "has no Stripe customer"):
-            stripe_lifecycle.create_portal_url(
+            stripe_lifecycle.create_stripe_portal_url(
                 organization=self.organization,
                 return_url="https://humr.example/billing",
             )
@@ -309,6 +309,42 @@ class TestWebhookEventPersistence(TestCase):
         self.assertGreaterEqual(stored_event.received_at, before_receive)
         self.assertLessEqual(stored_event.received_at, after_receive)
 
+    def test_unhandled_event_does_not_require_data_object(self) -> None:
+        event = {
+            "id": "evt_unhandled_without_object",
+            "type": "checkout.session.completed",
+            "created": int(PERIOD_START.timestamp()),
+            "data": None,
+        }
+
+        stripe_lifecycle.apply_webhook_event(event=event)
+
+        stored_event = models.StripeWebhookEvent.objects.get(stripe_event_id=event["id"])
+        self.assertEqual(stored_event.payload, event)
+
+    def test_every_handled_event_requires_a_dictionary_data_object(self) -> None:
+        malformed_data = (
+            None,
+            {},
+            {"object": None},
+            {"object": []},
+        )
+        for event_type in stripe_lifecycle._HANDLED_EVENT_TYPES:
+            for index, event_data in enumerate(malformed_data):
+                with self.subTest(event_type=event_type, event_data=event_data):
+                    event_id = f"evt_malformed_object_{event_type.replace('.', '_')}_{index}"
+                    event = {
+                        "id": event_id,
+                        "type": event_type,
+                        "created": int(PERIOD_START.timestamp()),
+                        "data": event_data,
+                    }
+
+                    with self.assertRaisesRegex(ValueError, "requires data.object to be an object"):
+                        stripe_lifecycle.apply_webhook_event(event=event)
+
+                    self.assertFalse(models.StripeWebhookEvent.objects.filter(stripe_event_id=event_id).exists())
+
     def test_redelivery_is_skipped_before_dispatch(self) -> None:
         event = _stripe_event(
             event_type="checkout.session.completed",
@@ -343,7 +379,7 @@ class TestWebhookEventPersistence(TestCase):
         )
 
         with (
-            patch.object(stripe_lifecycle, "transition_organization_plan", side_effect=RuntimeError("apply failed")),
+            patch.object(stripe_lifecycle, "_transition_organization_plan", side_effect=RuntimeError("apply failed")),
             self.assertRaisesRegex(RuntimeError, "apply failed"),
         ):
             stripe_lifecycle.apply_webhook_event(event=event)
@@ -548,6 +584,175 @@ class TestSubscriptionWebhookMirroring(TestCase):
         self.assertEqual(subscription.current_period_start, next_period_start)
         self.assertEqual(subscription.current_period_end, next_period_end)
         self.assertEqual(self.organization.plan, plans.OPERATOR)
+
+    def test_subscription_event_with_absent_periods_clears_stale_periods_and_cannot_grant(self) -> None:
+        self.organization.plan = plans.OPERATOR
+        self.organization.save(update_fields=["plan", "updated_at"])
+        subscription = _create_mirror(
+            organization=self.organization,
+            stripe_subscription_id="sub_missing_event_periods",
+            status="active",
+            period_start=PERIOD_START,
+            period_end=PERIOD_END,
+        )
+        subscription.latest_paid_period_start = PERIOD_START
+        subscription.save(update_fields=["latest_paid_period_start", "updated_at"])
+        subscription_object = _subscription_object(
+            organization=self.organization,
+            stripe_subscription_id="sub_missing_event_periods",
+            stripe_customer_id="cus_sub_missing_event_periods",
+            status="active",
+            period_start=PERIOD_START,
+            period_end=PERIOD_END,
+        )
+        subscription_object["items"] = {"data": [{}]}
+
+        stripe_lifecycle.apply_webhook_event(event=_stripe_event_at(
+            event_type="customer.subscription.updated",
+            stripe_object=subscription_object,
+            event_id="evt_subscription_periods_absent",
+            event_created_at=PERIOD_END,
+        ))
+
+        subscription.refresh_from_db()
+        self.assertIsNone(subscription.current_period_start)
+        self.assertIsNone(subscription.current_period_end)
+        self.assertEqual(subscription.latest_paid_period_start, PERIOD_START)
+        self.assertFalse(models.BillingLedgerEntry.objects.filter(
+            organization=self.organization,
+            idempotency_key="grant:sub_missing_event_periods:2026-08-01",
+        ).exists())
+
+    def test_malformed_updated_event_raises_and_rolls_back_event_retention(self) -> None:
+        malformed_fields = (
+            ("customer", "", "customer id"),
+            ("customer", {"id": "cus_expanded"}, "customer id"),
+            ("id", None, "subscription id"),
+            ("status", 3, "status"),
+        )
+        for index, (malformed_field, malformed_value, expected_message) in enumerate(malformed_fields):
+            with self.subTest(malformed_field=malformed_field, malformed_value=malformed_value):
+                organization = models.Organization.objects.create(
+                    name=f"Malformed Subscription {index}",
+                    slug=f"malformed-subscription-{index}",
+                    plan=plans.OPERATOR,
+                )
+                subscription = _create_mirror(
+                    organization=organization,
+                    stripe_subscription_id=f"sub_malformed_{index}",
+                    status="active",
+                    period_start=PERIOD_START,
+                    period_end=PERIOD_END,
+                )
+                original_updated_at = subscription.updated_at
+                subscription_object = _subscription_object(
+                    organization=organization,
+                    stripe_subscription_id=f"sub_malformed_{index}",
+                    stripe_customer_id=f"cus_malformed_{index}",
+                    status="past_due",
+                    period_start=PERIOD_END,
+                    period_end=datetime.datetime(2026, 10, 1, tzinfo=datetime.UTC),
+                )
+                subscription_object[malformed_field] = malformed_value
+                event = _stripe_event_at(
+                    event_type="customer.subscription.updated",
+                    stripe_object=subscription_object,
+                    event_id=f"evt_malformed_subscription_{index}",
+                    event_created_at=PERIOD_END,
+                )
+
+                with self.assertRaisesRegex(ValueError, expected_message):
+                    stripe_lifecycle.apply_webhook_event(event=event)
+
+                subscription.refresh_from_db()
+                self.assertEqual(subscription.stripe_customer_id, f"cus_sub_malformed_{index}")
+                self.assertEqual(subscription.stripe_subscription_id, f"sub_malformed_{index}")
+                self.assertEqual(subscription.status, "active")
+                self.assertEqual(subscription.current_period_start, PERIOD_START)
+                self.assertEqual(subscription.current_period_end, PERIOD_END)
+                self.assertIsNone(subscription.latest_subscription_event_created_at)
+                self.assertEqual(subscription.updated_at, original_updated_at)
+                self.assertFalse(models.StripeWebhookEvent.objects.filter(stripe_event_id=event["id"]).exists())
+
+    def test_malformed_created_event_raises_without_creating_a_mirror_or_retaining_the_event(self) -> None:
+        subscription_object = _subscription_object(
+            organization=self.organization,
+            stripe_subscription_id="sub_malformed_created",
+            stripe_customer_id="cus_malformed_created",
+            status="active",
+            period_start=PERIOD_START,
+            period_end=PERIOD_END,
+        )
+        subscription_object["status"] = None
+        event = _stripe_event(
+            event_type="customer.subscription.created",
+            stripe_object=subscription_object,
+        )
+
+        with self.assertRaisesRegex(ValueError, "missing required status"):
+            stripe_lifecycle.apply_webhook_event(event=event)
+
+        self.assertFalse(models.BillingSubscription.objects.filter(organization=self.organization).exists())
+        self.assertFalse(models.StripeWebhookEvent.objects.filter(stripe_event_id=event["id"]).exists())
+
+    def test_deleted_event_with_malformed_customer_rolls_back_instead_of_leaving_operator_active_forever(self) -> None:
+        self.organization.plan = plans.OPERATOR
+        self.organization.save(update_fields=["plan", "updated_at"])
+        subscription = _create_mirror(
+            organization=self.organization,
+            stripe_subscription_id="sub_malformed_deleted",
+            status="active",
+            period_start=PERIOD_START,
+            period_end=PERIOD_END,
+        )
+        subscription_object = _subscription_object(
+            organization=self.organization,
+            stripe_subscription_id="sub_malformed_deleted",
+            stripe_customer_id="cus_malformed_deleted",
+            status="active",
+            period_start=PERIOD_START,
+            period_end=PERIOD_END,
+        )
+        subscription_object["customer"] = []
+        event = _stripe_event(
+            event_type="customer.subscription.deleted",
+            stripe_object=subscription_object,
+        )
+
+        with self.assertRaisesRegex(ValueError, "missing required customer id"):
+            stripe_lifecycle.apply_webhook_event(event=event)
+
+        subscription.refresh_from_db()
+        self.organization.refresh_from_db()
+        self.assertEqual(subscription.status, "active")
+        self.assertEqual(self.organization.plan, plans.OPERATOR)
+        self.assertFalse(models.StripeWebhookEvent.objects.filter(stripe_event_id=event["id"]).exists())
+
+    def test_deleted_event_without_data_object_rolls_back_instead_of_leaving_operator_active_forever(self) -> None:
+        self.organization.plan = plans.OPERATOR
+        self.organization.save(update_fields=["plan", "updated_at"])
+        subscription = _create_mirror(
+            organization=self.organization,
+            stripe_subscription_id="sub_objectless_deleted",
+            status="active",
+            period_start=PERIOD_START,
+            period_end=PERIOD_END,
+        )
+        event = {
+            "id": "evt_objectless_subscription_deleted",
+            "type": "customer.subscription.deleted",
+            "created": int(PERIOD_START.timestamp()),
+            "data": {"object": None},
+        }
+
+        with self.assertRaisesRegex(ValueError, "requires data.object to be an object"):
+            stripe_lifecycle.apply_webhook_event(event=event)
+
+        subscription.refresh_from_db()
+        self.organization.refresh_from_db()
+        self.assertEqual(subscription.status, "active")
+        self.assertEqual(self.organization.plan, plans.OPERATOR)
+        self.assertFalse(models.StripeWebhookEvent.objects.filter(stripe_event_id=event["id"]).exists())
 
     def test_deleted_event_forces_canceled_and_downgrades_to_trial(self) -> None:
         self.organization.plan = plans.OPERATOR
@@ -798,10 +1003,11 @@ class TestSubscriptionPlanTransition(TestCase):
                     period_end=PERIOD_END,
                 )
 
-                stripe_lifecycle.transition_organization_plan(subscription=subscription)
+                transition = stripe_lifecycle._transition_organization_plan(subscription=subscription)
 
                 organization.refresh_from_db()
                 self.assertEqual(organization.plan, plans.OPERATOR)
+                self.assertEqual(transition, (plans.TRIAL, plans.OPERATOR))
 
     def test_every_other_stripe_status_downgrades_to_trial(self) -> None:
         statuses = ("canceled", "unpaid", "incomplete", "incomplete_expired", "paused")
@@ -820,10 +1026,11 @@ class TestSubscriptionPlanTransition(TestCase):
                     period_end=PERIOD_END,
                 )
 
-                stripe_lifecycle.transition_organization_plan(subscription=subscription)
+                transition = stripe_lifecycle._transition_organization_plan(subscription=subscription)
 
                 organization.refresh_from_db()
                 self.assertEqual(organization.plan, plans.TRIAL)
+                self.assertEqual(transition, (plans.OPERATOR, plans.TRIAL))
 
     def test_team_and_enterprise_are_logged_and_never_changed(self) -> None:
         for index, plan in enumerate((plans.TEAM, plans.ENTERPRISE)):
@@ -842,10 +1049,11 @@ class TestSubscriptionPlanTransition(TestCase):
                 )
 
                 with patch.object(stripe_lifecycle.logger, "error") as error_log:
-                    stripe_lifecycle.transition_organization_plan(subscription=subscription)
+                    transition = stripe_lifecycle._transition_organization_plan(subscription=subscription)
 
                 organization.refresh_from_db()
                 self.assertEqual(organization.plan, plan)
+                self.assertEqual(transition, (plan, plan))
                 error_log.assert_called_once()
 
     def test_equal_derived_plan_is_a_save_and_log_no_op(self) -> None:
@@ -866,10 +1074,11 @@ class TestSubscriptionPlanTransition(TestCase):
             patch.object(organization, "save") as save,
             patch.object(stripe_lifecycle.logger, "error") as error_log,
         ):
-            stripe_lifecycle.transition_organization_plan(subscription=subscription)
+            transition = stripe_lifecycle._transition_organization_plan(subscription=subscription)
 
         save.assert_not_called()
         error_log.assert_not_called()
+        self.assertEqual(transition, (plans.OPERATOR, plans.OPERATOR))
 
 
 class TestTrialRestartOnDowngrade(TestCase):
@@ -1007,7 +1216,7 @@ class TestTrialRestartOnDowngrade(TestCase):
 
         stripe_lifecycle.apply_webhook_event(event=deleted_event)
         subscription = models.BillingSubscription.objects.get(organization=organization)
-        stripe_lifecycle.reconcile_subscription(
+        stripe_lifecycle._reconcile_subscription(
             subscription=subscription,
             triggering_stripe_event_id=deleted_event["id"],
         )
@@ -1926,6 +2135,39 @@ class TestStripeWebhookView(TestCase):
         apply_event.assert_called_once_with(event=event)
 
     @override_settings(STRIPE_WEBHOOK_SECRET="whsec_humr")
+    def test_malformed_subscription_event_returns_500_without_retaining_the_event(self) -> None:
+        organization = models.Organization.objects.create(name="Malformed Webhook", slug="malformed-webhook")
+        subscription_object = _subscription_object(
+            organization=organization,
+            stripe_subscription_id="sub_malformed_webhook",
+            stripe_customer_id="cus_malformed_webhook",
+            status="active",
+            period_start=PERIOD_START,
+            period_end=PERIOD_END,
+        )
+        subscription_object["status"] = ""
+        event = _stripe_event(
+            event_type="customer.subscription.created",
+            stripe_object=subscription_object,
+        )
+        client = Client(raise_request_exception=False)
+
+        with (
+            patch.object(stripe_lifecycle, "verify_and_parse_webhook", return_value=event),
+            self.assertLogs("django.request", level="ERROR"),
+        ):
+            response = client.post(
+                "/api/stripe/webhook",
+                data=b"{}",
+                content_type="application/json",
+                HTTP_STRIPE_SIGNATURE="valid",
+            )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertFalse(models.StripeWebhookEvent.objects.filter(stripe_event_id=event["id"]).exists())
+        self.assertFalse(models.BillingSubscription.objects.filter(organization=organization).exists())
+
+    @override_settings(STRIPE_WEBHOOK_SECRET="whsec_humr")
     def test_verified_unhandled_event_is_persisted_and_acknowledged(self) -> None:
         event = _stripe_event(
             event_type="checkout.session.completed",
@@ -1970,7 +2212,7 @@ class TestSubscriptionRenewalEntitlement(TestCase):
 
                 snapshot = entitlements.entitlement_snapshot(organization=organization)
 
-                self.assertEqual(snapshot.renewal_date, "2026-09-01")
+                self.assertEqual(snapshot["renewal_date"], "2026-09-01")
 
     def test_pending_cancellation_suppresses_the_renewal_date(self) -> None:
         organization = models.Organization.objects.create(name="Ending Operator", slug="ending-operator")
@@ -1986,7 +2228,7 @@ class TestSubscriptionRenewalEntitlement(TestCase):
 
         snapshot = entitlements.entitlement_snapshot(organization=organization)
 
-        self.assertIsNone(snapshot.renewal_date)
+        self.assertIsNone(snapshot["renewal_date"])
 
     def test_terminal_status_and_unknown_period_have_no_renewal_date(self) -> None:
         terminal = models.Organization.objects.create(name="Terminal", slug="terminal-renewal")
@@ -2006,5 +2248,5 @@ class TestSubscriptionRenewalEntitlement(TestCase):
             period_end=None,
         )
 
-        self.assertIsNone(entitlements.entitlement_snapshot(organization=terminal).renewal_date)
-        self.assertIsNone(entitlements.entitlement_snapshot(organization=unknown_period).renewal_date)
+        self.assertIsNone(entitlements.entitlement_snapshot(organization=terminal)["renewal_date"])
+        self.assertIsNone(entitlements.entitlement_snapshot(organization=unknown_period)["renewal_date"])

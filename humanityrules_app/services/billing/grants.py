@@ -15,13 +15,15 @@ by the enforcement floor.
 
 Stripe delivers webhooks at least once, so the event that triggered either
 reset can arrive again — possibly days later, after the customer has spent
-from the new grant. Each reset therefore checks for its grant entry first and,
-when it already exists, writes nothing at all: re-running just the write-off
-would wipe those newly spent credits.
+from the new grant. Each reset therefore looks up a ``BillingLedgerEntry``
+with its grant idempotency key under the balance lock and, when that row
+already exists, writes nothing at all: re-running just the write-off would
+wipe those newly spent credits.
 
 All grant paths read the organization's effective plan after overrides. Grant
-metadata stamps the plan and config version that supplied the amount, leaving
-old ledger rows explainable after the in-code registry changes.
+metadata stamps the plan and config version that supplied the amount, so you
+can still tell why an old ledger row got the credits it did even after those
+plan amounts change in code.
 """
 
 import datetime
@@ -35,6 +37,78 @@ from humanityrules_app import models
 from humanityrules_app.services.billing import plans
 
 logger = logging.getLogger(__name__)
+
+
+def grant_trial_credits(organization: models.Organization) -> bool:
+    """Write an organization's one-time trial grant; False when it already has one.
+
+    The amount comes from the organization's effective plan, so a comped org
+    whose overrides raise the grant is backfilled with the raised number rather
+    than the registry default.
+    """
+    plan = plans.effective_plan(organization=organization)
+    return _write_grant(
+        organization_id=organization.id,
+        credits=Decimal(plan.monthly_credit_grant),
+        idempotency_key=f"grant:trial:{organization.id}",
+        description="Trial credits",
+        metadata={"plan": organization.plan, "plan_version": plans.PLAN_VERSION},
+    )
+
+
+def restart_trial_credits(organization: models.Organization, stripe_event_id: str, stripe_subscription_id: str) -> bool:
+    """Reset an ex-customer's balance to the effective Trial grant; False when that Stripe event already reset it.
+
+    Idempotency is keyed on the triggering webhook event rather than on the
+    subscription, because one subscription can drop out of Operator more than
+    once: a failed payment can recover back to Operator before the
+    subscription is later canceled outright, and each drop is its own flip
+    that needs its own write-off-and-grant. Keying on the subscription would
+    make the second flip's reset look like a replay of the first and skip it.
+    """
+    grant_key = f"grant:trial-reset:{stripe_event_id}"
+    expiry_key = f"expiry:trial-reset:{stripe_event_id}"
+    plan = plans.effective_plan(organization=organization)
+    grant_amount = Decimal(plan.monthly_credit_grant)
+
+    if grant_amount <= 0:
+        raise ValueError(f"a restarted Trial grant must be positive, got {grant_amount}")
+
+    return _reset_balance_to_grant(
+        organization=organization,
+        grant_amount=grant_amount,
+        grant_key=grant_key,
+        grant_description="Trial credits after subscription ended",
+        grant_metadata={"plan": organization.plan, "plan_version": plans.PLAN_VERSION},
+        expiry_key=expiry_key,
+        expiry_description="Subscription-end balance written off for Trial restart",
+        expiry_metadata={"subscription_id": stripe_subscription_id},
+        duplicate_log_label="Trial restart",
+    )
+
+
+def grant_operator_period_credits(organization: models.Organization, stripe_subscription_id: str, period_start: datetime.date) -> bool:
+    """Reset the balance to one Operator period's grant; False when that period already posted."""
+    period = period_start.isoformat()
+    grant_key = f"grant:{stripe_subscription_id}:{period}"
+    expiry_key = f"expiry:{stripe_subscription_id}:{period}"
+    plan = plans.effective_plan(organization=organization)
+    grant_amount = Decimal(plan.monthly_credit_grant)
+
+    if grant_amount <= 0:
+        raise ValueError(f"an Operator period grant must be positive, got {grant_amount}")
+
+    return _reset_balance_to_grant(
+        organization=organization,
+        grant_amount=grant_amount,
+        grant_key=grant_key,
+        grant_description="Operator monthly credits",
+        grant_metadata={"plan": organization.plan, "plan_version": plans.PLAN_VERSION},
+        expiry_key=expiry_key,
+        expiry_description="Previous period balance written off at renewal",
+        expiry_metadata={"subscription_id": stripe_subscription_id, "period_start": period},
+        duplicate_log_label="Operator period",
+    )
 
 
 def _write_locked_entry(
@@ -103,41 +177,24 @@ def _write_grant(organization_id: UUID, credits: Decimal, idempotency_key: str, 
         )
 
 
-def grant_trial_credits(organization: models.Organization) -> bool:
-    """Write an organization's one-time trial grant; False when it already has one.
+def _reset_balance_to_grant(
+    organization: models.Organization,
+    grant_amount: Decimal,
+    grant_key: str,
+    grant_description: str,
+    grant_metadata: dict,
+    expiry_key: str,
+    expiry_description: str,
+    expiry_metadata: dict,
+    duplicate_log_label: str,
+) -> bool:
+    """Reset the balance to ``grant_amount``: the write-off-then-grant pair under one balance lock.
 
-    The amount comes from the organization's effective plan, so a comped org
-    whose overrides raise the grant is backfilled with the raised number rather
-    than the registry default.
+    The grant key identifies the whole reset. A replay returns before writing
+    anything; a first application writes off whatever balance exists, positive
+    or negative, and then posts the new grant, so the two ledger entries can
+    never interleave with usage or another reset.
     """
-    plan = plans.effective_plan(organization=organization)
-    return _write_grant(
-        organization_id=organization.id,
-        credits=Decimal(plan.monthly_credit_grant),
-        idempotency_key=f"grant:trial:{organization.id}",
-        description="Trial credits",
-        metadata={"plan": organization.plan, "plan_version": plans.PLAN_VERSION},
-    )
-
-
-def restart_trial_credits(organization: models.Organization, stripe_event_id: str, stripe_subscription_id: str) -> bool:
-    """Reset an ex-customer's balance to the effective Trial grant; False when that Stripe event already reset it.
-
-    Idempotency is keyed on the triggering webhook event rather than on the
-    subscription, because one subscription can drop out of Operator more than
-    once: a failed payment can recover back to Operator before the
-    subscription is later canceled outright, and each drop is its own flip
-    that needs its own write-off-and-grant. Keying on the subscription would
-    make the second flip's reset look like a replay of the first and skip it.
-    """
-    grant_key = f"grant:trial-reset:{stripe_event_id}"
-    expiry_key = f"expiry:trial-reset:{stripe_event_id}"
-    plan = plans.effective_plan(organization=organization)
-    grant_amount = Decimal(plan.monthly_credit_grant)
-
-    if grant_amount <= 0:
-        raise ValueError(f"a restarted Trial grant must be positive, got {grant_amount}")
-
     models.BillingBalance.objects.get_or_create(
         organization=organization,
         defaults={"credits": Decimal(0)},
@@ -154,7 +211,7 @@ def restart_trial_credits(organization: models.Organization, stripe_event_id: st
             idempotency_key=grant_key,
         ).exists()
         if grant_exists:
-            logger.info(f"Trial restart {grant_key} already posted for organization {organization.id}; no-op")
+            logger.info(f"{duplicate_log_label} {grant_key} already posted for organization {organization.id}; no-op")
             return False
 
         if balance.credits != 0:
@@ -163,8 +220,8 @@ def restart_trial_credits(organization: models.Organization, stripe_event_id: st
                 entry_type=models.BillingLedgerEntry.Type.EXPIRY,
                 amount=-balance.credits,
                 idempotency_key=expiry_key,
-                description="Subscription-end balance written off for Trial restart",
-                metadata={"subscription_id": stripe_subscription_id},
+                description=expiry_description,
+                metadata=expiry_metadata,
             )
 
         return _write_locked_entry(
@@ -172,56 +229,6 @@ def restart_trial_credits(organization: models.Organization, stripe_event_id: st
             entry_type=models.BillingLedgerEntry.Type.GRANT,
             amount=grant_amount,
             idempotency_key=grant_key,
-            description="Trial credits after subscription ended",
-            metadata={"plan": organization.plan, "plan_version": plans.PLAN_VERSION},
-        )
-
-
-def grant_operator_period_credits(organization: models.Organization, stripe_subscription_id: str, period_start: datetime.date) -> bool:
-    """Reset the balance to one Operator period's grant; False when that period already posted."""
-    period = period_start.isoformat()
-    grant_key = f"grant:{stripe_subscription_id}:{period}"
-    expiry_key = f"expiry:{stripe_subscription_id}:{period}"
-    plan = plans.effective_plan(organization=organization)
-    grant_amount = Decimal(plan.monthly_credit_grant)
-
-    if grant_amount <= 0:
-        raise ValueError(f"an Operator period grant must be positive, got {grant_amount}")
-
-    models.BillingBalance.objects.get_or_create(
-        organization=organization,
-        defaults={"credits": Decimal(0)},
-    )
-    with transaction.atomic():
-        balance = (
-            models.BillingBalance.objects
-            .select_for_update()
-            .filter(organization=organization)
-            .get()
-        )
-        grant_exists = models.BillingLedgerEntry.objects.filter(
-            organization=organization,
-            idempotency_key=grant_key,
-        ).exists()
-        if grant_exists:
-            logger.info(f"Operator period {grant_key} already posted for organization {organization.id}; no-op")
-            return False
-
-        if balance.credits != 0:
-            _write_locked_entry(
-                balance=balance,
-                entry_type=models.BillingLedgerEntry.Type.EXPIRY,
-                amount=-balance.credits,
-                idempotency_key=expiry_key,
-                description="Previous period balance written off at renewal",
-                metadata={"subscription_id": stripe_subscription_id, "period_start": period},
-            )
-
-        return _write_locked_entry(
-            balance=balance,
-            entry_type=models.BillingLedgerEntry.Type.GRANT,
-            amount=grant_amount,
-            idempotency_key=grant_key,
-            description="Operator monthly credits",
-            metadata={"plan": organization.plan, "plan_version": plans.PLAN_VERSION},
+            description=grant_description,
+            metadata=grant_metadata,
         )
