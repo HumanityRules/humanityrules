@@ -22,14 +22,15 @@ While HumR runs on the shared Codex subscription, marginal inference cost is ~ze
 
 Entitlement fields per plan:
 
-1. **`price_usd_month`** — Stripe price; null for trial and enterprise.
-2. **`monthly_credit_grant`** — credits granted per billing period; for trial, a one-time grant at signup.
-3. **`always_on`** — whether the agent instance stays up permanently.
-4. **`trial_runtime_days`** — runtime before suspension when `always_on` is false.
-5. **`max_agents`** — how many agent apps the org may deploy.
-6. **`customer_cloud`** — may deploy into their own AWS account (Team+).
-7. **`bedrock_enabled`** — platform capability boolean (see §2.3).
-8. **`on_demand_allowed`** — reserved, false everywhere; the zero-credit code path asks one place.
+1. **`price_usd_month`** — Stripe price; Operator only.
+2. **`price_usd_agent_month`** — published per-agent price; Team only. Display-only until Team has a self-serve path.
+3. **`monthly_credit_grant`** — credits granted per billing period; for trial, a one-time grant at signup; 0 for the customer-cloud tiers, where no brokered model exists to meter.
+4. **`always_on`** — whether the agent instance stays up permanently.
+5. **`trial_runtime_days`** — runtime before suspension when `always_on` is false.
+6. **`max_agents`** — how many agent apps the org may deploy; null means unlimited.
+7. **`customer_cloud`** — may deploy into their own AWS account (Team+).
+8. **`bedrock_enabled`** — platform capability boolean (see §2.3).
+9. **`on_demand_allowed`** — reserved, false everywhere; the zero-credit code path asks one place.
 
 ### 2.2 Per-org overrides
 
@@ -39,7 +40,7 @@ Rules:
 
 1. Overrides replace fields wholly. No merge semantics per field type.
 2. Keys are validated on save against the plan-config schema; values are type-checked. A typo'd key is a save error, not a silently dead exception.
-3. Overrides adjust entitlements, not payment. `price_usd_month` is rejected as an override key — Stripe charges what the subscription says regardless.
+3. Overrides adjust entitlements, not payment. The price fields (`price_usd_month`, `price_usd_agent_month`) are rejected as override keys — Stripe charges what the subscription says regardless.
 
 Overrides are the admin escape hatch for every exception: comped credits, extended trials, extra agents, capability grants.
 
@@ -55,9 +56,12 @@ Every existing org lands on `trial` with the 500-credit trial grant backfilled. 
 
 ### 2.4 Plan numbers
 
-1. **Operator:** $39/month, 2,000 credits/month, always-on, 1 agent.
-2. **Trial:** free, 500 credits one-time, 7 days runtime, 1 agent.
-3. **Team / Enterprise:** sales-led; entitlements decided per deal via config + overrides.
+The axis between the tiers is who hosts and who pays for models. Trial and Operator run on HumR's cloud against HumR-brokered models, so they carry credits. Team and Enterprise deploy into the customer's AWS account where the customer brings their own model (Bedrock or any provider they configure), so credits do not apply: their grant is 0, and the broker gate that refuses at zero only guards a path those tiers don't use.
+
+1. **Trial:** free, 500 credits one-time, 7 days runtime, 1 agent.
+2. **Operator:** $39/month, 2,000 credits/month, always-on, 1 agent.
+3. **Team:** $29/agent/month — published on the billing page but still sales-led, no self-serve path. Unlimited agents, customer cloud, bring-your-own model.
+4. **Enterprise:** custom pricing, sales-led; everything in Team plus SSO, compliance, and support. Per-deal entitlements via config + overrides.
 
 All are config constants, cheap to change until customers exist. Price is the only value with lock-in (repricing subscribers is grandfathering, deferred).
 
