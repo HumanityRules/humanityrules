@@ -16,10 +16,19 @@ grant themselves. ``customer.subscription.*`` events own status, periods, the
 customer and subscription ids, and the cancellation timestamps, copying
 Stripe's full current state — but are dropped if their envelope timestamp is
 older than the newest subscription event already mirrored, since Stripe does
-not guarantee delivery order. ``invoice.paid`` owns exactly one fact, the
-newest paid period's start, and never touches status: Stripe advances a
-subscription's period fields on a failed renewal too, so treating that
-advance as proof of payment would grant credits nobody paid for.
+not guarantee delivery order. Stripe event timestamps carry only one-second
+resolution, so two distinct events for the same subscription can legitimately
+share a timestamp; when that tie lands on a subscription the mirror already
+marks canceled, an equal-timestamp event reporting any other status is
+refused rather than applied, because a canceled subscription is a dead end
+that will never emit a later event to correct an accidental resurrection. The
+same tie against a *different* subscription id is not covered by this rule
+and falls through to the normal handling above, since a genuinely new, live
+subscription keeps sending events that will correct the mirror on their own
+regardless of which one happened to land first. ``invoice.paid`` owns
+exactly one fact, the newest paid period's start, and never touches status:
+Stripe advances a subscription's period fields on a failed renewal too, so
+treating that advance as proof of payment would grant credits nobody paid for.
 ``invoice.payment_failed`` is retained for the audit trail but writes nothing
 to the mirror — the plan consequence of a failed payment arrives separately,
 through the ``customer.subscription.updated`` event Stripe sends alongside
@@ -424,6 +433,10 @@ def _apply_subscription_event(
             f"{current_subscription.stripe_subscription_id}; event facts skipped"
         )
         return current_subscription
+
+    status = "canceled" if event_type == "customer.subscription.deleted" else _nonempty_string(
+        value=subscription_object.get("status"),
+    )
     if (
         current_subscription is not None
         and current_subscription.latest_subscription_event_created_at is not None
@@ -434,10 +447,22 @@ def _apply_subscription_event(
             f"from {current_subscription.latest_subscription_event_created_at.isoformat()}; mirror unchanged"
         )
         return current_subscription
+    if (
+        current_subscription is not None
+        and current_subscription.latest_subscription_event_created_at is not None
+        and event_created_at == current_subscription.latest_subscription_event_created_at
+        and current_subscription.stripe_subscription_id == stripe_subscription_id
+        and current_subscription.status == "canceled"
+        and status is not None
+        and status != "canceled"
+    ):
+        logger.info(
+            f"Stripe subscription event {event_type} for {stripe_subscription_id} matched canceled state from "
+            f"{current_subscription.latest_subscription_event_created_at.isoformat()}; equal-timestamp tie resolved "
+            "in favor of terminal canceled status; mirror unchanged"
+        )
+        return current_subscription
 
-    status = "canceled" if event_type == "customer.subscription.deleted" else _nonempty_string(
-        value=subscription_object.get("status"),
-    )
     current_period_start, current_period_end = _subscription_period(subscription_object=subscription_object)
     subscription = _upsert_subscription_mirror(
         organization=organization,
