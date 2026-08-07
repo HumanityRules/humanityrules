@@ -8,7 +8,7 @@ stays explainable when DB-versioned plans eventually arrive.
 comped credits, extended trials, extra agents, capability grants. Overrides
 replace a field wholly; there are no per-field merge semantics. Keys are
 validated against this schema on save, so a typo is a save error rather than a
-silently dead entitlement. ``price_usd_month`` is not overridable: Stripe
+silently dead entitlement. The price fields are not overridable: Stripe
 charges what the subscription says regardless, so an override there would only
 lie about the money.
 
@@ -38,8 +38,8 @@ OPERATOR = "operator"
 TEAM = "team"
 ENTERPRISE = "enterprise"
 
-# The one field payment owns. Overriding it would claim a price Stripe never charges.
-PRICE_FIELD = "price_usd_month"
+# The fields payment owns. Overriding them would claim prices Stripe never charges.
+PRICE_FIELDS = frozenset({"price_usd_month", "price_usd_agent_month"})
 
 
 @dataclass(frozen=True)
@@ -47,10 +47,11 @@ class PlanConfig:
     """One plan's entitlements: what it costs and what it lets an organization do."""
 
     price_usd_month: Decimal | None
+    price_usd_agent_month: Decimal | None
     monthly_credit_grant: int
     always_on: bool
     trial_runtime_days: int | None
-    max_agents: int
+    max_agents: int | None  # None means unlimited
     customer_cloud: bool
     bedrock_enabled: bool
     on_demand_allowed: bool
@@ -70,12 +71,17 @@ CAPABILITY_SLUG_BY_FIELD = {
     "bedrock_enabled": "bedrock-runtime",
 }
 
-# Operator and Trial are the self-serve plans and their numbers are the product.
-# Team and Enterprise are sales-led: these are the starting points a deal adjusts
-# through plan_overrides, not quoted prices.
+# The axis between the tiers is who hosts and who pays for models. Trial and
+# Operator run on HumR's cloud against HumR-brokered models, so they carry
+# credits and their numbers are the product. Team and Enterprise deploy into
+# the customer's AWS account where the customer brings their own model
+# (Bedrock or any provider they configure), so credits do not apply. Team's
+# per-agent price is published but still sales-led; Enterprise is a custom
+# deal (SSO, compliance, support) shaped through plan_overrides.
 PLANS: dict[str, PlanConfig] = {
     TRIAL: PlanConfig(
         price_usd_month=None,
+        price_usd_agent_month=None,
         monthly_credit_grant=500,
         always_on=False,
         trial_runtime_days=7,
@@ -86,6 +92,7 @@ PLANS: dict[str, PlanConfig] = {
     ),
     OPERATOR: PlanConfig(
         price_usd_month=Decimal("39"),
+        price_usd_agent_month=None,
         monthly_credit_grant=2000,
         always_on=True,
         trial_runtime_days=None,
@@ -96,20 +103,22 @@ PLANS: dict[str, PlanConfig] = {
     ),
     TEAM: PlanConfig(
         price_usd_month=None,
-        monthly_credit_grant=20000,
+        price_usd_agent_month=Decimal("29"),
+        monthly_credit_grant=0,
         always_on=True,
         trial_runtime_days=None,
-        max_agents=25,
+        max_agents=None,
         customer_cloud=True,
-        bedrock_enabled=False,
+        bedrock_enabled=True,
         on_demand_allowed=False,
     ),
     ENTERPRISE: PlanConfig(
         price_usd_month=None,
-        monthly_credit_grant=100000,
+        price_usd_agent_month=None,
+        monthly_credit_grant=0,
         always_on=True,
         trial_runtime_days=None,
-        max_agents=250,
+        max_agents=None,
         customer_cloud=True,
         bedrock_enabled=True,
         on_demand_allowed=False,
@@ -123,16 +132,16 @@ _OVERRIDE_TYPES: dict[str, tuple[type, ...]] = {
     "monthly_credit_grant": (int,),
     "always_on": (bool,),
     "trial_runtime_days": (int, type(None)),
-    "max_agents": (int,),
+    "max_agents": (int, type(None)),
     "customer_cloud": (bool,),
     "bedrock_enabled": (bool,),
     "on_demand_allowed": (bool,),
 }
 
 _PLAN_FIELDS = {field.name for field in dataclasses.fields(PlanConfig)}
-if set(_OVERRIDE_TYPES) | {PRICE_FIELD} != _PLAN_FIELDS:
+if set(_OVERRIDE_TYPES) | PRICE_FIELDS != _PLAN_FIELDS:
     raise RuntimeError(
-        f"plan override schema {sorted(set(_OVERRIDE_TYPES) | {PRICE_FIELD})} has drifted from "
+        f"plan override schema {sorted(set(_OVERRIDE_TYPES) | PRICE_FIELDS)} has drifted from "
         f"PlanConfig's fields {sorted(_PLAN_FIELDS)}"
     )
 
@@ -147,9 +156,9 @@ def validate_overrides(overrides: object) -> None:
         raise PlanOverrideError(f"plan_overrides must be a JSON object, got {type(overrides).__name__}")
 
     for key, value in overrides.items():
-        if key == PRICE_FIELD:
+        if key in PRICE_FIELDS:
             raise PlanOverrideError(
-                f"{PRICE_FIELD!r} is not overridable: Stripe charges what the subscription says. "
+                f"{key!r} is not overridable: Stripe charges what the subscription says. "
                 "Change the plan or the subscription instead."
             )
         accepted = _OVERRIDE_TYPES.get(key)

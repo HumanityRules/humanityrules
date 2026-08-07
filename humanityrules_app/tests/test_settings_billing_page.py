@@ -224,10 +224,13 @@ class TestBillingPageContext(TestCase):
 
         billing = billing_page.billing_page_context(organization=self.organization)
 
+        self.assertEqual(billing.plan_key, "trial")
         self.assertEqual(billing.plan_name, "Trial")
+        self.assertTrue(billing.show_credits)
         self.assertEqual(billing.credits_remaining, 0)
         self.assertEqual(billing.monthly_grant, 750)
         self.assertEqual(billing.operator_price_usd, "39")
+        self.assertEqual(billing.team_agent_price_usd, "29")
         self.assertTrue(billing.show_upgrade)
         self.assertFalse(billing.show_manage_billing)
         self.assertFalse(billing.stripe_configured)
@@ -285,6 +288,7 @@ class TestBillingPageContext(TestCase):
                 billing = billing_page.billing_page_context(organization=organization)
                 self.assertFalse(billing.show_upgrade)
                 self.assertFalse(billing.show_manage_billing)
+                self.assertFalse(billing.show_credits)
 
     def test_stripe_is_configured_only_when_both_required_values_are_set(self) -> None:
         cases = (
@@ -429,11 +433,31 @@ class TestSettingsBillingViews(TestCase):
         self.assertContains(response, "Trial")
         self.assertContains(response, "425 of 500 credits remaining")
         self.assertContains(response, "0 credits used this period")
-        self.assertContains(response, "Upgrade to Operator ($39/month)")
+        self.assertContains(response, "Current plan")
+        self.assertContains(response, "Upgrade to Operator")
+        self.assertContains(response, "$39")
+        self.assertContains(response, "/month")
+        self.assertContains(response, "$29")
+        self.assertContains(response, "/agent/month")
+        self.assertContains(response, "Custom")
+        self.assertContains(response, "Contact us")
         self.assertContains(response, "Payments aren't set up yet.")
         self.assertContains(response, "disabled")
         self.assertNotContains(response, "Renews on")
         self.assertNotContains(response, "Ends on")
+
+    def test_customer_cloud_page_shows_plans_without_credit_numbers(self) -> None:
+        self.organization.plan = plans.TEAM
+        self.organization.save(update_fields=["plan", "updated_at"])
+        self.client.force_login(user=self.admin)
+
+        response = self.client.get(path="/settings/billing/", HTTP_HX_REQUEST="true")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Current plan")
+        self.assertNotContains(response, "credits remaining")
+        self.assertNotContains(response, "credits used this period")
+        self.assertNotContains(response, "Upgrade to Operator")
 
     def test_htmx_page_distinguishes_renewal_from_pending_cancellation(self) -> None:
         self.organization.plan = plans.OPERATOR

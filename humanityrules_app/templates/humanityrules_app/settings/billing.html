@@ -11,7 +11,7 @@ webhook is the only thing that flips the plan to Operator; once it does, this te
 without the polling attributes, so the poll stops because the server said so, not because the client
 counted down.
 {% endcomment %}
-<div class="max-w-2xl space-y-8"
+<div class="max-w-6xl space-y-8"
      {% if is_activating %}
      hx-get="{{ activation_poll_url }}"
      hx-trigger="load delay:5s"
@@ -48,7 +48,7 @@ counted down.
         <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">Your organization's plan and agent usage.</p>
 
         <div class="rounded-lg border border-gray-200 dark:border-white/10">
-            <div class="px-4 py-4 border-b border-gray-100 dark:border-white/10 sm:flex sm:items-center sm:justify-between">
+            <div class="px-4 py-4 sm:flex sm:items-center sm:justify-between {% if billing.show_credits %}border-b border-gray-100 dark:border-white/10{% endif %}">
                 <div class="text-sm font-semibold text-gray-900 dark:text-white">{{ billing.plan_name }}</div>
                 {% if billing.plan_end_date %}
                 <div class="mt-1 text-sm text-gray-500 dark:text-gray-400 sm:mt-0">
@@ -62,6 +62,7 @@ counted down.
                 {% endif %}
             </div>
 
+            {% if billing.show_credits %}
             <div class="px-4 py-6">
                 <div class="text-3xl font-semibold tracking-tight text-gray-900 dark:text-white">
                     {{ billing.credits_remaining }} of {{ billing.monthly_grant }} credits remaining
@@ -70,40 +71,138 @@ counted down.
                     {{ billing.current_period_burn }} credits used this period
                 </div>
             </div>
+            {% endif %}
         </div>
     </section>
 
-    {% if billing.show_upgrade or billing.show_manage_billing %}
     <section>
-        <div class="flex flex-wrap items-center gap-3">
-            {% if billing.show_upgrade %}
-            <form method="post" action="{% url 'settings_billing_checkout' %}">
-                {% csrf_token %}
-                <button type="submit"
-                        {% if not billing.stripe_configured %}disabled{% endif %}
-                        class="rounded-md px-4 py-2 text-sm font-semibold shadow-sm
-                               {% if billing.stripe_configured %}bg-indigo-500 text-white hover:bg-indigo-400{% else %}cursor-not-allowed bg-gray-200 text-gray-500 dark:bg-white/10 dark:text-gray-500{% endif %}">
-                    Upgrade to Operator (${{ billing.operator_price_usd }}/month)
-                </button>
-            </form>
-            {% endif %}
+        <h3 class="text-sm font-semibold text-gray-900 dark:text-white mb-3">Plans</h3>
+        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
 
-            {% if billing.show_manage_billing %}
-            <form method="post" action="{% url 'settings_billing_portal' %}">
-                {% csrf_token %}
-                <button type="submit"
-                        {% if not billing.stripe_configured %}disabled{% endif %}
-                        class="rounded-md px-4 py-2 text-sm font-semibold shadow-sm
-                               {% if billing.stripe_configured %}bg-white text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 dark:bg-white/5 dark:text-white dark:ring-white/10 dark:hover:bg-white/10{% else %}cursor-not-allowed bg-gray-200 text-gray-500 dark:bg-white/10 dark:text-gray-500{% endif %}">
-                    Manage billing
-                </button>
-            </form>
-            {% endif %}
+            <div class="flex flex-col rounded-2xl p-6 {% if billing.plan_key == 'trial' %}bg-indigo-50/40 ring-2 ring-indigo-500 dark:bg-indigo-500/5 dark:ring-indigo-400{% else %}ring-1 ring-gray-200 dark:ring-white/10{% endif %}">
+                <div class="flex items-center justify-between gap-x-2">
+                    <h4 class="text-sm font-semibold text-gray-900 dark:text-white">Trial</h4>
+                    {% if billing.plan_key == 'trial' %}
+                    <span class="rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400">Current plan</span>
+                    {% endif %}
+                </div>
+                <div class="mt-4 flex items-baseline gap-x-1">
+                    <span class="text-3xl font-semibold tracking-tight text-gray-900 dark:text-white">Free</span>
+                </div>
+                <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">Try your first agent for free.</p>
+                <ul class="mt-6 space-y-2 text-sm text-gray-600 dark:text-gray-300">
+                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="500 credits, one time" %}
+                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="7 days of agent runtime" %}
+                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="1 agent" %}
+                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="Runs on HumR's cloud, model included" %}
+                </ul>
+            </div>
+
+            <div class="flex flex-col rounded-2xl p-6 {% if billing.plan_key == 'operator' %}bg-indigo-50/40 ring-2 ring-indigo-500 dark:bg-indigo-500/5 dark:ring-indigo-400{% else %}ring-1 ring-gray-200 dark:ring-white/10{% endif %}">
+                <div class="flex items-center justify-between gap-x-2">
+                    <h4 class="text-sm font-semibold text-gray-900 dark:text-white">Operator</h4>
+                    {% if billing.plan_key == 'operator' %}
+                    <span class="rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400">Current plan</span>
+                    {% endif %}
+                </div>
+                <div class="mt-4 flex items-baseline gap-x-1">
+                    <span class="text-3xl font-semibold tracking-tight text-gray-900 dark:text-white">${{ billing.operator_price_usd }}</span>
+                    <span class="text-sm font-semibold text-gray-500 dark:text-gray-400">/month</span>
+                </div>
+                <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">Your always-on agent, hosted by us.</p>
+                <ul class="mt-6 space-y-2 text-sm text-gray-600 dark:text-gray-300">
+                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="2,000 credits per month" %}
+                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="Always-on agent" %}
+                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="1 agent" %}
+                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="Runs on HumR's cloud, model included" %}
+                </ul>
+                {% if billing.show_upgrade %}
+                <div class="mt-auto pt-6">
+                    <form method="post" action="{% url 'settings_billing_checkout' %}">
+                        {% csrf_token %}
+                        <button type="submit"
+                                {% if not billing.stripe_configured %}disabled{% endif %}
+                                class="w-full rounded-md px-3 py-2 text-sm font-semibold shadow-sm
+                                       {% if billing.stripe_configured %}bg-indigo-500 text-white hover:bg-indigo-400{% else %}cursor-not-allowed bg-gray-200 text-gray-500 dark:bg-white/10 dark:text-gray-500{% endif %}">
+                            Upgrade to Operator
+                        </button>
+                    </form>
+                    {% if not billing.stripe_configured %}
+                    <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">Payments aren't set up yet.</p>
+                    {% endif %}
+                </div>
+                {% endif %}
+            </div>
+
+            <div class="flex flex-col rounded-2xl p-6 {% if billing.plan_key == 'team' %}bg-indigo-50/40 ring-2 ring-indigo-500 dark:bg-indigo-500/5 dark:ring-indigo-400{% else %}ring-1 ring-gray-200 dark:ring-white/10{% endif %}">
+                <div class="flex items-center justify-between gap-x-2">
+                    <h4 class="text-sm font-semibold text-gray-900 dark:text-white">Team</h4>
+                    {% if billing.plan_key == 'team' %}
+                    <span class="rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400">Current plan</span>
+                    {% endif %}
+                </div>
+                <div class="mt-4 flex items-baseline gap-x-1">
+                    <span class="text-3xl font-semibold tracking-tight text-gray-900 dark:text-white">${{ billing.team_agent_price_usd }}</span>
+                    <span class="text-sm font-semibold text-gray-500 dark:text-gray-400">/agent/month</span>
+                </div>
+                <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">Your cloud, your models, agents for the whole team.</p>
+                <ul class="mt-6 space-y-2 text-sm text-gray-600 dark:text-gray-300">
+                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="Unlimited agents" %}
+                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="Runs in your AWS account" %}
+                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="Bring your own model: Bedrock or any provider" %}
+                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="Always-on agents" %}
+                </ul>
+                {% if billing.plan_key != 'team' %}
+                <div class="mt-auto pt-6">
+                    <a href="mailto:hello@humanityrules.io"
+                       class="block w-full rounded-md bg-white px-3 py-2 text-center text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 dark:bg-white/5 dark:text-white dark:ring-white/10 dark:hover:bg-white/10">
+                        Contact us
+                    </a>
+                </div>
+                {% endif %}
+            </div>
+
+            <div class="flex flex-col rounded-2xl p-6 {% if billing.plan_key == 'enterprise' %}bg-indigo-50/40 ring-2 ring-indigo-500 dark:bg-indigo-500/5 dark:ring-indigo-400{% else %}ring-1 ring-gray-200 dark:ring-white/10{% endif %}">
+                <div class="flex items-center justify-between gap-x-2">
+                    <h4 class="text-sm font-semibold text-gray-900 dark:text-white">Enterprise</h4>
+                    {% if billing.plan_key == 'enterprise' %}
+                    <span class="rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400">Current plan</span>
+                    {% endif %}
+                </div>
+                <div class="mt-4 flex items-baseline gap-x-1">
+                    <span class="text-3xl font-semibold tracking-tight text-gray-900 dark:text-white">Custom</span>
+                </div>
+                <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">For organizations that need controls and guarantees.</p>
+                <ul class="mt-6 space-y-2 text-sm text-gray-600 dark:text-gray-300">
+                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="Everything in Team" %}
+                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="SSO" %}
+                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="Compliance" %}
+                    {% include "humanityrules_app/settings/_billing_plan_feature.html" with text="Dedicated support" %}
+                </ul>
+                {% if billing.plan_key != 'enterprise' %}
+                <div class="mt-auto pt-6">
+                    <a href="mailto:hello@humanityrules.io"
+                       class="block w-full rounded-md bg-white px-3 py-2 text-center text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 dark:bg-white/5 dark:text-white dark:ring-white/10 dark:hover:bg-white/10">
+                        Contact us
+                    </a>
+                </div>
+                {% endif %}
+            </div>
+
         </div>
+    </section>
 
-        {% if not billing.stripe_configured %}
-        <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">Payments aren't set up yet.</p>
-        {% endif %}
+    {% if billing.show_manage_billing %}
+    <section>
+        <form method="post" action="{% url 'settings_billing_portal' %}">
+            {% csrf_token %}
+            <button type="submit"
+                    {% if not billing.stripe_configured %}disabled{% endif %}
+                    class="rounded-md px-4 py-2 text-sm font-semibold shadow-sm
+                           {% if billing.stripe_configured %}bg-white text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 dark:bg-white/5 dark:text-white dark:ring-white/10 dark:hover:bg-white/10{% else %}cursor-not-allowed bg-gray-200 text-gray-500 dark:bg-white/10 dark:text-gray-500{% endif %}">
+                Manage billing
+            </button>
+        </form>
     </section>
     {% endif %}
 

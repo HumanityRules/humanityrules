@@ -100,6 +100,28 @@ class TestPlanRegistry(SimpleTestCase):
         self.assertIsNone(operator.trial_runtime_days)
         self.assertEqual(operator.max_agents, 1)
 
+    def test_team_is_29_dollars_per_agent_with_no_credits_and_unlimited_agents(self) -> None:
+        team = plans.PLANS[plans.TEAM]
+
+        self.assertIsNone(team.price_usd_month)
+        self.assertEqual(team.price_usd_agent_month, Decimal("29"))
+        self.assertEqual(team.monthly_credit_grant, 0)
+        self.assertTrue(team.always_on)
+        self.assertIsNone(team.max_agents)
+        self.assertTrue(team.customer_cloud)
+        self.assertTrue(team.bedrock_enabled)
+
+    def test_enterprise_is_custom_priced_with_no_credits_and_unlimited_agents(self) -> None:
+        enterprise = plans.PLANS[plans.ENTERPRISE]
+
+        self.assertIsNone(enterprise.price_usd_month)
+        self.assertIsNone(enterprise.price_usd_agent_month)
+        self.assertEqual(enterprise.monthly_credit_grant, 0)
+        self.assertTrue(enterprise.always_on)
+        self.assertIsNone(enterprise.max_agents)
+        self.assertTrue(enterprise.customer_cloud)
+        self.assertTrue(enterprise.bedrock_enabled)
+
     def test_customer_cloud_starts_at_team(self) -> None:
         self.assertFalse(plans.PLANS[plans.TRIAL].customer_cloud)
         self.assertFalse(plans.PLANS[plans.OPERATOR].customer_cloud)
@@ -142,9 +164,14 @@ class TestOverrideValidation(SimpleTestCase):
         with self.assertRaisesMessage(plans.PlanOverrideError, "'bedrock_enabeld' is not a plan entitlement"):
             plans.validate_overrides(overrides={"bedrock_enabeld": True})
 
-    def test_price_is_refused_as_an_override(self) -> None:
-        with self.assertRaisesMessage(plans.PlanOverrideError, "not overridable"):
-            plans.validate_overrides(overrides={"price_usd_month": 0})
+    def test_price_fields_are_refused_as_overrides(self) -> None:
+        for price_field in sorted(plans.PRICE_FIELDS):
+            with self.subTest(price_field=price_field):
+                with self.assertRaisesMessage(plans.PlanOverrideError, "not overridable"):
+                    plans.validate_overrides(overrides={price_field: 0})
+
+    def test_max_agents_accepts_null_for_unlimited(self) -> None:
+        plans.validate_overrides(overrides={"max_agents": None})
 
     def test_wrong_type_is_refused(self) -> None:
         with self.assertRaisesMessage(plans.PlanOverrideError, "must be a boolean"):
@@ -396,6 +423,15 @@ class TestAgentLimit(TestCase):
     def test_an_override_raises_the_cap(self) -> None:
         self.organization.plan_overrides = {"max_agents": 2}
         self.organization.save(update_fields=["plan_overrides"])
+
+        self.deploy(app_slug="agentone")
+        second = self.deploy(app_slug="agenttwo")
+
+        self.assertEqual(second.slug, "agenttwo")
+
+    def test_an_unlimited_plan_never_refuses(self) -> None:
+        self.organization.plan = plans.TEAM
+        self.organization.save(update_fields=["plan"])
 
         self.deploy(app_slug="agentone")
         second = self.deploy(app_slug="agenttwo")
