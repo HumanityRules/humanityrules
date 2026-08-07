@@ -477,35 +477,35 @@ class TestEntitlementSnapshot(TestCase):
 
         snapshot = entitlements.entitlement_snapshot(organization=self.organization)
 
-        self.assertEqual(snapshot.credits_remaining, 500)
-        self.assertEqual(snapshot.monthly_grant, 500)
-        self.assertIsNone(snapshot.renewal_date)
-        self.assertEqual(snapshot.plan, "trial")
-        self.assertFalse(snapshot.exhausted)
+        self.assertEqual(snapshot["credits_remaining"], 500)
+        self.assertEqual(snapshot["monthly_grant"], 500)
+        self.assertIsNone(snapshot["renewal_date"])
+        self.assertEqual(snapshot["plan"], "trial")
+        self.assertFalse(snapshot["exhausted"])
 
     def test_an_organization_with_no_balance_row_reads_as_zero(self) -> None:
         snapshot = entitlements.entitlement_snapshot(organization=self.organization)
 
-        self.assertEqual(snapshot.credits_remaining, 0)
-        self.assertFalse(snapshot.exhausted)
+        self.assertEqual(snapshot["credits_remaining"], 0)
+        self.assertFalse(snapshot["exhausted"])
 
     def test_zero_credits_is_not_yet_exhausted(self) -> None:
         self.set_balance(credits=Decimal(0))
 
-        self.assertFalse(entitlements.entitlement_snapshot(organization=self.organization).exhausted)
+        self.assertFalse(entitlements.entitlement_snapshot(organization=self.organization)["exhausted"])
 
     def test_just_above_the_floor_still_spends(self) -> None:
         self.set_balance(credits=Decimal(-24))
 
-        self.assertFalse(entitlements.entitlement_snapshot(organization=self.organization).exhausted)
+        self.assertFalse(entitlements.entitlement_snapshot(organization=self.organization)["exhausted"])
 
     def test_the_floor_itself_is_exhausted(self) -> None:
         self.set_balance(credits=Decimal(-25))
 
         snapshot = entitlements.entitlement_snapshot(organization=self.organization)
 
-        self.assertEqual(snapshot.credits_remaining, -25)
-        self.assertTrue(snapshot.exhausted)
+        self.assertEqual(snapshot["credits_remaining"], -25)
+        self.assertTrue(snapshot["exhausted"])
 
     def test_the_floor_follows_the_plans_grant(self) -> None:
         self.organization.plan = plans.OPERATOR
@@ -514,12 +514,12 @@ class TestEntitlementSnapshot(TestCase):
 
         snapshot = entitlements.entitlement_snapshot(organization=self.organization)
 
-        self.assertEqual(snapshot.monthly_grant, 2000)
-        self.assertFalse(snapshot.exhausted)
+        self.assertEqual(snapshot["monthly_grant"], 2000)
+        self.assertFalse(snapshot["exhausted"])
 
         self.set_balance(credits=Decimal(-100))
 
-        self.assertTrue(entitlements.entitlement_snapshot(organization=self.organization).exhausted)
+        self.assertTrue(entitlements.entitlement_snapshot(organization=self.organization)["exhausted"])
 
     def test_the_floor_follows_an_override(self) -> None:
         self.organization.plan_overrides = {"monthly_credit_grant": 5000}
@@ -528,13 +528,13 @@ class TestEntitlementSnapshot(TestCase):
 
         snapshot = entitlements.entitlement_snapshot(organization=self.organization)
 
-        self.assertEqual(snapshot.monthly_grant, 5000)
-        self.assertFalse(snapshot.exhausted)
+        self.assertEqual(snapshot["monthly_grant"], 5000)
+        self.assertFalse(snapshot["exhausted"])
 
     def test_the_payload_carries_exactly_the_broker_contract(self) -> None:
         grants.grant_trial_credits(organization=self.organization)
 
-        payload = entitlements.snapshot_payload(organization=self.organization)
+        payload = entitlements.entitlement_snapshot(organization=self.organization)
 
         self.assertEqual(payload, {
             "credits_remaining": 500,
