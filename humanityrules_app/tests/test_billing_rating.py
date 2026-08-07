@@ -694,6 +694,30 @@ class TestRatingPassOrganizationIsolation(RatingPassTestBase):
 
 class TestBillingVerifyCommand(RatingPassTestBase):
 
+    def create_subscription_mirror(
+        self,
+        plan: str,
+        status: str,
+        current_period_start: datetime.datetime,
+        latest_paid_period_start: datetime.datetime,
+        updated_at: datetime.datetime,
+    ) -> models.BillingSubscription:
+        """Create a verifier fixture whose mirror age is controlled independently of auto_now."""
+        self.organization.plan = plan
+        self.organization.save(update_fields=["plan", "updated_at"])
+        subscription = models.BillingSubscription.objects.create(
+            organization=self.organization,
+            stripe_customer_id="cus_verify",
+            stripe_subscription_id="sub_verify",
+            status=status,
+            current_period_start=current_period_start,
+            current_period_end=current_period_start + datetime.timedelta(days=30),
+            latest_paid_period_start=latest_paid_period_start,
+        )
+        models.BillingSubscription.objects.filter(id=subscription.id).update(updated_at=updated_at)
+        subscription.refresh_from_db()
+        return subscription
+
     def call_verify(self, org_slug: str | None) -> str:
         out = io.StringIO()
         if org_slug is None:
@@ -768,3 +792,103 @@ class TestBillingVerifyCommand(RatingPassTestBase):
             self.call_verify(org_slug=None)
 
         self.assertIn("1 billing invariant violation(s)", str(raised.exception))
+
+    def test_stale_operator_period_without_paid_invoice_fails(self) -> None:
+        paid_period_start = datetime.datetime(2026, 7, 1, tzinfo=datetime.UTC)
+        current_period_start = datetime.datetime(2026, 8, 1, tzinfo=datetime.UTC)
+        stale_at = timezone.now() - datetime.timedelta(days=1, seconds=1)
+        self.create_subscription_mirror(
+            plan=models.Organization.Plan.OPERATOR,
+            status="active",
+            current_period_start=current_period_start,
+            latest_paid_period_start=paid_period_start,
+            updated_at=stale_at,
+        )
+        errors = io.StringIO()
+
+        with self.assertRaises(CommandError) as raised:
+            call_command("humr_billing_verify", stdout=io.StringIO(), stderr=errors)
+
+        self.assertIn("1 billing invariant violation(s)", str(raised.exception))
+        self.assertIn("rating-org: possible lost invoice.paid for active subscription sub_verify", errors.getvalue())
+        self.assertIn(stale_at.isoformat(), errors.getvalue())
+
+    def test_operator_paid_period_lag_within_grace_passes(self) -> None:
+        self.create_subscription_mirror(
+            plan=models.Organization.Plan.OPERATOR,
+            status="active",
+            current_period_start=datetime.datetime(2026, 8, 1, tzinfo=datetime.UTC),
+            latest_paid_period_start=datetime.datetime(2026, 7, 1, tzinfo=datetime.UTC),
+            updated_at=timezone.now() - datetime.timedelta(hours=23),
+        )
+
+        output = self.call_verify(org_slug=None)
+
+        self.assertIn("Billing invariants hold", output)
+
+    def test_missing_grant_for_equal_paid_and_current_period_fails(self) -> None:
+        period_start = datetime.datetime(2026, 8, 1, tzinfo=datetime.UTC)
+        self.create_subscription_mirror(
+            plan=models.Organization.Plan.OPERATOR,
+            status="active",
+            current_period_start=period_start,
+            latest_paid_period_start=period_start,
+            updated_at=timezone.now() - datetime.timedelta(days=2),
+        )
+        errors = io.StringIO()
+
+        with self.assertRaises(CommandError) as raised:
+            call_command("humr_billing_verify", stdout=io.StringIO(), stderr=errors)
+
+        self.assertIn("1 billing invariant violation(s)", str(raised.exception))
+        self.assertIn("missing Operator period grant grant:sub_verify:2026-08-01", errors.getvalue())
+
+    def test_present_grant_for_equal_paid_and_current_period_passes(self) -> None:
+        period_start = datetime.datetime(2026, 8, 1, tzinfo=datetime.UTC)
+        self.create_subscription_mirror(
+            plan=models.Organization.Plan.OPERATOR,
+            status="active",
+            current_period_start=period_start,
+            latest_paid_period_start=period_start,
+            updated_at=timezone.now() - datetime.timedelta(days=2),
+        )
+        models.BillingLedgerEntry.objects.create(
+            organization=self.organization,
+            type=models.BillingLedgerEntry.Type.GRANT,
+            amount=Decimal(2500),
+            idempotency_key="grant:sub_verify:2026-08-01",
+            usage_event=None,
+            description="Test Operator period grant",
+            metadata={},
+        )
+        models.BillingBalance.objects.create(organization=self.organization, credits=Decimal(2500))
+
+        output = self.call_verify(org_slug=None)
+
+        self.assertIn("Billing invariants hold", output)
+
+    def test_past_due_paid_period_lag_past_grace_passes(self) -> None:
+        self.create_subscription_mirror(
+            plan=models.Organization.Plan.OPERATOR,
+            status="past_due",
+            current_period_start=datetime.datetime(2026, 8, 1, tzinfo=datetime.UTC),
+            latest_paid_period_start=datetime.datetime(2026, 7, 1, tzinfo=datetime.UTC),
+            updated_at=timezone.now() - datetime.timedelta(days=2),
+        )
+
+        output = self.call_verify(org_slug=None)
+
+        self.assertIn("Billing invariants hold", output)
+
+    def test_canceled_mirror_with_hand_set_operator_plan_passes(self) -> None:
+        self.create_subscription_mirror(
+            plan=models.Organization.Plan.OPERATOR,
+            status="canceled",
+            current_period_start=datetime.datetime(2026, 8, 1, tzinfo=datetime.UTC),
+            latest_paid_period_start=datetime.datetime(2026, 7, 1, tzinfo=datetime.UTC),
+            updated_at=timezone.now() - datetime.timedelta(days=2),
+        )
+
+        output = self.call_verify(org_slug=None)
+
+        self.assertIn("Billing invariants hold", output)
