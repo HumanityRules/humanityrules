@@ -358,6 +358,63 @@ class TestSettingsBillingViews(TestCase):
         self.assertEqual(response.context["content_url"], "/settings/billing/")
         build_context.assert_not_called()
 
+    def test_checkout_success_landing_preserves_and_logs_the_session_marker(self) -> None:
+        self.client.force_login(user=self.admin)
+        with (
+            patch.object(billing_page, "billing_page_context") as build_context,
+            patch.object(settings_view.logger, "info") as info_log,
+        ):
+            response = self.client.get(path="/settings/billing/?checkout_session_id=cs_completed")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "humanityrules_app/app_shell.html")
+        self.assertEqual(
+            response.context["content_url"],
+            "/settings/billing/?checkout_session_id=cs_completed",
+        )
+        build_context.assert_not_called()
+        info_log.assert_called_once()
+        self.assertIn("cs_completed", info_log.call_args.args[0])
+
+    def test_trial_with_checkout_marker_renders_activating_state_and_polls(self) -> None:
+        self.client.force_login(user=self.admin)
+        with (
+            patch.object(billing_page, "billing_page_context") as build_context,
+            patch.object(stripe_lifecycle.stripe, "StripeClient") as stripe_client,
+        ):
+            response = self.client.get(
+                path="/settings/billing/?checkout_session_id=cs_completed",
+                HTTP_HX_REQUEST="true",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["is_activating"])
+        self.assertContains(response, "Activating your Operator subscription")
+        self.assertContains(response, "Your payment was successful")
+        self.assertContains(response, 'hx-get="/settings/billing/?checkout_session_id=cs_completed"')
+        self.assertContains(response, 'hx-trigger="load delay:5s"')
+        self.assertContains(response, 'hx-target="#main-content"')
+        self.assertNotContains(response, "Upgrade to Operator")
+        build_context.assert_not_called()
+        stripe_client.assert_not_called()
+
+    def test_checkout_marker_is_ignored_after_operator_activation_and_polling_stops(self) -> None:
+        self.organization.plan = plans.OPERATOR
+        self.organization.save(update_fields=["plan", "updated_at"])
+        self.client.force_login(user=self.admin)
+
+        response = self.client.get(
+            path="/settings/billing/?checkout_session_id=cs_completed",
+            HTTP_HX_REQUEST="true",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.context["is_activating"])
+        self.assertContains(response, "Operator")
+        self.assertNotContains(response, "Activating your Operator subscription")
+        self.assertNotContains(response, 'hx-trigger="load delay:5s"')
+        self.assertNotContains(response, "Upgrade to Operator")
+
     @override_settings(STRIPE_SECRET_KEY=None, STRIPE_OPERATOR_PRICE_ID=None)
     def test_htmx_page_renders_display_values_and_disabled_upgrade(self) -> None:
         models.BillingBalance.objects.create(organization=self.organization, credits=Decimal(425))
@@ -405,7 +462,7 @@ class TestSettingsBillingViews(TestCase):
         self.assertNotContains(ending_response, "Renews on")
 
     @override_settings(STRIPE_SECRET_KEY="sk_test_humr", STRIPE_OPERATOR_PRICE_ID="price_operator")
-    def test_checkout_redirects_to_the_hosted_url(self) -> None:
+    def test_checkout_redirects_with_distinct_success_and_cancel_urls(self) -> None:
         self.client.force_login(user=self.admin)
         with patch.object(
             stripe_lifecycle,
@@ -418,7 +475,10 @@ class TestSettingsBillingViews(TestCase):
         self.assertEqual(response["Location"], "https://checkout.example/session")
         create_checkout.assert_called_once_with(
             organization=self.organization,
-            success_url="http://testserver/settings/billing/",
+            success_url=(
+                "http://testserver/settings/billing/"
+                "?checkout_session_id={CHECKOUT_SESSION_ID}"
+            ),
             cancel_url="http://testserver/settings/billing/",
         )
 
