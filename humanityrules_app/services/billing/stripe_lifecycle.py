@@ -10,17 +10,32 @@ applying its effects happen in the same database transaction, so a
 ``StripeWebhookEvent`` row existing means everything it triggered committed
 too.
 
-Two event families update the organization's one ``BillingSubscription``
-mirror row. ``customer.subscription.*`` events copy Stripe's full current
-state — including whether cancellation is pending — but are dropped if their
-envelope timestamp is older than the newest subscription event already
-mirrored, since out-of-order delivery means a later webhook can arrive before
-an earlier one. A paid-invoice event records the period that was just paid
-and posts its credit grant, but leaves an existing status untouched, because
-a late-arriving invoice must never resurrect a subscription that was
-canceled since. After either kind, one transition function turns the
-mirrored status into ``Organization.plan``; the grant resets the balance to
-the new period's credits (see ``grants.py``).
+Handlers only record the facts their event carries in the organization's one
+``BillingSubscription`` mirror row; none of them decide the plan or post a
+grant themselves. ``customer.subscription.*`` events own status, periods, the
+customer and subscription ids, and the cancellation timestamps, copying
+Stripe's full current state — but are dropped if their envelope timestamp is
+older than the newest subscription event already mirrored, since Stripe does
+not guarantee delivery order. ``invoice.paid`` owns exactly one fact, the
+newest paid period's start, and never touches status: Stripe advances a
+subscription's period fields on a failed renewal too, so treating that
+advance as proof of payment would grant credits nobody paid for.
+``invoice.payment_failed`` is retained for the audit trail but writes nothing
+to the mirror — the plan consequence of a failed payment arrives separately,
+through the ``customer.subscription.updated`` event Stripe sends alongside
+it.
+
+One reconciler runs after every handled event and turns whatever the mirror
+currently holds into consequences: it derives ``Organization.plan`` from the
+mirrored status, then grants the current period's credits, but only when
+that plan is Operator and the recorded paid-period fact matches the
+subscription's current period (see ``grants.py``). Because reconciliation
+reads the accumulated mirror rather than reacting to a single event in
+isolation, it does not matter whether ``invoice.paid`` or
+``customer.subscription.created`` is delivered first for the same period —
+whichever one completes the matching status and paid-period fact triggers
+the grant, and the other event's reconciliation pass finds nothing left to
+do.
 
 This is the only module that imports Stripe. Checkout and portal callers get
 plain URL strings, the webhook view gets a plain event dict, and models plus
@@ -192,22 +207,20 @@ def _subscription_period(subscription_object: dict) -> tuple[datetime.datetime |
     )
 
 
-def _invoice_subscription_identity(invoice: dict) -> tuple[str | None, object, str | None]:
-    """Read subscription identity, metadata, and an expanded status from the current Invoice parent shape."""
+def _invoice_subscription_identity(invoice: dict) -> tuple[str | None, object]:
+    """Read subscription identity and metadata from the current Invoice parent shape."""
     parent = invoice.get("parent")
     if not isinstance(parent, dict) or parent.get("type") != "subscription_details":
-        return None, None, None
+        return None, None
     subscription_details = parent.get("subscription_details")
     if not isinstance(subscription_details, dict):
-        return None, None, None
+        return None, None
     subscription_reference = subscription_details.get("subscription")
     if isinstance(subscription_reference, dict):
         stripe_subscription_id = _nonempty_string(value=subscription_reference.get("id"))
-        subscription_status = _nonempty_string(value=subscription_reference.get("status"))
     else:
         stripe_subscription_id = _nonempty_string(value=subscription_reference)
-        subscription_status = None
-    return stripe_subscription_id, subscription_details.get("metadata"), subscription_status
+    return stripe_subscription_id, subscription_details.get("metadata")
 
 
 def _invoice_subscription_period(invoice: dict) -> tuple[datetime.datetime | None, datetime.datetime | None]:
@@ -238,24 +251,30 @@ def _upsert_subscription_mirror(
     status: str | None,
     current_period_start: datetime.datetime | None,
     current_period_end: datetime.datetime | None,
+    allow_statusless_create: bool,
 ) -> models.BillingSubscription | None:
     """Apply plain Stripe values to the organization's one mirror row."""
     subscription = models.BillingSubscription.objects.filter(organization=organization).first()
     if subscription is None:
-        if stripe_customer_id is None or stripe_subscription_id is None or status is None:
+        if stripe_customer_id is None or stripe_subscription_id is None:
             logger.error(
                 f"cannot create BillingSubscription for organization {organization.id} without customer id, "
-                f"subscription id, and status"
+                "and subscription id"
             )
             return None
-        return models.BillingSubscription.objects.create(
-            organization=organization,
-            stripe_customer_id=stripe_customer_id,
-            stripe_subscription_id=stripe_subscription_id,
-            status=status,
-            current_period_start=current_period_start,
-            current_period_end=current_period_end,
-        )
+        if status is None and not allow_statusless_create:
+            logger.error(f"cannot create BillingSubscription for organization {organization.id} without status")
+            return None
+        create_fields: dict[str, object] = {
+            "organization": organization,
+            "stripe_customer_id": stripe_customer_id,
+            "stripe_subscription_id": stripe_subscription_id,
+            "current_period_start": current_period_start,
+            "current_period_end": current_period_end,
+        }
+        if status is not None:
+            create_fields["status"] = status
+        return models.BillingSubscription.objects.create(**create_fields)
 
     updated_fields: list[str] = []
     for field_name, value in (
@@ -290,13 +309,52 @@ def transition_organization_plan(subscription: models.BillingSubscription) -> No
     organization.save(update_fields=["plan", "updated_at"])
 
 
-def _apply_subscription_event(event_type: str, event_created_at: datetime.datetime, subscription_object: dict) -> None:
-    """Mirror one subscription event and apply its plan transition, unless a newer event already won.
+def reconcile_subscription(subscription: models.BillingSubscription) -> None:
+    """Turn the mirror's accumulated facts into their two consequences: the plan, then the grant.
+
+    Plan is derived first because the grant only fires when that derivation
+    lands on Operator. The second condition — the mirrored paid-period fact
+    matching the subscription's current period — stops a paid invoice for an
+    old period, or for a subscription id the mirror no longer follows, from
+    granting against the wrong period. The write-off-then-grant pair posted
+    for a matching period is idempotent (see ``grants.py``), so calling this
+    again for the same state, whether from a retried webhook or the other
+    event in a same-period pair, changes nothing.
+    """
+    transition_organization_plan(subscription=subscription)
+    organization = subscription.organization
+    if (
+        organization.plan != plans.OPERATOR
+        or subscription.latest_paid_period_start is None
+        or subscription.latest_paid_period_start != subscription.current_period_start
+    ):
+        return
+    grants.grant_operator_period_credits(
+        organization=organization,
+        stripe_subscription_id=subscription.stripe_subscription_id,
+        period_start=subscription.latest_paid_period_start.date(),
+    )
+
+
+def _apply_subscription_event(
+    event_type: str,
+    event_created_at: datetime.datetime,
+    subscription_object: dict,
+) -> models.BillingSubscription | None:
+    """Mirror one subscription event unless a newer subscription event already won.
 
     Locks the organization row before comparing timestamps, so two webhooks
     for the same subscription delivered concurrently cannot both read the
     same stale "latest event" and race each other into the wrong final
     mirror state.
+
+    A ``customer.subscription.created`` naming a subscription id different
+    from the one the mirror already follows, while that existing subscription
+    is not canceled, means the organization somehow has two live Stripe
+    subscriptions. That is logged as a manual-intervention error, but the new
+    event still mirrors normally through the newest-state-wins path below —
+    the check only surfaces the anomaly, it does not refuse or cancel either
+    subscription.
     """
     stripe_subscription_id = _nonempty_string(value=subscription_object.get("id"))
     organization = _resolve_organization(
@@ -305,10 +363,22 @@ def _apply_subscription_event(event_type: str, event_created_at: datetime.dateti
     )
     if organization is None:
         logger.error(f"cannot resolve organization for Stripe subscription event {event_type} ({stripe_subscription_id})")
-        return
+        return None
 
     organization = models.Organization.objects.select_for_update().get(id=organization.id)
     current_subscription = models.BillingSubscription.objects.filter(organization=organization).first()
+    if (
+        event_type == "customer.subscription.created"
+        and current_subscription is not None
+        and stripe_subscription_id is not None
+        and current_subscription.stripe_subscription_id != stripe_subscription_id
+        and current_subscription.status != "canceled"
+    ):
+        logger.error(
+            f"organization {organization.id} has multiple live Stripe subscriptions: existing "
+            f"{current_subscription.stripe_subscription_id}, newly created {stripe_subscription_id}; "
+            "manual intervention required"
+        )
     if (
         current_subscription is not None
         and current_subscription.latest_subscription_event_created_at is not None
@@ -318,7 +388,7 @@ def _apply_subscription_event(event_type: str, event_created_at: datetime.dateti
             f"Stripe subscription event {event_type} for {stripe_subscription_id} was superseded by newer state "
             f"from {current_subscription.latest_subscription_event_created_at.isoformat()}; mirror unchanged"
         )
-        return
+        return current_subscription
 
     status = "canceled" if event_type == "customer.subscription.deleted" else _nonempty_string(
         value=subscription_object.get("status"),
@@ -331,6 +401,7 @@ def _apply_subscription_event(event_type: str, event_created_at: datetime.dateti
         status=status,
         current_period_start=current_period_start,
         current_period_end=current_period_end,
+        allow_statusless_create=False,
     )
     if subscription is not None:
         # Written verbatim including nulls, unlike the upsert's absent-means-unchanged
@@ -344,66 +415,82 @@ def _apply_subscription_event(event_type: str, event_created_at: datetime.dateti
             "latest_subscription_event_created_at",
             "updated_at",
         ])
-        transition_organization_plan(subscription=subscription)
+    return subscription
 
 
-def _apply_paid_invoice(invoice: dict) -> None:
-    """Mirror a paid period, transition the plan, then post expiry and grant."""
-    stripe_subscription_id, metadata, _subscription_status = _invoice_subscription_identity(invoice=invoice)
+def _apply_paid_invoice(invoice: dict) -> models.BillingSubscription | None:
+    """Record a paid invoice's identity, periods, and paid-period fact — never a subscription status.
+
+    An invoice naming a subscription other than the one the mirror currently
+    follows is skipped entirely: accepting its facts would let a superseded
+    subscription's invoice overwrite the mirror that a newer, still-live
+    subscription owns. Otherwise the mirror is created or updated even before
+    any subscription event has arrived, so the paid-period fact reflects
+    payment regardless of whether the subscription-event side of the mirror
+    exists yet.
+    """
+    stripe_subscription_id, metadata = _invoice_subscription_identity(invoice=invoice)
     organization = _resolve_organization(metadata=metadata, stripe_subscription_id=stripe_subscription_id)
     if organization is None:
         logger.error(f"cannot resolve organization for paid Stripe invoice subscription {stripe_subscription_id}")
-        return
+        return None
+
+    organization = models.Organization.objects.select_for_update().get(id=organization.id)
+    current_subscription = models.BillingSubscription.objects.filter(organization=organization).first()
+    if (
+        current_subscription is not None
+        and stripe_subscription_id is not None
+        and current_subscription.stripe_subscription_id != stripe_subscription_id
+        and current_subscription.status not in {None, "canceled"}
+    ):
+        logger.error(
+            f"paid Stripe invoice for superseded subscription {stripe_subscription_id} cannot update organization "
+            f"{organization.id}'s live subscription mirror {current_subscription.stripe_subscription_id}; "
+            "invoice facts skipped"
+        )
+        return current_subscription
 
     current_period_start, current_period_end = _invoice_subscription_period(invoice=invoice)
-    mirror_exists = models.BillingSubscription.objects.filter(organization=organization).exists()
     subscription = _upsert_subscription_mirror(
         organization=organization,
         stripe_customer_id=_nonempty_string(value=invoice.get("customer")),
         stripe_subscription_id=stripe_subscription_id,
-        status=None if mirror_exists else "active",
+        status=None,
         current_period_start=current_period_start,
         current_period_end=current_period_end,
+        allow_statusless_create=True,
     )
     if subscription is None:
-        return
+        return None
 
-    transition_organization_plan(subscription=subscription)
-    if current_period_start is None or current_period_end is None:
+    if current_period_start is None:
         logger.error(
             f"paid Stripe invoice for subscription {stripe_subscription_id} has no subscription line-item period; "
-            f"credits not granted"
+            "paid-period fact unchanged"
         )
-        return
-    grants.grant_operator_period_credits(
-        organization=organization,
-        stripe_subscription_id=subscription.stripe_subscription_id,
-        period_start=current_period_start.date(),
-    )
+        return subscription
+    if subscription.latest_paid_period_start is None or current_period_start >= subscription.latest_paid_period_start:
+        subscription.latest_paid_period_start = current_period_start
+        subscription.save(update_fields=["latest_paid_period_start", "updated_at"])
+    return subscription
 
 
-def _apply_failed_invoice(invoice: dict) -> None:
-    """Update a carried subscription status without changing the plan during retries."""
-    stripe_subscription_id, metadata, subscription_status = _invoice_subscription_identity(invoice=invoice)
+def _apply_failed_invoice(invoice: dict) -> models.BillingSubscription | None:
+    """Resolve the existing mirror so the reconciler still runs, without recording any facts.
+
+    A failed invoice carries no fact this mirror trusts — the status change
+    it implies arrives separately on the accompanying
+    ``customer.subscription.updated`` event — so this handler only looks up
+    the mirror row for the dispatcher to hand to the reconciler.
+    """
+    stripe_subscription_id, metadata = _invoice_subscription_identity(invoice=invoice)
     organization = _resolve_organization(metadata=metadata, stripe_subscription_id=stripe_subscription_id)
     if organization is None:
         logger.error(f"cannot resolve organization for failed Stripe invoice subscription {stripe_subscription_id}")
-        return
+        return None
 
-    if subscription_status is None:
-        logger.error(
-            f"failed Stripe invoice for subscription {stripe_subscription_id} carries no subscription status; "
-            f"mirror unchanged"
-        )
-        return
-    _upsert_subscription_mirror(
-        organization=organization,
-        stripe_customer_id=_nonempty_string(value=invoice.get("customer")),
-        stripe_subscription_id=stripe_subscription_id,
-        status=subscription_status,
-        current_period_start=None,
-        current_period_end=None,
-    )
+    organization = models.Organization.objects.select_for_update().get(id=organization.id)
+    return models.BillingSubscription.objects.filter(organization=organization).first()
 
 
 def _event_envelope(event: dict) -> tuple[str, str, datetime.datetime]:
@@ -426,16 +513,19 @@ def _dispatch_webhook_event(event: dict, event_type: str, event_created_at: date
         logger.error(f"Stripe event {event_type} has no data.object")
         return
 
+    subscription: models.BillingSubscription | None
     if event_type in SUBSCRIPTION_EVENT_TYPES:
-        _apply_subscription_event(
+        subscription = _apply_subscription_event(
             event_type=event_type,
             event_created_at=event_created_at,
             subscription_object=stripe_object,
         )
     elif event_type == "invoice.paid":
-        _apply_paid_invoice(invoice=stripe_object)
+        subscription = _apply_paid_invoice(invoice=stripe_object)
     else:
-        _apply_failed_invoice(invoice=stripe_object)
+        subscription = _apply_failed_invoice(invoice=stripe_object)
+    if subscription is not None:
+        reconcile_subscription(subscription=subscription)
 
 
 @transaction.atomic

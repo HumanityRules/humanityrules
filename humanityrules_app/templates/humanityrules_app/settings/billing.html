@@ -1,7 +1,47 @@
 {% extends "humanityrules_app/settings/settings.html" %}
 
 {% block settings_content %}
-<div class="max-w-2xl space-y-8">
+{% comment %}
+Stripe can redirect the browser back here before its subscription webhook reaches HumR, so a
+customer who just paid could otherwise land on the Trial view with an Upgrade button still showing.
+The Checkout Session id echoed back in the URL only selects this activating state — it is never
+checked against Stripe, so it cannot grant Operator on its own. While the organization is still on
+Trial, the wrapper below runs a self-terminating HTMX poll of this same URL every five seconds. The
+webhook is the only thing that flips the plan to Operator; once it does, this template renders
+without the polling attributes, so the poll stops because the server said so, not because the client
+counted down.
+{% endcomment %}
+<div class="max-w-2xl space-y-8"
+     {% if is_activating %}
+     hx-get="{{ activation_poll_url }}"
+     hx-trigger="load delay:5s"
+     hx-target="#main-content"
+     hx-swap="innerHTML"
+     {% endif %}>
+
+    {% if is_activating %}
+    <section>
+        <h2 class="text-base font-semibold text-gray-900 dark:text-white mb-1">Billing</h2>
+        <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">Your organization's plan and agent usage.</p>
+
+        <div class="rounded-lg border border-gray-200 px-4 py-6 dark:border-white/10">
+            <div class="flex items-start gap-3">
+                <svg class="mt-0.5 size-5 shrink-0 animate-spin text-indigo-500"
+                     viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor"
+                          d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                </svg>
+                <div>
+                    <div class="font-semibold text-gray-900 dark:text-white">Activating your Operator subscription</div>
+                    <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">
+                        Your payment was successful. We're activating your subscription now; this page will update automatically.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </section>
+    {% else %}
 
     <section>
         <h2 class="text-base font-semibold text-gray-900 dark:text-white mb-1">Billing</h2>
@@ -65,6 +105,8 @@
         <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">Payments aren't set up yet.</p>
         {% endif %}
     </section>
+    {% endif %}
+
     {% endif %}
 
 </div>
