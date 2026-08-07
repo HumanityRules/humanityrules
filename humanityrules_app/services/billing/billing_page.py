@@ -25,6 +25,8 @@ class BillingPageContext:
     show_credits: bool
     credits_remaining: int
     monthly_grant: int
+    trial_runtime_days: int | None
+    max_agents: int | None
     current_period_burn: int
     renewal_date: datetime.date | None
     plan_end_date: datetime.date | None
@@ -97,6 +99,8 @@ def billing_page_context(organization: models.Organization) -> BillingPageContex
         show_credits=effective_plan.monthly_credit_grant > 0,
         credits_remaining=max(credits_remaining, 0),
         monthly_grant=effective_plan.monthly_credit_grant,
+        trial_runtime_days=effective_plan.trial_runtime_days,
+        max_agents=effective_plan.max_agents,
         current_period_burn=int(abs(charge_total)),
         renewal_date=renewal_date,
         plan_end_date=plan_end_date,
