@@ -39,4 +39,5 @@ def stripe_webhook(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"error": "invalid Stripe signature"}, status=400)
 
     stripe_lifecycle.apply_webhook_event(event=event)
+    
     return JsonResponse({"ok": True})
