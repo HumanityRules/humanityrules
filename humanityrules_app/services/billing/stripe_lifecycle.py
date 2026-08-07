@@ -27,15 +27,15 @@ it.
 
 One reconciler runs after every handled event and turns whatever the mirror
 currently holds into consequences: it derives ``Organization.plan`` from the
-mirrored status, then grants the current period's credits, but only when
-that plan is Operator and the recorded paid-period fact matches the
-subscription's current period (see ``grants.py``). Because reconciliation
-reads the accumulated mirror rather than reacting to a single event in
-isolation, it does not matter whether ``invoice.paid`` or
-``customer.subscription.created`` is delivered first for the same period —
-whichever one completes the matching status and paid-period fact triggers
-the grant, and the other event's reconciliation pass finds nothing left to
-do.
+mirrored status, resets an ex-customer's credits when Operator becomes Trial,
+then grants the current period's credits when the resulting plan is Operator
+and the recorded paid-period fact matches the subscription's current period
+(see ``grants.py``). Because reconciliation reads the accumulated mirror
+rather than reacting to a single event in isolation, it does not matter
+whether ``invoice.paid`` or ``customer.subscription.created`` is delivered
+first for the same period — whichever one completes the matching status and
+paid-period fact triggers the grant, and the other event's reconciliation pass
+finds nothing left to do.
 
 This is the only module that imports Stripe. Checkout and portal callers get
 plain URL strings, the webhook view gets a plain event dict, and models plus
@@ -309,20 +309,30 @@ def transition_organization_plan(subscription: models.BillingSubscription) -> No
     organization.save(update_fields=["plan", "updated_at"])
 
 
-def reconcile_subscription(subscription: models.BillingSubscription) -> None:
-    """Turn the mirror's accumulated facts into their two consequences: the plan, then the grant.
+def reconcile_subscription(subscription: models.BillingSubscription, triggering_stripe_event_id: str) -> None:
+    """Turn the mirror's accumulated facts into plan and credit consequences.
 
-    Plan is derived first because the grant only fires when that derivation
-    lands on Operator. The second condition — the mirrored paid-period fact
-    matching the subscription's current period — stops a paid invoice for an
-    old period, or for a subscription id the mirror no longer follows, from
-    granting against the wrong period. The write-off-then-grant pair posted
-    for a matching period is idempotent (see ``grants.py``), so calling this
-    again for the same state, whether from a retried webhook or the other
-    event in a same-period pair, changes nothing.
+    Plan is derived first. An Operator-to-Trial transition restarts the
+    trial, keyed on the event that triggered this reconciliation pass rather
+    than on the subscription: the same subscription can make that transition
+    more than once (an unpaid period can recover back to Operator before a
+    later cancellation), and each transition is its own reset. Otherwise a
+    grant only fires when the derivation lands on Operator and the mirrored
+    paid-period fact matches the subscription's current period. That match
+    stops a paid invoice for an old period, or for a subscription id the
+    mirror no longer follows, from granting against the wrong period. Both
+    write-off-then-grant paths are idempotent (see ``grants.py``), so calling
+    this again for the same state changes nothing.
     """
-    transition_organization_plan(subscription=subscription)
     organization = subscription.organization
+    previous_plan = organization.plan
+    transition_organization_plan(subscription=subscription)
+    if previous_plan == plans.OPERATOR and organization.plan == plans.TRIAL:
+        grants.restart_trial_credits(
+            organization=organization,
+            stripe_event_id=triggering_stripe_event_id,
+            stripe_subscription_id=subscription.stripe_subscription_id,
+        )
     if (
         organization.plan != plans.OPERATOR
         or subscription.latest_paid_period_start is None
@@ -333,6 +343,28 @@ def reconcile_subscription(subscription: models.BillingSubscription) -> None:
         organization=organization,
         stripe_subscription_id=subscription.stripe_subscription_id,
         period_start=subscription.latest_paid_period_start.date(),
+    )
+
+
+def _event_names_superseded_subscription(
+    current_subscription: models.BillingSubscription | None,
+    stripe_subscription_id: str | None,
+) -> bool:
+    """Return whether an event names a different subscription while the mirror follows a live one.
+
+    The mirror follows exactly one subscription at a time. An event for any
+    other id is stale by construction — the organization has already moved
+    on to a different subscription — so applying its facts would let that
+    superseded subscription overwrite the mirror a newer, still-live one
+    owns. Once the mirrored subscription is gone (unset or canceled) there is
+    nothing live left to protect, so an event under a new id is free to
+    become the mirror's subscription.
+    """
+    return (
+        current_subscription is not None
+        and stripe_subscription_id is not None
+        and current_subscription.stripe_subscription_id != stripe_subscription_id
+        and current_subscription.status not in {None, "canceled"}
     )
 
 
@@ -379,6 +411,19 @@ def _apply_subscription_event(
             f"{current_subscription.stripe_subscription_id}, newly created {stripe_subscription_id}; "
             "manual intervention required"
         )
+    if (
+        event_type in {"customer.subscription.updated", "customer.subscription.deleted"}
+        and _event_names_superseded_subscription(
+            current_subscription=current_subscription,
+            stripe_subscription_id=stripe_subscription_id,
+        )
+    ):
+        logger.error(
+            f"Stripe subscription event {event_type} for superseded subscription {stripe_subscription_id} cannot "
+            f"update organization {organization.id}'s live subscription mirror "
+            f"{current_subscription.stripe_subscription_id}; event facts skipped"
+        )
+        return current_subscription
     if (
         current_subscription is not None
         and current_subscription.latest_subscription_event_created_at is not None
@@ -437,11 +482,9 @@ def _apply_paid_invoice(invoice: dict) -> models.BillingSubscription | None:
 
     organization = models.Organization.objects.select_for_update().get(id=organization.id)
     current_subscription = models.BillingSubscription.objects.filter(organization=organization).first()
-    if (
-        current_subscription is not None
-        and stripe_subscription_id is not None
-        and current_subscription.stripe_subscription_id != stripe_subscription_id
-        and current_subscription.status not in {None, "canceled"}
+    if _event_names_superseded_subscription(
+        current_subscription=current_subscription,
+        stripe_subscription_id=stripe_subscription_id,
     ):
         logger.error(
             f"paid Stripe invoice for superseded subscription {stripe_subscription_id} cannot update organization "
@@ -503,7 +546,12 @@ def _event_envelope(event: dict) -> tuple[str, str, datetime.datetime]:
     return stripe_event_id, event_type, event_created_at
 
 
-def _dispatch_webhook_event(event: dict, event_type: str, event_created_at: datetime.datetime) -> None:
+def _dispatch_webhook_event(
+    event: dict,
+    event_type: str,
+    event_created_at: datetime.datetime,
+    triggering_stripe_event_id: str,
+) -> None:
     """Apply one supported Stripe event; unrelated event types are silent no-ops."""
     if event_type not in HANDLED_EVENT_TYPES:
         return
@@ -525,7 +573,10 @@ def _dispatch_webhook_event(event: dict, event_type: str, event_created_at: date
     else:
         subscription = _apply_failed_invoice(invoice=stripe_object)
     if subscription is not None:
-        reconcile_subscription(subscription=subscription)
+        reconcile_subscription(
+            subscription=subscription,
+            triggering_stripe_event_id=triggering_stripe_event_id,
+        )
 
 
 @transaction.atomic
@@ -554,4 +605,5 @@ def apply_webhook_event(event: dict) -> None:
         event=event,
         event_type=event_type,
         event_created_at=event_created_at,
+        triggering_stripe_event_id=stripe_event_id,
     )
