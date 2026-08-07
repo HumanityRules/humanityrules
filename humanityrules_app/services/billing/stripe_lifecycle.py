@@ -1,66 +1,62 @@
-"""The boundary between Stripe's subscription lifecycle and HumR billing.
+"""The boundary between Stripe and HumR billing: everything Stripe lives here.
 
-Checkout starts an Operator subscription and stamps the organization id on
-both the Checkout Session and the future subscription. Stripe then drives all
-state through signed webhooks, delivered at least once and in no guaranteed
-order. Every verified event is persisted in ``StripeWebhookEvent`` before it
-is applied, keyed on Stripe's own event id, so a redelivered event is
-recognized and skipped instead of applied twice. Recording the event and
-applying its effects happen in the same database transaction, so a
-``StripeWebhookEvent`` row existing means everything it triggered committed
-too.
+The story starts at Checkout: a customer buys an Operator subscription, and we
+stamp our organization id into the session's (and the subscription's)
+metadata. From then on, Stripe tells us what is happening through signed
+webhooks. Stripe delivers webhooks at least once and in no particular order,
+so this module is built around two problems: never applying the same event
+twice, and never letting an old event overwrite newer state.
 
-Handlers only record the facts their event carries in the organization's one
-``BillingSubscription`` mirror row; none of them decide the plan or post a
-grant themselves. Every handled event first requires ``data.object`` to be a
-dictionary. A missing or differently shaped object raises inside the retention
-transaction, rolling back the event row so Stripe retries instead of treating
-an unapplied event as complete. This outer-object requirement applies equally
-to subscription and invoice events; accepted invoice objects may still omit
-individual sparse facts.
+Applying exactly once: every verified event is stored in
+``StripeWebhookEvent``, keyed on Stripe's own event id, in the same database
+transaction that applies its effects. A stored row therefore means "fully
+applied": redeliveries of it are skipped, and if applying raises, the row
+rolls back with everything else and Stripe retries later. That is also why
+handlers raise on malformed events (no ``data.object`` dict, a snapshot
+missing its ids or status) instead of ignoring them — raising turns a broken
+delivery into a retry instead of silently counting it as done.
 
-``customer.subscription.*`` events own status, periods, the customer and
-subscription ids, and the cancellation timestamps, copying Stripe's full
-current state. A subscription snapshot missing a non-empty customer id,
-subscription id, or (for a non-delete event) status also raises, before any
-delivery guard runs. Valid events are dropped if their
-envelope timestamp is older than the newest subscription event already
-mirrored, since Stripe does not guarantee delivery order. Stripe event
-timestamps carry only one-second resolution, so two distinct events for the
-same subscription can legitimately share a timestamp; when that tie lands on
-a subscription the mirror already marks canceled, an equal-timestamp event
-reporting any other status is refused rather than applied, because a canceled
-subscription is a dead end that will never emit a later event to correct an
-accidental resurrection. The same tie against a *different* subscription id
-is not covered by this rule and falls through to the normal handling above,
-since a genuinely new, live subscription keeps sending events that will
-correct the mirror on their own regardless of which one happened to land
-first. ``invoice.paid`` owns exactly one fact, the newest paid period's start,
-and never touches status:
-Stripe advances a subscription's period fields on a failed renewal too, so
-treating that advance as proof of payment would grant credits nobody paid for.
-``invoice.payment_failed`` is retained for the audit trail but writes nothing
-to the mirror — the plan consequence of a failed payment arrives separately,
-through the ``customer.subscription.updated`` event Stripe sends alongside
-it.
+The mirror: each organization has one ``BillingSubscription`` row that mirrors
+what Stripe last told us. Handlers only copy facts into that row; they never
+decide the plan or grant credits themselves. Each event type owns specific
+fields:
 
-One reconciler runs after every handled event and turns whatever the mirror
-currently holds into consequences: it derives ``Organization.plan`` from the
-mirrored status, resets an ex-customer's credits when Operator becomes Trial,
-then grants the current period's credits when the resulting plan is Operator
-and the recorded paid-period fact matches the subscription's current period
-(see ``grants.py``). Because reconciliation reads the accumulated mirror
-rather than reacting to a single event in isolation, it does not matter
-whether ``invoice.paid`` or ``customer.subscription.created`` is delivered
-first for the same period — whichever one completes the matching status and
-paid-period fact triggers the grant, and the other event's reconciliation pass
-finds nothing left to do.
+- ``customer.subscription.*`` events carry a full snapshot and own almost
+  everything: status, ids, billing periods, cancellation timestamps. The
+  snapshot is written verbatim, ``None`` included, so a newer event can clear
+  stale fields.
+- ``invoice.paid`` owns one fact: the start of the newest period someone
+  actually paid for. It never touches status. Stripe advances the period
+  fields even on a failed renewal, so the period alone is not proof of
+  payment — the paid invoice is.
+- ``invoice.payment_failed`` writes nothing; it is kept for the audit trail.
+  Its consequence arrives on the ``customer.subscription.updated`` event
+  Stripe sends alongside it.
+
+Ordering: each applied subscription event stamps its envelope timestamp on
+the mirror, and any subscription event older than that stamp is dropped — it
+stays in the audit trail but cannot move the mirror backward. Timestamps only
+have one-second resolution, so ties happen. A tied event that would flip a
+canceled subscription back to life is refused, because canceled is terminal:
+a dead subscription emits no further events, so a wrong resurrection would
+never be corrected. A tie under a *different* subscription id is handled
+normally — a genuinely live subscription keeps sending events that will set
+the mirror right regardless of which one landed first.
+
+Consequences: after every handled event, one reconciler reads the whole
+mirror and acts on it. It derives ``Organization.plan`` from the mirrored
+status, resets credits when an Operator drops back to Trial, and grants the
+period's credits when the plan is Operator and the paid-period fact matches
+the current period (see ``grants.py``). Because it reads accumulated state
+rather than the single event that woke it, delivery order between
+``invoice.paid`` and the subscription events doesn't matter: whichever event
+completes the picture triggers the grant, and the other's pass finds nothing
+left to do.
 
 This is the only module that imports Stripe. Checkout and portal callers get
-plain URL strings, the webhook view gets a plain event dict, and models plus
-other billing services know only HumR values. Keeping the SDK at this boundary
-also makes the mirror's writer rule explicit: only the handlers below mutate a
-``BillingSubscription`` row.
+plain URL strings, the webhook view hands over a plain event dict, and the
+rest of billing sees only HumR values. Only the handlers in this file write
+to ``BillingSubscription``.
 """
 
 import datetime
@@ -136,11 +132,11 @@ def create_stripe_portal_url(organization: models.Organization, return_url: str)
 def verify_and_parse_webhook(payload: bytes, signature_header: str) -> dict:
     """Verify Stripe's signature and return the event as plain dictionaries.
 
-    The SDK's event wrapper is deliberately bypassed: every handler downstream
-    consumes plain dicts, so the signed payload's own JSON is the event. Only
-    the SDK's signature check is used. Every failure raises the same error
-    type, but signature failures and payload-shape failures carry distinct
-    messages so the webhook view's log tells them apart.
+    The SDK is used only for the signature check. The event itself is the
+    signed payload's own JSON parsed into plain dicts, because that is what
+    every handler downstream consumes. All failures raise the same error
+    type; the message says whether the signature or the payload shape was the
+    problem, so the webhook view's log tells them apart.
     """
     try:
         payload_text = payload.decode("utf-8")
@@ -170,13 +166,13 @@ def verify_and_parse_webhook(payload: bytes, signature_header: str) -> dict:
 
 @transaction.atomic
 def apply_webhook_event(event: dict) -> None:
-    """Persist and apply one verified Stripe event exactly once.
+    """Store and apply one verified Stripe event, exactly once.
 
-    The Stripe event id is the row's primary key, so a redelivered event is
-    recognized by the get_or_create lookup instead of inserted again. A fresh
-    row is created and its effects are dispatched inside the same
-    transaction, so either both happen or neither does; an existing row means
-    the event was already fully handled, and dispatch is skipped.
+    The Stripe event id is the row's primary key, so get_or_create doubles as
+    the dedup check. A fresh row means this delivery wins: the row and the
+    event's effects commit in the same transaction, so both happen or neither
+    does. An existing row means a redelivery of something already applied,
+    and dispatch is skipped.
     """
     stripe_event_id, event_type, event_created_at = _event_envelope(event=event)
     _webhook_event, created = models.StripeWebhookEvent.objects.get_or_create(
@@ -234,7 +230,12 @@ def _organization_from_metadata(metadata: object) -> models.Organization | None:
 
 
 def _resolve_organization(metadata: object, stripe_subscription_id: str | None) -> models.Organization | None:
-    """Checkout stamps the organization id into subscription metadata; events that carry none resolve through the mirror row instead."""
+    """Find the organization an event belongs to.
+
+    Checkout stamps our organization id into the subscription's metadata, so
+    that is checked first. An event carrying no usable metadata falls back to
+    whichever organization's mirror already follows this subscription id.
+    """
     organization = _organization_from_metadata(metadata=metadata)
     if organization is not None:
         return organization
@@ -262,7 +263,11 @@ def _subscription_period(subscription_object: dict) -> tuple[datetime.datetime |
 
 
 def _validated_subscription_event_state(event_type: str, subscription_object: dict) -> tuple[str, str, str]:
-    """Return the customer id, subscription id, and status a snapshot must carry, raising when any is missing."""
+    """Extract the customer id, subscription id, and status, raising when any is missing.
+
+    A delete event carries no live status; it simply means the subscription
+    is canceled.
+    """
     stripe_customer_id = _nonempty_string(value=subscription_object.get("customer"))
     stripe_subscription_id = _nonempty_string(value=subscription_object.get("id"))
     status = "canceled" if event_type == "customer.subscription.deleted" else _nonempty_string(
@@ -330,12 +335,12 @@ def _write_subscription_event_mirror(
     canceled_at: datetime.datetime | None,
     event_created_at: datetime.datetime,
 ) -> models.BillingSubscription:
-    """Replace the mirror from one validated, complete subscription snapshot.
+    """Overwrite the mirror with one complete subscription snapshot.
 
-    The caller has already required customer id, subscription id, and status
-    before resolving delivery-order guards. Every nullable field this event
-    family owns is written verbatim, including ``None``, so a newer event can
-    clear stale periods or cancellation timestamps.
+    The caller has already validated the snapshot and decided it should win.
+    Every field this event family owns is written verbatim, ``None``
+    included, so a newer event can clear stale periods or cancellation
+    timestamps.
     """
     subscription = models.BillingSubscription.objects.filter(organization=organization).first()
     if subscription is None:
@@ -380,14 +385,12 @@ def _write_invoice_subscription_facts(
     current_period_start: datetime.datetime | None,
     current_period_end: datetime.datetime | None,
 ) -> models.BillingSubscription | None:
-    """Merge the sparse identity and period facts carried by an invoice.
+    """Merge the few facts an invoice carries into the mirror.
 
-    The dispatcher has already required the invoice's ``data.object`` to be a
-    dictionary, but an invoice is not a complete subscription snapshot.
-    ``None`` therefore means "this invoice supplied no fact" and leaves an
-    existing field unchanged. An invoice may arrive first and create a partial
-    mirror, but it must carry both ids to do so and never invents a subscription
-    status.
+    Unlike a subscription snapshot, an invoice is sparse: ``None`` means "the
+    invoice didn't say", so existing fields are left alone rather than
+    cleared. An invoice arriving before any subscription event may create the
+    mirror, but only if it carries both ids — and it never invents a status.
     """
     subscription = models.BillingSubscription.objects.filter(organization=organization).first()
     if subscription is None:
@@ -422,11 +425,11 @@ def _write_invoice_subscription_facts(
 
 
 def _transition_organization_plan(subscription: models.BillingSubscription) -> tuple[str, str]:
-    """Apply Stripe's plan derivation and return ``(previous_plan, resulting_plan)``.
+    """Set ``Organization.plan`` from the mirrored status and return ``(previous_plan, resulting_plan)``.
 
-    Only Trial and Operator are Stripe-managed. A Team or Enterprise plan stays
-    unchanged even when the subscription status implies a different plan, so
-    its previous and resulting values are equal in the returned transition.
+    Stripe only manages Trial and Operator. Team and Enterprise organizations
+    are hand-managed, so their plan never changes here no matter what the
+    subscription status says — the returned transition has equal values.
     """
     organization = subscription.organization
     previous_plan = organization.plan
@@ -445,19 +448,23 @@ def _transition_organization_plan(subscription: models.BillingSubscription) -> t
 
 
 def _reconcile_subscription(subscription: models.BillingSubscription, triggering_stripe_event_id: str) -> None:
-    """Turn the mirror's accumulated facts into plan and credit consequences.
+    """Turn whatever the mirror currently says into plan and credit changes.
 
-    Plan is derived first. An Operator-to-Trial transition restarts the
-    trial, keyed on the event that triggered this reconciliation pass rather
-    than on the subscription: the same subscription can make that transition
-    more than once (an unpaid period can recover back to Operator before a
-    later cancellation), and each transition is its own reset. Otherwise a
-    grant only fires when the derivation lands on Operator and the mirrored
-    paid-period fact matches the subscription's current period. That match
-    stops a paid invoice for an old period, or for a subscription id the
-    mirror no longer follows, from granting against the wrong period. Both
-    write-off-then-grant paths are idempotent (see ``grants.py``), so calling
-    this again for the same state changes nothing.
+    First the plan. An Operator dropping back to Trial gets its trial credits
+    restarted, keyed on the triggering event rather than on the subscription:
+    one subscription can drop to Trial for an unpaid period, recover to
+    Operator, and later drop again at cancellation — each drop is its own
+    reset.
+
+    Then the grant. Credits are only granted when the plan landed on Operator
+    AND the paid-period fact matches the subscription's current period. That
+    match is what stops a paid invoice for an old period, or for a
+    subscription the mirror no longer follows, from granting against the
+    wrong period.
+
+    Both paths are idempotent (see ``grants.py``), so reconciling the same
+    state twice changes nothing — which is what makes it safe to run after
+    every single event.
     """
     organization = subscription.organization
     previous_plan, resulting_plan = _transition_organization_plan(subscription=subscription)
@@ -487,15 +494,14 @@ def _event_names_superseded_subscription(
     current_subscription: models.BillingSubscription | None,
     stripe_subscription_id: str | None,
 ) -> bool:
-    """Return whether an event names a different subscription while the mirror follows a live one.
+    """Does this event name a different subscription than the live one the mirror follows?
 
-    The mirror follows exactly one subscription at a time. An event for any
-    other id is stale by construction — the organization has already moved
-    on to a different subscription — so applying its facts would let that
-    superseded subscription overwrite the mirror a newer, still-live one
-    owns. Once the mirrored subscription is gone (unset or canceled) there is
-    nothing live left to protect, so an event under a new id is free to
-    become the mirror's subscription.
+    The mirror follows one subscription at a time. While that subscription is
+    alive, an event about any other id means the organization has moved on
+    from that other subscription, and applying its facts would overwrite the
+    live one's state. Once the followed subscription is gone (unset or
+    canceled) there is nothing left to protect, and a new id is free to take
+    over the mirror.
     """
     return (
         current_subscription is not None
@@ -510,13 +516,13 @@ def _created_event_names_second_live_subscription(
     current_subscription: models.BillingSubscription | None,
     stripe_subscription_id: str,
 ) -> bool:
-    """Return whether a create event competes with the subscription already followed.
+    """Does this create event reveal a second live subscription?
 
-    One organization has room for one subscription in its mirror. Seeing a new
-    id before the followed subscription reaches ``canceled`` signals that
-    Stripe may have two live subscriptions. The event still enters the normal
-    ordering path, but the anomaly must be surfaced for manual cleanup and a
-    possible mirror correction.
+    The mirror has room for exactly one subscription. A new id showing up
+    before the followed one is canceled suggests Stripe now holds two live
+    subscriptions for this organization. The event is still applied through
+    the normal ordering path; this check only flags the anomaly so a human
+    can clean up.
     """
     return (
         event_type == "customer.subscription.created"
@@ -530,11 +536,11 @@ def _event_is_older_than_mirrored_subscription_state(
     current_subscription: models.BillingSubscription | None,
     event_created_at: datetime.datetime,
 ) -> bool:
-    """Return whether a delayed subscription event predates the state already mirrored.
+    """Is this event older than the state already in the mirror?
 
-    Stripe delivery order is not state order. The newest applied envelope time
-    is therefore the mirror's high-water mark: an event below it remains in the
-    webhook audit trail but cannot move the subscription snapshot backward.
+    Stripe can deliver events in any order. The newest applied envelope time
+    acts as the mirror's high-water mark: an older event stays in the webhook
+    audit trail but is not allowed to move the mirror backward.
     """
     return (
         current_subscription is not None
@@ -549,12 +555,12 @@ def _event_would_resurrect_canceled_subscription(
     status: str,
     event_created_at: datetime.datetime,
 ) -> bool:
-    """Return whether an equal-timestamp event would resurrect a canceled mirror.
+    """Would this equal-timestamp event bring a canceled subscription back to life?
 
-    Stripe envelope timestamps have one-second resolution, so creation order
-    cannot distinguish every pair of events. For the same subscription,
-    ``canceled`` is the deterministic winner of a tie; only a strictly newer
-    event may replace that terminal state.
+    Stripe timestamps have one-second resolution, so two events can tie. When
+    the tie is on the same subscription and the mirror already says canceled,
+    canceled wins: it is a terminal state, and only a strictly newer event may
+    replace it.
     """
     return (
         current_subscription is not None
@@ -571,20 +577,17 @@ def _apply_subscription_event(
     event_created_at: datetime.datetime,
     subscription_object: dict,
 ) -> models.BillingSubscription | None:
-    """Mirror one subscription event unless a newer subscription event already won.
+    """Mirror one subscription event, unless a newer event already won.
 
-    Locks the organization row before comparing timestamps, so two webhooks
-    for the same subscription delivered concurrently cannot both read the
-    same stale "latest event" and race each other into the wrong final
-    mirror state.
+    The organization row is locked before any timestamps are compared, so two
+    webhooks for the same subscription delivered concurrently cannot both
+    read the same stale "latest event" and race into the wrong final state.
 
-    A ``customer.subscription.created`` naming a subscription id different
-    from the one the mirror already follows, while that existing subscription
-    is not canceled, means the organization somehow has two live Stripe
-    subscriptions. That is logged as a manual-intervention error, but the new
-    event still mirrors normally through the newest-state-wins path below —
-    the check only surfaces the anomaly, it does not refuse or cancel either
-    subscription.
+    The guards then run in order: a create event revealing a second live
+    subscription is logged for manual cleanup but still applied normally; an
+    update or delete for a superseded subscription is skipped; an event older
+    than the mirror is skipped; an equal-timestamp resurrection of a canceled
+    subscription is refused. Whatever survives overwrites the mirror.
     """
     stripe_customer_id, stripe_subscription_id, status = _validated_subscription_event_state(
         event_type=event_type,
@@ -661,15 +664,15 @@ def _apply_subscription_event(
 
 
 def _apply_paid_invoice(invoice: dict) -> models.BillingSubscription | None:
-    """Record a paid invoice's identity, periods, and paid-period fact — never a subscription status.
+    """Record what a paid invoice proves: identity, periods, and the paid-period fact.
 
-    An invoice naming a subscription other than the one the mirror currently
-    follows is skipped entirely: accepting its facts would let a superseded
-    subscription's invoice overwrite the mirror that a newer, still-live
-    subscription owns. Otherwise the mirror is created or updated even before
-    any subscription event has arrived, so the paid-period fact reflects
-    payment regardless of whether the subscription-event side of the mirror
-    exists yet.
+    Never a status — that belongs to subscription events. An invoice for a
+    subscription other than the live one the mirror follows is skipped
+    entirely, so a superseded subscription's invoice cannot overwrite the
+    live mirror. The invoice may arrive before any subscription event; in
+    that case it creates the mirror itself, so the payment is recorded either
+    way. The paid-period fact only moves forward: a late invoice for an older
+    period does not rewind it.
     """
     stripe_subscription_id, metadata = _invoice_subscription_identity(invoice=invoice)
     organization = _resolve_organization(metadata=metadata, stripe_subscription_id=stripe_subscription_id)
@@ -714,11 +717,12 @@ def _apply_paid_invoice(invoice: dict) -> models.BillingSubscription | None:
 
 
 def _resolve_subscription_for_failed_invoice(invoice: dict) -> models.BillingSubscription | None:
-    """Find the existing mirror for reconciliation without recording invoice facts.
+    """Find the mirror so reconciliation can run; record nothing from the invoice.
 
-    Payment failure matters to the lifecycle, but the invoice itself owns no
-    trusted mirror field — the status change it implies arrives separately on
-    the accompanying ``customer.subscription.updated`` event.
+    A failed payment matters to the lifecycle, but the invoice itself carries
+    no fact the mirror trusts. The status change it implies arrives
+    separately, on the ``customer.subscription.updated`` event Stripe sends
+    alongside it.
     """
     stripe_subscription_id, metadata = _invoice_subscription_identity(invoice=invoice)
     organization = _resolve_organization(metadata=metadata, stripe_subscription_id=stripe_subscription_id)
@@ -746,11 +750,12 @@ def _dispatch_webhook_event(
     event_created_at: datetime.datetime,
     triggering_stripe_event_id: str,
 ) -> None:
-    """Apply one supported Stripe event; unrelated event types are silent no-ops.
+    """Route one supported event to its handler; unrelated event types are silent no-ops.
 
-    This is the one place that checks ``data.object`` is a dictionary for
-    every handled type, subscription and invoice alike, ahead of the
-    type-specific handler.
+    This is the one place that requires ``data.object`` to be a dictionary,
+    for subscription and invoice events alike. Raising here happens inside
+    the retention transaction, so the event row rolls back and Stripe
+    redelivers instead of counting a malformed event as done.
     """
     if event_type not in _HANDLED_EVENT_TYPES:
         return
