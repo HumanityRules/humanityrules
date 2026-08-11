@@ -1,0 +1,15 @@
+Read, in this order: ../BRIEF.md; the concept catalog at the end of ../conversation.md; the four developed-concept write-ups at the ends of ../one-real-run/conversation.md, ../meet-the-builder/conversation.md, ../ownership-walkthrough/conversation.md, and ../plain-product-card/conversation.md; and the kill record in ../operators-own-stack/conversation.md. The earlier parts of those transcripts are context when you need the reasoning behind a decision.
+
+This is the judging round. The task: choose the one page this project builds — a single concept, or a deliberate hybrid you fully specify — and defend the choice well enough that the losers stay dead. The full design spec descends from your verdict; there is no appeal round.
+
+Ground rules:
+
+1. Before judging, run a missing-bet check. The catalog never examined a selectivity bet: an application-gated, design-partner, or waitlist page that treats access as scarce rather than courting a purchase. Decide whether that (or any other bet you find missing) is a viable sovereign concept or a legitimate implicit kill, and record the reasoning. If you conclude a missing bet is strong enough that it might win, say so plainly and stop short of a final verdict; it will get its own development conversation before judging resumes.
+
+2. Judge feasibility as fact, not hope. One Real Run's own write-up states that no qualifying run has been verified and that no degraded version exists. If you can verify from evidence actually available to you that a qualifying run exists, do so; otherwise judge the concept at its real asset status. Apply the same discipline to Meet the Builder's continuity drill (does not exist yet; most expensive asset set in the catalog; gated on an experiment that can fail) and to the Walkthrough's product tensions (the AdministratorAccess role and vendor-held credentials are shipped fact today).
+
+3. Hybrids are permitted and were deliberately deferred to this round. A hybrid must still be one coherent bet about what convinces a skeptical visitor; the catalog's rule that arrangements without bets are not concepts still applies. The recorded cross-branch facts are in play: Meet the Builder's steelman concedes its drill report is reusable by the Walkthrough at lower framing cost; the Card's steelman concedes it structurally cannot demonstrate persistence; the Walkthrough's steelman concedes it invites an audit the product may not yet pass.
+
+4. The verdict must engage the two disagreements the catalog recorded: the One Real Run vs Plain Product Card ranking split, and whether the Walkthrough's infrastructure-owner audience is the right visitor at pre-beta. The brief's criteria are the standard, not personal taste.
+
+5. End with a standalone verdict document: the chosen page and its bet; its section list if you hybridized, otherwise the winning write-up plus your amendments; why each rival loses, tied to criteria; the conditions, gates, and product-work dependencies the winner carries into section-level development; and the record of the missing-bet check.
