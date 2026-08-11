@@ -1,0 +1,1 @@
+Both Codex and Claude Desktop are our competition, due to the new "managed agents" in the cloud features that they offered recently. How do we compete with them?
