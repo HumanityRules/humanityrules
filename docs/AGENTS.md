@@ -20,6 +20,8 @@ The main developer documentation lives in the docs/ subdirectory. **When creatin
 
 - **`docs/app_cost_tracking_design.md`** — Design for per-day, per-app cost tracking on the app-detail page, starting with Bedrock invocation cost and built as a generic, pluggable cost subsystem (`services/cost/`). Records the locked decisions plus the non-obvious facts from AWS docs and a real log record (cache-token fields, inference-profile-ARN modelId, geo ×1.1 premium, ARN→app forward mapping). Open before implementing cost tracking or adding a new cost source.
 
+- **`docs/cost_per_ha.md`** — Concise monthly cost estimate for one HA in the shared sandbox, including allocated `r8g.large` infrastructure, Enhanced Container Insights, storage, networking, and usage-dependent unit costs.
+
 - **`docs/billing_design.md`** — Decided MVP design for billing and credits: plan config in code with `Organization.plan_overrides` (capability booleans replacing `platform_capabilities`), the four `Billing*` models, credit unit ($0.01) and plan numbers, in-code rate cards versioned by effective date at 1.5x markup, LLM metering as a fail-open tap in the integrations broker with direct CP posting, broker-side 402 enforcement at −10% grace with the WebUI credits card, Stripe→plan transition rules, deferred-complexity inventory, and implementation order. Open before implementing anything billing-, credits-, or plan-related.
 
 - **`docs/app_removal_data_cleanup_audit.md`** — Audit of what app removal's `removal_delete_all_data` flag covers, and the gap: `IntegrationUserCredential` rows have no FK to `App` and are never cleaned up. Open when reworking app removal, debugging phantom reconnects after recreating an app, or auditing GDPR. Snapshot 2026-05-24.
