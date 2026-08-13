@@ -1,0 +1,4 @@
+interface:
+  display_name: "Show Me"
+  short_description: "Explain code and systems with concise visuals"
+  default_prompt: "Use $show-me to explain the current topic with the smallest useful visual."
