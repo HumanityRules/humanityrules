@@ -1,7 +1,15 @@
+{% load static %}
 {% comment %}
 Landing page hero - leads with the product: meet the personal agent, sign up and
-try it. Governance appears as reassurance, not the lead. Primary CTA is a Sign up
-button into the app.
+try it. Governance appears as reassurance, not the lead. The hero carries no CTA
+of its own; signup lives in the header. The showcase is a minimal
+browser frame that rotates through a real screenshot (the agent chat home) and
+screen recordings of integrations, widgets, and web apps, each with a caption;
+labels under the frame double as navigation. Source assets live in landing/media/;
+the optimized WebP and cropped/transcoded MP4 derivatives live in static/. The
+frame keeps the still's aspect ratio; videos keep their full app viewport (only
+browser chrome and desktop margins are cropped at transcode time) and letterbox
+inside it via object-contain against the frame's navy background.
 {% endcomment %}
 
 <section id="hero" class="landing-section relative min-h-screen flex items-center pt-28 pb-20 overflow-hidden">
@@ -42,21 +50,200 @@ button into the app.
             <p class="text-lg text-gray-400 max-w-3xl mx-auto leading-relaxed mb-9">
                 Built on the best open-source agent, <a href="https://get-hermes.ai" target="_blank" rel="noopener noreferrer" class="text-cyber-400 font-bold underline underline-offset-2 hover:text-cyber-300 transition-colors">Hermes</a>. Deployed the way your company should run it:
                 in your cloud, connected to your data <span class="text-white font-bold">inside your perimeter</span>, secured in a <span class="text-white font-bold">sandbox</span>. The agent never sees
-                a credential. <br/>Your company owns the agent, <span class="text-white font-bold">its data</span>, permissions, and the audit trail.<br>Thanks to Bedrock support, <span class="text-white font-bold">nothing leaves your AWS account.</span> </p>
+                a credential.
+            </p>
 
-            <!-- CTA -->
-            <div class="flex flex-col items-center gap-3">
-                <a href="/auth/login/?screen_hint=sign-up" class="group inline-flex items-center gap-2 px-8 py-4 bg-gradient-to-r from-cyber-400 to-cyan-400 text-navy-950 font-semibold text-lg rounded-full transition-all duration-300 hover:shadow-glow hover:scale-105">
-                    Sign up
-                    <svg class="w-5 h-5 transform group-hover:translate-x-0.5 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>
-                    </svg>
-                </a>
-                <p class="text-sm italic text-gray-500">Your agent is waiting.</p>
+        </div>
+
+        <!-- Product showcase: browser frame rotating through a screenshot and screen
+             recordings, with a synced caption row underneath. Rotation logic lives in
+             the #product-shot IIFE at the bottom of this partial. -->
+        <div id="product-shot" class="max-w-5xl mx-auto mt-16 sm:mt-20 relative animate-fade-in-landing" style="animation-delay: 0.2s;">
+            <!-- Glow behind the frame -->
+            <div class="absolute -inset-8 bg-gradient-to-t from-cyber-500/10 via-cyan-500/5 to-transparent rounded-3xl blur-2xl pointer-events-none"></div>
+
+            <div class="relative rounded-xl border border-white/10 bg-navy-950 shadow-2xl shadow-navy-950/80 overflow-hidden">
+                <!-- Browser bar -->
+                <div class="relative flex items-center px-4 py-3 bg-white/[0.04] border-b border-white/5">
+                    <div class="flex items-center gap-1.5">
+                        <span class="w-3 h-3 rounded-full bg-white/10"></span>
+                        <span class="w-3 h-3 rounded-full bg-white/10"></span>
+                        <span class="w-3 h-3 rounded-full bg-white/10"></span>
+                    </div>
+                    <div class="absolute left-1/2 -translate-x-1/2 flex items-center gap-1.5 px-4 py-1 bg-navy-950/60 border border-white/5 rounded-full">
+                        <svg class="w-3 h-3 text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                        </svg>
+                        <span data-url class="text-xs font-mono text-gray-400 transition-colors duration-500">demo.humr.io</span>
+                    </div>
+                </div>
+                <!-- Slides: the container keeps the still's aspect ratio so the frame
+                     never changes height; videos letterbox inside it (object-contain)
+                     rather than lose pixels to a crop -->
+                <div class="relative" style="aspect-ratio: 2200 / 1088;">
+                    <img data-slide="0" src="{% static 'humanityrules_app/landing/chat-home.webp' %}"
+                         alt="The agent's home screen: a chat greeting you with 'What can I help with?', starter suggestions, and the sidebar with tasks, skills, memory, integrations, and web apps"
+                         width="2200" height="1088" fetchpriority="high"
+                         class="absolute inset-0 w-full h-full object-cover transition-opacity duration-700 opacity-100">
+                    <video data-slide="1" muted playsinline preload="none"
+                           poster="{% static 'humanityrules_app/landing/integrations-poster.webp' %}"
+                           aria-label="Screen recording of the integrations catalog: connecting tools like Asana, Datadog, and Google Workspace"
+                           class="absolute inset-0 w-full h-full object-contain transition-opacity duration-700 opacity-0 pointer-events-none">
+                        <source src="{% static 'humanityrules_app/landing/integrations.mp4' %}" type="video/mp4">
+                    </video>
+                    <video data-slide="2" muted playsinline preload="none"
+                           poster="{% static 'humanityrules_app/landing/widgets-poster.webp' %}"
+                           aria-label="Screen recording of a customer health dashboard widget the agent keeps up to date"
+                           class="absolute inset-0 w-full h-full object-contain transition-opacity duration-700 opacity-0 pointer-events-none">
+                        <source src="{% static 'humanityrules_app/landing/widgets.mp4' %}" type="video/mp4">
+                    </video>
+                    <video data-slide="3" muted playsinline preload="none"
+                           poster="{% static 'humanityrules_app/landing/webapps-poster.webp' %}"
+                           data-pill-swap="15.7|team-pulse-demo.humr.io"
+                           aria-label="Screen recording of asking the agent for a team dashboard in chat, then opening the finished app at its own URL"
+                           class="absolute inset-0 w-full h-full object-contain transition-opacity duration-700 opacity-0 pointer-events-none">
+                        <source src="{% static 'humanityrules_app/landing/webapps.mp4' %}" type="video/mp4">
+                    </video>
+                </div>
+            </div>
+
+            <!-- Caption row: labels double as navigation, caption line follows the active slide -->
+            <div class="mt-6 text-center">
+                <div class="flex flex-wrap items-center justify-center gap-2">
+                    <button type="button" data-tab="0" class="px-4 py-1.5 text-sm rounded-full border transition-colors">Chat</button>
+                    <button type="button" data-tab="1" class="px-4 py-1.5 text-sm rounded-full border transition-colors">Integrations</button>
+                    <button type="button" data-tab="2" class="px-4 py-1.5 text-sm rounded-full border transition-colors">Widgets</button>
+                    <button type="button" data-tab="3" class="px-4 py-1.5 text-sm rounded-full border transition-colors">Web apps</button>
+                </div>
+                <p data-caption class="mt-3 text-sm text-gray-400 min-h-5"></p>
             </div>
         </div>
+
     </div>
 
     <!-- Bottom gradient fade -->
     <div class="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-navy-950 to-transparent pointer-events-none"></div>
 </section>
+
+<script>
+(function() {
+    // Product showcase rotation. Self-contained: all selectors are scoped under
+    // #product-shot. The still shows for a fixed time; each video plays through
+    // once and advances on 'ended' (with a safety timeout in case it never fires).
+    // Rotation only runs while the showcase is in view, and never starts for
+    // users who prefer reduced motion (labels still switch slides by hand).
+    const root = document.getElementById('product-shot');
+    const slides = Array.from(root.querySelectorAll('[data-slide]'));
+    const tabs = Array.from(root.querySelectorAll('[data-tab]'));
+    const captionEl = root.querySelector('[data-caption]');
+    const urlPill = root.querySelector('[data-url]');
+    const defaultUrl = urlPill.textContent;
+    const captions = [
+        'Ask for anything: research, documents, apps, automations.',
+        'Connect the tools your team already uses.',
+        'Live dashboards your agent builds and keeps up to date.',
+        'Ask for an app in chat, get a working URL.',
+    ];
+    const STILL_MS = 5000;
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    let current = 0;
+    let timer = null;
+    let inView = false;
+
+    function setTabStyles() {
+        tabs.forEach((tab, i) => {
+            const active = i === current;
+            tab.classList.toggle('text-cyber-300', active);
+            tab.classList.toggle('bg-cyber-500/10', active);
+            tab.classList.toggle('border-cyber-500/30', active);
+            tab.classList.toggle('text-gray-500', !active);
+            tab.classList.toggle('border-white/10', !active);
+            tab.setAttribute('aria-current', active ? 'true' : 'false');
+        });
+    }
+
+    function stop() {
+        clearTimeout(timer);
+        timer = null;
+        slides.forEach(s => { if (s.tagName === 'VIDEO') s.pause(); });
+    }
+
+    function preloadNext() {
+        const next = slides[(current + 1) % slides.length];
+        if (next.tagName === 'VIDEO' && next.preload === 'none') {
+            next.preload = 'auto';
+            next.load();
+        }
+    }
+
+    function show(index, autoplay) {
+        stop();
+        current = index;
+        slides.forEach((s, i) => {
+            s.classList.toggle('opacity-100', i === index);
+            s.classList.toggle('opacity-0', i !== index);
+        });
+        setTabStyles();
+        captionEl.textContent = captions[index];
+        preloadNext();
+
+        // The URL pill follows the story inside a slide: a video can declare
+        // data-pill-swap="seconds|hostname" to switch the pill mid-playback
+        // (the web-apps video ends on the new app's own subdomain).
+        urlPill.textContent = defaultUrl;
+        urlPill.classList.remove('text-cyber-300');
+        urlPill.classList.add('text-gray-400');
+
+        const slide = slides[index];
+        if (slide.tagName === 'VIDEO') {
+            const swap = slide.dataset.pillSwap;
+            if (swap) {
+                const [at, url] = swap.split('|');
+                slide.ontimeupdate = () => {
+                    if (slide.currentTime >= parseFloat(at)) {
+                        urlPill.textContent = url;
+                        urlPill.classList.remove('text-gray-400');
+                        urlPill.classList.add('text-cyber-300');
+                    }
+                };
+            }
+            if (autoplay || !reduceMotion) {
+                slide.currentTime = 0;
+                slide.play().catch(() => {});
+            }
+            if (autoplay) {
+                slide.onended = () => advance();
+                // Safety net: advance even if 'ended' never fires (e.g. stalled load)
+                timer = setTimeout(() => advance(), ((slide.duration || 20) + 5) * 1000);
+            }
+        } else if (autoplay) {
+            timer = setTimeout(() => advance(), STILL_MS);
+        }
+    }
+
+    function advance() {
+        if (!inView) return;
+        show((current + 1) % slides.length, true);
+    }
+
+    tabs.forEach((tab, i) => {
+        tab.addEventListener('click', () => show(i, !reduceMotion));
+    });
+
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            inView = entry.isIntersecting;
+            if (reduceMotion) return;
+            if (inView && !timer) {
+                show(current, true);
+            } else if (!inView) {
+                stop();
+            }
+        });
+    }, { threshold: 0.3 });
+    observer.observe(root);
+
+    setTabStyles();
+    captionEl.textContent = captions[0];
+})();
+</script>
