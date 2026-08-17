@@ -71,3 +71,8 @@ infra_humanityrules/app.py
 .claude/
 .cursor/
 .playwright-mcp/
+
+# Raw landing-media sources (screen recordings, uncropped screenshots). Only the
+# transcoded derivatives under humanityrules_app/static/ are served; the sources
+# stay tracked in git but have no business inside the image.
+humanityrules_app/templates/humanityrules_app/landing/media/
