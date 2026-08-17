@@ -1,16 +1,4 @@
 {% load static %}
-{% comment %}
-Landing page hero - leads with the product: meet the personal agent, sign up and
-try it. Governance appears as reassurance, not the lead. The hero carries no CTA
-of its own; signup lives in the header. The showcase is a minimal
-browser frame that rotates through a real screenshot (the agent chat home) and
-screen recordings of integrations, widgets, and web apps, each with a caption;
-labels under the frame double as navigation. Source assets live in landing/media/;
-the optimized WebP and cropped/transcoded MP4 derivatives live in static/. The
-frame keeps the still's aspect ratio; videos keep their full app viewport (only
-browser chrome and desktop margins are cropped at transcode time) and letterbox
-inside it via object-contain against the frame's navy background.
-{% endcomment %}
 
 <section id="hero" class="landing-section relative min-h-screen flex items-center pt-28 pb-20 overflow-hidden">
     <!-- Background effects -->
@@ -33,24 +21,24 @@ inside it via object-contain against the frame's navy background.
                     <path d="M9.2 16c.75.85 1.7 1.3 2.8 1.3s2.05-.45 2.8-1.3"/>
                     <path d="M4.8 12.8H3"/><path d="M19.2 12.8H21"/>
                 </svg>
-                <span class="text-sm sm:text-base text-cyber-300 font-semibold tracking-wide">Bring the agents, without the chaos</span>
+                <span class="text-sm sm:text-base text-cyber-300 font-semibold tracking-wide">The enterprise home for personal agents</span>
             </div>
 
             <!-- Headline -->
-            <h1 class="text-5xl sm:text-6xl lg:text-7xl font-bold leading-[1.05] mb-6">
-                <span class="text-white">Meet the</span> <span class="gradient-text">personal agent.</span>
+            <h1 class="text-3xl sm:text-4xl lg:text-5xl font-bold leading-[1.05] mb-6">
+                <span class="text-white">The</span> <span class="gradient-text">workspace that builds itself.</span>
             </h1>
 
             <!-- Sub-headline -->
             <p class="text-xl sm:text-2xl font-semibold mb-5 flex flex-col items-center gap-2">
-                <span class="text-white">Try it, trust it, put it to work.</span>
+                <span class="text-white">Built on the best open-source agent, <a href="https://get-hermes.ai" target="_blank" rel="noopener noreferrer" class="text-cyber-400 font-bold underline underline-offset-2 hover:text-cyber-300 transition-colors">Hermes</a>.</span>
             </p>
 
             <!-- Description -->
             <p class="text-lg text-gray-400 max-w-3xl mx-auto leading-relaxed mb-9">
-                Built on the best open-source agent, <a href="https://get-hermes.ai" target="_blank" rel="noopener noreferrer" class="text-cyber-400 font-bold underline underline-offset-2 hover:text-cyber-300 transition-colors">Hermes</a>. Deployed the way your company should run it:
-                in your cloud, connected to your data <span class="text-white font-bold">inside your perimeter</span>, secured in a <span class="text-white font-bold">sandbox</span>. The agent never sees
-                a credential.
+                Run a project, a team, or your whole company with an agent that <span class="text-white font-bold">creates the software</span> you need along the way.
+                Deployed the way your company should run it:
+                in <span class="text-white font-bold">your cloud</span> and secured in a <span class="text-white font-bold">sandbox</span>. The agent never sees a credential.
             </p>
 
         </div>
@@ -110,7 +98,7 @@ inside it via object-contain against the frame's navy background.
             <!-- Caption row: labels double as navigation, caption line follows the active slide -->
             <div class="mt-6 text-center">
                 <div class="flex flex-wrap items-center justify-center gap-2">
-                    <button type="button" data-tab="0" class="px-4 py-1.5 text-sm rounded-full border transition-colors">Chat</button>
+                    <button type="button" data-tab="0" class="px-4 py-1.5 text-sm rounded-full border transition-colors">Agent</button>
                     <button type="button" data-tab="1" class="px-4 py-1.5 text-sm rounded-full border transition-colors">Integrations</button>
                     <button type="button" data-tab="2" class="px-4 py-1.5 text-sm rounded-full border transition-colors">Widgets</button>
                     <button type="button" data-tab="3" class="px-4 py-1.5 text-sm rounded-full border transition-colors">Web apps</button>
@@ -139,10 +127,10 @@ inside it via object-contain against the frame's navy background.
     const urlPill = root.querySelector('[data-url]');
     const defaultUrl = urlPill.textContent;
     const captions = [
-        'Ask for anything: research, documents, apps, automations.',
+        'It remembers your work, takes action, and keeps going when you leave.',
         'Connect the tools your team already uses.',
-        'Live dashboards your agent builds and keeps up to date.',
-        'Ask for an app in chat, get a working URL.',
+        'Custom tools your agent builds into your workspace.',
+        'Ask for an app. Your agent builds it and gives you a URL to share.',
     ];
     const STILL_MS = 5000;
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
