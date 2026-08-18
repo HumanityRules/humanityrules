@@ -1,0 +1,126 @@
+{% comment %}
+Landing page pricing section. The four plans mirror the billing settings page
+(settings/billing.html): feature copy is kept verbatim in sync with those cards,
+and prices arrive in context from services/billing/plans.py via the landing view.
+{% endcomment %}
+
+<section id="pricing" class="landing-section section-padding relative overflow-hidden min-h-screen flex items-center py-24">
+    <div class="absolute inset-0 bg-grid-pattern opacity-30"></div>
+
+    <div class="container-custom relative z-10">
+        <!-- Section header -->
+        <div class="text-center max-w-3xl mx-auto mb-16">
+            <span class="text-cyber-400 font-semibold text-sm uppercase tracking-wider mb-4 block">
+                Pricing
+            </span>
+            <h2 class="text-4xl sm:text-5xl font-bold text-white mb-6">
+                Start free, <span class="gradient-text">on our cloud</span>.<br>
+                <span class="text-2xl sm:text-3xl">Bring it home when your team is ready.</span>
+            </h2>
+        </div>
+
+        <!-- Plan cards -->
+        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+
+            <!-- Trial -->
+            <div class="flex flex-col p-8 bg-white/[0.02] border border-white/5 rounded-2xl card-hover hover:border-cyber-500/30">
+                <h3 class="text-lg font-semibold text-white">Trial</h3>
+                <div class="mt-4 flex items-center gap-x-2">
+                    <span class="text-4xl font-bold tracking-tight text-white">$0</span>
+                    <span class="text-sm font-semibold text-gray-400">no credit card required</span>
+                </div>
+                <p class="mt-3 text-sm text-gray-400">Meet your agent before you commit.</p>
+                <ul class="mt-6 space-y-3 text-sm text-gray-300">
+                    {% include "humanityrules_app/landing/_pricing_plan_feature.html" with text="One-time credits for model usage" %}
+                    <li class="flex gap-x-3">
+                        <svg class="mt-0.5 h-5 w-4 flex-none text-cyber-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                            <path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clip-rule="evenodd"/>
+                        </svg>
+                        <span>{{ trial_runtime_days }} days of runtime</span>
+                    </li>
+                    {% include "humanityrules_app/landing/_pricing_plan_feature.html" with text="One agent" %}
+                    {% include "humanityrules_app/landing/_pricing_plan_feature.html" with text="Runs on HumR's cloud, model included" %}
+                </ul>
+                <div class="mt-auto pt-8">
+                    <a href="/auth/login/?screen_hint=sign-up"
+                       class="block w-full px-5 py-3 bg-gradient-to-r from-cyber-400 to-cyan-400 text-navy-950 font-semibold text-sm text-center rounded-full transition-all duration-300 hover:shadow-glow hover:scale-105">
+                        Start for free
+                    </a>
+                </div>
+            </div>
+
+            <!-- Operator -->
+            <div class="flex flex-col p-8 bg-white/[0.02] border border-cyber-500/40 rounded-2xl card-hover hover:border-cyber-500/60">
+                <h3 class="text-lg font-semibold text-white">Operator</h3>
+                <div class="mt-4 flex items-baseline gap-x-1">
+                    <span class="text-4xl font-bold tracking-tight text-white">${{ operator_price_usd }}</span>
+                    <span class="text-sm font-semibold text-gray-400">/month</span>
+                </div>
+                <p class="mt-3 text-sm text-gray-400">Your always-on agent, <span class="text-white font-bold">hosted by us</span>.</p>
+                <ul class="mt-6 space-y-3 text-sm text-gray-300">
+                    {% include "humanityrules_app/landing/_pricing_plan_feature.html" with text="Generous monthly credits for model usage" %}
+                    {% include "humanityrules_app/landing/_pricing_plan_feature.html" with text="Runs on HumR's cloud, model included" %}
+                    {% include "humanityrules_app/landing/_pricing_plan_feature.html" with text="One always-on agent" %}
+                    {% include "humanityrules_app/landing/_pricing_plan_feature.html" with text="No infrastructure to manage" %}
+                    {% include "humanityrules_app/landing/_pricing_plan_feature.html" with text="Turn agent workflows into web apps and share them" %}
+                    {% include "humanityrules_app/landing/_pricing_plan_feature.html" with text="Connectors for GitHub, Google, Slack and more" %}
+                    {% include "humanityrules_app/landing/_pricing_plan_feature.html" with text="Connected accounts stay safe: credentials live in the broker, never inside the agent" %}
+                </ul>
+                <div class="mt-auto pt-8">
+                    <a href="/auth/login/?screen_hint=sign-up"
+                       class="block w-full px-5 py-3 bg-gradient-to-r from-cyber-400 to-cyan-400 text-navy-950 font-semibold text-sm text-center rounded-full transition-all duration-300 hover:shadow-glow hover:scale-105">
+                        Get started
+                    </a>
+                </div>
+            </div>
+
+            <!-- Team -->
+            <div class="flex flex-col p-8 bg-white/[0.02] border border-white/5 rounded-2xl card-hover hover:border-cyber-500/30">
+                <h3 class="text-lg font-semibold text-white">Team</h3>
+                <div class="mt-4 flex items-baseline gap-x-1">
+                    <span class="text-4xl font-bold tracking-tight text-white">${{ team_agent_price_usd }}</span>
+                    <span class="text-sm font-semibold text-gray-400">/agent/month</span>
+                </div>
+                <p class="mt-3 text-sm text-gray-400"><span class="text-white font-bold">Your cloud</span>, your models, agents for the whole team.</p>
+                <ul class="mt-6 space-y-3 text-sm text-gray-300">
+                    {% include "humanityrules_app/landing/_pricing_plan_feature.html" with text="Unlimited always-on agents" %}
+                    {% include "humanityrules_app/landing/_pricing_plan_feature.html" with text="Runs in your AWS account: deep integration, agents live in your private VPC" %}
+                    {% include "humanityrules_app/landing/_pricing_plan_feature.html" with text="Conversations and files stay in your cloud" %}
+                    {% include "humanityrules_app/landing/_pricing_plan_feature.html" with text="Agents and apps on your own domain" %}
+                    {% include "humanityrules_app/landing/_pricing_plan_feature.html" with text="Bring your own model: Bedrock or any provider" %}
+                    {% include "humanityrules_app/landing/_pricing_plan_feature.html" with text="Fine-grained access control with ABAC policies" %}
+                    {% include "humanityrules_app/landing/_pricing_plan_feature.html" with text="Connected accounts stay safe: credentials live in the broker, never inside the agent" %}
+                </ul>
+                <div class="mt-auto pt-8">
+                    <a href="mailto:hello@humanityrules.io"
+                       class="block w-full px-5 py-3 bg-white/[0.04] border border-white/10 text-white font-semibold text-sm text-center rounded-full transition-all duration-300 hover:bg-white/[0.08]">
+                        Contact us
+                    </a>
+                </div>
+            </div>
+
+            <!-- Enterprise -->
+            <div class="flex flex-col p-8 bg-white/[0.02] border border-white/5 rounded-2xl card-hover hover:border-cyber-500/30">
+                <h3 class="text-lg font-semibold text-white">Enterprise</h3>
+                <div class="mt-4 flex items-baseline gap-x-1">
+                    <span class="text-4xl font-bold tracking-tight text-white">Custom</span>
+                </div>
+                <p class="mt-3 text-sm text-gray-400">For organizations that need controls and guarantees.</p>
+                <ul class="mt-6 space-y-3 text-sm text-gray-300">
+                    {% include "humanityrules_app/landing/_pricing_plan_feature.html" with text="Everything in Team" %}
+                    {% include "humanityrules_app/landing/_pricing_plan_feature.html" with text="SSO with any identity provider (SAML or OIDC)" %}
+                    {% include "humanityrules_app/landing/_pricing_plan_feature.html" with text="Directory sync (SCIM)" %}
+                    {% include "humanityrules_app/landing/_pricing_plan_feature.html" with text="Compliance" %}
+                    {% include "humanityrules_app/landing/_pricing_plan_feature.html" with text="Dedicated support" %}
+                </ul>
+                <div class="mt-auto pt-8">
+                    <a href="mailto:hello@humanityrules.io"
+                       class="block w-full px-5 py-3 bg-white/[0.04] border border-white/10 text-white font-semibold text-sm text-center rounded-full transition-all duration-300 hover:bg-white/[0.08]">
+                        Contact us
+                    </a>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</section>
