@@ -11,7 +11,7 @@
 
     <div class="container-custom relative z-10">
         <div class="max-w-4xl mx-auto text-center">
-            <!-- Eyebrow badge -->
+            {% comment %}Eyebrow badge — hidden for now
             <div class="inline-flex items-center gap-3 px-5 py-2.5 bg-cyber-500/10 border border-cyber-500/20 rounded-full mb-8 animate-fade-in-landing">
                 <!-- Friendly robot face: meet the personal agent -->
                 <svg class="w-6 h-6 text-cyber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -23,6 +23,7 @@
                 </svg>
                 <span class="text-sm sm:text-base text-cyber-300 font-semibold tracking-wide">The enterprise home for personal agents</span>
             </div>
+            {% endcomment %}
 
             <!-- Headline -->
             <h1 class="text-3xl sm:text-4xl lg:text-5xl font-bold leading-[1.05] mb-6">
@@ -127,7 +128,7 @@
     const urlPill = root.querySelector('[data-url]');
     const defaultUrl = urlPill.textContent;
     const captions = [
-        'It remembers your work, takes action, and keeps going when you leave.',
+        'It remembers your preferences, learns your workflows, and gets better over time.',
         'Connect the tools your team already uses.',
         'Custom tools your agent builds into your workspace.',
         'Ask for an app. Your agent builds it and gives you a URL to share.',
