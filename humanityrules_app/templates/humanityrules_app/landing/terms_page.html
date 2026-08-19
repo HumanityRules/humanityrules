@@ -1,0 +1,71 @@
+{% extends "humanityrules_app/landing/legal_base.html" %}
+{% comment %}
+Public terms of service page. Standard SaaS terms adapted to the product:
+organization accounts, customer content ownership, open-source Hermes note,
+trial/early-access disclaimer, California governing law.
+{% endcomment %}
+
+{% block page_title %}Terms of Service — Humanity Rules{% endblock %}
+{% block meta_description %}The terms that govern use of the Humanity Rules platform and websites.{% endblock %}
+{% block legal_heading %}Terms of Service{% endblock %}
+{% block legal_updated %}August 18, 2026{% endblock %}
+
+{% block legal_content %}
+<p>These Terms of Service ("Terms") govern your access to and use of the websites and services provided by Humanity Rules ("we", "us", or "our"), including humanityrules.io and the Humanity Rules platform (together, the "Services"). By using the Services, you agree to these Terms.</p>
+
+<h2>The Services</h2>
+<p>Humanity Rules provides a platform for deploying and operating AI agents for organizations, including agent runtimes, integrations, access controls, and related tooling. We may add, change, or remove features of the Services over time.</p>
+
+<h2>Accounts and organizations</h2>
+<p>You must provide accurate information when creating an account and keep your credentials secure. You are responsible for activity that occurs under your account. If you use the Services on behalf of an organization, you represent that you have authority to bind that organization to these Terms, and "you" refers to that organization. Organization administrators can manage members, permissions, and data within their organization's account.</p>
+
+<h2>Acceptable use</h2>
+<p>You agree not to:</p>
+<ul>
+    <li>Use the Services to violate any law or the rights of others.</li>
+    <li>Attempt to gain unauthorized access to the Services or the accounts, systems, or data of others.</li>
+    <li>Interfere with or disrupt the integrity or performance of the Services.</li>
+    <li>Use the Services to create, transmit, or store content that is unlawful, infringing, or harmful.</li>
+    <li>Resell, sublicense, or provide the Services to third parties except as we expressly permit.</li>
+    <li>Reverse engineer or attempt to extract the source code of the Services, except to the extent applicable law permits it.</li>
+</ul>
+
+<h2>Your content</h2>
+<p>You retain all rights to the content you and your users submit to the Services, such as messages, files, configurations, and connected-service credentials ("Customer Content"). You grant us a limited license to host, process, and transmit Customer Content solely to provide and secure the Services. You are responsible for Customer Content and for ensuring you have the rights needed to use it with the Services.</p>
+
+<h2>AI-generated output</h2>
+<p>The Services use artificial intelligence models to generate output. AI output may be inaccurate, incomplete, or unsuitable for your purposes. You are responsible for reviewing output before relying on it or acting on it, and for how agents you configure act on your behalf. The Services are not a substitute for professional advice.</p>
+
+<h2>Our intellectual property</h2>
+<p>The Services, including their software, design, and branding, are owned by us or our licensors and are protected by intellectual property laws. Except for the limited rights expressly granted in these Terms, we reserve all rights in the Services. Feedback you provide about the Services may be used by us without restriction or obligation to you.</p>
+
+<h2>Third-party and open-source components</h2>
+<p>The Services incorporate third-party services and open-source software, including the MIT-licensed Hermes agent built by Nous Research. Humanity Rules is an independent company and is not affiliated with or endorsed by Nous Research. Third-party services you connect to the Services are governed by their own terms.</p>
+
+<h2>Fees and billing</h2>
+<p>Some parts of the Services require payment. Fees, billing periods, and plan details are presented at purchase. Unless stated otherwise, fees are charged in advance, are non-refundable, and exclude taxes, which you are responsible for. We may change prices with reasonable advance notice; changes apply at your next billing period.</p>
+
+<h2>Trials and early access</h2>
+<p>We may offer free trials, beta features, or early-access programs. These are provided "as is", may change or end at any time, and may be subject to additional terms or usage limits.</p>
+
+<h2>Termination</h2>
+<p>You may stop using the Services and close your account at any time. We may suspend or terminate your access if you materially breach these Terms, if required by law, or if we discontinue the Services. Upon termination, your right to use the Services ends; sections of these Terms that by their nature should survive (such as ownership, disclaimers, and limitations of liability) will survive.</p>
+
+<h2>Disclaimers</h2>
+<p>THE SERVICES ARE PROVIDED "AS IS" AND "AS AVAILABLE" WITHOUT WARRANTIES OF ANY KIND, WHETHER EXPRESS, IMPLIED, OR STATUTORY, INCLUDING WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT. WE DO NOT WARRANT THAT THE SERVICES WILL BE UNINTERRUPTED, ERROR-FREE, OR SECURE.</p>
+
+<h2>Limitation of liability</h2>
+<p>TO THE MAXIMUM EXTENT PERMITTED BY LAW, WE WILL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, OR ANY LOSS OF PROFITS, REVENUE, DATA, OR GOODWILL, ARISING OUT OF OR RELATED TO THE SERVICES. OUR TOTAL LIABILITY FOR ALL CLAIMS RELATED TO THE SERVICES WILL NOT EXCEED THE GREATER OF THE AMOUNTS YOU PAID US IN THE TWELVE MONTHS BEFORE THE CLAIM OR ONE HUNDRED US DOLLARS.</p>
+
+<h2>Indemnification</h2>
+<p>You will defend and indemnify us against claims arising from your Customer Content, your use of the Services in violation of these Terms, or your violation of applicable law.</p>
+
+<h2>Governing law</h2>
+<p>These Terms are governed by the laws of the State of California, without regard to its conflict-of-laws rules. Any dispute arising out of these Terms or the Services will be resolved in the state or federal courts located in California, and you consent to their jurisdiction.</p>
+
+<h2>Changes to these Terms</h2>
+<p>We may update these Terms from time to time. If we make material changes, we will notify you by posting the updated Terms on this page and updating the date above, and where appropriate by additional notice such as email. Continued use of the Services after changes take effect constitutes acceptance of the updated Terms.</p>
+
+<h2>Contact us</h2>
+<p>If you have questions about these Terms, reach us through our <a href="{% url 'contact' %}">contact page</a>.</p>
+{% endblock %}
