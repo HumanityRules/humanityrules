@@ -1,0 +1,42 @@
+{% extends "humanityrules_app/landing/legal_base.html" %}
+{% comment %}
+Public security page: the architecture described with concrete mechanisms,
+plus an honest statement of where the company is (no certifications yet,
+SOC 2 Type I targeted October 2026) and an architecture-walkthrough offer.
+Every claim here passed a check against the actual codebase; keep it that way.
+{% endcomment %}
+
+{% block page_title %}Security — Humanity Rules{% endblock %}
+{% block meta_description %}How Humanity Rules secures AI agents: isolation, brokered credentials, policy enforcement, and an honest view of where we are.{% endblock %}
+{% block legal_eyebrow %}Security{% endblock %}
+{% block legal_heading %}Security at Humanity Rules{% endblock %}
+{% block legal_updated %}August 19, 2026{% endblock %}
+
+{% block legal_content %}
+<p>Humanity Rules exists so companies can run AI agents under their own control. That makes security the product itself, not a checklist we filled in afterwards. This page describes how the platform works today, in concrete terms, and where we honestly are as a company.</p>
+
+<p>How this page was written: it was drafted with AI, from a prompt that explicitly required honesty about the current state of the product and the company. A human reviewed every claim before publishing.</p>
+
+<h2>Where your agents run</h2>
+<p>Every agent runs as its own isolated workload, with its own identity, its own permissions, and its own history. Agents do not share credentials or state with each other.</p>
+<p>There are two hosting modes. On the Trial and Operator plans, agents run in a managed AWS environment that we operate, so you can put agents to work without connecting any infrastructure of your own. On the Team and Enterprise plans, agents deploy into your company's AWS account: your infrastructure, your data residency, your choice of model provider, and access you can cut off at the account level whenever you decide.</p>
+
+<h2>How access is controlled</h2>
+<p><strong>Credentials stay out of the agent.</strong> Agents reach outside services like GitHub or Google through a credential broker. The real secrets live with the broker; the agent holds placeholders that only work through it. An agent that goes wrong has nothing durable to leak.</p>
+<p><strong>Every request passes a policy check.</strong> Agent traffic flows through a policy proxy that enforces the access rules your organization has set. What an agent can reach is decided by policy, not by whatever tokens happen to be within reach.</p>
+<p><strong>Access is granted by people.</strong> An agent gets a new permission only when someone in your organization explicitly grants it. Administrators can review and revoke every grant at any time.</p>
+<p><strong>Activity is recorded.</strong> The traffic the policy proxy authorizes is reported back to the platform, so you can see what your agents actually did, not just what they were allowed to do.</p>
+<p><strong>Sign-in runs through WorkOS.</strong> Single sign-on with your company's identity provider is available on the Enterprise plan.</p>
+
+<h2>Where we are, honestly</h2>
+<p>We are an early-stage company, and we would rather say that plainly than hide it behind a wall of badges.</p>
+<ul>
+    <li>We hold no compliance certifications today.</li>
+    <li>We are targeting SOC 2 Type I in October 2026.</li>
+    <li>Data is encrypted in transit everywhere, and at rest in our databases, file systems, and storage.</li>
+    <li>We are in beta. If your security requirements need something the platform does not do yet, there is a real chance we can build it with you.</li>
+</ul>
+
+<h2>Talk to us</h2>
+<p>If your security team wants to look deeper, we will walk them through the architecture ourselves: the trust boundaries, the mechanisms above, and the parts still on the roadmap. Tell us what you need through our <a href="{% url 'contact' %}">contact page</a>.</p>
+{% endblock %}

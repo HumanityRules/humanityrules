@@ -1,0 +1,110 @@
+{% comment %}
+Shared shell for public legal pages (privacy, terms). Same visual frame as the
+contact page: dark landing styling, header with back-to-home, minimal footer.
+Child templates fill page_title, meta_description, legal_heading, legal_updated
+and legal_content.
+{% endcomment %}
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block page_title %}{% endblock %}</title>
+    <meta name="description" content="{% block meta_description %}{% endblock %}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'css/dist/styles.css' %}">
+    <style>
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+        }
+        ::selection {
+            background-color: rgba(6, 182, 212, 0.3);
+            color: white;
+        }
+        .legal-prose h2 {
+            margin-top: 2.5rem;
+            margin-bottom: 0.75rem;
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: white;
+        }
+        .legal-prose p {
+            margin-bottom: 1rem;
+            line-height: 1.75;
+            color: rgb(156 163 175);
+        }
+        .legal-prose ul {
+            margin-bottom: 1rem;
+            padding-left: 1.5rem;
+            list-style-type: disc;
+        }
+        .legal-prose li {
+            margin-bottom: 0.5rem;
+            line-height: 1.75;
+            color: rgb(156 163 175);
+        }
+        .legal-prose a {
+            color: rgb(34 211 238);
+            text-decoration: underline;
+            text-underline-offset: 2px;
+        }
+        .legal-prose a:hover {
+            color: rgb(103 232 249);
+        }
+        .legal-prose strong {
+            color: rgb(229 231 235);
+            font-weight: 600;
+        }
+    </style>
+    {% include "humanityrules_app/partials/_posthog.html" %}
+</head>
+<body class="min-h-screen bg-navy-950 text-gray-100 antialiased">
+    <div class="fixed inset-0 bg-grid-pattern opacity-30"></div>
+    <div class="fixed left-1/2 top-0 h-[32rem] w-[52rem] -translate-x-1/2 rounded-full bg-cyber-500/10 blur-3xl"></div>
+
+    <header class="relative z-10 border-b border-white/[0.06] bg-navy-950/70 backdrop-blur-xl">
+        <div class="container-custom">
+            <nav class="flex h-20 items-center justify-between">
+                <a href="{% url 'landing' %}" class="group">
+                    <img src="{% static 'humanityrules_app/humr-logo-large-dark.png' %}" alt="Humanity Rules" width="1330" height="280" class="max-h-14 h-auto w-auto max-w-full object-contain transition-transform duration-300 group-hover:scale-105">
+                </a>
+                <a href="{% url 'landing' %}" class="inline-flex items-center gap-2 text-sm font-medium text-gray-400 transition-colors hover:text-white">
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="m15 18-6-6 6-6"/>
+                    </svg>
+                    Back to home
+                </a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="relative z-10">
+        <div class="container-custom py-16 lg:py-24">
+            <article class="mx-auto max-w-3xl">
+                <span class="mb-4 block text-sm font-semibold uppercase tracking-wider text-cyber-400">{% block legal_eyebrow %}Legal{% endblock %}</span>
+                <h1 class="text-4xl font-bold leading-tight text-white sm:text-5xl">{% block legal_heading %}{% endblock %}</h1>
+                <p class="mt-4 text-sm text-gray-500">Last updated: {% block legal_updated %}{% endblock %}</p>
+                <div class="legal-prose mt-10">
+                    {% block legal_content %}{% endblock %}
+                </div>
+            </article>
+        </div>
+    </main>
+
+    <footer class="relative z-10 border-t border-white/5 py-6">
+        <div class="container-custom flex flex-col items-center justify-between gap-2 text-sm text-gray-600 sm:flex-row">
+            <span>© 2026 Humanity Rules. All rights reserved.</span>
+            <span class="flex items-center gap-4">
+                <a href="{% url 'privacy' %}" class="transition-colors hover:text-gray-400">Privacy</a>
+                <a href="{% url 'terms' %}" class="transition-colors hover:text-gray-400">Terms</a>
+                <a href="{% url 'security' %}" class="transition-colors hover:text-gray-400">Security</a>
+                <a href="{% url 'contact' %}" class="transition-colors hover:text-gray-400">Contact</a>
+            </span>
+        </div>
+    </footer>
+</body>
+</html>
