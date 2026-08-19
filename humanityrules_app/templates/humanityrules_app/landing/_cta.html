@@ -1,38 +1,50 @@
 {% comment %}
-Landing page CTA section - final call to action with a sign-up button.
+Landing page waitlist section, shown while public signup is disabled.
 {% endcomment %}
 
-<section id="cta" class="landing-section min-h-screen flex items-center pt-16 pb-8 relative overflow-hidden">
+<section id="waitlist" class="landing-section min-h-screen flex items-center pt-16 pb-8 relative overflow-hidden">
     <div class="absolute inset-0 bg-grid-pattern opacity-30"></div>
-    <div class="absolute top-0 left-1/2 -translate-x-1/2 w-[1000px] h-[600px] bg-cyber-500/10 rounded-full blur-3xl"></div>
+    <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[1000px] h-[600px] bg-cyber-500/10 rounded-full blur-3xl"></div>
 
     <div class="container-custom relative z-10">
         <div class="relative max-w-4xl mx-auto">
-            <div class="absolute inset-0 bg-gradient-to-r from-cyber-500/20 via-cyan-500/20 to-teal-500/20 rounded-3xl blur-2xl"></div>
-
             <div class="relative p-12 md:p-16 bg-navy-900/80 backdrop-blur-sm border border-white/10 rounded-3xl text-center">
                 <h2 class="text-4xl sm:text-5xl font-bold text-white mb-8 leading-tight">
                     Your agents.
                     <span class="gradient-text">Your rules.</span>
                 </h2>
 
-                <!-- Sign-up call to action -->
-                <div class="flex justify-center">
-                    {% if is_authenticated %}
-                        <a href="/dashboard/" class="group inline-flex items-center gap-2 px-8 py-4 bg-gradient-to-r from-cyber-400 to-cyan-400 text-navy-950 font-semibold text-base rounded-full transition-all duration-300 hover:shadow-glow hover:scale-105">
-                            Go to Dashboard
-                            <svg class="w-5 h-5 transform group-hover:translate-x-0.5 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>
-                            </svg>
-                        </a>
-                    {% else %}
-                        <a href="/auth/login/?screen_hint=sign-up" class="group inline-flex items-center gap-2 px-8 py-4 bg-gradient-to-r from-cyber-400 to-cyan-400 text-navy-950 font-semibold text-base rounded-full transition-all duration-300 hover:shadow-glow hover:scale-105">
-                            Sign up
-                            <svg class="w-5 h-5 transform group-hover:translate-x-0.5 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>
-                            </svg>
-                        </a>
-                    {% endif %}
+                <p class="text-lg text-gray-400 max-w-2xl mx-auto mb-10 leading-relaxed">
+                    Join the waitlist and we'll let you know when Humanity Rules is ready.
+                </p>
+
+                <div class="max-w-md mx-auto">
+                    <form
+                        hx-post="{% url 'waitlist_signup' %}"
+                        hx-target="#signup-response-waitlist"
+                        hx-swap="innerHTML"
+                        class="space-y-3"
+                    >
+                        {% csrf_token %}
+                        <input type="hidden" name="source" value="cta">
+                        <div class="flex gap-2">
+                            <input
+                                type="email"
+                                name="email"
+                                placeholder="name@company.com"
+                                class="flex-1 px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyber-500 focus:border-transparent transition-all"
+                                required
+                            >
+                            <button type="submit" class="btn-primary whitespace-nowrap py-2 px-6">
+                                Join the waitlist
+                            </button>
+                        </div>
+                        <div id="signup-response-waitlist">
+                            <p class="text-sm text-gray-500 text-left">
+                                No spam, we promise. We'll only email you about Humanity Rules when it's ready.
+                            </p>
+                        </div>
+                    </form>
                 </div>
 
                 <!-- Trust badges -->
