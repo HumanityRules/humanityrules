@@ -777,6 +777,9 @@
   .h-12 {
     height: calc(var(--spacing) * 12);
   }
+  .h-14 {
+    height: calc(var(--spacing) * 14);
+  }
   .h-16 {
     height: calc(var(--spacing) * 16);
   }
@@ -797,6 +800,9 @@
   }
   .h-96 {
     height: calc(var(--spacing) * 96);
+  }
+  .h-\[32rem\] {
+    height: 32rem;
   }
   .h-\[600px\] {
     height: 600px;
@@ -834,11 +840,17 @@
   .min-h-13 {
     min-height: calc(var(--spacing) * 13);
   }
+  .min-h-96 {
+    min-height: calc(var(--spacing) * 96);
+  }
   .min-h-\[3rem\] {
     min-height: 3rem;
   }
   .min-h-\[104px\] {
     min-height: 104px;
+  }
+  .min-h-\[calc\(100vh-10rem\)\] {
+    min-height: calc(100vh - 10rem);
   }
   .min-h-full {
     min-height: 100%;
@@ -935,6 +947,9 @@
   }
   .w-96 {
     width: calc(var(--spacing) * 96);
+  }
+  .w-\[52rem\] {
+    width: 52rem;
   }
   .w-\[800px\] {
     width: 800px;
@@ -1497,6 +1512,12 @@
       border-color: color-mix(in oklab, var(--color-cyan-500) 50%, transparent);
     }
   }
+  .border-cyber-400\/30 {
+    border-color: color-mix(in srgb, #22d3ee 30%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      border-color: color-mix(in oklab, var(--color-cyber-400) 30%, transparent);
+    }
+  }
   .border-cyber-500\/20 {
     border-color: color-mix(in srgb, #06b6d4 20%, transparent);
     @supports (color: color-mix(in lab, red, red)) {
@@ -1572,6 +1593,12 @@
   .border-red-400 {
     border-color: var(--color-red-400);
   }
+  .border-red-400\/30 {
+    border-color: color-mix(in srgb, oklch(70.4% 0.191 22.216) 30%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      border-color: color-mix(in oklab, var(--color-red-400) 30%, transparent);
+    }
+  }
   .border-teal-500\/50 {
     border-color: color-mix(in srgb, oklch(70.4% 0.14 182.503) 50%, transparent);
     @supports (color: color-mix(in lab, red, red)) {
@@ -1646,6 +1673,12 @@
   }
   .bg-cyber-400 {
     background-color: var(--color-cyber-400);
+  }
+  .bg-cyber-400\/10 {
+    background-color: color-mix(in srgb, #22d3ee 10%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      background-color: color-mix(in oklab, var(--color-cyber-400) 10%, transparent);
+    }
   }
   .bg-cyber-500 {
     background-color: var(--color-cyber-500);
@@ -1803,6 +1836,12 @@
       background-color: color-mix(in oklab, var(--color-navy-950) 60%, transparent);
     }
   }
+  .bg-navy-950\/70 {
+    background-color: color-mix(in srgb, #060911 70%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      background-color: color-mix(in oklab, var(--color-navy-950) 70%, transparent);
+    }
+  }
   .bg-navy-950\/98 {
     background-color: color-mix(in srgb, #060911 98%, transparent);
     @supports (color: color-mix(in lab, red, red)) {
@@ -1820,6 +1859,12 @@
   }
   .bg-red-100 {
     background-color: var(--color-red-100);
+  }
+  .bg-red-400\/10 {
+    background-color: color-mix(in srgb, oklch(70.4% 0.191 22.216) 10%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      background-color: color-mix(in oklab, var(--color-red-400) 10%, transparent);
+    }
   }
   .bg-red-500 {
     background-color: var(--color-red-500);
@@ -2142,6 +2187,9 @@
   }
   .py-12 {
     padding-block: calc(var(--spacing) * 12);
+  }
+  .py-16 {
+    padding-block: calc(var(--spacing) * 16);
   }
   .py-24 {
     padding-block: calc(var(--spacing) * 24);
@@ -2543,6 +2591,9 @@
   .text-purple-700 {
     color: var(--color-purple-700);
   }
+  .text-red-300 {
+    color: var(--color-red-300);
+  }
   .text-red-400 {
     color: var(--color-red-400);
   }
@@ -2710,6 +2761,12 @@
   .ring-2 {
     --tw-ring-shadow: var(--tw-ring-inset,) 0 0 0 calc(2px + var(--tw-ring-offset-width)) var(--tw-ring-color, currentcolor);
     box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
+  }
+  .shadow-black\/20 {
+    --tw-shadow-color: color-mix(in srgb, #000 20%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      --tw-shadow-color: color-mix(in oklab, color-mix(in oklab, var(--color-black) 20%, transparent) var(--tw-shadow-alpha), transparent);
+    }
   }
   .shadow-navy-950\/80 {
     --tw-shadow-color: color-mix(in srgb, #060911 80%, transparent);
@@ -3018,6 +3075,11 @@
   .placeholder\:text-gray-500 {
     &::placeholder {
       color: var(--color-gray-500);
+    }
+  }
+  .placeholder\:text-gray-600 {
+    &::placeholder {
+      color: var(--color-gray-600);
     }
   }
   .first\:rounded-t-lg {
@@ -3412,6 +3474,11 @@
       }
     }
   }
+  .focus\:border-cyber-400 {
+    &:focus {
+      border-color: var(--color-cyber-400);
+    }
+  }
   .focus\:border-indigo-500 {
     &:focus {
       border-color: var(--color-indigo-500);
@@ -3458,6 +3525,14 @@
     &:focus {
       --tw-ring-shadow: var(--tw-ring-inset,) 0 0 0 calc(2px + var(--tw-ring-offset-width)) var(--tw-ring-color, currentcolor);
       box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
+    }
+  }
+  .focus\:ring-cyber-400\/20 {
+    &:focus {
+      --tw-ring-color: color-mix(in srgb, #22d3ee 20%, transparent);
+      @supports (color: color-mix(in lab, red, red)) {
+        --tw-ring-color: color-mix(in oklab, var(--color-cyber-400) 20%, transparent);
+      }
     }
   }
   .focus\:ring-cyber-500 {
@@ -3729,6 +3804,16 @@
       gap: calc(var(--spacing) * 4);
     }
   }
+  .sm\:p-8 {
+    @media (width >= 40rem) {
+      padding: calc(var(--spacing) * 8);
+    }
+  }
+  .sm\:text-left {
+    @media (width >= 40rem) {
+      text-align: left;
+    }
+  }
   .sm\:text-2xl {
     @media (width >= 40rem) {
       font-size: var(--text-2xl);
@@ -3833,6 +3918,16 @@
   .lg\:gap-16 {
     @media (width >= 64rem) {
       gap: calc(var(--spacing) * 16);
+    }
+  }
+  .lg\:gap-20 {
+    @media (width >= 64rem) {
+      gap: calc(var(--spacing) * 20);
+    }
+  }
+  .lg\:py-24 {
+    @media (width >= 64rem) {
+      padding-block: calc(var(--spacing) * 24);
     }
   }
   .lg\:text-5xl {
