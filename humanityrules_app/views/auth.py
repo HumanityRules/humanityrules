@@ -5,6 +5,7 @@ from functools import lru_cache
 from urllib.parse import urlencode
 
 import httpx
+import jwt
 from django.conf import settings
 from django.contrib.auth import login, logout
 from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest
@@ -16,6 +17,9 @@ from ..models import Organization, OrganizationMembership, User
 from ..services import abac_service
 
 logger = logging.getLogger(__name__)
+
+
+_WORKOS_SESSION_ID_SESSION_KEY = "workos_session_id"
 
 
 @lru_cache(maxsize=1)
@@ -190,7 +194,27 @@ def _post_login_redirect_target(request: HttpRequest) -> str:
     return request.session.pop("post_login_redirect", "") or "/dashboard/"
 
 
-def auth_callback(request):
+def _remember_workos_session_id(request: HttpRequest, access_token: str | None) -> None:
+    """Keep the WorkOS session ID so logout can end both authentication sessions."""
+    request.session.pop(_WORKOS_SESSION_ID_SESSION_KEY, None)
+    if not access_token:
+        logger.error("WorkOS authentication response did not include an access token")
+        return
+
+    try:
+        claims = jwt.decode(jwt=access_token, options={"verify_signature": False})
+    except jwt.PyJWTError as exc:
+        logger.error("Could not decode WorkOS access token for logout: %s", exc)
+        return
+
+    session_id = claims.get("sid")
+    if not isinstance(session_id, str) or not session_id:
+        logger.error("WorkOS access token did not include a session ID")
+        return
+    request.session[_WORKOS_SESSION_ID_SESSION_KEY] = session_id
+
+
+def auth_callback(request: HttpRequest) -> HttpResponse:
     """Handles the OAuth callback from WorkOS."""
     code = request.GET.get("code")
     if not code:
@@ -199,6 +223,10 @@ def auth_callback(request):
     try:
         auth_response = _get_workos_client().user_management.authenticate_with_code(
             code=code,
+        )
+        _remember_workos_session_id(
+            request=request,
+            access_token=getattr(auth_response, "access_token", None),
         )
 
         workos_user = auth_response.user
@@ -350,9 +378,15 @@ def oidc_callback(request):
     return redirect(post_login_redirect)
 
 
-def auth_logout(request):
-    """
-    Logs the user out of Django session.
-    """
+def auth_logout(request: HttpRequest) -> HttpResponse:
+    """End the local session and the corresponding WorkOS session."""
+    workos_session_id = request.session.get(_WORKOS_SESSION_ID_SESSION_KEY)
     logout(request)
+
+    if isinstance(workos_session_id, str) and workos_session_id:
+        workos_logout_url = _get_workos_client().user_management.get_logout_url(
+            session_id=workos_session_id,
+            return_to=f"{_build_base_uri(request=request)}/",
+        )
+        return redirect(workos_logout_url)
     return redirect("/")
