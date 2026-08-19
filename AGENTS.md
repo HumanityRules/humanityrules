@@ -8,7 +8,7 @@ HumR’s product POV is that agents should be easy enough for non-technical empl
 
 **What makes HumR different is that the customer owns the agent platform:** its runtime, identity, permissions, integrations, operational history, and choice of models.
 
-**Stage:** Pre-beta and pre-product-market fit, with no customers yet.
+**Stage:** Beta and pre-product-market fit, with no customers yet.
 
 **Implementation facts:** “Humanity Rules” and “HumR” are the product identity. Code and infrastructure use `humanityrules`, `humr`, and `HUMR_`; AWS resources use `humr`, and Python packages use `humanityrules`. HumR uses the open-source Hermes Agent (HA) as its harness and Hermes WebUI as its primary UI. The deployed Hermes template is under `template_repos/hermes_agent/` and is deployed through the AppTemplate mechanism. HumR’s control plane is called CP.
 

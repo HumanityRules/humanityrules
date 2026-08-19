@@ -10,6 +10,9 @@ urlpatterns = [
 
     path("", views.landing, name="landing"),
     path("contact/", views.contact, name="contact"),
+    path("privacy/", views.privacy, name="privacy"),
+    path("terms/", views.terms, name="terms"),
+    path("security/", views.security, name="security"),
     path("devopshero-ai/", views.devopshero_landing, name="devopshero_landing"),
     path("waitlist/signup/", views.waitlist_signup, name="waitlist_signup"),
     path("dashboard/", views.dashboard, name="dashboard"),

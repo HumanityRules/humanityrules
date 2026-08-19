@@ -50,6 +50,7 @@ Landing page footer with brand, links and social icons.
                 <ul class="space-y-3">
                     <li><a href="#platform" class="text-gray-400 hover:text-white text-sm transition-colors">Platform</a></li>
                     <li><a href="#why" class="text-gray-400 hover:text-white text-sm transition-colors">Why Humanity Rules</a></li>
+                    <li><a href="{% url 'security' %}" class="text-gray-400 hover:text-white text-sm transition-colors">Security</a></li>
                 </ul>
             </div>
 
@@ -66,9 +67,8 @@ Landing page footer with brand, links and social icons.
             <div class="md:-ml-6">
                 <h4 class="text-white font-semibold mb-4 text-sm">Legal</h4>
                 <ul class="space-y-3">
-                    <li><a href="#" class="text-gray-400 hover:text-white text-sm transition-colors">Privacy</a></li>
-                    <li><a href="#" class="text-gray-400 hover:text-white text-sm transition-colors">Terms</a></li>
-                    <li><a href="#" class="text-gray-400 hover:text-white text-sm transition-colors">Trust &amp; compliance</a></li>
+                    <li><a href="{% url 'privacy' %}" class="text-gray-400 hover:text-white text-sm transition-colors">Privacy</a></li>
+                    <li><a href="{% url 'terms' %}" class="text-gray-400 hover:text-white text-sm transition-colors">Terms</a></li>
                 </ul>
             </div>
         </div>

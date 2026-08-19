@@ -1,0 +1,64 @@
+{% extends "humanityrules_app/landing/legal_base.html" %}
+{% comment %}
+Public privacy policy page. Standard SaaS policy adapted to our actual stack:
+WorkOS auth, Stripe billing, PostHog analytics, AWS hosting.
+{% endcomment %}
+
+{% block page_title %}Privacy Policy — Humanity Rules{% endblock %}
+{% block meta_description %}How Humanity Rules collects, uses, and protects your information.{% endblock %}
+{% block legal_heading %}Privacy Policy{% endblock %}
+{% block legal_updated %}August 18, 2026{% endblock %}
+
+{% block legal_content %}
+<p>This Privacy Policy explains how Humanity Rules ("we", "us", or "our") collects, uses, and shares information when you use our websites and services, including humanityrules.io and the Humanity Rules platform (together, the "Services").</p>
+
+<h2>Information we collect</h2>
+<p><strong>Account information.</strong> When you sign up, we collect information such as your name, email address, and the organization you belong to. Authentication is handled through our sign-in provider, and we receive basic profile information from it.</p>
+<p><strong>Contact and waitlist submissions.</strong> When you contact us or join a waitlist, we collect the information you submit, such as your name, email address, company, and message.</p>
+<p><strong>Billing information.</strong> If you purchase a paid plan, payment is processed by our payment provider (Stripe). We do not store your full payment card details; we receive limited billing information such as plan, payment status, and billing contact details.</p>
+<p><strong>Usage information.</strong> We collect information about how you interact with the Services, such as pages visited, features used, browser type, and approximate location derived from your IP address. We use analytics tools to help us understand this information.</p>
+<p><strong>Customer content.</strong> Organizations and their users may submit content to the Services, such as messages to agents, files, configurations, and connected-service credentials ("Customer Content"). We process Customer Content on behalf of the organization that controls the account in order to provide the Services.</p>
+
+<h2>How we use information</h2>
+<ul>
+    <li>To provide, operate, maintain, and secure the Services.</li>
+    <li>To set up and manage accounts, organizations, and billing.</li>
+    <li>To respond to your requests and provide support.</li>
+    <li>To understand usage and improve the Services.</li>
+    <li>To communicate with you about the Services, including service announcements and administrative messages.</li>
+    <li>To comply with legal obligations and enforce our terms.</li>
+</ul>
+
+<h2>How we share information</h2>
+<p>We do not sell your personal information. We share information only in the following circumstances:</p>
+<ul>
+    <li><strong>Service providers.</strong> We use third-party providers to operate the Services, such as cloud hosting (Amazon Web Services), authentication, payment processing (Stripe), and product analytics. These providers process information on our behalf under their own contractual obligations.</li>
+    <li><strong>Your organization.</strong> If you use the Services through an organization, information about your account and activity may be visible to that organization's administrators.</li>
+    <li><strong>Legal requirements.</strong> We may disclose information if required by law, or if we believe in good faith that disclosure is necessary to protect our rights, your safety, or the safety of others.</li>
+    <li><strong>Business transfers.</strong> If we are involved in a merger, acquisition, or sale of assets, information may be transferred as part of that transaction.</li>
+</ul>
+
+<h2>Cookies and analytics</h2>
+<p>We use cookies and similar technologies to keep you signed in, remember your preferences, and understand how the Services are used. You can control cookies through your browser settings, though some features of the Services may not function properly without them.</p>
+
+<h2>Data retention</h2>
+<p>We retain information for as long as needed to provide the Services and for legitimate business purposes, such as complying with legal obligations, resolving disputes, and enforcing agreements. When an organization's account is closed, we delete or de-identify associated Customer Content within a reasonable period, except where retention is required by law.</p>
+
+<h2>Security</h2>
+<p>We use administrative, technical, and physical safeguards designed to protect your information, including encryption in transit, scoped access controls, and audit logging. No method of transmission or storage is completely secure, so we cannot guarantee absolute security.</p>
+
+<h2>Your rights</h2>
+<p>Depending on where you live, you may have rights regarding your personal information, such as the right to access, correct, delete, or receive a copy of it. To exercise these rights, contact us through our <a href="{% url 'contact' %}">contact page</a>. If you use the Services through an organization, we may direct your request to that organization, which controls its account data.</p>
+
+<h2>International transfers</h2>
+<p>We are based in the United States, and information we collect is processed in the United States. If you access the Services from outside the United States, you understand that your information will be transferred to and processed in the United States.</p>
+
+<h2>Children</h2>
+<p>The Services are not directed to children under 16, and we do not knowingly collect personal information from them. If you believe a child has provided us personal information, contact us and we will delete it.</p>
+
+<h2>Changes to this policy</h2>
+<p>We may update this Privacy Policy from time to time. If we make material changes, we will notify you by posting the updated policy on this page and updating the date above, and where appropriate by additional notice such as email.</p>
+
+<h2>Contact us</h2>
+<p>If you have questions about this Privacy Policy, reach us through our <a href="{% url 'contact' %}">contact page</a>.</p>
+{% endblock %}
