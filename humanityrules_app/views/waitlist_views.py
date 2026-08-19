@@ -24,5 +24,5 @@ def waitlist_signup(request):
         pass
 
     return HttpResponse(
-        '<p class="text-sm text-cyber-400">Thanks! We\'ll notify you when Humanity Rules is ready.</p>'
+        '<p class="text-sm text-cyber-400">Thanks! You\'re in line. We\'ll email you when your slot opens.</p>'
     )
