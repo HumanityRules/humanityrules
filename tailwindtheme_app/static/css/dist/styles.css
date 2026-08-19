@@ -3952,6 +3952,11 @@
       line-height: var(--tw-leading, var(--text-7xl--line-height));
     }
   }
+  .lg\:text-\[3\.35rem\] {
+    @media (width >= 64rem) {
+      font-size: 3.35rem;
+    }
+  }
   .xl\:grid-cols-3 {
     @media (width >= 80rem) {
       grid-template-columns: repeat(3, minmax(0, 1fr));
