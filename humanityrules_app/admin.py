@@ -1,7 +1,13 @@
+import httpx
 from django import forms
-from django.contrib import admin
+from django.conf import settings
+from django.contrib import admin, messages
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+from django.db.models import QuerySet
 from django.http import HttpRequest
+from django.utils import timezone
+from workos import WorkOSClient
+from workos.exceptions import BaseRequestException
 
 from humanityrules_app.views.integrations import provider_registry
 from humanityrules_app.models import (
@@ -292,10 +298,53 @@ class AwsResourceCacheAdmin(admin.ModelAdmin):
 
 @admin.register(WaitlistSignup)
 class WaitlistSignupAdmin(admin.ModelAdmin):
-    list_display = ["email", "source", "created_at"]
-    list_filter = ["source", "created_at"]
+    list_display = ["email", "source", "invitation_sent_at", "created_at"]
+    list_filter = ["source", "invitation_sent_at", "created_at"]
     search_fields = ["email"]
-    readonly_fields = ["id", "created_at"]
+    readonly_fields = ["id", "workos_invitation_id", "invitation_sent_at", "created_at"]
+    actions = ["invite_selected_to_humr"]
+
+    @admin.action(description="Invite selected people to HumR")
+    def invite_selected_to_humr(self, request: HttpRequest, queryset: QuerySet[WaitlistSignup]) -> None:
+        client = WorkOSClient(
+            api_key=settings.WORKOS_API_KEY,
+            client_id=settings.WORKOS_CLIENT_ID,
+        )
+        invited_count = 0
+        skipped_count = 0
+
+        for signup in queryset:
+            if signup.invitation_sent_at is not None:
+                skipped_count += 1
+                continue
+
+            try:
+                invitation = client.user_management.send_invitation(email=signup.email)
+            except (BaseRequestException, httpx.HTTPError) as error:
+                self.message_user(
+                    request=request,
+                    message=f"Could not invite {signup.email} through WorkOS: {error}",
+                    level=messages.ERROR,
+                )
+                continue
+
+            signup.workos_invitation_id = invitation.id
+            signup.invitation_sent_at = timezone.now()
+            signup.save(update_fields=["workos_invitation_id", "invitation_sent_at"])
+            invited_count += 1
+
+        if invited_count:
+            self.message_user(
+                request=request,
+                message=f"Sent {invited_count} WorkOS invitation(s).",
+                level=messages.SUCCESS,
+            )
+        if skipped_count:
+            self.message_user(
+                request=request,
+                message=f"Skipped {skipped_count} previously invited waitlist signup(s).",
+                level=messages.INFO,
+            )
 
 
 @admin.register(ContactSubmission)
