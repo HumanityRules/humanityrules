@@ -28,6 +28,7 @@ from humanityrules_app.models import (
     OrganizationMembership,
     AwsResourceCache,
     AppPermissionRequest,
+    PlatformSettings,
     PlatformSharedCredential,
     Policy,
     EnvironmentBearerToken,
@@ -294,6 +295,14 @@ class WaitlistSignupAdmin(admin.ModelAdmin):
     list_filter = ["source", "created_at"]
     search_fields = ["email"]
     readonly_fields = ["id", "created_at"]
+
+
+@admin.register(PlatformSettings)
+class PlatformSettingsAdmin(admin.ModelAdmin):
+    list_display = ["public_signup_enabled"]
+
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        return not PlatformSettings.objects.exists()
 
 
 # =============================================================================
