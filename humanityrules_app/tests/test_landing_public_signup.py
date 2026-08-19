@@ -10,7 +10,13 @@ class LandingPublicSignupTests(TestCase):
     def test_public_signup_disabled_shows_waitlist(self) -> None:
         response = self.client.get(path="/")
 
-        self.assertContains(response=response, text="Join the waitlist")
+        self.assertContains(response=response, text="Get a trial slot")
+        self.assertContains(
+            response=response,
+            text="The product is live. Trial capacity is limited, so leave your email and we’ll let you know when a slot opens.",
+        )
+        self.assertContains(response=response, text="Bring it to your own cloud")
+        self.assertContains(response=response, text="Humanity Rules — The workspace that builds itself.")
         self.assertContains(response=response, text='id="waitlist"')
         self.assertContains(response=response, text='hx-post="/waitlist/signup/"')
         self.assertNotContains(response=response, text="/auth/login/?screen_hint=sign-up")
@@ -23,5 +29,5 @@ class LandingPublicSignupTests(TestCase):
 
         self.assertContains(response=response, text="/auth/login/?screen_hint=sign-up")
         self.assertContains(response=response, text="Start for free")
-        self.assertNotContains(response=response, text="Join the waitlist")
+        self.assertNotContains(response=response, text="Get a trial slot")
         self.assertNotContains(response=response, text='id="waitlist"')
