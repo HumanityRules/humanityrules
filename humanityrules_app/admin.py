@@ -12,6 +12,7 @@ from humanityrules_app.models import (
     BillingBalance,
     BillingLedgerEntry,
     BillingUsageEvent,
+    ContactSubmission,
     DeploymentLog,
     DeploymentRecord,
     Environment,
@@ -295,6 +296,14 @@ class WaitlistSignupAdmin(admin.ModelAdmin):
     list_filter = ["source", "created_at"]
     search_fields = ["email"]
     readonly_fields = ["id", "created_at"]
+
+
+@admin.register(ContactSubmission)
+class ContactSubmissionAdmin(admin.ModelAdmin):
+    list_display = ["name", "email", "company", "created_at"]
+    list_filter = ["created_at"]
+    search_fields = ["name", "email", "company", "message"]
+    readonly_fields = ["id", "name", "email", "company", "message", "created_at"]
 
 
 @admin.register(PlatformSettings)

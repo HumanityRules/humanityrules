@@ -1172,6 +1172,25 @@ class WaitlistSignup(models.Model):
         return self.email
 
 
+class ContactSubmission(models.Model):
+    """A message submitted through the public contact page."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
+    name = models.CharField(max_length=200)
+    email = models.EmailField()
+    company = models.CharField(max_length=200, blank=True)
+    message = models.TextField(max_length=5000)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Contact submission"
+        verbose_name_plural = "Contact submissions"
+
+    def __str__(self) -> str:
+        return f"{self.name} <{self.email}>"
+
+
 class AppPermissions(models.Model):
     """The current (last-applied) permissions for an app."""
     id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)

@@ -9,6 +9,7 @@ urlpatterns = [
     path("health/", views.health_check, name="health_check"),
 
     path("", views.landing, name="landing"),
+    path("contact/", views.contact, name="contact"),
     path("devopshero-ai/", views.devopshero_landing, name="devopshero_landing"),
     path("waitlist/signup/", views.waitlist_signup, name="waitlist_signup"),
     path("dashboard/", views.dashboard, name="dashboard"),

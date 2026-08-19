@@ -1,6 +1,7 @@
 """Export the control-plane view callables consumed by the central URL map."""
 
 from .landing import devopshero_landing, landing
+from .contact_views import contact
 from .dashboard import dashboard
 from .platform_fleet import (
     fleet_app_remove,
@@ -151,6 +152,7 @@ from .security_abac import (
 __all__ = [
     "landing",
     "devopshero_landing",
+    "contact",
     "dashboard",
     "fleet_app_remove",
     "fleet_app_remove_confirm",
