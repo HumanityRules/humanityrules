@@ -42,9 +42,9 @@ and prices arrive in context from services/billing/plans.py via the landing view
                     {% include "humanityrules_app/landing/_pricing_plan_feature.html" with text="Runs on HumR's cloud, model included" %}
                 </ul>
                 <div class="mt-auto pt-8">
-                    <a href="/auth/login/?screen_hint=sign-up"
+                    <a href="{% if public_signup_enabled %}/auth/login/?screen_hint=sign-up{% else %}#waitlist{% endif %}"
                        class="block w-full px-5 py-3 bg-gradient-to-r from-cyber-400 to-cyan-400 text-navy-950 font-semibold text-sm text-center rounded-full transition-all duration-300 hover:shadow-glow hover:scale-105">
-                        Start for free
+                        {% if public_signup_enabled %}Start for free{% else %}Join the waitlist{% endif %}
                     </a>
                 </div>
             </div>
@@ -67,9 +67,9 @@ and prices arrive in context from services/billing/plans.py via the landing view
                     {% include "humanityrules_app/landing/_pricing_plan_feature.html" with text="Connected accounts stay safe: credentials live in the broker, never inside the agent" %}
                 </ul>
                 <div class="mt-auto pt-8">
-                    <a href="/auth/login/?screen_hint=sign-up"
+                    <a href="{% if public_signup_enabled %}/auth/login/?screen_hint=sign-up{% else %}#waitlist{% endif %}"
                        class="block w-full px-5 py-3 bg-gradient-to-r from-cyber-400 to-cyan-400 text-navy-950 font-semibold text-sm text-center rounded-full transition-all duration-300 hover:shadow-glow hover:scale-105">
-                        Get started
+                        {% if public_signup_enabled %}Get started{% else %}Join the waitlist{% endif %}
                     </a>
                 </div>
             </div>
