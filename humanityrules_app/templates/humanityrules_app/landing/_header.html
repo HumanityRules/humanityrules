@@ -45,7 +45,7 @@ JS for scroll effect and mobile toggle is in landing_page.html.
                         Sign in
                     </a>
                     <a href="{% if public_signup_enabled %}/auth/login/?screen_hint=sign-up{% else %}#waitlist{% endif %}" class="group inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-cyber-400 to-cyan-400 text-navy-950 font-semibold text-sm rounded-full transition-all duration-300 hover:shadow-glow hover:scale-105">
-                        {% if public_signup_enabled %}Sign up{% else %}Join the waitlist{% endif %}
+                        {% if public_signup_enabled %}Sign up{% else %}Get a trial slot{% endif %}
                         <svg class="w-4 h-4 transform group-hover:translate-x-0.5 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>
                         </svg>
@@ -105,7 +105,7 @@ JS for scroll effect and mobile toggle is in landing_page.html.
                     Sign in
                 </a>
                 <a href="{% if public_signup_enabled %}/auth/login/?screen_hint=sign-up{% else %}#waitlist{% endif %}" class="flex items-center justify-center gap-2 w-full px-6 py-4 bg-gradient-to-r from-cyber-400 to-cyan-400 text-navy-950 font-semibold rounded-xl">
-                    {% if public_signup_enabled %}Sign up{% else %}Join the waitlist{% endif %}
+                    {% if public_signup_enabled %}Sign up{% else %}Get a trial slot{% endif %}
                     <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>
                     </svg>
