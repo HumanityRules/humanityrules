@@ -1134,6 +1134,20 @@ class EnvironmentLog(models.Model):
         return f"[{self.source}] {self.level}: {self.message[:50]}..."
 
 
+class PlatformSettings(models.Model):
+    """Live, platform-wide product controls managed through Django admin."""
+
+    id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+    public_signup_enabled = models.BooleanField(default=False)
+
+    class Meta:
+        verbose_name = "Platform settings"
+        verbose_name_plural = "Platform settings"
+
+    def __str__(self) -> str:
+        return "Platform settings"
+
+
 class WaitlistSignup(models.Model):
     """Captures email signups from the landing page 'notify me' form."""
     id = models.UUIDField(
