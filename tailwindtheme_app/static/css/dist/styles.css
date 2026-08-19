@@ -1183,6 +1183,9 @@
   .gap-8 {
     gap: calc(var(--spacing) * 8);
   }
+  .gap-12 {
+    gap: calc(var(--spacing) * 12);
+  }
   .gap-16 {
     gap: calc(var(--spacing) * 16);
   }
@@ -2611,8 +2614,17 @@
   .underline {
     text-decoration-line: underline;
   }
+  .decoration-white\/30 {
+    text-decoration-color: color-mix(in srgb, #fff 30%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      text-decoration-color: color-mix(in oklab, var(--color-white) 30%, transparent);
+    }
+  }
   .underline-offset-2 {
     text-underline-offset: 2px;
+  }
+  .underline-offset-4 {
+    text-underline-offset: 4px;
   }
   .antialiased {
     -webkit-font-smoothing: antialiased;
@@ -3393,6 +3405,13 @@
       }
     }
   }
+  .hover\:decoration-white {
+    &:hover {
+      @media (hover: hover) {
+        text-decoration-color: var(--color-white);
+      }
+    }
+  }
   .focus\:border-indigo-500 {
     &:focus {
       border-color: var(--color-indigo-500);
@@ -3746,6 +3765,11 @@
       line-height: var(--tw-leading, var(--text-base--line-height));
     }
   }
+  .md\:-ml-6 {
+    @media (width >= 48rem) {
+      margin-left: calc(var(--spacing) * -6);
+    }
+  }
   .md\:grid-cols-2 {
     @media (width >= 48rem) {
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3754,6 +3778,11 @@
   .md\:grid-cols-3 {
     @media (width >= 48rem) {
       grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+  .md\:grid-cols-5 {
+    @media (width >= 48rem) {
+      grid-template-columns: repeat(5, minmax(0, 1fr));
     }
   }
   .md\:grid-cols-6 {
@@ -3799,6 +3828,11 @@
   .lg\:grid-cols-3 {
     @media (width >= 64rem) {
       grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+  .lg\:gap-16 {
+    @media (width >= 64rem) {
+      gap: calc(var(--spacing) * 16);
     }
   }
   .lg\:text-5xl {
