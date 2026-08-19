@@ -1161,6 +1161,15 @@ class WaitlistSignup(models.Model):
         blank=True,
         help_text="Where on the landing page they signed up (hero, cta)",
     )
+    workos_invitation_id = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        unique=True,
+        editable=False,
+        help_text="WorkOS application-wide invitation sent to this person.",
+    )
+    invitation_sent_at = models.DateTimeField(null=True, blank=True, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
