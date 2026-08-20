@@ -29,7 +29,10 @@
     </div>
     {% endif %}
 
-    <form method="post" class="space-y-5">
+    <form hx-post="{% url 'template_deploy_form' template_slug=template.slug %}"
+          hx-target="#main-content"
+          hx-swap="innerHTML"
+          class="space-y-5">
         {% csrf_token %}
 
         <div>

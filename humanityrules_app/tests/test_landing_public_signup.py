@@ -13,10 +13,10 @@ class LandingPublicSignupTests(TestCase):
         self.assertContains(response=response, text="Get a trial slot")
         self.assertContains(
             response=response,
-            text="The product is live. Trial capacity is limited, so leave your email and we’ll let you know when a slot opens.",
+            text="The product is in production and live. Trial capacity is limited, so leave your email and we’ll let you know when a slot opens.",
         )
         self.assertContains(response=response, text="Bring it to your own cloud")
-        self.assertContains(response=response, text="Humanity Rules — The workspace that builds itself.")
+        self.assertContains(response=response, text="Humanity Rules — Private apps, built and shipped.")
         self.assertContains(response=response, text='id="waitlist"')
         self.assertContains(response=response, text='hx-post="/waitlist/signup/"')
         self.assertNotContains(response=response, text="/auth/login/?screen_hint=sign-up")
