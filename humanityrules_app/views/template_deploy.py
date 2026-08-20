@@ -10,7 +10,8 @@ import logging
 
 from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, HttpResponse
-from django.shortcuts import get_object_or_404, render, redirect
+from django.shortcuts import get_object_or_404, render
+from django.urls import reverse
 
 from humanityrules_app import app_slugs
 from humanityrules_app import models
@@ -350,4 +351,6 @@ def _handle_deploy(request: HttpRequest, template: models.AppTemplate, org: mode
 
     if app is None:
         raise RuntimeError("Template deployment completed without a created app")
-    return redirect("app_detail", app_slug=app.slug)
+    response = HttpResponse(status=200)
+    response["HX-Redirect"] = reverse("app_detail", kwargs={"app_slug": app.slug})
+    return response

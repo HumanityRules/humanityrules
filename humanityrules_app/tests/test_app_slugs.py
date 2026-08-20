@@ -309,6 +309,28 @@ class AgentSlugErrorSurfaceTests(TestCase):
         self.assertFalse(models.App.objects.filter(organization=self.organization, slug="myagent").exists())
         self.assertEqual(deploy_mock.call_args.kwargs["app_slug"], "myagent")
 
+    def test_template_deploy_form_success_redirects_via_htmx_header(self) -> None:
+        self.client.force_login(self.user)
+        app = self._create_redeploy_source()
+        deploy_mock = Mock(return_value=app)
+
+        with patch(
+            "humanityrules_app.views.template_deploy.template_deploy_service.deploy_from_template",
+            new=deploy_mock,
+        ):
+            response = self.client.post(
+                reverse("template_deploy_form", kwargs={"template_slug": self.template.slug}),
+                {
+                    "app_name": "My Agent",
+                    "workspace_id": str(self.workspace.id),
+                    "environment_id": str(self.environment.id),
+                    "compute_mode": models.EcsComputeMode.FARGATE,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["HX-Redirect"], reverse("app_detail", kwargs={"app_slug": app.slug}))
+
     def test_humr_control_deploy_template_writes_service_value_error_to_stderr(self) -> None:
         stderr = StringIO()
         deploy_mock = Mock(side_effect=ValueError("Simulated deploy failure."))
