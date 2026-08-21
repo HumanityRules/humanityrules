@@ -1,7 +1,7 @@
 // HUMR WebUI extension. Loaded per Hermes' docs/EXTENSIONS.md via the
 // HERMES_WEBUI_EXTENSION_* env vars exported in webui.sh.
 //
-// Adds a Settings → Permissions section (after System): the self-referential IAM
+// Adds a Settings → Cloud Permissions section (after System): the self-referential IAM
 // task-role permissions editor for THIS Hermes deployment. The target
 // (app, environment) is implicit — HUMR resolves it from the deployment identity
 // behind the broker, so no app/env is ever named here. All calls go same-origin
@@ -373,7 +373,7 @@
     ]);
     return elem('div', { class: 'humr-perm-head' }, [
       elem('div', { class: 'humr-perm-head-row' }, [
-        elem('div', { class: 'humr-perm-title' }, ['Permissions']),
+        elem('div', { class: 'humr-perm-title' }, ['Cloud Permissions']),
         actions,
       ]),
       elem('div', { class: 'humr-perm-meta' }, [
@@ -483,7 +483,7 @@
         if (typeof window.switchSettingsSection === 'function') window.switchSettingsSection('permissions');
       },
     });
-    menuBtn.innerHTML = menuIcon + '<span>Permissions</span>';
+    menuBtn.innerHTML = menuIcon + '<span>Cloud Permissions</span>';
     // Hermes 0.51 wraps the menu buttons in `.settings-menu-items`, so System
     // is no longer a direct child of #settingsMenu. Insert relative to System's
     // real parent (the wrapper) — settingsMenu.insertBefore() would throw
