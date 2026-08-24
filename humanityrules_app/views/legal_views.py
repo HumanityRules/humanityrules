@@ -1,4 +1,4 @@
-"""Render the public legal and trust pages (privacy policy, terms of service, security) outside the authenticated app shell."""
+"""Render the public legal and company pages (privacy policy, terms of service, security, team) outside the authenticated app shell."""
 
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
@@ -17,3 +17,8 @@ def terms(request: HttpRequest) -> HttpResponse:
 def security(request: HttpRequest) -> HttpResponse:
     """Render the public security page."""
     return render(request, "humanityrules_app/landing/security_page.html")
+
+
+def team(request: HttpRequest) -> HttpResponse:
+    """Render the public team page."""
+    return render(request, "humanityrules_app/landing/team_page.html")

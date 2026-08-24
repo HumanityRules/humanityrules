@@ -2,7 +2,7 @@
 
 from .landing import devopshero_landing, landing
 from .contact_views import contact
-from .legal_views import privacy, security, terms
+from .legal_views import privacy, security, team, terms
 from .dashboard import dashboard
 from .platform_fleet import (
     fleet_app_remove,
@@ -157,6 +157,7 @@ __all__ = [
     "privacy",
     "terms",
     "security",
+    "team",
     "dashboard",
     "fleet_app_remove",
     "fleet_app_remove_confirm",
