@@ -20,7 +20,6 @@ SKIP_APP_PENDING_REMOVAL = app_job_service.SKIP_APP_PENDING_REMOVAL
 SKIP_ENVIRONMENT_NOT_READY = app_job_service.SKIP_ENVIRONMENT_NOT_READY
 SKIP_FAILED_NOT_INCLUDED = "Failed not included"
 SKIP_NOT_REDEPLOYABLE = "Not redeployable"
-SKIP_TORN_DOWN = "Torn down"
 
 
 # --- Status -----------------------------------------------------------------
@@ -120,8 +119,6 @@ def get_redeploy_skip_reason(app: models.App) -> str | None:
         return SKIP_APP_PENDING_REMOVAL
     if app.job_status != models.App.JobStatus.IDLE:
         return SKIP_APP_BUSY
-    if app.live_state == models.App.LiveState.TORN_DOWN:
-        return SKIP_TORN_DOWN
     if app.last_attempt_id is None:
         return SKIP_NOT_REDEPLOYABLE
     if app.environment.status != models.Environment.Status.READY:
@@ -254,7 +251,7 @@ def _refresh_remove_skip_reason(app: models.App) -> str:
 
 
 def queue_remove(app_id: UUID, created_by: models.User) -> FleetRemoveResult:
-    """Queue one fleet row for teardown, data purge, and deletion of its App row."""
+    """Queue one fleet row for removal: infra teardown, data purge, and deletion of its App row."""
     app = (
         models.App.objects
         .select_related("environment")

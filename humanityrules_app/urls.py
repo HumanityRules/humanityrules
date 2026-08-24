@@ -45,12 +45,10 @@ urlpatterns = [
 
     path("apps/<slug:app_slug>/deployment-section-status/", views.app_deployment_section_status, name="app_deployment_section_status"),
 
-    path("apps/<slug:app_slug>/teardown/", views.app_deployment_teardown, name="app_deployment_teardown"),
     path("apps/<slug:app_slug>/redeploy/", views.app_deployment_redeploy, name="app_deployment_redeploy"),
     path("apps/<slug:app_slug>/status-row/", views.app_status_row, name="app_status_row"),
     path("apps/<slug:app_slug>/deployment-log/", views.app_deployment_log, name="app_deployment_log"),
     path("apps/<slug:app_slug>/card/", views.app_card, name="app_card"),
-    path("apps/<slug:app_slug>/teardown-confirm/", views.app_teardown_confirm, name="app_teardown_confirm"),
     path("apps/<slug:app_slug>/remove/", views.app_remove, name="app_remove"),
     path("apps/<slug:app_slug>/remove-confirm/", views.app_remove_confirm, name="app_remove_confirm"),
 

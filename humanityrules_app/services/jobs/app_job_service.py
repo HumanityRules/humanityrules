@@ -17,8 +17,6 @@ from humanityrules_app import models
 FAILURE_EVENT_BY_JOB_STATUS = {
     models.App.JobStatus.DEPLOY_PENDING: models.DeploymentRecord.EventType.DEPLOY_FAILED,
     models.App.JobStatus.DEPLOYING: models.DeploymentRecord.EventType.DEPLOY_FAILED,
-    models.App.JobStatus.TEARDOWN_PENDING: models.DeploymentRecord.EventType.TEARDOWN_FAILED,
-    models.App.JobStatus.TEARING_DOWN: models.DeploymentRecord.EventType.TEARDOWN_FAILED,
     models.App.JobStatus.REMOVAL_PENDING: models.DeploymentRecord.EventType.REMOVAL_FAILED,
     models.App.JobStatus.REMOVING: models.DeploymentRecord.EventType.REMOVAL_FAILED,
 }
@@ -27,7 +25,7 @@ FAILURE_EVENT_BY_JOB_STATUS = {
 # Why an app cannot accept a removal right now. Advisory: the view layer and the
 # fleet page render these to gate their buttons, while the real enforcement is the
 # admission guard below, re-checked under the row lock.
-SKIP_APP_BUSY = "Deployment or teardown already in progress"
+SKIP_APP_BUSY = "Deployment already in progress"
 SKIP_APP_PENDING_REMOVAL = "App pending removal"
 SKIP_ENVIRONMENT_NOT_READY = "Environment not ready"
 
@@ -95,26 +93,6 @@ def queue_deploy(app: models.App, created_by: models.User | None) -> models.App:
     return locked_app
 
 
-def queue_teardown(app: models.App, created_by: models.User | None, label: str | None) -> models.App:
-    """Atomically admit and queue an App infrastructure teardown."""
-    with transaction.atomic():
-        locked_app = _lock_app_for_admission(app=app)
-        _require_idle(app=locked_app)
-        if not locked_app.may_have_infra:
-            raise AppJobAdmissionError(f"App '{locked_app.slug}' has no infrastructure to tear down.")
-        if label is not None:
-            locked_app.label = label
-            locked_app.save(update_fields=["label", "updated_at"])
-        _open_attempt(app=locked_app, job_status=models.App.JobStatus.TEARDOWN_PENDING)
-        models.DeploymentRecord.objects.create(
-            app=locked_app,
-            attempt_id=locked_app.last_attempt_id,
-            event_type=models.DeploymentRecord.EventType.TEARDOWN_STARTED,
-            created_by=created_by,
-        )
-    return locked_app
-
-
 def queue_removal(app: models.App, created_by: models.User | None, label: str | None) -> models.App:
     """Atomically admit and queue an App removal: teardown, full data purge, then delete.
 
@@ -154,25 +132,6 @@ def settle_deploy_success(app: models.App, service_url: str, alb_dns: str, image
         attempt_id=app.last_attempt_id,
         event_type=models.DeploymentRecord.EventType.DEPLOY_SUCCEEDED,
         details={"image_hashes": image_hashes} if image_hashes else None,
-    )
-
-
-def settle_teardown_success(app: models.App) -> None:
-    """Conclude a teardown attempt as succeeded: clear live outputs + IDLE + event."""
-    app.job_status = models.App.JobStatus.IDLE
-    app.live_state = models.App.LiveState.TORN_DOWN
-    app.may_have_infra = False
-    app.service_url = ""
-    app.alb_dns = ""
-    app.last_attempt_error = ""
-    app.save(update_fields=[
-        "job_status", "live_state", "may_have_infra", "service_url",
-        "alb_dns", "last_attempt_error", "updated_at",
-    ])
-    models.DeploymentRecord.objects.create(
-        app=app,
-        attempt_id=app.last_attempt_id,
-        event_type=models.DeploymentRecord.EventType.TEARDOWN_SUCCEEDED,
     )
 
 

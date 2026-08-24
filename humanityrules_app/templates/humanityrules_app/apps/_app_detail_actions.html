@@ -1,8 +1,8 @@
 {% comment %}
 Header action buttons for app detail (Remove App), gated on can_remove. Rendered in place on
 full load; re-rendered out-of-band (oob=True) by the deployment-section status poll so the
-button appears the moment a teardown settles and the app becomes removable. The wrapper is
-always emitted, even when empty, so the OOB swap always has a target.
+button appears the moment an in-flight job settles and the app becomes removable again. The
+wrapper is always emitted, even when empty, so the OOB swap always has a target.
 See docs/ui_live_update_contract.md.
 {% endcomment %}
 <div id="app-detail-actions"{% if oob %} hx-swap-oob="true"{% endif %} class="shrink-0 flex items-center gap-2">

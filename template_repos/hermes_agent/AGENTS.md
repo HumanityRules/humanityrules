@@ -32,7 +32,7 @@ When you need an instance of a Hermes agent to run your verification, deploy it 
 1. Pick a unique label for your verification run (e.g. `vmendi-A`, your worktree branch name, etc.).
 2. In your worktree, start a labelled worker: `uv run manage.py run_job_worker --label <your-label>`. This worker only claims work for Apps stamped with that exact label.
 3. Pass the *same* label to `deploy-app-template`: `humr_control deploy-app-template ... --label <your-label>`. This stamps the new App's `label` so only your worker picks up its deploy/redeploy/permission-apply/teardown/removal jobs.
-4. Other `humr_control` subcommands (`redeploy-app`, `teardown-app`, etc.) need no `--label`; they read it transitively from the App.
+4. Other `humr_control` subcommands (`redeploy-app`, `remove-app`, etc.) need no `--label`; they read it transitively from the App.
 
 The unscoped main worker (no `--label`) keeps running and serves UI traffic + env-level jobs. Leave it alone.
 
