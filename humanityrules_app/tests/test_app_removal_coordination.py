@@ -163,6 +163,61 @@ class TestAppRemovalCoordination(TestCase):
         self.assertFalse(models.Policy.objects.filter(id=policy.id).exists())
         self.assertTrue(models.Policy.objects.filter(id=other_policy.id).exists())
 
+    def test_web_enqueue_keeps_the_user_on_the_app_page(self) -> None:
+        """Removal runs for minutes and streams a log, so the POST re-renders instead of redirecting."""
+        self.client.force_login(self.user)
+
+        response = self.client.post(reverse("app_remove", kwargs={"app_slug": self.app.slug}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("HX-Redirect", response)
+        self.assertContains(response, "Removing this app")
+        self.assertContains(response, f'id="deployment-section-{self.app.id}"')
+
+    def test_section_poll_navigates_to_the_workspace_once_the_app_row_is_gone(self) -> None:
+        self.client.force_login(self.user)
+        workspace_url = reverse("workspace_detail", kwargs={"workspace_slug": self.workspace.slug})
+        poll_urls = [
+            reverse("app_deployment_section_status", kwargs={"app_slug": self.app.slug}),
+            reverse("app_deployment_log", kwargs={"app_slug": self.app.slug}),
+        ]
+        self.app.delete()
+
+        for url in poll_urls:
+            with self.subTest(url=url):
+                response = self.client.get(url, {"ws": self.workspace.slug})
+
+                # 200, not 404: htmx does not swap 4xx, so a 404 would freeze the page mid-removal.
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response["HX-Redirect"], workspace_url)
+
+    def test_section_poll_falls_back_to_the_dashboard_without_a_known_workspace(self) -> None:
+        self.client.force_login(self.user)
+        url = reverse("app_deployment_section_status", kwargs={"app_slug": self.app.slug})
+        self.app.delete()
+
+        response = self.client.get(url, {"ws": "not-a-workspace"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["HX-Redirect"], reverse("dashboard"))
+
+    def test_grid_polls_return_an_empty_body_once_the_app_row_is_gone(self) -> None:
+        """The card and the row live in someone else's list: an empty swap deletes them."""
+        self.client.force_login(self.user)
+        poll_urls = [
+            reverse("app_card", kwargs={"app_slug": self.app.slug}),
+            reverse("app_status_row", kwargs={"app_slug": self.app.slug}),
+        ]
+        self.app.delete()
+
+        for url in poll_urls:
+            with self.subTest(url=url):
+                response = self.client.get(url)
+
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.content, b"")
+                self.assertNotIn("HX-Redirect", response)
+
     def test_removal_keeps_the_owners_integration_credentials(self) -> None:
         """Pinned by design: the rows are per-user, so a re-created app finds them connected."""
         credential = models.IntegrationUserCredential.objects.create(
