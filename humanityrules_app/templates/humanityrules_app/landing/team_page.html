@@ -1,0 +1,42 @@
+{% extends "humanityrules_app/landing/legal_base.html" %}
+{% load static %}
+{% comment %}
+Public team page: founder profile and founding date. Uses the legal shell
+without the revision-date line.
+{% endcomment %}
+
+{% block page_title %}Team — Humanity Rules{% endblock %}
+{% block meta_description %}Who builds Humanity Rules: founded in August 2026 by Victor Mendiluce, a software engineer with 20+ years across games, cloud infrastructure, data, and machine learning.{% endblock %}
+{% block legal_eyebrow %}Team{% endblock %}
+{% block legal_heading %}One founder, <span class="gradient-text">twenty years of shipping.</span>{% endblock %}
+{% block legal_meta %}{% endblock %}
+
+{% block legal_content %}
+<div class="sm:flex sm:items-start sm:gap-8">
+<img src="{% static 'humanityrules_app/victor.jpeg' %}" alt="Victor Mendiluce"
+     width="450" height="450"
+     class="w-32 sm:w-40 mb-6 sm:mb-0 sm:order-2 rounded-2xl border border-white/10 shadow-lg shadow-navy-950/50">
+<div class="sm:order-1 sm:flex-1 min-w-0">
+<p>
+    Humanity Rules was founded in August 2026 by
+    <a href="https://www.linkedin.com/in/vmendi/" target="_blank" rel="noopener noreferrer">Victor Mendiluce</a>,
+    a software engineer with 20+ years across games, cloud infrastructure, data,
+    and machine learning. He was cofounder and CTO of Unusual Studios, a founding
+    backend engineer at Manticore Games, and most recently Principal Engineer at
+    Course Hero, where he helped build the data platform that served hundreds of
+    engineers and analysts.
+</p>
+<p>
+    The common thread, and the work he loves: platforms other people build on.
+    Humanity Rules applies it to agents.
+</p>
+<p class="flex items-center gap-1.5 text-gray-300">
+    Made with
+    <svg class="w-4 h-4 text-rose-500" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-label="love" role="img">
+        <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/>
+    </svg>
+    in Millbrae, California
+</p>
+</div>
+</div>
+{% endblock %}

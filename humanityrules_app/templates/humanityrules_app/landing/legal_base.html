@@ -1,8 +1,9 @@
 {% comment %}
-Shared shell for public legal pages (privacy, terms). Same visual frame as the
-contact page: dark landing styling, header with back-to-home, minimal footer.
-Child templates fill page_title, meta_description, legal_heading, legal_updated
-and legal_content.
+Shared shell for public standalone pages (privacy, terms, security, team). Same
+visual frame as the contact page: dark landing styling, header with back-to-home,
+minimal footer. Child templates fill page_title, meta_description, legal_heading,
+legal_updated and legal_content; pages without a revision date override
+legal_meta with nothing.
 {% endcomment %}
 {% load static %}
 <!DOCTYPE html>
@@ -87,7 +88,7 @@ and legal_content.
             <article class="mx-auto max-w-3xl">
                 <span class="mb-4 block text-sm font-semibold uppercase tracking-wider text-cyber-400">{% block legal_eyebrow %}Legal{% endblock %}</span>
                 <h1 class="text-4xl font-bold leading-tight text-white sm:text-5xl">{% block legal_heading %}{% endblock %}</h1>
-                <p class="mt-4 text-sm text-gray-500">Last updated: {% block legal_updated %}{% endblock %}</p>
+                {% block legal_meta %}<p class="mt-4 text-sm text-gray-500">Last updated: {% block legal_updated %}{% endblock %}</p>{% endblock %}
                 <div class="legal-prose mt-10">
                     {% block legal_content %}{% endblock %}
                 </div>
@@ -102,6 +103,7 @@ and legal_content.
                 <a href="{% url 'privacy' %}" class="transition-colors hover:text-gray-400">Privacy</a>
                 <a href="{% url 'terms' %}" class="transition-colors hover:text-gray-400">Terms</a>
                 <a href="{% url 'security' %}" class="transition-colors hover:text-gray-400">Security</a>
+                <a href="{% url 'team' %}" class="transition-colors hover:text-gray-400">Team</a>
                 <a href="{% url 'contact' %}" class="transition-colors hover:text-gray-400">Contact</a>
             </span>
         </div>
