@@ -13,7 +13,7 @@ All custom commands live in `humanityrules_app/management/commands/`.
 ## Command Reference
 
 - **humr_query** — Ad-hoc model queries (fields, filters, ordering). Preferred over `shell -c` for plain reads (formatted table, JSON output, no Python).
-- **humr_control** — Control plane ops: provision/teardown environments; deploy from AppTemplate (`deploy-app-template`), redeploy, teardown, and remove apps (`teardown-app --remove-app` for full cleanup including secrets/persistent-data/policies).
+- **humr_control** — Control plane ops: provision/teardown environments; deploy from AppTemplate (`deploy-app-template`), redeploy, and remove apps (`remove-app --app <slug>`, which tears down infra and purges secrets/persistent-data/policies).
 - **humr_efs_browse** — Browse EFS filesystem via ECS Exec (interactive shell in customer environment).
 - **humr_app_logs** — Fetch CloudWatch logs for a customer app (works for running and crashed/stopped tasks), by account + env + app slug.
 - **humr_app_shell** — Interactive shell in a deployed customer app *container* (ECS Exec / SSM). For humans.

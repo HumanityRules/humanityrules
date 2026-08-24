@@ -378,9 +378,9 @@ class AgentSlugErrorSurfaceTests(TestCase):
             ).exists()
         )
 
-    def test_humr_control_redeploy_is_blocked_while_teardown_is_unsettled(self) -> None:
+    def test_humr_control_redeploy_is_blocked_while_a_job_is_unsettled(self) -> None:
         app = self._create_redeploy_source()
-        app.job_status = models.App.JobStatus.TEARDOWN_PENDING
+        app.job_status = models.App.JobStatus.DEPLOYING
         app.save(update_fields=["job_status", "updated_at"])
         stdout = StringIO()
         stderr = StringIO()
@@ -396,7 +396,7 @@ class AgentSlugErrorSurfaceTests(TestCase):
 
         self.assertIn("has a job in progress", stderr.getvalue())
         app.refresh_from_db()
-        self.assertEqual(app.job_status, models.App.JobStatus.TEARDOWN_PENDING)
+        self.assertEqual(app.job_status, models.App.JobStatus.DEPLOYING)
         self.assertFalse(
             models.DeploymentRecord.objects.filter(
                 app=app, event_type=models.DeploymentRecord.EventType.DEPLOY_STARTED,

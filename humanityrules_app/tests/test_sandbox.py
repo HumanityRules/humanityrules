@@ -262,7 +262,7 @@ class TestSandboxRemovalFromTheCLI(TestCase):
         _make_app(org, "demo", env)
 
         call_command(
-            "humr_control", "teardown-app", "--app", "demo", "--remove-app",
+            "humr_control", "remove-app", "--app", "demo",
             stdout=StringIO(), stderr=StringIO(),
         )
 

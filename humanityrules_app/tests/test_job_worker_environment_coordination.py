@@ -74,24 +74,22 @@ class TestJobWorkerEnvironmentCoordination(TestCase):
 
     def test_app_jobs_do_not_start_after_environment_teardown_is_queued(self) -> None:
         self._make_app(slug="deploypending", job_status=models.App.JobStatus.DEPLOY_PENDING)
-        self._make_app(slug="teardownpending", job_status=models.App.JobStatus.TEARDOWN_PENDING)
+        self._make_app(slug="removalpending", job_status=models.App.JobStatus.REMOVAL_PENDING)
         self._create_permission_request(app=self.app, status=models.AppPermissionRequest.Status.APPROVED_PENDING_APPLY)
         self._set_environment_status(models.Environment.Status.TEARDOWN_PENDING)
 
         deployment = job_worker._claim_pending_app_deployment(label="")
-        app_teardown = job_worker._claim_pending_app_deployment_teardown(label="")
+        removal = job_worker._claim_pending_app_removal(label="")
         permission_apply = job_worker._claim_pending_permissions_apply(label="")
 
         self.assertIsNone(deployment)
-        self.assertIsNone(app_teardown)
+        self.assertIsNone(removal)
         self.assertIsNone(permission_apply)
 
     def test_teardown_queue_rejects_each_unsettled_app_job(self) -> None:
         unsettled_statuses = (
             models.App.JobStatus.DEPLOY_PENDING,
             models.App.JobStatus.DEPLOYING,
-            models.App.JobStatus.TEARDOWN_PENDING,
-            models.App.JobStatus.TEARING_DOWN,
             models.App.JobStatus.REMOVAL_PENDING,
             models.App.JobStatus.REMOVING,
         )

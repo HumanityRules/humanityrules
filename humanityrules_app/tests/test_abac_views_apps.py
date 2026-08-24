@@ -1,6 +1,6 @@
 """ABAC view tests: App endpoints.
 
-App detail, deployment ops (status polling, teardown, redeploy),
+App detail, deployment ops (status polling, redeploy),
 and tag management — access derived from parent workspace.
 """
 
@@ -47,7 +47,7 @@ class TestAppEndpoints(TestCase):
             aws_region="us-east-1",
             status=Environment.Status.READY,
         )
-        # A live, idle app: deployed with infra behind it, so teardown is offered.
+        # A live, idle app: deployed with infra behind it, so removal must tear it down.
         self.app = App.objects.create(
             organization=self.org, workspace=self.workspace, source_template=make_source_template(),
             environment=self.env, name="MyApp", slug="myapp",
@@ -106,14 +106,6 @@ class TestAppEndpoints(TestCase):
         response = self.client.get("/apps/myapp/", **HTMX)
         self.assertEqual(response.status_code, 200)
 
-    def test_app_detail_shows_teardown_for_a_deployed_app(self) -> None:
-        self.client.force_login(self.ws_editor)
-        response = self.client.get("/apps/myapp/", **HTMX)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Tear Down")
-        self.assertContains(response, "/apps/myapp/teardown-confirm/")
-
     def test_app_detail_offers_remove_while_deployed(self) -> None:
         """Removal no longer waits on a teardown: a live app is removable as long as it is idle."""
         self.client.force_login(self.ws_editor)
@@ -124,9 +116,8 @@ class TestAppEndpoints(TestCase):
         self.assertContains(response, "Remove App")
         self.assertContains(response, "/apps/myapp/remove-confirm/")
 
-    def test_app_detail_hides_teardown_without_infra(self) -> None:
-        self.app.may_have_infra = False
-        self.app.save(update_fields=["may_have_infra", "updated_at"])
+    def test_app_detail_offers_no_tear_down(self) -> None:
+        """Tear Down is gone from the product: removal is the one destructive action."""
         self.client.force_login(self.ws_editor)
 
         response = self.client.get("/apps/myapp/", **HTMX)
@@ -176,36 +167,12 @@ class TestAppEndpoints(TestCase):
         response = self.client.get("/apps/myapp/deployment-section-status/")
         self.assertEqual(response.status_code, 403)
 
-    # --- App Teardown Confirm Modal (requires workspace:view) ---
+    # --- Tear Down endpoints are gone ---
 
-    def test_ws_viewer_can_fetch_teardown_confirm(self) -> None:
-        self.client.force_login(self.ws_viewer)
-        response = self.client.get("/apps/myapp/teardown-confirm/")
-        self.assertEqual(response.status_code, 200)
-
-    def test_no_access_gets_403_on_teardown_confirm(self) -> None:
-        self.client.force_login(self.no_access_user)
-        response = self.client.get("/apps/myapp/teardown-confirm/")
-        self.assertEqual(response.status_code, 403)
-
-    # --- App Deployment Teardown (requires workspace:edit) ---
-
-    def test_ws_editor_can_trigger_teardown(self) -> None:
+    def test_teardown_endpoints_are_gone(self) -> None:
         self.client.force_login(self.ws_editor)
-        response = self.client.post("/apps/myapp/teardown/")
-        self.assertEqual(response.status_code, 200)
-        self.app.refresh_from_db()
-        self.assertEqual(self.app.job_status, App.JobStatus.TEARDOWN_PENDING)
-
-    def test_ws_viewer_gets_403_on_teardown(self) -> None:
-        self.client.force_login(self.ws_viewer)
-        response = self.client.post("/apps/myapp/teardown/")
-        self.assertEqual(response.status_code, 403)
-
-    def test_no_access_gets_403_on_teardown(self) -> None:
-        self.client.force_login(self.no_access_user)
-        response = self.client.post("/apps/myapp/teardown/")
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(self.client.get("/apps/myapp/teardown-confirm/").status_code, 404)
+        self.assertEqual(self.client.post("/apps/myapp/teardown/").status_code, 404)
 
     # --- App Deployment Redeploy (requires workspace:edit) ---
 
@@ -217,7 +184,7 @@ class TestAppEndpoints(TestCase):
         self.assertEqual(self.app.job_status, App.JobStatus.DEPLOY_PENDING)
 
     def test_redeploy_is_blocked_while_a_job_is_in_flight(self) -> None:
-        self.app.job_status = App.JobStatus.TEARDOWN_PENDING
+        self.app.job_status = App.JobStatus.REMOVAL_PENDING
         self.app.save(update_fields=["job_status", "updated_at"])
         self.client.force_login(self.ws_editor)
 
@@ -225,7 +192,7 @@ class TestAppEndpoints(TestCase):
 
         self.assertEqual(response.status_code, 422)
         self.app.refresh_from_db()
-        self.assertEqual(self.app.job_status, App.JobStatus.TEARDOWN_PENDING)
+        self.assertEqual(self.app.job_status, App.JobStatus.REMOVAL_PENDING)
         self.assertFalse(
             DeploymentRecord.objects.filter(
                 app=self.app, event_type=DeploymentRecord.EventType.DEPLOY_STARTED,
