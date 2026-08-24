@@ -5,10 +5,14 @@ target in app_detail.html so it survives the swap.
 
 This is the app page's single live clock: poll responses also OOB-swap the header actions and the
 History section, the other two regions that move when a job settles. with_oob is set only on those
-responses, never on the initial include (where both regions render in place). {% endcomment %}
+responses, never on the initial include (where both regions render in place).
+
+A removal is just another in-flight job here — is_pending_removal already hides the action row —
+except that it ends by deleting the row this fragment renders. ?ws= hands the poll the workspace to
+navigate to in that case, since by then there is no App row left to read it from. {% endcomment %}
 {% partialdef deployment_section %}
 <div {% if app.job_in_flight %}
-     hx-get="{% url 'app_deployment_section_status' app_slug=app.slug %}"
+     hx-get="{% url 'app_deployment_section_status' app_slug=app.slug %}?ws={{ app.workspace.slug }}"
      hx-trigger="load delay:10s"
      hx-target="#deployment-section-{{ app.id }}"
      hx-swap="innerHTML"
