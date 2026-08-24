@@ -85,8 +85,8 @@ class TestAppRemovalCoordination(TestCase):
         stderr = StringIO()
         command = humr_control.Command(stdout=stdout, stderr=stderr)
 
-        command._queue_app_removal(app=self.app, delete_all_data=False)
-        command._queue_app_removal(app=self.app, delete_all_data=False)
+        command._queue_app_removal(app=self.app)
+        command._queue_app_removal(app=self.app)
 
         self.app.refresh_from_db()
         self.assertEqual(self.app.job_status, models.App.JobStatus.REMOVAL_PENDING)
@@ -94,13 +94,7 @@ class TestAppRemovalCoordination(TestCase):
         self.assertIn("has a job in progress", stderr.getvalue())
 
     def test_worker_claims_pending_removal_into_removing(self) -> None:
-        app_job_service.queue_removal(
-            app=self.app,
-            created_by=self.user,
-            delete_all_data=False,
-            teardown_first=False,
-            label=None,
-        )
+        app_job_service.queue_removal(app=self.app, created_by=self.user, label=None)
 
         claimed = job_worker._claim_pending_app_removal(label="")
 
@@ -109,53 +103,79 @@ class TestAppRemovalCoordination(TestCase):
         self.app.refresh_from_db()
         self.assertEqual(self.app.job_status, models.App.JobStatus.REMOVING)
 
-    def test_removal_refused_while_infra_may_exist_and_stays_retryable(self) -> None:
+    def _claim_into_removing(self) -> None:
+        """Put the app where the worker would leave it, so run_removal can be driven directly."""
+        app_job_service.queue_removal(app=self.app, created_by=self.user, label=None)
+        self.app.refresh_from_db()
+        self.app.job_status = models.App.JobStatus.REMOVING
+        self.app.save(update_fields=["job_status", "updated_at"])
+
+    def test_removal_is_admitted_while_infra_may_exist(self) -> None:
         self.app.may_have_infra = True
         self.app.save(update_fields=["may_have_infra", "updated_at"])
-        with self.assertRaisesMessage(app_job_service.AppJobAdmissionError, "tear it down first"):
-            app_job_service.queue_removal(
-                app=self.app,
-                created_by=self.user,
-                delete_all_data=False,
-                teardown_first=False,
-                label=None,
-            )
 
-        self.app.refresh_from_db()
-        self.assertEqual(self.app.job_status, models.App.JobStatus.IDLE)
-        self.assertFalse(models.DeploymentRecord.objects.filter(app=self.app).exists())
+        app_job_service.queue_removal(app=self.app, created_by=self.user, label=None)
 
-        app_job_service.queue_removal(
-            app=self.app,
-            created_by=self.user,
-            delete_all_data=False,
-            teardown_first=True,
-            label=None,
-        )
         self.app.refresh_from_db()
         self.assertEqual(self.app.job_status, models.App.JobStatus.REMOVAL_PENDING)
+        self.assertEqual(self._removal_started_count(), 1)
 
-    def test_removal_with_teardown_first_tears_down_then_deletes_the_app(self) -> None:
+    def test_removal_of_a_deployed_app_tears_down_then_deletes_the_app(self) -> None:
         self.app.may_have_infra = True
         self.app.live_state = models.App.LiveState.DEPLOYED
         self.app.service_url = "https://removalagent.example.com"
         self.app.save(update_fields=["may_have_infra", "live_state", "service_url", "updated_at"])
-        app_job_service.queue_removal(
-            app=self.app,
-            created_by=self.user,
-            delete_all_data=False,
-            teardown_first=True,
-            label=None,
-        )
-        self.app.job_status = models.App.JobStatus.REMOVING
-        self.app.save(update_fields=["job_status", "updated_at"])
+        self._claim_into_removing()
 
-        with patch(
-            "humanityrules_app.services.jobs.app_remove_executor.app_deployment_teardown_executor.teardown_infra",
-            return_value=True,
-        ) as teardown_mock:
+        with patch.object(app_remove_executor.app_deployment_teardown_executor, "teardown_infra", return_value=True) as teardown_mock, \
+             patch.object(app_remove_executor, "purge_app_namespace_data", return_value=(True, "ok")):
             success = app_remove_executor.run_removal(app_id=str(self.app.id))
 
         self.assertTrue(success)
         teardown_mock.assert_called_once()
         self.assertFalse(models.App.objects.filter(id=self.app.id).exists())
+
+    def test_removal_always_purges_data_and_deletes_app_scoped_policies(self) -> None:
+        policy = models.Policy.objects.create(
+            organization=self.organization,
+            name="Removal agent access",
+            resource_type=models.Policy.ResourceType.APP,
+            identity_conditions=[{"key": "role", "value": "member"}],
+            resource_conditions=[{"key": "app-name", "value": self.app.slug}],
+            actions=["app:use"],
+        )
+        other_policy = models.Policy.objects.create(
+            organization=self.organization,
+            name="Other agent access",
+            resource_type=models.Policy.ResourceType.APP,
+            identity_conditions=[{"key": "role", "value": "member"}],
+            resource_conditions=[{"key": "app-name", "value": "otheragent"}],
+            actions=["app:use"],
+        )
+        self._claim_into_removing()
+
+        with patch.object(app_remove_executor, "purge_app_namespace_data", return_value=(True, "ok")) as purge_mock:
+            success = app_remove_executor.run_removal(app_id=str(self.app.id))
+
+        self.assertTrue(success)
+        purge_mock.assert_called_once()
+        self.assertFalse(models.App.objects.filter(id=self.app.id).exists())
+        self.assertFalse(models.Policy.objects.filter(id=policy.id).exists())
+        self.assertTrue(models.Policy.objects.filter(id=other_policy.id).exists())
+
+    def test_removal_keeps_the_owners_integration_credentials(self) -> None:
+        """Pinned by design: the rows are per-user, so a re-created app finds them connected."""
+        credential = models.IntegrationUserCredential.objects.create(
+            owner_user=self.user,
+            environment=self.environment,
+            app_slug=self.app.slug,
+            provider="google",
+        )
+        self._claim_into_removing()
+
+        with patch.object(app_remove_executor, "purge_app_namespace_data", return_value=(True, "ok")):
+            success = app_remove_executor.run_removal(app_id=str(self.app.id))
+
+        self.assertTrue(success)
+        self.assertFalse(models.App.objects.filter(id=self.app.id).exists())
+        self.assertTrue(models.IntegrationUserCredential.objects.filter(id=credential.id).exists())

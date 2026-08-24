@@ -114,6 +114,16 @@ class TestAppEndpoints(TestCase):
         self.assertContains(response, "Tear Down")
         self.assertContains(response, "/apps/myapp/teardown-confirm/")
 
+    def test_app_detail_offers_remove_while_deployed(self) -> None:
+        """Removal no longer waits on a teardown: a live app is removable as long as it is idle."""
+        self.client.force_login(self.ws_editor)
+
+        response = self.client.get("/apps/myapp/", **HTMX)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Remove App")
+        self.assertContains(response, "/apps/myapp/remove-confirm/")
+
     def test_app_detail_hides_teardown_without_infra(self) -> None:
         self.app.may_have_infra = False
         self.app.save(update_fields=["may_have_infra", "updated_at"])

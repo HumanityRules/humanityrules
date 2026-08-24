@@ -12,9 +12,12 @@ from humanityrules_app.services.jobs import app_job_service
 
 RECOVERY_STATUS_MESSAGE = "Marked failed by the fleet recovery action after a control plane interruption"
 
-SKIP_APP_BUSY = "Deployment or teardown already in progress"
-SKIP_APP_PENDING_REMOVAL = "App pending removal"
-SKIP_ENVIRONMENT_NOT_READY = "Environment not ready"
+# Removability is defined once, next to the admission guard it mirrors. The three
+# reasons it can return are re-bound here because the redeploy predicates below share
+# the same vocabulary and the fleet page renders both through fleet_service.
+SKIP_APP_BUSY = app_job_service.SKIP_APP_BUSY
+SKIP_APP_PENDING_REMOVAL = app_job_service.SKIP_APP_PENDING_REMOVAL
+SKIP_ENVIRONMENT_NOT_READY = app_job_service.SKIP_ENVIRONMENT_NOT_READY
 SKIP_FAILED_NOT_INCLUDED = "Failed not included"
 SKIP_NOT_REDEPLOYABLE = "Not redeployable"
 SKIP_TORN_DOWN = "Torn down"
@@ -57,7 +60,7 @@ def build_fleet_snapshot() -> list[EnvGroup]:
     )
     for app in apps:
         app.redeploy_skip_reason = get_redeploy_skip_reason(app=app)
-        app.remove_skip_reason = get_remove_skip_reason(app=app)
+        app.remove_skip_reason = app_job_service.get_remove_skip_reason(app=app)
         groups[app.environment_id].apps.append(app)
 
     for group in groups.values():
@@ -243,27 +246,11 @@ class FleetRemoveResult:
     skip_reason: str | None
 
 
-def get_remove_skip_reason(app: models.App) -> str | None:
-    """Return why a fleet row cannot be removed, or None when eligible.
-
-    Unlike the app-detail Remove button, live infrastructure is not a blocker: the
-    fleet action queues the removal with teardown_first, so the worker tears the
-    deployment down inline before purging.
-    """
-    if app.job_status in models.App.REMOVAL_JOB_STATUSES:
-        return SKIP_APP_PENDING_REMOVAL
-    if app.job_status != models.App.JobStatus.IDLE:
-        return SKIP_APP_BUSY
-    if app.environment.status != models.Environment.Status.READY:
-        return SKIP_ENVIRONMENT_NOT_READY
-    return None
-
-
 def _refresh_remove_skip_reason(app: models.App) -> str:
     """Reclassify an admission failure from current App and Environment state."""
     app.refresh_from_db()
     app.environment.refresh_from_db()
-    return get_remove_skip_reason(app=app) or SKIP_APP_BUSY
+    return app_job_service.get_remove_skip_reason(app=app) or SKIP_APP_BUSY
 
 
 def queue_remove(app_id: UUID, created_by: models.User) -> FleetRemoveResult:
@@ -273,16 +260,10 @@ def queue_remove(app_id: UUID, created_by: models.User) -> FleetRemoveResult:
         .select_related("environment")
         .get(id=app_id)
     )
-    skip_reason = get_remove_skip_reason(app=app)
+    skip_reason = app_job_service.get_remove_skip_reason(app=app)
     if skip_reason is None:
         try:
-            app_job_service.queue_removal(
-                app=app,
-                created_by=created_by,
-                delete_all_data=True,
-                teardown_first=True,
-                label=None,
-            )
+            app_job_service.queue_removal(app=app, created_by=created_by, label=None)
         except app_job_service.AppJobAdmissionError:
             skip_reason = _refresh_remove_skip_reason(app=app)
 

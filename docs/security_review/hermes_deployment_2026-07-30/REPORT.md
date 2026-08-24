@@ -27,7 +27,7 @@ Ordered by “if this is real, fix or accept before GA.” One line each; open t
 2. **Sandbox peers trust each other.** Loopback signer, broker, MCP, process-compose, gateway key are open to the agent UID. Public Web Apps inherit that. Decide whether “agent is TCB” is the GA story.
 3. **ABAC anchors are editable.** `owner` / `app-type` tags and `username` identity attributes can be changed by admins; PA takeover without redeploy. ([03](03_sso_policy_proxy_abac.md))
 4. **Shared sandbox is soft multi-tenancy.** Flat VPC SG, packed EC2, `SYS_ADMIN`, shared SSO zone resolution. Fine for HumR-ops sandbox if stated; not a customer isolation claim. ([04](04_customer_deploy_infra.md), [03](03_sso_policy_proxy_abac.md))
-5. **Teardown / removal leaks secrets.** SM secrets survive env teardown; `IntegrationUserCredential` survives app remove (known audit). ([04](04_customer_deploy_infra.md), [01](01_tls_credential_broker.md))
+5. **Environment teardown leaks secrets.** SM secrets survive env teardown. (App *removal* now purges everything unconditionally; `IntegrationUserCredential` survives it as accepted per-user retention.) ([04](04_customer_deploy_infra.md), [01](01_tls_credential_broker.md))
 6. **Direct `:443` egress + unfiltered aws_signer** — broker bypass and STS-shaped credential minting into the sandbox if IAM ever allows it. ([05](05_in_container_sandbox.md))
 
 ## What looks sound

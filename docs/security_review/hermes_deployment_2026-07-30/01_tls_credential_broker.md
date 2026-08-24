@@ -26,12 +26,12 @@ The custody model is sound in its core claim: refresh tokens and HUMR OAuth clie
 - **Impact:** Compromise of one HA container (or leak of the shared secret) yields access tokens / vault keys for **all** connected integrations of **all** users/apps in that environment, not only the compromised app’s owner. Lifetime is bounded for OAuth access tokens; vault keys are not.
 - **Next:** Move to per-app (or per-broker) bearers, or require a signed app identity claim the CP verifies against the bearer; until then, document multi-app envs as a shared-fate security domain.
 
-### [High] Integration credentials survive app removal (orphan refresh tokens / vault keys)
+### [High → Accepted by design] Integration credentials survive app removal (orphan refresh tokens / vault keys)
 
 - **Location:** `docs/app_removal_data_cleanup_audit.md` (open action); `IntegrationUserCredential` in `humanityrules_app/models.py:1432–1486` (`app_slug` is a `SlugField`, not FK); no cleanup in app-removal executor
 - **Issue:** Removing an app never deletes `IntegrationUserCredential` rows. Refresh tokens and vault secrets remain in the CP DB keyed by `(owner_user, environment, app_slug, provider)`.
 - **Impact:** Recreating an app with the same slug under the same owner/env silently reconnects integrations (“phantom reconnect”). Also a GDPR/data-deletion gap: user-visible “remove app” does not remove stored third-party grants.
-- **Next:** Unconditionally delete (and best-effort revoke) matching `IntegrationUserCredential` rows in `app_remove_executor`; add the regression test already listed in the audit.
+- **Resolution (2026-08-24): accepted by design.** The rows are keyed on `(owner_user, environment, app_slug, provider)` and every lookup in `views/integrations/` filters on `owner_user=request.user` first, so a different user creating an app with the same slug matches none of them; in the shared sandbox each org has its own `Environment` row, so cross-org slug reuse is a different FK too. The "phantom reconnect" is the intended workflow — the *same* user re-creating their app finds their integrations still connected. What is left is retention, not access control, and it is accepted. Retention is now the only removal exception: as of the tear-down/removal consolidation, removal is unconditional and purges everything else (infra, EFS + host data, secrets, `app-name=` policies). See `docs/app_removal_data_cleanup_audit.md`; the retention is pinned by `test_app_removal_coordination.test_removal_keeps_the_owners_integration_credentials`.
 
 ### [Medium] Loopback control API has no auth; sandbox can drive credential lifecycle
 

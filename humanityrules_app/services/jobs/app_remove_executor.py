@@ -1,10 +1,13 @@
 """
 App removal executor.
 
-Runs a removal attempt on an app in REMOVING: optionally tears down live infra,
-cleans persistent data (EFS app data + EC2 host bind-mount data) and Secrets
-Manager secrets in the app's environment, then deletes the App row (FK cascades
-handle records, logs, permissions, tags).
+Runs a removal attempt on an app in REMOVING. Removal is the single destructive
+operation on an app and takes no options: it tears down live infra when the app may
+have any, purges persistent data (EFS app data + EC2 host bind-mount data) and Secrets
+Manager secrets in the app's environment, deletes the app's ABAC policies, releases
+its sandbox slug claim, and finally deletes the App row (FK cascades handle records,
+logs, permissions, tags). Every step is written to be re-runnable, because any failure
+settles the attempt back to IDLE and the user can press Remove again.
 """
 
 import logging
@@ -66,11 +69,23 @@ def _get_env_session(environment: models.Environment):
     )
 
 
+def app_has_persistent_data(app: models.App) -> bool:
+    """True when the app's template declares storage that outlives its tasks (EFS or host bind mounts).
+
+    The remove-confirm modal asks this to decide whether to promise a data purge, so it
+    must stay the same question `_run_persistent_data_purge` answers before doing one.
+    """
+    template = app.source_template
+    if template is None:
+        return False
+    return bool(template.efs_config) or bool(_template_host_path_templates(template=template))
+
+
 def _run_persistent_data_purge(app: models.App, env: models.Environment) -> tuple[bool, str]:
     """Delete the app's EFS subtree and host bind-mount dirs. No-op if the template declares neither."""
     template = app.source_template
     has_efs = bool(template and template.efs_config)
-    host_path_templates = _template_host_path_templates(template) if template else []
+    host_path_templates = _template_host_path_templates(template=template) if template else []
     if not has_efs and not host_path_templates:
         logger.info("Skipping persistent-data cleanup: template has no EFS or host_mounts")
         return True, "no persistent data"
@@ -143,36 +158,25 @@ def run_removal(app_id: str) -> bool:
         attempt_id=app.last_attempt_id,
         source_default=models.DeploymentLog.Source.SYSTEM,
     ):
-        if app.may_have_infra:
-            if not app.removal_teardown_first:
-                _fail(app, "App may still have deployed infrastructure; tear it down first.")
-                return False
-            if not _teardown_infra_for_removal(app=app):
-                _fail(app, "Teardown failed for the app's deployment")
-                return False
+        if app.may_have_infra and not _teardown_infra_for_removal(app=app):
+            _fail(app, "Teardown failed for the app's deployment")
+            return False
 
-        try:
-            if app.removal_delete_all_data:
-                ok, message = _run_persistent_data_purge(app=app, env=env)
-                if not ok:
-                    _fail(app, message)
-                    return False
-                _run_secrets_purge(env=env, app_slug=app.slug)
-        except ClientError as e:
-            logger.exception("AWS cleanup failed: %s", e)
-            _fail(app, f"AWS cleanup failed: {e}")
+        ok, message = purge_app_namespace_data(app=app, env=env)
+        if not ok:
+            _fail(app, message)
             return False
 
     with transaction.atomic():
-        if app.removal_delete_all_data:
-            _delete_matching_policies(organization_id=app.organization_id, app_slug=app.slug)
+        # Policy has no FK to App, so the cascade below cannot reach the app-scoped rows.
+        _delete_matching_policies(organization_id=app.organization_id, app_slug=app.slug)
         # Release the shared-sandbox slug claim (if any) so the name is free for reuse. It is
-        # keyed by (slug, org) with no FK to App, so app.delete() does not cascade it. Removal,
-        # not teardown, frees the slug — a torn-down app keeps its App row and can redeploy.
+        # keyed by (slug, org) with no FK to App, so app.delete() does not cascade it.
         sandbox_service.release_sandbox_app_slug(app_slug=app.slug, organization_id=app.organization_id)
+        # IntegrationUserCredential rows are per-user and deliberately survive removal, so a
+        # re-created app with the same slug finds the owner's integrations still connected.
         # Cascade deletes DeploymentRecord, DeploymentLog, AppPermissions, AppPermissionRequest,
-        # and ResourceTag rows that point at this app. Policy has no FK to App; matching
-        # rows are handled above when removal_delete_all_data is set.
+        # and ResourceTag rows that point at this app.
         app.delete()
 
     logger.info("App removed: '%s' (%s).", app.name, app.slug)
