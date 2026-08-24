@@ -145,22 +145,22 @@ Identity, build, and runtime configuration. Deploys to exactly one Environment, 
 - Unique constraint: (organization, slug)
 
 The App row also carries all runtime deployment state (there is no separate Deployment row):
-- **job_status** — The single in-flight operation: idle / deploy_pending / deploying / teardown_pending / tearing_down / removal_pending / removing. The job worker claims the `*_pending` values; executors return the row to `idle` when the attempt settles. `job_in_flight` = anything but idle; `is_pending_removal` = removal_pending/removing.
-- **live_state** — What is actually running in AWS: not_deployed / deployed / torn_down. Written only at deploy/teardown **success**, so a failed attempt never clobbers it.
-- **may_have_infra** — A deploy attempt (even a failed one) may have created AWS resources. Set when a deploy is claimed, cleared only on teardown success. Gates whether teardown is offered and whether removal tears infra down before purging.
-- **service_url, alb_dns, last_deployed_at** — Live-deploy outputs, written only at deploy success and cleared on teardown success.
+- **job_status** — The single in-flight operation: idle / deploy_pending / deploying / removal_pending / removing. The job worker claims the `*_pending` values; executors return the row to `idle` when the attempt settles. `job_in_flight` = anything but idle; `is_pending_removal` = removal_pending/removing.
+- **live_state** — What is actually running in AWS: not_deployed / deployed. Written only at deploy **success**, so a failed attempt never clobbers it.
+- **may_have_infra** — A deploy attempt (even a failed one) may have created AWS resources. Set when a deploy is claimed, cleared once the infra is torn down. Gates whether removal tears infra down before purging.
+- **service_url, alb_dns, last_deployed_at** — Live-deploy outputs, written only at deploy success and cleared when the infra is torn down.
 - **last_attempt_id** — Correlation id shared by the current/latest attempt's DeploymentRecord events and DeploymentLog lines. Kept after the attempt settles; selects the log tab's content and anchors the failure banner.
 - **last_attempt_error** — Failure message of the latest attempt; empty when it succeeded or none ran. Drives `display_status` and the failure banner.
 - **claimed_by_run** — FK to JobWorkerRun that claimed the in-flight job (liveness input for stale-job detection).
-- **display_status / display_status_label** — Derived UI pill vocabulary folding job_status, live_state, and last error (pending / deploying / … / succeeded / failed / torn_down / removing / "").
+- **display_status / display_status_label** — Derived UI pill vocabulary folding job_status, live_state, and last error (pending / deploying / succeeded / failed / removing / "").
 
-All of these transitions go through `services/jobs/app_job_service.py` (queue_deploy / queue_teardown / queue_removal / settle_deploy_success / settle_teardown_success / settle_failure), which writes the App fields and the paired DeploymentRecord event together.
+All of these transitions go through `services/jobs/app_job_service.py` (queue_deploy / queue_removal / settle_deploy_success / settle_failure), which writes the App fields and the paired DeploymentRecord event together.
 
 ### DeploymentRecord
 Append-only audit event for one App job attempt. Insert-only; nothing operational reads this table (App fields are the runtime truth).
 - **app** — FK to App
 - **attempt_id** — Correlation id; rows sharing it describe one attempt (matches `App.last_attempt_id` for the latest attempt)
-- **event_type** — deploy_started / deploy_succeeded / deploy_failed / teardown_started / teardown_succeeded / teardown_failed / removal_started / removal_failed (no removal_succeeded — a successful removal cascade-deletes the App row and its events)
+- **event_type** — deploy_started / deploy_succeeded / deploy_failed / removal_started / removal_failed (no removal_succeeded — a successful removal cascade-deletes the App row and its events). The teardown_started / teardown_succeeded / teardown_failed values are retained for historical rows only; nothing writes them since app teardown stopped being its own job.
 - **git_ref** — Branch deployed by this attempt (deploy events only)
 - **error** — Failure message (failure events only)
 - **created_by** — FK to User (nullable)
@@ -270,7 +270,8 @@ Workflow: The user builds a draft in the permissions editor → user approves �
 - At app creation, a slug whose label an existing app already holds on the same hosted zone is rejected
 
 ### Teardown Flows
-- **App teardown:** `job_status` teardown_pending → tearing_down; CDK deletes app stacks. On success (`settle_teardown_success`): `job_status` → idle, `live_state` → torn_down, `may_have_infra` cleared, `service_url`/`alb_dns` cleared. The App row survives, still pointing at its environment, and can redeploy.
+There is no standalone app teardown: removal is the only destructive operation on an app, and `app_deployment_teardown_executor.teardown_infra` survives purely as an inline step of removal and of environment teardown.
+
 - **App removal:** Queued via `app_job_service.queue_removal`, which takes no options and moves `job_status` → removal_pending → removing. It is admitted whenever the app is idle and its environment is ready, deployed or not. The removal executor always runs the whole sequence: tear down live infra inline when `may_have_infra`, purge persistent data and Secrets Manager entries (`purge_app_namespace_data`, shared with sandbox environment teardown), delete `app-name=`-scoped Policy rows, release the sandbox slug claim, and delete the App row (cascading DeploymentRecords, DeploymentLogs, permissions, tags). `IntegrationUserCredential` rows are per-user and deliberately survive — see `docs/app_removal_data_cleanup_audit.md`. A failed removal settles back to idle and is retryable, re-running the whole sequence. There is no removal_succeeded event — success deletes the row.
 - **Environment teardown:** All apps torn down first (sequentially, stop on failure), then cluster/VPC CloudFormation stacks deleted, then the environment's App rows deleted (releasing sandbox slug claims), then the environment record deleted from database.
 
@@ -282,7 +283,7 @@ Workflow: The user builds a draft in the permissions editor → user approves �
 5. On failure: request → failed
 
 ### Job Worker
-A polling-based background worker that claims pending jobs using `SELECT ... FOR UPDATE SKIP LOCKED` and spawns threads for execution. App jobs are claimed by `App.job_status` (one in-flight job per app by construction — the single field makes overlap impossible). Handles environment provisioning, app deployment, app teardown, app removal, environment teardown, permissions apply, and cost refresh. A stale-job reaper settles apps abandoned in an executing status (`deploying` / `tearing_down` / `removing`) back to idle via `settle_failure` when their owning worker run died or they stopped making progress; claimable (`*_pending`) statuses are left for a new worker to pick up.
+A polling-based background worker that claims pending jobs using `SELECT ... FOR UPDATE SKIP LOCKED` and spawns threads for execution. App jobs are claimed by `App.job_status` (one in-flight job per app by construction — the single field makes overlap impossible). Handles environment provisioning, app deployment, app removal, environment teardown, permissions apply, and cost refresh. A stale-job reaper settles apps abandoned in an executing status (`deploying` / `removing`) back to idle via `settle_failure` when their owning worker run died or they stopped making progress; claimable (`*_pending`) statuses are left for a new worker to pick up.
 
 ### Signal-Driven Auto-Creation
 - Organization created → "Default" workspace auto-created

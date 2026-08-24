@@ -65,7 +65,7 @@ def build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
     context["initial_tab"] = "logs" if app.job_in_flight else "content"
     if app.last_attempt_id is not None:
         # Address shown by the welcome + deploy-success dialogs. Computed here so
-        # every renderer of app_detail.html (detail, redeploy, teardown) includes
+        # every renderer of app_detail.html (detail, redeploy) includes
         # the deploy-success watcher, not just the app_detail view.
         zone = app.environment.shared_alb_hosted_zone
         context["deploy_address"] = f"{app.slug}.{zone}" if zone else app.slug
@@ -114,25 +114,6 @@ def app_detail(request: HttpRequest, app_slug: str) -> HttpResponse:
     context["welcome_preview"] = welcome_preview
     # ?live=preview (DEBUG only): render the deploy-success dialog visible for iteration.
     context["live_preview"] = live_preview
-    return render(request, "humanityrules_app/apps/app_detail.html", context=context)
-
-
-@login_required
-@require_POST
-def app_deployment_teardown(request: HttpRequest, app_slug: str) -> HttpResponse:
-    """Queue a teardown attempt for the app's live infra."""
-    app = _get_app_for_user(request, app_slug)
-
-    denied = abac_view_checks.check_abac(request, app.workspace, "workspace", "workspace:edit")
-    if denied:
-        return denied
-
-    try:
-        app_job_service.queue_teardown(app=app, created_by=request.user, label=None)
-    except app_job_service.AppJobAdmissionError:
-        return HttpResponse(status=422)
-
-    context = build_app_detail_context(request=request, app=_get_app_for_user(request, app_slug))
     return render(request, "humanityrules_app/apps/app_detail.html", context=context)
 
 
@@ -207,23 +188,6 @@ def app_card(request: HttpRequest, app_slug: str) -> HttpResponse:
     """Return the app summary card for the self-terminating poll."""
     app = _get_app_for_user(request, app_slug)
     return render(request, "humanityrules_app/partials/_app_card.html", {"app": app})
-
-
-@login_required
-@require_GET
-def app_teardown_confirm(request: HttpRequest, app_slug: str) -> HttpResponse:
-    """Return the teardown confirmation modal HTML."""
-    app = _get_app_for_user(request, app_slug)
-
-    denied = abac_view_checks.check_abac(request, app.workspace, "workspace", "workspace:view")
-    if denied:
-        return denied
-
-    context = {
-        "app": app,
-        "post_url": reverse("app_deployment_teardown", kwargs={"app_slug": app.slug}),
-    }
-    return render(request, "humanityrules_app/apps/_app_teardown_confirm_modal.html", context=context)
 
 
 @login_required

@@ -88,35 +88,16 @@ class TestStaleJobReaper(TestCase):
 
     def test_old_claimable_jobs_are_untouched(self) -> None:
         deploy_pending = self._make_app(slug="deploypending", job_status=models.App.JobStatus.DEPLOY_PENDING)
-        teardown_pending = self._make_app(slug="teardownpending", job_status=models.App.JobStatus.TEARDOWN_PENDING)
         removal_pending = self._make_app(slug="removalpending", job_status=models.App.JobStatus.REMOVAL_PENDING)
-        for app in (deploy_pending, teardown_pending, removal_pending):
+        for app in (deploy_pending, removal_pending):
             self._make_stale(app)
 
         stale_job_reaper.reap_stale_jobs(no_progress_timeout=TIMEOUT, dead_worker_timeout=DEAD_WORKER_TIMEOUT)
 
         deploy_pending.refresh_from_db()
-        teardown_pending.refresh_from_db()
         removal_pending.refresh_from_db()
         self.assertEqual(deploy_pending.job_status, models.App.JobStatus.DEPLOY_PENDING)
-        self.assertEqual(teardown_pending.job_status, models.App.JobStatus.TEARDOWN_PENDING)
         self.assertEqual(removal_pending.job_status, models.App.JobStatus.REMOVAL_PENDING)
-
-    def test_stale_tearing_down_app_fails_with_teardown_event(self) -> None:
-        app = self._make_app(slug="teardownapp", job_status=models.App.JobStatus.TEARING_DOWN)
-        self._make_stale(app)
-
-        stale_job_reaper.reap_stale_jobs(no_progress_timeout=TIMEOUT, dead_worker_timeout=DEAD_WORKER_TIMEOUT)
-
-        app.refresh_from_db()
-        self.assertEqual(app.job_status, models.App.JobStatus.IDLE)
-        self.assertTrue(
-            models.DeploymentRecord.objects.filter(
-                app=app,
-                attempt_id=app.last_attempt_id,
-                event_type=models.DeploymentRecord.EventType.TEARDOWN_FAILED,
-            ).exists()
-        )
 
     def test_stale_removing_app_fails_and_stays_retryable(self) -> None:
         app = self._make_app(slug="removingapp", job_status=models.App.JobStatus.REMOVING)

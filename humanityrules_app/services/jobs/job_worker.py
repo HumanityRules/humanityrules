@@ -1,9 +1,9 @@
 """
 Job worker.
 
-Polls for pending jobs (deployments, environment provisioning, teardowns,
-permissions applies) and spawns threads to execute them. This provides a simple, in-process
-job execution mechanism for background tasks.
+Polls for pending jobs (app deployments and removals, environment provisioning and
+teardown, permissions applies, cost refreshes) and spawns threads to execute them. This
+provides a simple, in-process job execution mechanism for background tasks.
 """
 
 import logging
@@ -20,7 +20,6 @@ from django.utils import timezone
 from humanityrules_app.models import App, AppPermissionRequest, CostRefreshJob, Environment, JobWorkerRun
 
 from . import app_deployment_executor
-from . import app_deployment_teardown_executor
 from . import app_remove_executor
 from . import environment_provisioning_executor
 from . import environment_teardown_executor
@@ -123,31 +122,6 @@ def _claim_pending_environment_provisioning() -> Environment | None:
     return None
 
 
-def _claim_pending_app_deployment_teardown(label: str) -> App | None:
-    """Atomically claim an app queued for teardown whose label matches."""
-    with transaction.atomic():
-        app = (
-            App.objects
-            .select_for_update(skip_locked=True, of=("self", "environment"))
-            .filter(
-                job_status=App.JobStatus.TEARDOWN_PENDING,
-                label=label,
-                environment__status=Environment.Status.READY,
-            )
-            .select_related("workspace", "environment")
-            .first()
-        )
-
-        if app:
-            app.job_status = App.JobStatus.TEARING_DOWN
-            app.claimed_by_run_id = _worker_run_id
-            app.save(update_fields=["job_status", "claimed_by_run", "updated_at"])
-            logger.info(f"Claimed app deployment teardown for app '{app.name}' (attempt {app.last_attempt_id})")
-            return app
-
-    return None
-
-
 def _run_app_deployment_thread(app_id: str) -> None:
     """Thread target that runs a single app deployment."""
     try:
@@ -232,16 +206,6 @@ def _start_pending_environment_provisioning() -> None:
     finally:
         if not slot_handed_off:
             _cdk_job_slots.release()
-
-
-def _run_app_deployment_teardown_thread(app_id: str) -> None:
-    """Thread target that runs a single app deployment teardown."""
-    try:
-        app_deployment_teardown_executor.run_teardown(app_id)
-    except Exception:
-        logger.exception(f"Unhandled error in app deployment teardown for app {app_id}")
-    finally:
-        connections.close_all()
 
 
 def _claim_pending_permissions_apply(label: str) -> AppPermissionRequest | None:
@@ -441,18 +405,6 @@ def _worker_loop() -> None:
             # Environment provisioning is unscoped — only the main worker handles it.
             if not label:
                 _start_pending_environment_provisioning()
-
-            # Check for pending app deployment teardowns
-            app_deployment_teardown = _claim_pending_app_deployment_teardown(label=label)
-            if app_deployment_teardown:
-                thread = threading.Thread(
-                    target=_run_app_deployment_teardown_thread,
-                    args=(str(app_deployment_teardown.id),),
-                    name=f"app-deploy-teardown-{app_deployment_teardown.id.hex[:8]}",
-                    daemon=True,
-                )
-                thread.start()
-                logger.info(f"Spawned thread for app deployment teardown {app_deployment_teardown.id}")
 
             # Environment teardown is unscoped — only the main worker handles it.
             if not label:

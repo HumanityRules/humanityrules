@@ -1,6 +1,6 @@
 {% comment %}
 App summary card, included by the dashboard and workspace-detail app grids. Self-terminating poll
-(docs/ui_live_update_contract.md): while a deploy or teardown job is in flight the whole card
+(docs/ui_live_update_contract.md): while a job is in flight the whole card
 re-renders every 10s (hx-swap=outerHTML), so the URL row, Last deployed and Status all move
 together; once the job settles the polling attributes are omitted and refreshing stops. The card
 carries no Alpine scope, so replacing it outright is safe.

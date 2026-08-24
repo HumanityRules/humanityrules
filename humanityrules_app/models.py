@@ -731,18 +731,15 @@ class App(models.Model):
         IDLE = "idle", "Idle"
         DEPLOY_PENDING = "deploy_pending", "Deploy Pending"
         DEPLOYING = "deploying", "Deploying"
-        TEARDOWN_PENDING = "teardown_pending", "Teardown Pending"
-        TEARING_DOWN = "tearing_down", "Tearing Down"
         REMOVAL_PENDING = "removal_pending", "Removal Pending"
         REMOVING = "removing", "Removing"
 
     class LiveState(models.TextChoices):
         NOT_DEPLOYED = "not_deployed", "Not Deployed"
         DEPLOYED = "deployed", "Deployed"
-        TORN_DOWN = "torn_down", "Torn Down"
 
     # Claimed-and-running job states; a worker thread (or inline executor) owns the row.
-    EXECUTING_JOB_STATUSES = (JobStatus.DEPLOYING, JobStatus.TEARING_DOWN, JobStatus.REMOVING)
+    EXECUTING_JOB_STATUSES = (JobStatus.DEPLOYING, JobStatus.REMOVING)
     REMOVAL_JOB_STATUSES = (JobStatus.REMOVAL_PENDING, JobStatus.REMOVING)
 
     id = models.UUIDField(
@@ -818,19 +815,19 @@ class App(models.Model):
         choices=JobStatus.choices,
         default=JobStatus.IDLE,
     )
-    # What is actually running in AWS. Written only at deploy/teardown success,
-    # so a failed attempt never clobbers it.
+    # What is actually running in AWS. Written only at deploy success, so a
+    # failed attempt never clobbers it.
     live_state = models.CharField(
         max_length=20,
         choices=LiveState.choices,
         default=LiveState.NOT_DEPLOYED,
     )
     # A deploy attempt (even a failed one) may have created AWS resources.
-    # Set when a deploy starts, cleared on successful teardown. Gates whether
-    # teardown is offered and whether removal tears infra down before purging.
+    # Set when a deploy starts, cleared once the infra is torn down. Gates
+    # whether removal tears infra down before purging.
     may_have_infra = models.BooleanField(default=False)
 
-    # Live-deploy outputs, written only at deploy success and cleared on teardown success.
+    # Live-deploy outputs, written only at deploy success and cleared when the infra is torn down.
     service_url = models.URLField(
         max_length=2048,
         blank=True,
@@ -900,8 +897,6 @@ class App(models.Model):
             return "succeeded"
         if self.last_attempt_error:
             return "failed"
-        if self.live_state == self.LiveState.TORN_DOWN:
-            return "torn_down"
         return ""
 
     @property
