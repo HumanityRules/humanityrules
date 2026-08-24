@@ -8,10 +8,11 @@ from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
 
-from humanityrules_app.models import App, DeploymentLog, DeploymentRecord, Environment, ResourceTag
+from humanityrules_app.models import App, DeploymentLog, DeploymentRecord, ResourceTag
 from humanityrules_app.services import abac_service
 from humanityrules_app.services.cost import panel as cost_panel
 from humanityrules_app.services.jobs import app_job_service
+from humanityrules_app.services.jobs import app_remove_executor
 
 from . import abac_view_checks
 from . import base
@@ -22,28 +23,6 @@ MAX_DEPLOYMENT_LOG_LINES = 1000
 
 # History rows shown on the app detail page.
 MAX_DEPLOYMENT_RECORDS = 30
-
-
-def _app_removable(app: App) -> bool:
-    """An app can be removed only while idle with no infra possibly behind it."""
-    return (
-        app.environment.status == Environment.Status.READY
-        and app.job_status == App.JobStatus.IDLE
-        and not app.may_have_infra
-    )
-
-
-def _app_has_persistent_data(app: App) -> bool:
-    """True if the template declares persistent storage (EFS or per-container host bind mounts)."""
-    template = app.source_template
-    if not template:
-        return False
-    if template.efs_config:
-        return True
-    for container in (template.containers or []):
-        if container.get("host_mounts"):
-            return True
-    return False
 
 
 def _get_app_for_user(request: HttpRequest, app_slug: str) -> App:
@@ -62,7 +41,7 @@ def _app_live_region_context(app: App, can_edit: bool) -> dict[str, Any]:
     """Context for the regions the status poll re-renders out of band: header actions and History."""
     return {
         "deployment_records": DeploymentRecord.objects.filter(app=app).select_related("created_by")[:MAX_DEPLOYMENT_RECORDS],
-        "can_remove": can_edit and not app.is_pending_removal and _app_removable(app),
+        "can_remove": can_edit and app_job_service.get_remove_skip_reason(app=app) is None,
     }
 
 
@@ -317,14 +296,15 @@ def app_remove_confirm(request: HttpRequest, app_slug: str) -> HttpResponse:
     if denied:
         return denied
 
-    if not _app_removable(app):
+    if app_job_service.get_remove_skip_reason(app=app) is not None:
         return HttpResponse(status=422)
 
     context = {
         "app": app,
         "post_url": reverse("app_remove", kwargs={"app_slug": app.slug}),
-        "has_persistent_data": _app_has_persistent_data(app),
-        "is_sandbox": app.environment.aws_account.is_humr_sandbox,
+        # Asked of the executor's own predicate so the modal's promise cannot drift
+        # from what the purge actually does.
+        "has_persistent_data": app_remove_executor.app_has_persistent_data(app=app),
     }
     return render(request, "humanityrules_app/apps/_app_remove_confirm_modal.html", context=context)
 
@@ -339,18 +319,8 @@ def app_remove(request: HttpRequest, app_slug: str) -> HttpResponse:
     if denied:
         return denied
 
-    # Sandbox slugs are reusable across orgs, so a released slug must never leave data behind:
-    # the full-purge choice is mandatory, not a user checkbox.
-    is_sandbox = app.environment.aws_account.is_humr_sandbox
-    delete_all_data = is_sandbox or request.POST.get("delete_all_data") == "on"
     try:
-        app_job_service.queue_removal(
-            app=app,
-            created_by=request.user,
-            delete_all_data=delete_all_data,
-            teardown_first=False,
-            label=None,
-        )
+        app_job_service.queue_removal(app=app, created_by=request.user, label=None)
     except app_job_service.AppJobAdmissionError:
         return HttpResponse(status=422)
 
