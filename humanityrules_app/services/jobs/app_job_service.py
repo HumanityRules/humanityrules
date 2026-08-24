@@ -24,6 +24,14 @@ FAILURE_EVENT_BY_JOB_STATUS = {
 }
 
 
+# Why an app cannot accept a removal right now. Advisory: the view layer and the
+# fleet page render these to gate their buttons, while the real enforcement is the
+# admission guard below, re-checked under the row lock.
+SKIP_APP_BUSY = "Deployment or teardown already in progress"
+SKIP_APP_PENDING_REMOVAL = "App pending removal"
+SKIP_ENVIRONMENT_NOT_READY = "Environment not ready"
+
+
 class AppJobAdmissionError(ValueError):
     """Raised when an environment or app cannot accept a new lifecycle operation."""
 
@@ -54,6 +62,22 @@ def _require_idle(app: models.App) -> None:
     """Reject a new operation while another App job owns the row."""
     if app.job_status != models.App.JobStatus.IDLE:
         raise AppJobAdmissionError(f"App '{app.slug}' has a job in progress ({app.job_status}).")
+
+
+def get_remove_skip_reason(app: models.App) -> str | None:
+    """Return why an app cannot be removed, or None when it can.
+
+    The advisory mirror of `queue_removal`'s admission guards, shared by the app-detail
+    Remove button, the staff fleet page, and the CLI so all three agree on one definition
+    of removability. Live infrastructure is not a blocker: removal tears it down inline.
+    """
+    if app.job_status in models.App.REMOVAL_JOB_STATUSES:
+        return SKIP_APP_PENDING_REMOVAL
+    if app.job_status != models.App.JobStatus.IDLE:
+        return SKIP_APP_BUSY
+    if app.environment.status != models.Environment.Status.READY:
+        return SKIP_ENVIRONMENT_NOT_READY
+    return None
 
 
 def queue_deploy(app: models.App, created_by: models.User | None) -> models.App:
@@ -91,26 +115,18 @@ def queue_teardown(app: models.App, created_by: models.User | None, label: str |
     return locked_app
 
 
-def queue_removal(
-    app: models.App,
-    created_by: models.User | None,
-    delete_all_data: bool,
-    teardown_first: bool,
-    label: str | None,
-) -> models.App:
-    """Atomically admit and queue an App removal."""
+def queue_removal(app: models.App, created_by: models.User | None, label: str | None) -> models.App:
+    """Atomically admit and queue an App removal: teardown, full data purge, then delete.
+
+    Takes no options. Removal is the single destructive operation on an app and always
+    runs the whole sequence, so live infrastructure is not a blocker here.
+    """
     with transaction.atomic():
         locked_app = _lock_app_for_admission(app=app)
         _require_idle(app=locked_app)
-        if locked_app.may_have_infra and not teardown_first:
-            raise AppJobAdmissionError(f"App '{locked_app.slug}' may still have deployed infrastructure; tear it down first.")
-        locked_app.removal_delete_all_data = delete_all_data
-        locked_app.removal_teardown_first = teardown_first
         if label is not None:
             locked_app.label = label
-        locked_app.save(update_fields=[
-            "removal_delete_all_data", "removal_teardown_first", "label", "updated_at",
-        ])
+            locked_app.save(update_fields=["label", "updated_at"])
         _open_attempt(app=locked_app, job_status=models.App.JobStatus.REMOVAL_PENDING)
         models.DeploymentRecord.objects.create(
             app=locked_app,

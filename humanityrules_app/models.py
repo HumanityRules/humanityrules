@@ -827,7 +827,7 @@ class App(models.Model):
     )
     # A deploy attempt (even a failed one) may have created AWS resources.
     # Set when a deploy starts, cleared on successful teardown. Gates whether
-    # teardown is offered and whether removal requires a teardown first.
+    # teardown is offered and whether removal tears infra down before purging.
     may_have_infra = models.BooleanField(default=False)
 
     # Live-deploy outputs, written only at deploy success and cleared on teardown success.
@@ -849,10 +849,6 @@ class App(models.Model):
     last_attempt_id = models.UUIDField(null=True, blank=True)
     # Failure message of the latest attempt; empty when it succeeded or none ran.
     last_attempt_error = models.TextField(blank=True)
-
-    # Removal-job inputs, set when removal is queued.
-    removal_delete_all_data = models.BooleanField(default=False)
-    removal_teardown_first = models.BooleanField(default=False)
 
     claimed_by_run = models.ForeignKey(
         "humanityrules_app.JobWorkerRun",

@@ -147,11 +147,10 @@ Identity, build, and runtime configuration. Deploys to exactly one Environment, 
 The App row also carries all runtime deployment state (there is no separate Deployment row):
 - **job_status** — The single in-flight operation: idle / deploy_pending / deploying / teardown_pending / tearing_down / removal_pending / removing. The job worker claims the `*_pending` values; executors return the row to `idle` when the attempt settles. `job_in_flight` = anything but idle; `is_pending_removal` = removal_pending/removing.
 - **live_state** — What is actually running in AWS: not_deployed / deployed / torn_down. Written only at deploy/teardown **success**, so a failed attempt never clobbers it.
-- **may_have_infra** — A deploy attempt (even a failed one) may have created AWS resources. Set when a deploy is claimed, cleared only on teardown success. Gates whether teardown is offered and blocks removal (unless removal tears down first).
+- **may_have_infra** — A deploy attempt (even a failed one) may have created AWS resources. Set when a deploy is claimed, cleared only on teardown success. Gates whether teardown is offered and whether removal tears infra down before purging.
 - **service_url, alb_dns, last_deployed_at** — Live-deploy outputs, written only at deploy success and cleared on teardown success.
 - **last_attempt_id** — Correlation id shared by the current/latest attempt's DeploymentRecord events and DeploymentLog lines. Kept after the attempt settles; selects the log tab's content and anchors the failure banner.
 - **last_attempt_error** — Failure message of the latest attempt; empty when it succeeded or none ran. Drives `display_status` and the failure banner.
-- **removal_delete_all_data, removal_teardown_first** — Removal-job inputs, set when removal is queued.
 - **claimed_by_run** — FK to JobWorkerRun that claimed the in-flight job (liveness input for stale-job detection).
 - **display_status / display_status_label** — Derived UI pill vocabulary folding job_status, live_state, and last error (pending / deploying / … / succeeded / failed / torn_down / removing / "").
 
@@ -272,7 +271,7 @@ Workflow: The user builds a draft in the permissions editor → user approves �
 
 ### Teardown Flows
 - **App teardown:** `job_status` teardown_pending → tearing_down; CDK deletes app stacks. On success (`settle_teardown_success`): `job_status` → idle, `live_state` → torn_down, `may_have_infra` cleared, `service_url`/`alb_dns` cleared. The App row survives, still pointing at its environment, and can redeploy.
-- **App removal:** Queued via `app_job_service.queue_removal`, which records the removal inputs on the App (`removal_delete_all_data`, `removal_teardown_first`) and moves `job_status` → removal_pending → removing. The removal executor tears down live infra inline when `removal_teardown_first` (and refuses while `may_have_infra` is set otherwise), optionally cleans persistent data and secrets, releases the sandbox slug claim, and deletes the App row (cascading DeploymentRecords, DeploymentLogs, permissions, tags). A failed removal settles back to idle and is retryable. There is no removal_succeeded event — success deletes the row.
+- **App removal:** Queued via `app_job_service.queue_removal`, which takes no options and moves `job_status` → removal_pending → removing. It is admitted whenever the app is idle and its environment is ready, deployed or not. The removal executor always runs the whole sequence: tear down live infra inline when `may_have_infra`, purge persistent data and Secrets Manager entries (`purge_app_namespace_data`, shared with sandbox environment teardown), delete `app-name=`-scoped Policy rows, release the sandbox slug claim, and delete the App row (cascading DeploymentRecords, DeploymentLogs, permissions, tags). `IntegrationUserCredential` rows are per-user and deliberately survive — see `docs/app_removal_data_cleanup_audit.md`. A failed removal settles back to idle and is retryable, re-running the whole sequence. There is no removal_succeeded event — success deletes the row.
 - **Environment teardown:** All apps torn down first (sequentially, stop on failure), then cluster/VPC CloudFormation stacks deleted, then the environment's App rows deleted (releasing sandbox slug claims), then the environment record deleted from database.
 
 ### Permissions Apply Flow

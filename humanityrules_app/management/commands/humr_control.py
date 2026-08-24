@@ -55,11 +55,7 @@ class Command(BaseCommand):
         teardown_app.add_argument("--app", required=True, help="App slug")
         teardown_app.add_argument(
             "--remove-app", action="store_true",
-            help="After tearing down any live infra, also remove the app (queues a removal attempt with teardown_first=True). Equivalent to the UI's 'Remove App' button.",
-        )
-        teardown_app.add_argument(
-            "--delete-all-data", action="store_true",
-            help="With --remove-app: also delete the app's persistent data (EFS subtree /deployments/{app} and EC2 host bind-mount directories), humr/{env}/{app}/* Secrets Manager secrets, and policies targeting app-name={app}.",
+            help="Remove the app instead: tears down any live infra, purges its data and secrets, then deletes it. Equivalent to the UI's 'Remove App' button.",
         )
 
         # redeploy-env
@@ -307,11 +303,6 @@ class Command(BaseCommand):
         """Tear down an app's most recent deployment, and optionally remove the app entirely."""
         app_slug = options["app"]
         remove_app = options.get("remove_app", False)
-        delete_all_data = options.get("delete_all_data", False)
-
-        if not remove_app and delete_all_data:
-            self.stderr.write(self.style.ERROR("--delete-all-data requires --remove-app"))
-            return
 
         try:
             app = models.App.objects.select_related("environment", "environment__aws_account").get(slug=app_slug)
@@ -320,14 +311,7 @@ class Command(BaseCommand):
             return
 
         if remove_app:
-            # Sandbox slugs are reusable across orgs, so a released slug must never leave data
-            # behind. Force a full purge regardless of the flags the caller passed.
-            if app.environment.aws_account.is_humr_sandbox and not delete_all_data:
-                self.stdout.write(self.style.WARNING(
-                    "Sandbox account: forcing --delete-all-data (sandbox slug release requires a full data purge)"
-                ))
-                delete_all_data = True
-            self._queue_app_removal(app=app, delete_all_data=delete_all_data)
+            self._queue_app_removal(app=app)
             return
 
         if app.job_status == models.App.JobStatus.TEARDOWN_PENDING:
@@ -361,21 +345,15 @@ class Command(BaseCommand):
         self.stdout.write(self.style.WARNING("Teardown will start automatically (job worker picks up pending teardowns)"))
         self.stdout.write("")
 
-    def _queue_app_removal(self, app: models.App, delete_all_data: bool) -> None:
-        """Queue a removal attempt with teardown_first=True; the worker tears down live infra inline, then removes the app."""
+    def _queue_app_removal(self, app: models.App) -> None:
+        """Queue a removal attempt: the worker tears down live infra inline, purges all data, then deletes the app."""
         if app.job_status in models.App.REMOVAL_JOB_STATUSES:
             self.stdout.write(self.style.WARNING(f"App '{app.slug}' is already pending removal"))
             return
 
         old_label = app.label
         try:
-            queued_app = app_job_service.queue_removal(
-                app=app,
-                created_by=None,
-                delete_all_data=delete_all_data,
-                teardown_first=True,
-                label="",
-            )
+            queued_app = app_job_service.queue_removal(app=app, created_by=None, label="")
         except app_job_service.AppJobAdmissionError as exc:
             self.stderr.write(self.style.ERROR(str(exc)))
             return
@@ -383,12 +361,10 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(f"\nApp '{queued_app.slug}' set to REMOVAL_PENDING"))
         self.stdout.write(f"  App: {queued_app.name}")
         self.stdout.write(f"  Workspace: {app.workspace.name}")
-        self.stdout.write(f"  teardown_first: True")
-        self.stdout.write(f"  delete_all_data: {delete_all_data}")
         if old_label:
             self.stdout.write(f"  Cleared App.label: {old_label!r} → '' (unscoped main worker will claim)")
         self.stdout.write(self.style.WARNING(
-            "Worker will tear down any live infra inline, then perform cleanup + cascade delete"
+            "Worker will tear down any live infra inline, then purge all app data and cascade delete"
         ))
         self.stdout.write("")
 
