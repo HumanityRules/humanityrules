@@ -1,4 +1,4 @@
-"""Tests for the app-detail live regions: the status poll and the two regions it OOB-swaps."""
+"""Tests for the app-detail live regions and the status poll that updates them."""
 
 import uuid
 
@@ -78,11 +78,12 @@ class TestAppDetailLiveRegions(TestCase):
         self.assertIn("/apps/myapp/deployment-section-status/", overview_button)
         self.assertIn(f'hx-target="#deployment-section-{self.app.id}"', overview_button)
 
-    def test_poll_response_carries_both_regions_out_of_band(self) -> None:
+    def test_poll_response_carries_live_regions_out_of_band(self) -> None:
         self._set_deploying()
         response = self.client.get("/apps/myapp/deployment-section-status/", **HTMX)
 
         body = response.content.decode()
+        self.assertIn('id="app-removal-banner" hx-swap-oob="true"', body)
         self.assertIn('id="app-detail-actions" hx-swap-oob="true"', body)
         self.assertIn('id="deployment-history" hx-swap-oob="true"', body)
         # Still the live clock: the section keeps polling while the job runs.

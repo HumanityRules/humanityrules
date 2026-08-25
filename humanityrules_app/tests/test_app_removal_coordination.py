@@ -234,6 +234,22 @@ class TestAppRemovalCoordination(TestCase):
         self.assertContains(response, "Removing this app")
         self.assertContains(response, f'id="deployment-section-{self.app.id}"')
 
+    def test_section_poll_replaces_progress_banner_when_removal_fails(self) -> None:
+        self.client.force_login(self.user)
+        app_job_service.queue_removal(app=self.app, created_by=self.user, label=None)
+        self.app.refresh_from_db()
+        app_job_service.settle_failure(app=self.app, error="Secrets cleanup failed")
+
+        response = self.client.get(
+            reverse("app_deployment_section_status", kwargs={"app_slug": self.app.slug}),
+        )
+
+        self.assertContains(response, 'id="app-removal-banner" hx-swap-oob="true"')
+        self.assertContains(response, "Removal failed.")
+        self.assertContains(response, "Retry removal to finish deleting this app.")
+        self.assertNotContains(response, "Removing this app")
+        self.assertNotContains(response, "Cleanup is in progress")
+
     def test_section_poll_navigates_to_the_workspace_once_the_app_row_is_gone(self) -> None:
         self.client.force_login(self.user)
         workspace_url = reverse("workspace_detail", kwargs={"workspace_slug": self.workspace.slug})
