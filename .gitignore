@@ -13,3 +13,6 @@ tmp/
 /template_repos/hermes_agent/.env.backup
 /lambdas/policy_proxy_auth/build/
 .claude/worktrees/
+
+# Riptide artifacts (cloud-synced)
+.humanlayer/tasks/
