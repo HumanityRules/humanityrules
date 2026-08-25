@@ -82,7 +82,7 @@ class TestFleetRedeployAll(TestCase):
             slug="failedagent",
             environment=environment,
             live_state=models.App.LiveState.DEPLOYED,
-            last_attempt_error="deploy crashed",
+            last_attempt_error=models.App.LastAttemptError.DEPLOY_FAILED,
         )
 
     def test_staff_fleet_page_shows_redeploy_all_button(self) -> None:
@@ -138,11 +138,12 @@ class TestFleetRedeployAll(TestCase):
         for app in unsettled_apps:
             app.refresh_from_db()
             self.assertEqual(app.job_status, models.App.JobStatus.IDLE)
-            self.assertEqual(app.last_attempt_error, fleet_service.RECOVERY_STATUS_MESSAGE)
+            self.assertEqual(app.last_attempt_error_text, fleet_service.RECOVERY_STATUS_MESSAGE)
         # The already-idle succeeded app is untouched.
         self.app.refresh_from_db()
         self.assertEqual(self.app.job_status, models.App.JobStatus.IDLE)
-        self.assertEqual(self.app.last_attempt_error, "")
+        self.assertEqual(self.app.last_attempt_error, models.App.LastAttemptError.NONE)
+        self.assertEqual(self.app.last_attempt_error_text, "")
 
     def test_fail_unsettled_is_safe_to_repeat(self) -> None:
         pending = self._make_app(
@@ -154,12 +155,12 @@ class TestFleetRedeployAll(TestCase):
 
         first_response = self.client.post("/platform/fleet/fail-unsettled/")
         pending.refresh_from_db()
-        first_error = pending.last_attempt_error
+        first_error_text = pending.last_attempt_error_text
         second_response = self.client.post("/platform/fleet/fail-unsettled/")
 
         self.assertContains(first_response, "Marked 1 unsettled deployment as failed")
         self.assertContains(second_response, "Marked 0 unsettled deployments as failed")
-        self.assertEqual(first_error, fleet_service.RECOVERY_STATUS_MESSAGE)
+        self.assertEqual(first_error_text, fleet_service.RECOVERY_STATUS_MESSAGE)
 
     def test_per_ha_redeploy_queues_only_the_selected_app(self) -> None:
         failed_app = self._add_failed_app()
@@ -195,6 +196,16 @@ class TestFleetRedeployAll(TestCase):
 
         self.assertContains(response, "Queued 0 redeployments")
         self.assertContains(response, fleet_service.SKIP_APP_BUSY)
+
+    def test_per_ha_redeploy_rejects_an_incomplete_removal(self) -> None:
+        self.app.last_attempt_error = models.App.LastAttemptError.REMOVAL_FAILED
+        self.app.last_attempt_error_text = "Secrets cleanup failed"
+        self.app.save(update_fields=["last_attempt_error", "last_attempt_error_text", "updated_at"])
+
+        response = self.client.post(f"/platform/fleet/app/{self.app.id}/redeploy/")
+
+        self.assertContains(response, "Queued 0 redeployments")
+        self.assertContains(response, fleet_service.SKIP_REMOVAL_FAILED)
 
     def test_per_ha_redeploy_reports_environment_that_becomes_not_ready_during_admission(self) -> None:
         def reject_deploy(*, app: models.App, created_by: models.User) -> None:

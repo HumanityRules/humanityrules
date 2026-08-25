@@ -112,11 +112,15 @@ def build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
     context["inherited_tags"] = inherited_tags
     context["tags_json"] = json.dumps([{"key": t.key, "value": t.value} for t in direct_tags])
     context["can_edit"] = can_edit
-    context["can_admin"] = can_admin
+    # Once removal has failed, cleanup may already have deleted part of the app's
+    # data. Keep the page read-only except for the explicit removal retry.
+    context["can_admin"] = can_admin and not app.has_failed_removal
     context["is_pending_removal"] = app.is_pending_removal
     context["url_base"] = f"/apps/{app.slug}/tags/"
     context["suggested_keys"], context["suggested_values"] = abac_service.get_resource_tag_suggestions(org, "app")
-    context.update(webapp_public_access.build_public_access_context(request=request, app=app))
+    public_access_context = webapp_public_access.build_public_access_context(request=request, app=app)
+    public_access_context["can_publish"] = public_access_context["can_publish"] and not app.has_failed_removal
+    context.update(public_access_context)
 
     return context
 

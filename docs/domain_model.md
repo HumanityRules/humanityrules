@@ -150,7 +150,8 @@ The App row also carries all runtime deployment state (there is no separate Depl
 - **may_have_infra** — A deploy attempt (even a failed one) may have created AWS resources. Set when a deploy is claimed, cleared once the infra is torn down. Gates whether removal tears infra down before purging.
 - **service_url, alb_dns, last_deployed_at** — Live-deploy outputs, written only at deploy success and cleared when the infra is torn down.
 - **last_attempt_id** — Correlation id shared by the current/latest attempt's DeploymentRecord events and DeploymentLog lines. Kept after the attempt settles; selects the log tab's content and anchors the failure banner.
-- **last_attempt_error** — Failure message of the latest attempt; empty when it succeeded or none ran. Drives `display_status` and the failure banner.
+- **last_attempt_error** — Structured failure kind for the latest attempt: empty / deploy_failed / removal_failed. Operational code uses it to distinguish a failed removal, which must stay on the retry-removal path, from a failed deploy.
+- **last_attempt_error_text** — Human-readable failure detail for the latest attempt; empty when it succeeded or none ran. Drives the failure banner.
 - **claimed_by_run** — FK to JobWorkerRun that claimed the in-flight job (liveness input for stale-job detection).
 - **display_status / display_status_label** — Derived UI pill vocabulary folding job_status, live_state, and last error (pending / deploying / succeeded / failed / removing / "").
 
@@ -263,7 +264,7 @@ Workflow: The user builds a draft in the permissions editor → user approves �
 3. Executor clones repository, builds AppConfig from the App + template, deploys via CDK (image_tag is minted per attempt inside the executor; git_ref is the repository's default branch)
 4. CDK creates/updates: ECR repository, ECS task definition, ECS service, ALB target group, and listener rules
 5. On success (`settle_deploy_success`): `job_status` → idle, `live_state` → deployed, `service_url`/`alb_dns`/`last_deployed_at` populated, deploy_succeeded event
-6. On failure (`settle_failure`): `job_status` → idle, `last_attempt_error` set, deploy_failed event — `live_state`/`service_url` are left untouched, so a failed redeploy of a live app keeps serving
+6. On failure (`settle_failure`): `job_status` → idle, `last_attempt_error` → deploy_failed, `last_attempt_error_text` set, deploy_failed event — `live_state`/`service_url` are left untouched, so a failed redeploy of a live app keeps serving
 
 ### Hostname Resolution
 - The app serves at `https://{app_slug}.{hosted_zone}` when its environment has a hosted zone
@@ -272,7 +273,7 @@ Workflow: The user builds a draft in the permissions editor → user approves �
 ### Teardown Flows
 There is no standalone app teardown: removal is the only destructive operation on an app, and `app_deployment_teardown_executor.teardown_infra` survives purely as an inline step of removal and of environment teardown.
 
-- **App removal:** Queued via `app_job_service.queue_removal`, which takes no options and moves `job_status` → removal_pending → removing. It is admitted whenever the app is idle and its environment is ready, deployed or not. The removal executor always runs the whole sequence: tear down live infra inline when `may_have_infra`, purge persistent data and Secrets Manager entries (`purge_app_namespace_data`, shared with sandbox environment teardown), delete `app-name=`-scoped Policy rows, release the sandbox slug claim, and delete the App row (cascading DeploymentRecords, DeploymentLogs, permissions, tags). `IntegrationUserCredential` rows are per-user and deliberately survive — see `docs/app_removal_data_cleanup_audit.md`. A failed removal settles back to idle and is retryable, re-running the whole sequence. There is no removal_succeeded event — success deletes the row.
+- **App removal:** Queued via `app_job_service.queue_removal`, which takes no options and moves `job_status` → removal_pending → removing. It is admitted whenever the app is idle and its environment is ready, deployed or not. The removal executor always runs the whole sequence: tear down live infra inline when `may_have_infra`, purge persistent data and Secrets Manager entries (`purge_app_namespace_data`, shared with sandbox environment teardown), delete `app-name=`-scoped Policy rows, release the sandbox slug claim, and delete the App row (cascading DeploymentRecords, DeploymentLogs, permissions, tags). `IntegrationUserCredential` rows are per-user and deliberately survive — see `docs/app_removal_data_cleanup_audit.md`. If cleanup fails after teardown, `live_state` remains `not_deployed`, the latest error kind is `removal_failed`, and the app page disables redeploy/configuration actions so the user can only retry the idempotent removal. There is no removal_succeeded event — success deletes the row.
 - **Environment teardown:** All apps torn down first (sequentially, stop on failure), then cluster/VPC CloudFormation stacks deleted, then the environment's App rows deleted (releasing sandbox slug claims), then the environment record deleted from database.
 
 ### Permissions Apply Flow

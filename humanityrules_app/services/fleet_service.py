@@ -18,6 +18,7 @@ RECOVERY_STATUS_MESSAGE = "Marked failed by the fleet recovery action after a co
 SKIP_APP_BUSY = app_job_service.SKIP_APP_BUSY
 SKIP_APP_PENDING_REMOVAL = app_job_service.SKIP_APP_PENDING_REMOVAL
 SKIP_ENVIRONMENT_NOT_READY = app_job_service.SKIP_ENVIRONMENT_NOT_READY
+SKIP_REMOVAL_FAILED = app_job_service.SKIP_REMOVAL_FAILED
 SKIP_FAILED_NOT_INCLUDED = "Failed not included"
 SKIP_NOT_REDEPLOYABLE = "Not redeployable"
 
@@ -119,6 +120,8 @@ def get_redeploy_skip_reason(app: models.App) -> str | None:
         return SKIP_APP_PENDING_REMOVAL
     if app.job_status != models.App.JobStatus.IDLE:
         return SKIP_APP_BUSY
+    if app.has_failed_removal:
+        return SKIP_REMOVAL_FAILED
     if app.last_attempt_id is None:
         return SKIP_NOT_REDEPLOYABLE
     if app.environment.status != models.Environment.Status.READY:

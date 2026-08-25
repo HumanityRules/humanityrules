@@ -135,6 +135,66 @@ class TestAppRemovalCoordination(TestCase):
         teardown_mock.assert_called_once()
         self.assertFalse(models.App.objects.filter(id=self.app.id).exists())
 
+    def test_failed_purge_after_teardown_keeps_the_app_not_deployed_for_removal_retry(self) -> None:
+        """Once teardown succeeds, a later cleanup failure must not claim the app is still live."""
+        self.app.may_have_infra = True
+        self.app.live_state = models.App.LiveState.DEPLOYED
+        self.app.service_url = "https://removalagent.example.com"
+        self.app.alb_dns = "removalagent.example-alb.com"
+        self.app.save(update_fields=["may_have_infra", "live_state", "service_url", "alb_dns", "updated_at"])
+        self._claim_into_removing()
+
+        with (
+            patch.object(app_remove_executor.app_deployment_teardown_executor, "teardown_infra", return_value=True),
+            patch.object(
+                app_remove_executor,
+                "purge_app_namespace_data",
+                return_value=(False, "Secrets cleanup failed"),
+            ),
+        ):
+            success = app_remove_executor.run_removal(app_id=str(self.app.id))
+
+        self.assertFalse(success)
+        self.app.refresh_from_db()
+        self.assertEqual(self.app.job_status, models.App.JobStatus.IDLE)
+        self.assertEqual(self.app.live_state, models.App.LiveState.NOT_DEPLOYED)
+        self.assertFalse(self.app.may_have_infra)
+        self.assertEqual(self.app.service_url, "")
+        self.assertEqual(self.app.alb_dns, "")
+        self.assertEqual(self.app.last_attempt_error, models.App.LastAttemptError.REMOVAL_FAILED)
+        self.assertEqual(self.app.last_attempt_error_text, "Secrets cleanup failed")
+        self.assertEqual(self.app.display_status, "failed")
+
+    def test_failed_removal_hides_deployment_and_configuration_actions(self) -> None:
+        self.app.last_attempt_error = models.App.LastAttemptError.REMOVAL_FAILED
+        self.app.last_attempt_error_text = "Secrets cleanup failed"
+        self.app.save(update_fields=["last_attempt_error", "last_attempt_error_text", "updated_at"])
+        self.app.source_template.enable_webapp_hosts = True
+        self.app.source_template.save(update_fields=["enable_webapp_hosts", "updated_at"])
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("app_detail", kwargs={"app_slug": self.app.slug}), HTTP_HX_REQUEST="true")
+
+        self.assertContains(response, "Retry Remove App")
+        self.assertNotContains(response, ">Redeploy<")
+        self.assertNotContains(response, ">Permissions<")
+        self.assertNotContains(response, ">Edit<")
+        self.assertNotContains(response, "Publish a webapp")
+
+        with self.assertRaisesRegex(app_job_service.AppJobAdmissionError, "incomplete removal"):
+            app_job_service.queue_deploy(app=self.app, created_by=self.user)
+
+    def test_retrying_a_failed_removal_clears_the_previous_error(self) -> None:
+        self.app.last_attempt_error = models.App.LastAttemptError.REMOVAL_FAILED
+        self.app.last_attempt_error_text = "Secrets cleanup failed"
+        self.app.save(update_fields=["last_attempt_error", "last_attempt_error_text", "updated_at"])
+
+        queued = app_job_service.queue_removal(app=self.app, created_by=self.user, label=None)
+
+        self.assertEqual(queued.job_status, models.App.JobStatus.REMOVAL_PENDING)
+        self.assertEqual(queued.last_attempt_error, models.App.LastAttemptError.NONE)
+        self.assertEqual(queued.last_attempt_error_text, "")
+
     def test_removal_always_purges_data_and_deletes_app_scoped_policies(self) -> None:
         policy = models.Policy.objects.create(
             organization=self.organization,

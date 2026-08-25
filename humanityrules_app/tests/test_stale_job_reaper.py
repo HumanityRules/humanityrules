@@ -69,7 +69,8 @@ class TestStaleJobReaper(TestCase):
 
         app.refresh_from_db()
         self.assertEqual(app.job_status, models.App.JobStatus.IDLE)
-        self.assertIn("stale-job detection", app.last_attempt_error)
+        self.assertEqual(app.last_attempt_error, models.App.LastAttemptError.DEPLOY_FAILED)
+        self.assertIn("stale-job detection", app.last_attempt_error_text)
         self.assertTrue(
             models.DeploymentRecord.objects.filter(
                 app=app,
@@ -126,7 +127,8 @@ class TestStaleJobReaper(TestCase):
 
         app.refresh_from_db()
         self.assertEqual(app.job_status, models.App.JobStatus.IDLE)
-        self.assertEqual(app.last_attempt_error, stale_job_reaper.DEAD_WORKER_MESSAGE)
+        self.assertEqual(app.last_attempt_error, models.App.LastAttemptError.DEPLOY_FAILED)
+        self.assertEqual(app.last_attempt_error_text, stale_job_reaper.DEAD_WORKER_MESSAGE)
 
     def test_app_claimed_by_live_run_is_untouched(self) -> None:
         live_run = self._create_worker_run(heartbeat_age=timedelta(seconds=10))
@@ -150,7 +152,8 @@ class TestStaleJobReaper(TestCase):
 
         app.refresh_from_db()
         self.assertEqual(app.job_status, models.App.JobStatus.IDLE)
-        self.assertIn("no progress", app.last_attempt_error)
+        self.assertEqual(app.last_attempt_error, models.App.LastAttemptError.DEPLOY_FAILED)
+        self.assertIn("no progress", app.last_attempt_error_text)
 
     def test_environment_claimed_by_dead_run_errors_fast(self) -> None:
         dead_run = self._create_worker_run(heartbeat_age=DEAD_WORKER_TIMEOUT + timedelta(minutes=1))

@@ -38,10 +38,11 @@ def _teardown_infra_for_removal(app: models.App) -> bool:
     ok = app_deployment_teardown_executor.teardown_infra(app=app)
     if not ok:
         return False
+    app.live_state = models.App.LiveState.NOT_DEPLOYED
     app.may_have_infra = False
     app.service_url = ""
     app.alb_dns = ""
-    app.save(update_fields=["may_have_infra", "service_url", "alb_dns", "updated_at"])
+    app.save(update_fields=["live_state", "may_have_infra", "service_url", "alb_dns", "updated_at"])
     return True
 
 

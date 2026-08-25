@@ -21,13 +21,21 @@ FAILURE_EVENT_BY_JOB_STATUS = {
     models.App.JobStatus.REMOVING: models.DeploymentRecord.EventType.REMOVAL_FAILED,
 }
 
+LAST_ATTEMPT_ERROR_BY_JOB_STATUS = {
+    models.App.JobStatus.DEPLOY_PENDING: models.App.LastAttemptError.DEPLOY_FAILED,
+    models.App.JobStatus.DEPLOYING: models.App.LastAttemptError.DEPLOY_FAILED,
+    models.App.JobStatus.REMOVAL_PENDING: models.App.LastAttemptError.REMOVAL_FAILED,
+    models.App.JobStatus.REMOVING: models.App.LastAttemptError.REMOVAL_FAILED,
+}
 
-# Why an app cannot accept a removal right now. Advisory: the view layer and the
-# fleet page render these to gate their buttons, while the real enforcement is the
-# admission guard below, re-checked under the row lock.
+
+# Why an app cannot accept a lifecycle action right now. Advisory: the view layer
+# and fleet page render these to gate their buttons, while the real enforcement is
+# the admission guard below, re-checked under the row lock.
 SKIP_APP_BUSY = "Deployment already in progress"
 SKIP_APP_PENDING_REMOVAL = "App pending removal"
 SKIP_ENVIRONMENT_NOT_READY = "Environment not ready"
+SKIP_REMOVAL_FAILED = "Removal incomplete"
 
 
 class AppJobAdmissionError(ValueError):
@@ -37,9 +45,12 @@ class AppJobAdmissionError(ValueError):
 def _open_attempt(app: models.App, job_status: str) -> None:
     """Assign a fresh attempt id and move the app into `job_status`."""
     app.job_status = job_status
-    app.last_attempt_id = uuid.uuid7() 
-    app.last_attempt_error = ""
-    app.save(update_fields=["job_status", "last_attempt_id", "last_attempt_error", "updated_at"])
+    app.last_attempt_id = uuid.uuid7()
+    app.last_attempt_error = models.App.LastAttemptError.NONE
+    app.last_attempt_error_text = ""
+    app.save(update_fields=[
+        "job_status", "last_attempt_id", "last_attempt_error", "last_attempt_error_text", "updated_at",
+    ])
 
 
 def _lock_app_for_admission(app: models.App) -> models.App:
@@ -60,6 +71,14 @@ def _require_idle(app: models.App) -> None:
     """Reject a new operation while another App job owns the row."""
     if app.job_status != models.App.JobStatus.IDLE:
         raise AppJobAdmissionError(f"App '{app.slug}' has a job in progress ({app.job_status}).")
+
+
+def _require_no_failed_removal(app: models.App) -> None:
+    """Keep a partially removed app on the retry-removal path."""
+    if app.has_failed_removal:
+        raise AppJobAdmissionError(
+            f"App '{app.slug}' has an incomplete removal; retry removal instead of deploying it."
+        )
 
 
 def get_remove_skip_reason(app: models.App) -> str | None:
@@ -83,6 +102,7 @@ def queue_deploy(app: models.App, created_by: models.User | None) -> models.App:
     with transaction.atomic():
         locked_app = _lock_app_for_admission(app=app)
         _require_idle(app=locked_app)
+        _require_no_failed_removal(app=locked_app)
         _open_attempt(app=locked_app, job_status=models.App.JobStatus.DEPLOY_PENDING)
         models.DeploymentRecord.objects.create(
             app=locked_app,
@@ -122,10 +142,11 @@ def settle_deploy_success(app: models.App, service_url: str, alb_dns: str, image
     app.service_url = service_url
     app.alb_dns = alb_dns
     app.last_deployed_at = timezone.now()
-    app.last_attempt_error = ""
+    app.last_attempt_error = models.App.LastAttemptError.NONE
+    app.last_attempt_error_text = ""
     app.save(update_fields=[
         "job_status", "live_state", "service_url", "alb_dns",
-        "last_deployed_at", "last_attempt_error", "updated_at",
+        "last_deployed_at", "last_attempt_error", "last_attempt_error_text", "updated_at",
     ])
     models.DeploymentRecord.objects.create(
         app=app,
@@ -138,9 +159,14 @@ def settle_deploy_success(app: models.App, service_url: str, alb_dns: str, image
 def settle_failure(app: models.App, error: str) -> None:
     """Conclude the in-flight attempt as failed, whatever kind it is: IDLE + error + event."""
     event_type = FAILURE_EVENT_BY_JOB_STATUS.get(app.job_status)
+    last_attempt_error = LAST_ATTEMPT_ERROR_BY_JOB_STATUS.get(
+        app.job_status,
+        models.App.LastAttemptError.DEPLOY_FAILED,
+    )
     app.job_status = models.App.JobStatus.IDLE
-    app.last_attempt_error = error
-    app.save(update_fields=["job_status", "last_attempt_error", "updated_at"])
+    app.last_attempt_error = last_attempt_error
+    app.last_attempt_error_text = error
+    app.save(update_fields=["job_status", "last_attempt_error", "last_attempt_error_text", "updated_at"])
     if event_type is not None:
         models.DeploymentRecord.objects.create(
             app=app,
