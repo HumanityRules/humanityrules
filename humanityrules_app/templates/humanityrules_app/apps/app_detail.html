@@ -8,18 +8,13 @@
         </div>
         {% include "humanityrules_app/apps/_app_detail_actions.html" %}
     </div>
-    {% if is_pending_removal %}
-    <div class="mb-6 rounded-lg border border-amber-300 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
-        <span class="font-medium">Removing this app…</span>
-        Cleanup is in progress.
-    </div>
-    {% endif %}
+    {% include "humanityrules_app/apps/_app_removal_banner.html" %}
 
     <div x-data="{ tab: '{{ initial_tab }}' }">
         {% comment %} Tabs: Overview + the live deployment log. The log tab is disabled until there's
         something to show, and opens by default ({{ initial_tab }}) while a deployment is in progress.
-        Clicking Overview refetches the deployment section (which OOB-swaps the actions and History
-        too), so the panel is current the instant it's shown instead of up to a poll-interval stale.
+        Clicking Overview refetches the deployment section (which OOB-swaps the removal banner,
+        actions, and History too), so the panel is current the instant it's shown instead of up to a poll-interval stale.
         The refetch also replaces the polling element, restarting its 10s delay from the click. {% endcomment %}
         <div class="mb-6 border-b border-gray-200 dark:border-gray-700">
             <nav class="-mb-px flex gap-6" aria-label="Tabs">
