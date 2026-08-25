@@ -85,8 +85,8 @@ class TestAppRemovalCoordination(TestCase):
         stderr = StringIO()
         command = humr_control.Command(stdout=stdout, stderr=stderr)
 
-        command._queue_app_removal(app=self.app, delete_all_data=False)
-        command._queue_app_removal(app=self.app, delete_all_data=False)
+        command._queue_app_removal(app=self.app)
+        command._queue_app_removal(app=self.app)
 
         self.app.refresh_from_db()
         self.assertEqual(self.app.job_status, models.App.JobStatus.REMOVAL_PENDING)
@@ -94,13 +94,7 @@ class TestAppRemovalCoordination(TestCase):
         self.assertIn("has a job in progress", stderr.getvalue())
 
     def test_worker_claims_pending_removal_into_removing(self) -> None:
-        app_job_service.queue_removal(
-            app=self.app,
-            created_by=self.user,
-            delete_all_data=False,
-            teardown_first=False,
-            label=None,
-        )
+        app_job_service.queue_removal(app=self.app, created_by=self.user, label=None)
 
         claimed = job_worker._claim_pending_app_removal(label="")
 
@@ -109,53 +103,210 @@ class TestAppRemovalCoordination(TestCase):
         self.app.refresh_from_db()
         self.assertEqual(self.app.job_status, models.App.JobStatus.REMOVING)
 
-    def test_removal_refused_while_infra_may_exist_and_stays_retryable(self) -> None:
+    def _claim_into_removing(self) -> None:
+        """Put the app where the worker would leave it, so run_removal can be driven directly."""
+        app_job_service.queue_removal(app=self.app, created_by=self.user, label=None)
+        self.app.refresh_from_db()
+        self.app.job_status = models.App.JobStatus.REMOVING
+        self.app.save(update_fields=["job_status", "updated_at"])
+
+    def test_removal_is_admitted_while_infra_may_exist(self) -> None:
         self.app.may_have_infra = True
         self.app.save(update_fields=["may_have_infra", "updated_at"])
-        with self.assertRaisesMessage(app_job_service.AppJobAdmissionError, "tear it down first"):
-            app_job_service.queue_removal(
-                app=self.app,
-                created_by=self.user,
-                delete_all_data=False,
-                teardown_first=False,
-                label=None,
-            )
 
-        self.app.refresh_from_db()
-        self.assertEqual(self.app.job_status, models.App.JobStatus.IDLE)
-        self.assertFalse(models.DeploymentRecord.objects.filter(app=self.app).exists())
+        app_job_service.queue_removal(app=self.app, created_by=self.user, label=None)
 
-        app_job_service.queue_removal(
-            app=self.app,
-            created_by=self.user,
-            delete_all_data=False,
-            teardown_first=True,
-            label=None,
-        )
         self.app.refresh_from_db()
         self.assertEqual(self.app.job_status, models.App.JobStatus.REMOVAL_PENDING)
+        self.assertEqual(self._removal_started_count(), 1)
 
-    def test_removal_with_teardown_first_tears_down_then_deletes_the_app(self) -> None:
+    def test_removal_of_a_deployed_app_tears_down_then_deletes_the_app(self) -> None:
         self.app.may_have_infra = True
         self.app.live_state = models.App.LiveState.DEPLOYED
         self.app.service_url = "https://removalagent.example.com"
         self.app.save(update_fields=["may_have_infra", "live_state", "service_url", "updated_at"])
-        app_job_service.queue_removal(
-            app=self.app,
-            created_by=self.user,
-            delete_all_data=False,
-            teardown_first=True,
-            label=None,
-        )
-        self.app.job_status = models.App.JobStatus.REMOVING
-        self.app.save(update_fields=["job_status", "updated_at"])
+        self._claim_into_removing()
 
-        with patch(
-            "humanityrules_app.services.jobs.app_remove_executor.app_deployment_teardown_executor.teardown_infra",
-            return_value=True,
-        ) as teardown_mock:
+        with patch.object(app_remove_executor.app_deployment_teardown_executor, "teardown_infra", return_value=True) as teardown_mock, \
+             patch.object(app_remove_executor, "purge_app_namespace_data", return_value=(True, "ok")):
             success = app_remove_executor.run_removal(app_id=str(self.app.id))
 
         self.assertTrue(success)
         teardown_mock.assert_called_once()
         self.assertFalse(models.App.objects.filter(id=self.app.id).exists())
+
+    def test_failed_purge_after_teardown_keeps_the_app_not_deployed_for_removal_retry(self) -> None:
+        """Once teardown succeeds, a later cleanup failure must not claim the app is still live."""
+        self.app.may_have_infra = True
+        self.app.live_state = models.App.LiveState.DEPLOYED
+        self.app.service_url = "https://removalagent.example.com"
+        self.app.alb_dns = "removalagent.example-alb.com"
+        self.app.save(update_fields=["may_have_infra", "live_state", "service_url", "alb_dns", "updated_at"])
+        self._claim_into_removing()
+
+        with (
+            patch.object(app_remove_executor.app_deployment_teardown_executor, "teardown_infra", return_value=True),
+            patch.object(
+                app_remove_executor,
+                "purge_app_namespace_data",
+                return_value=(False, "Secrets cleanup failed"),
+            ),
+        ):
+            success = app_remove_executor.run_removal(app_id=str(self.app.id))
+
+        self.assertFalse(success)
+        self.app.refresh_from_db()
+        self.assertEqual(self.app.job_status, models.App.JobStatus.IDLE)
+        self.assertEqual(self.app.live_state, models.App.LiveState.NOT_DEPLOYED)
+        self.assertFalse(self.app.may_have_infra)
+        self.assertEqual(self.app.service_url, "")
+        self.assertEqual(self.app.alb_dns, "")
+        self.assertEqual(self.app.last_attempt_error, models.App.LastAttemptError.REMOVAL_FAILED)
+        self.assertEqual(self.app.last_attempt_error_text, "Secrets cleanup failed")
+        self.assertEqual(self.app.display_status, "failed")
+
+    def test_failed_removal_hides_deployment_and_configuration_actions(self) -> None:
+        self.app.last_attempt_error = models.App.LastAttemptError.REMOVAL_FAILED
+        self.app.last_attempt_error_text = "Secrets cleanup failed"
+        self.app.save(update_fields=["last_attempt_error", "last_attempt_error_text", "updated_at"])
+        self.app.source_template.enable_webapp_hosts = True
+        self.app.source_template.save(update_fields=["enable_webapp_hosts", "updated_at"])
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("app_detail", kwargs={"app_slug": self.app.slug}), HTTP_HX_REQUEST="true")
+
+        self.assertContains(response, "Retry Remove App")
+        self.assertNotContains(response, ">Redeploy<")
+        self.assertNotContains(response, ">Permissions<")
+        self.assertNotContains(response, ">Edit<")
+        self.assertNotContains(response, "Publish a webapp")
+
+        with self.assertRaisesRegex(app_job_service.AppJobAdmissionError, "incomplete removal"):
+            app_job_service.queue_deploy(app=self.app, created_by=self.user)
+
+    def test_retrying_a_failed_removal_clears_the_previous_error(self) -> None:
+        self.app.last_attempt_error = models.App.LastAttemptError.REMOVAL_FAILED
+        self.app.last_attempt_error_text = "Secrets cleanup failed"
+        self.app.save(update_fields=["last_attempt_error", "last_attempt_error_text", "updated_at"])
+
+        queued = app_job_service.queue_removal(app=self.app, created_by=self.user, label=None)
+
+        self.assertEqual(queued.job_status, models.App.JobStatus.REMOVAL_PENDING)
+        self.assertEqual(queued.last_attempt_error, models.App.LastAttemptError.NONE)
+        self.assertEqual(queued.last_attempt_error_text, "")
+
+    def test_removal_always_purges_data_and_deletes_app_scoped_policies(self) -> None:
+        policy = models.Policy.objects.create(
+            organization=self.organization,
+            name="Removal agent access",
+            resource_type=models.Policy.ResourceType.APP,
+            identity_conditions=[{"key": "role", "value": "member"}],
+            resource_conditions=[{"key": "app-name", "value": self.app.slug}],
+            actions=["app:use"],
+        )
+        other_policy = models.Policy.objects.create(
+            organization=self.organization,
+            name="Other agent access",
+            resource_type=models.Policy.ResourceType.APP,
+            identity_conditions=[{"key": "role", "value": "member"}],
+            resource_conditions=[{"key": "app-name", "value": "otheragent"}],
+            actions=["app:use"],
+        )
+        self._claim_into_removing()
+
+        with patch.object(app_remove_executor, "purge_app_namespace_data", return_value=(True, "ok")) as purge_mock:
+            success = app_remove_executor.run_removal(app_id=str(self.app.id))
+
+        self.assertTrue(success)
+        purge_mock.assert_called_once()
+        self.assertFalse(models.App.objects.filter(id=self.app.id).exists())
+        self.assertFalse(models.Policy.objects.filter(id=policy.id).exists())
+        self.assertTrue(models.Policy.objects.filter(id=other_policy.id).exists())
+
+    def test_web_enqueue_keeps_the_user_on_the_app_page(self) -> None:
+        """Removal runs for minutes and streams a log, so the POST re-renders instead of redirecting."""
+        self.client.force_login(self.user)
+
+        response = self.client.post(reverse("app_remove", kwargs={"app_slug": self.app.slug}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("HX-Redirect", response)
+        self.assertContains(response, "Removing this app")
+        self.assertContains(response, f'id="deployment-section-{self.app.id}"')
+
+    def test_section_poll_replaces_progress_banner_when_removal_fails(self) -> None:
+        self.client.force_login(self.user)
+        app_job_service.queue_removal(app=self.app, created_by=self.user, label=None)
+        self.app.refresh_from_db()
+        app_job_service.settle_failure(app=self.app, error="Secrets cleanup failed")
+
+        response = self.client.get(
+            reverse("app_deployment_section_status", kwargs={"app_slug": self.app.slug}),
+        )
+
+        self.assertContains(response, 'id="app-removal-banner" hx-swap-oob="true"')
+        self.assertContains(response, "Removal failed.")
+        self.assertContains(response, "Retry removal to finish deleting this app.")
+        self.assertNotContains(response, "Removing this app")
+        self.assertNotContains(response, "Cleanup is in progress")
+
+    def test_section_poll_navigates_to_the_workspace_once_the_app_row_is_gone(self) -> None:
+        self.client.force_login(self.user)
+        workspace_url = reverse("workspace_detail", kwargs={"workspace_slug": self.workspace.slug})
+        poll_urls = [
+            reverse("app_deployment_section_status", kwargs={"app_slug": self.app.slug}),
+            reverse("app_deployment_log", kwargs={"app_slug": self.app.slug}),
+        ]
+        self.app.delete()
+
+        for url in poll_urls:
+            with self.subTest(url=url):
+                response = self.client.get(url, {"ws": self.workspace.slug})
+
+                # 200, not 404: htmx does not swap 4xx, so a 404 would freeze the page mid-removal.
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response["HX-Redirect"], workspace_url)
+
+    def test_section_poll_falls_back_to_the_dashboard_without_a_known_workspace(self) -> None:
+        self.client.force_login(self.user)
+        url = reverse("app_deployment_section_status", kwargs={"app_slug": self.app.slug})
+        self.app.delete()
+
+        response = self.client.get(url, {"ws": "not-a-workspace"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["HX-Redirect"], reverse("dashboard"))
+
+    def test_grid_polls_return_an_empty_body_once_the_app_row_is_gone(self) -> None:
+        """The card and the row live in someone else's list: an empty swap deletes them."""
+        self.client.force_login(self.user)
+        poll_urls = [
+            reverse("app_card", kwargs={"app_slug": self.app.slug}),
+            reverse("app_status_row", kwargs={"app_slug": self.app.slug}),
+        ]
+        self.app.delete()
+
+        for url in poll_urls:
+            with self.subTest(url=url):
+                response = self.client.get(url)
+
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.content, b"")
+                self.assertNotIn("HX-Redirect", response)
+
+    def test_removal_keeps_the_owners_integration_credentials(self) -> None:
+        """Pinned by design: the rows are per-user, so a re-created app finds them connected."""
+        credential = models.IntegrationUserCredential.objects.create(
+            owner_user=self.user,
+            environment=self.environment,
+            app_slug=self.app.slug,
+            provider="google",
+        )
+        self._claim_into_removing()
+
+        with patch.object(app_remove_executor, "purge_app_namespace_data", return_value=(True, "ok")):
+            success = app_remove_executor.run_removal(app_id=str(self.app.id))
+
+        self.assertTrue(success)
+        self.assertFalse(models.App.objects.filter(id=self.app.id).exists())
+        self.assertTrue(models.IntegrationUserCredential.objects.filter(id=credential.id).exists())

@@ -3,6 +3,9 @@ Deployment-log fragment for the app-detail "Deployment Log" tab. Shows the lates
 attempt's log, colorized by source/level. Self-terminating HTMX poll: while a job
 is in flight it re-renders itself every second (hx-swap=outerHTML); once concluded
 the polling attributes are omitted and refreshing stops. See docs/ui_live_update_contract.md.
+
+?ws= hands the poll the workspace to navigate to when the in-flight job is a removal and it
+finishes: the App row is gone by then, so the fragment cannot supply it any more.
 {% endcomment %}
 <div id="deployment-log-inner"
      {% if app.last_attempt_id %}
@@ -10,7 +13,7 @@ the polling attributes are omitted and refreshing stops. See docs/ui_live_update
      data-service-url="{{ app.service_url }}"
      {% endif %}
      {% if app.job_in_flight %}
-     hx-get="{% url 'app_deployment_log' app_slug=app.slug %}"
+     hx-get="{% url 'app_deployment_log' app_slug=app.slug %}?ws={{ app.workspace.slug }}"
      hx-trigger="load delay:1s"
      hx-target="#deployment-log-inner"
      hx-swap="outerHTML"

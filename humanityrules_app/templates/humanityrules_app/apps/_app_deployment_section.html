@@ -3,12 +3,16 @@ by the self-terminating status poll (app_deployment_section_status), which swaps
 #deployment-section-{{ app.id }}. Alpine state (configOpen, copied) lives on a wrapper OUTSIDE that
 target in app_detail.html so it survives the swap.
 
-This is the app page's single live clock: poll responses also OOB-swap the header actions and the
-History section, the other two regions that move when a job settles. with_oob is set only on those
-responses, never on the initial include (where both regions render in place). {% endcomment %}
+This is the app page's single live clock: poll responses also OOB-swap the removal banner, header
+actions, and History section, the other regions that move when a job settles. with_oob is set only
+on those responses, never on the initial include (where those regions render in place).
+
+A removal is just another in-flight job here — is_pending_removal already hides the action row —
+except that it ends by deleting the row this fragment renders. ?ws= hands the poll the workspace to
+navigate to in that case, since by then there is no App row left to read it from. {% endcomment %}
 {% partialdef deployment_section %}
 <div {% if app.job_in_flight %}
-     hx-get="{% url 'app_deployment_section_status' app_slug=app.slug %}"
+     hx-get="{% url 'app_deployment_section_status' app_slug=app.slug %}?ws={{ app.workspace.slug }}"
      hx-trigger="load delay:10s"
      hx-target="#deployment-section-{{ app.id }}"
      hx-swap="innerHTML"
@@ -38,11 +42,11 @@ responses, never on the initial include (where both regions render in place). {%
                 {% include "humanityrules_app/partials/_status_pill.html" with status=app.display_status label=app.display_status_label only %}
                 <span class="text-xs text-gray-500 dark:text-gray-400">{{ app.updated_at|timesince }} ago</span>
             </div>
-            {% if app.last_attempt_error and not app.job_in_flight %}
-            <p class="mt-2 max-w-xl text-xs text-red-700 dark:text-red-400">{{ app.last_attempt_error }}</p>
+            {% if app.last_attempt_error_text and not app.job_in_flight %}
+            <p class="mt-2 max-w-xl text-xs text-red-700 dark:text-red-400">{{ app.last_attempt_error_text }}</p>
             {% endif %}
         </div>
-        {% if app.environment.status == 'ready' and not app.is_pending_removal %}
+        {% if app.environment.status == 'ready' and not app.is_pending_removal and not app.has_failed_removal %}
         <div class="flex shrink-0 items-center gap-2 pt-1">
             {% if not app.job_in_flight %}
             <button hx-post="{% url 'app_deployment_redeploy' app_slug=app.slug %}"
@@ -57,13 +61,6 @@ responses, never on the initial include (where both regions render in place). {%
                hx-swap="innerHTML"
                hx-push-url="true"
                class="rounded-lg bg-white dark:bg-gray-800 px-3 py-1.5 text-sm font-medium text-gray-900 dark:text-white ring-1 ring-inset ring-gray-300 dark:ring-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700">Permissions</a>
-            {% endif %}
-            {% if not app.job_in_flight and app.may_have_infra %}
-            <button type="button"
-                    hx-get="{% url 'app_teardown_confirm' app_slug=app.slug %}"
-                    hx-target="#modal-container"
-                    hx-swap="innerHTML"
-                    class="rounded-lg bg-white dark:bg-gray-800 px-3 py-1.5 text-sm font-medium text-gray-900 dark:text-white ring-1 ring-inset ring-gray-300 dark:ring-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700">Tear Down</button>
             {% endif %}
         </div>
         {% endif %}
@@ -156,6 +153,7 @@ responses, never on the initial include (where both regions render in place). {%
     {% endif %}
 </div>
 {% if with_oob %}
+{% include "humanityrules_app/apps/_app_removal_banner.html" with oob=True %}
 {% include "humanityrules_app/apps/_app_detail_actions.html" with oob=True %}
 {% include "humanityrules_app/apps/_app_deployment_history.html" with oob=True %}
 {% endif %}

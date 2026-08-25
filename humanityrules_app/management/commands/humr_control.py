@@ -4,8 +4,7 @@ Control plane operations for environment provisioning and app deployments.
 Usage:
     uv run manage.py humr_control create-env --aws-account "Name" --name default --region us-east-1 --hosted-zone example.com
     uv run manage.py humr_control teardown-env --slug default --aws-account "Name"
-    uv run manage.py humr_control teardown-app --app aidetectorandhumanizer
-    uv run manage.py humr_control teardown-app --app foo --remove-app --delete-secrets --delete-persistent-data --delete-policies
+    uv run manage.py humr_control remove-app --app aidetectorandhumanizer
     uv run manage.py humr_control deploy-app-template --template hermes-agent --org acme-corp --workspace default --env default --app-name "Hermes Vmendi"
     uv run manage.py humr_control redeploy-env --slug default --aws-account "Name"
     uv run manage.py humr_control redeploy-app --app simpledashboard
@@ -50,17 +49,12 @@ class Command(BaseCommand):
         teardown_env.add_argument("--slug", required=True, help="Environment slug")
         teardown_env.add_argument("--aws-account", required=True, help="AWS account name")
 
-        # teardown-app
-        teardown_app = subparsers.add_parser("teardown-app", help="Tear down an app's deployment (and optionally remove the app)")
-        teardown_app.add_argument("--app", required=True, help="App slug")
-        teardown_app.add_argument(
-            "--remove-app", action="store_true",
-            help="After tearing down any live infra, also remove the app (queues a removal attempt with teardown_first=True). Equivalent to the UI's 'Remove App' button.",
+        # remove-app
+        remove_app = subparsers.add_parser(
+            "remove-app",
+            help="Remove an app: tears down any live infra, purges its data and secrets, then deletes it (CLI parity with the UI's 'Remove App' button)",
         )
-        teardown_app.add_argument(
-            "--delete-all-data", action="store_true",
-            help="With --remove-app: also delete the app's persistent data (EFS subtree /deployments/{app} and EC2 host bind-mount directories), humr/{env}/{app}/* Secrets Manager secrets, and policies targeting app-name={app}.",
-        )
+        remove_app.add_argument("--app", required=True, help="App slug")
 
         # redeploy-env
         redeploy_env = subparsers.add_parser(
@@ -145,8 +139,8 @@ class Command(BaseCommand):
             self._handle_create_env(options)
         elif operation == "teardown-env":
             self._handle_teardown_env(options)
-        elif operation == "teardown-app":
-            self._handle_teardown_app(options)
+        elif operation == "remove-app":
+            self._handle_remove_app(options)
         elif operation == "redeploy-env":
             self._handle_redeploy_env(options)
         elif operation == "redeploy-app":
@@ -303,15 +297,9 @@ class Command(BaseCommand):
         self.stdout.write(self.style.WARNING("Teardown will start automatically (job worker picks up pending teardowns)"))
         self.stdout.write("")
 
-    def _handle_teardown_app(self, options: dict[str, Any]) -> None:
-        """Tear down an app's most recent deployment, and optionally remove the app entirely."""
+    def _handle_remove_app(self, options: dict[str, Any]) -> None:
+        """Remove an app entirely: infra teardown, full data purge, then delete."""
         app_slug = options["app"]
-        remove_app = options.get("remove_app", False)
-        delete_all_data = options.get("delete_all_data", False)
-
-        if not remove_app and delete_all_data:
-            self.stderr.write(self.style.ERROR("--delete-all-data requires --remove-app"))
-            return
 
         try:
             app = models.App.objects.select_related("environment", "environment__aws_account").get(slug=app_slug)
@@ -319,63 +307,17 @@ class Command(BaseCommand):
             self.stderr.write(self.style.ERROR(f"App '{app_slug}' not found"))
             return
 
-        if remove_app:
-            # Sandbox slugs are reusable across orgs, so a released slug must never leave data
-            # behind. Force a full purge regardless of the flags the caller passed.
-            if app.environment.aws_account.is_humr_sandbox and not delete_all_data:
-                self.stdout.write(self.style.WARNING(
-                    "Sandbox account: forcing --delete-all-data (sandbox slug release requires a full data purge)"
-                ))
-                delete_all_data = True
-            self._queue_app_removal(app=app, delete_all_data=delete_all_data)
-            return
+        self._queue_app_removal(app=app)
 
-        if app.job_status == models.App.JobStatus.TEARDOWN_PENDING:
-            self.stdout.write(self.style.WARNING("App is already queued for teardown"))
-            return
-
-        if app.job_status != models.App.JobStatus.IDLE:
-            self.stderr.write(self.style.ERROR(
-                f"App has a job in progress ({app.job_status}) - cannot tear down. Wait for it to complete."
-            ))
-            return
-
-        if not app.may_have_infra:
-            self.stderr.write(self.style.ERROR(f"App '{app_slug}' has no infra to tear down"))
-            return
-
-        old_status = app.display_status
-        old_label = app.label
-        try:
-            app_job_service.queue_teardown(app=app, created_by=None, label="")
-        except app_job_service.AppJobAdmissionError as exc:
-            self.stderr.write(self.style.ERROR(str(exc)))
-            return
-
-        self.stdout.write(self.style.SUCCESS(f"\nApp '{app_slug}' set to TEARDOWN_PENDING"))
-        self.stdout.write(f"  App: {app.name}")
-        self.stdout.write(f"  Environment: {app.environment.name}")
-        self.stdout.write(f"  Previous status: {old_status}")
-        if old_label:
-            self.stdout.write(f"  Cleared App.label: {old_label!r} → '' (unscoped main worker will claim)")
-        self.stdout.write(self.style.WARNING("Teardown will start automatically (job worker picks up pending teardowns)"))
-        self.stdout.write("")
-
-    def _queue_app_removal(self, app: models.App, delete_all_data: bool) -> None:
-        """Queue a removal attempt with teardown_first=True; the worker tears down live infra inline, then removes the app."""
+    def _queue_app_removal(self, app: models.App) -> None:
+        """Queue a removal attempt: the worker tears down live infra inline, purges all data, then deletes the app."""
         if app.job_status in models.App.REMOVAL_JOB_STATUSES:
             self.stdout.write(self.style.WARNING(f"App '{app.slug}' is already pending removal"))
             return
 
         old_label = app.label
         try:
-            queued_app = app_job_service.queue_removal(
-                app=app,
-                created_by=None,
-                delete_all_data=delete_all_data,
-                teardown_first=True,
-                label="",
-            )
+            queued_app = app_job_service.queue_removal(app=app, created_by=None, label="")
         except app_job_service.AppJobAdmissionError as exc:
             self.stderr.write(self.style.ERROR(str(exc)))
             return
@@ -383,12 +325,10 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(f"\nApp '{queued_app.slug}' set to REMOVAL_PENDING"))
         self.stdout.write(f"  App: {queued_app.name}")
         self.stdout.write(f"  Workspace: {app.workspace.name}")
-        self.stdout.write(f"  teardown_first: True")
-        self.stdout.write(f"  delete_all_data: {delete_all_data}")
         if old_label:
             self.stdout.write(f"  Cleared App.label: {old_label!r} → '' (unscoped main worker will claim)")
         self.stdout.write(self.style.WARNING(
-            "Worker will tear down any live infra inline, then perform cleanup + cascade delete"
+            "Worker will tear down any live infra inline, then purge all app data and cascade delete"
         ))
         self.stdout.write("")
 

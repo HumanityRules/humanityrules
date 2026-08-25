@@ -80,7 +80,8 @@ class TestAppDeploymentExecutor(TestCase):
         self.assertEqual(self.app.live_state, models.App.LiveState.DEPLOYED)
         self.assertEqual(self.app.service_url, "https://myapp.example.com")
         self.assertEqual(self.app.alb_dns, "myapp-staging.debug-alb.local")
-        self.assertEqual(self.app.last_attempt_error, "")
+        self.assertEqual(self.app.last_attempt_error, models.App.LastAttemptError.NONE)
+        self.assertEqual(self.app.last_attempt_error_text, "")
         self.assertIsNotNone(self.app.last_deployed_at)
 
         self.assertTrue(
@@ -130,7 +131,8 @@ class TestAppDeploymentExecutor(TestCase):
         self.assertEqual(self.app.service_url, "https://myapp.example.com")
         self.assertEqual(self.app.alb_dns, "myapp-staging.alb.local")
         # The failed attempt is recorded on the app and as an event.
-        self.assertEqual(self.app.last_attempt_error, "stack rollback")
+        self.assertEqual(self.app.last_attempt_error, models.App.LastAttemptError.DEPLOY_FAILED)
+        self.assertEqual(self.app.last_attempt_error_text, "stack rollback")
         # A failed deploy may have created infra, so the flag stays set.
         self.assertTrue(self.app.may_have_infra)
         self.assertTrue(
@@ -176,7 +178,8 @@ class TestAppDeploymentExecutor(TestCase):
 
         cross_tenant_app.refresh_from_db()
         self.assertEqual(cross_tenant_app.job_status, models.App.JobStatus.IDLE)
-        self.assertIn("Refused", cross_tenant_app.last_attempt_error)
+        self.assertEqual(cross_tenant_app.last_attempt_error, models.App.LastAttemptError.DEPLOY_FAILED)
+        self.assertIn("Refused", cross_tenant_app.last_attempt_error_text)
 
     def test_sandbox_slug_reservation_rejects_cross_org_slug(self) -> None:
         """A slug another org already holds in the shared sandbox is rejected by the slug
