@@ -738,6 +738,11 @@ class App(models.Model):
         NOT_DEPLOYED = "not_deployed", "Not Deployed"
         DEPLOYED = "deployed", "Deployed"
 
+    class LastAttemptError(models.TextChoices):
+        NONE = "", "None"
+        DEPLOY_FAILED = "deploy_failed", "Deploy Failed"
+        REMOVAL_FAILED = "removal_failed", "Removal Failed"
+
     # Claimed-and-running job states; a worker thread (or inline executor) owns the row.
     EXECUTING_JOB_STATUSES = (JobStatus.DEPLOYING, JobStatus.REMOVING)
     REMOVAL_JOB_STATUSES = (JobStatus.REMOVAL_PENDING, JobStatus.REMOVING)
@@ -844,8 +849,16 @@ class App(models.Model):
     # events and DeploymentLog lines. Kept after the attempt settles: it selects
     # the log tab's content and anchors the failure banner.
     last_attempt_id = models.UUIDField(null=True, blank=True)
-    # Failure message of the latest attempt; empty when it succeeded or none ran.
-    last_attempt_error = models.TextField(blank=True)
+    # Failure kind and human-readable detail for the latest attempt. Keeping the
+    # kind structured lets operational code distinguish a failed removal from a
+    # failed deploy without reading the append-only DeploymentRecord audit trail.
+    last_attempt_error = models.CharField(
+        max_length=30,
+        choices=LastAttemptError.choices,
+        default=LastAttemptError.NONE,
+        blank=True,
+    )
+    last_attempt_error_text = models.TextField(blank=True)
 
     claimed_by_run = models.ForeignKey(
         "humanityrules_app.JobWorkerRun",
@@ -893,6 +906,8 @@ class App(models.Model):
             return "removing"
         if self.job_status != self.JobStatus.IDLE:
             return self.job_status
+        if self.last_attempt_error == self.LastAttemptError.REMOVAL_FAILED:
+            return "failed"
         if self.live_state == self.LiveState.DEPLOYED:
             return "succeeded"
         if self.last_attempt_error:
@@ -906,6 +921,10 @@ class App(models.Model):
     @property
     def is_pending_removal(self) -> bool:
         return self.job_status in self.REMOVAL_JOB_STATUSES
+
+    @property
+    def has_failed_removal(self) -> bool:
+        return self.last_attempt_error == self.LastAttemptError.REMOVAL_FAILED
 
     @property
     def job_in_flight(self) -> bool:

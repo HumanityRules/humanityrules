@@ -11,6 +11,6 @@ See docs/ui_live_update_contract.md.
             hx-get="{% url 'app_remove_confirm' app_slug=app.slug %}"
             hx-target="#modal-container"
             hx-swap="innerHTML"
-            class="rounded-lg bg-white dark:bg-gray-800 px-3 py-1.5 text-sm font-medium text-red-700 dark:text-red-400 ring-1 ring-inset ring-red-300 dark:ring-red-500/30 hover:bg-red-50 dark:hover:bg-red-500/10">Remove App</button>
+            class="rounded-lg bg-white dark:bg-gray-800 px-3 py-1.5 text-sm font-medium text-red-700 dark:text-red-400 ring-1 ring-inset ring-red-300 dark:ring-red-500/30 hover:bg-red-50 dark:hover:bg-red-500/10">{% if app.has_failed_removal %}Retry Remove App{% else %}Remove App{% endif %}</button>
     {% endif %}
 </div>

@@ -42,11 +42,11 @@ navigate to in that case, since by then there is no App row left to read it from
                 {% include "humanityrules_app/partials/_status_pill.html" with status=app.display_status label=app.display_status_label only %}
                 <span class="text-xs text-gray-500 dark:text-gray-400">{{ app.updated_at|timesince }} ago</span>
             </div>
-            {% if app.last_attempt_error and not app.job_in_flight %}
-            <p class="mt-2 max-w-xl text-xs text-red-700 dark:text-red-400">{{ app.last_attempt_error }}</p>
+            {% if app.last_attempt_error_text and not app.job_in_flight %}
+            <p class="mt-2 max-w-xl text-xs text-red-700 dark:text-red-400">{{ app.last_attempt_error_text }}</p>
             {% endif %}
         </div>
-        {% if app.environment.status == 'ready' and not app.is_pending_removal %}
+        {% if app.environment.status == 'ready' and not app.is_pending_removal and not app.has_failed_removal %}
         <div class="flex shrink-0 items-center gap-2 pt-1">
             {% if not app.job_in_flight %}
             <button hx-post="{% url 'app_deployment_redeploy' app_slug=app.slug %}"
