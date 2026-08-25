@@ -340,7 +340,9 @@ class TestSandboxEnvironmentTeardownUI(TestCase):
         self.client.force_login(self.admin_user)
         response = self.client.get(reverse("app_remove_confirm", kwargs={"app_slug": "demo"}), **HTMX)
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Removing it destroys")
+        self.assertContains(response, "All data and resources owned by this app will be permanently deleted.")
+        self.assertNotContains(response, "<ul")
+        self.assertNotContains(response, "{#")
         self.assertNotContains(response, "<input")
 
     def test_sandbox_app_remove_queues_a_removal(self) -> None:
