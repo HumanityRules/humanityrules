@@ -75,15 +75,13 @@ class TestFleetRemove(TestCase):
         self.assertContains(response, "Remove fleetagent")
         self.assertContains(response, f"/platform/fleet/app/{self.app.id}/remove/")
 
-    def test_remove_queues_teardown_first_and_a_full_data_purge(self) -> None:
+    def test_remove_queues_a_removal_for_a_still_deployed_app(self) -> None:
         response = self.client.post(f"/platform/fleet/app/{self.app.id}/remove/")
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Queued removal of fleetagent")
         self.app.refresh_from_db()
         self.assertEqual(self.app.job_status, models.App.JobStatus.REMOVAL_PENDING)
-        self.assertTrue(self.app.removal_teardown_first)
-        self.assertTrue(self.app.removal_delete_all_data)
         self.assertTrue(
             models.DeploymentRecord.objects.filter(
                 app=self.app, event_type=models.DeploymentRecord.EventType.REMOVAL_STARTED,

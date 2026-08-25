@@ -731,18 +731,20 @@ class App(models.Model):
         IDLE = "idle", "Idle"
         DEPLOY_PENDING = "deploy_pending", "Deploy Pending"
         DEPLOYING = "deploying", "Deploying"
-        TEARDOWN_PENDING = "teardown_pending", "Teardown Pending"
-        TEARING_DOWN = "tearing_down", "Tearing Down"
         REMOVAL_PENDING = "removal_pending", "Removal Pending"
         REMOVING = "removing", "Removing"
 
     class LiveState(models.TextChoices):
         NOT_DEPLOYED = "not_deployed", "Not Deployed"
         DEPLOYED = "deployed", "Deployed"
-        TORN_DOWN = "torn_down", "Torn Down"
+
+    class LastAttemptError(models.TextChoices):
+        NONE = "", "None"
+        DEPLOY_FAILED = "deploy_failed", "Deploy Failed"
+        REMOVAL_FAILED = "removal_failed", "Removal Failed"
 
     # Claimed-and-running job states; a worker thread (or inline executor) owns the row.
-    EXECUTING_JOB_STATUSES = (JobStatus.DEPLOYING, JobStatus.TEARING_DOWN, JobStatus.REMOVING)
+    EXECUTING_JOB_STATUSES = (JobStatus.DEPLOYING, JobStatus.REMOVING)
     REMOVAL_JOB_STATUSES = (JobStatus.REMOVAL_PENDING, JobStatus.REMOVING)
 
     id = models.UUIDField(
@@ -818,19 +820,19 @@ class App(models.Model):
         choices=JobStatus.choices,
         default=JobStatus.IDLE,
     )
-    # What is actually running in AWS. Written only at deploy/teardown success,
-    # so a failed attempt never clobbers it.
+    # What is actually running in AWS. Written only at deploy success, so a
+    # failed attempt never clobbers it.
     live_state = models.CharField(
         max_length=20,
         choices=LiveState.choices,
         default=LiveState.NOT_DEPLOYED,
     )
     # A deploy attempt (even a failed one) may have created AWS resources.
-    # Set when a deploy starts, cleared on successful teardown. Gates whether
-    # teardown is offered and whether removal requires a teardown first.
+    # Set when a deploy starts, cleared once the infra is torn down. Gates
+    # whether removal tears infra down before purging.
     may_have_infra = models.BooleanField(default=False)
 
-    # Live-deploy outputs, written only at deploy success and cleared on teardown success.
+    # Live-deploy outputs, written only at deploy success and cleared when the infra is torn down.
     service_url = models.URLField(
         max_length=2048,
         blank=True,
@@ -847,12 +849,16 @@ class App(models.Model):
     # events and DeploymentLog lines. Kept after the attempt settles: it selects
     # the log tab's content and anchors the failure banner.
     last_attempt_id = models.UUIDField(null=True, blank=True)
-    # Failure message of the latest attempt; empty when it succeeded or none ran.
-    last_attempt_error = models.TextField(blank=True)
-
-    # Removal-job inputs, set when removal is queued.
-    removal_delete_all_data = models.BooleanField(default=False)
-    removal_teardown_first = models.BooleanField(default=False)
+    # Failure kind and human-readable detail for the latest attempt. Keeping the
+    # kind structured lets operational code distinguish a failed removal from a
+    # failed deploy without reading the append-only DeploymentRecord audit trail.
+    last_attempt_error = models.CharField(
+        max_length=30,
+        choices=LastAttemptError.choices,
+        default=LastAttemptError.NONE,
+        blank=True,
+    )
+    last_attempt_error_text = models.TextField(blank=True)
 
     claimed_by_run = models.ForeignKey(
         "humanityrules_app.JobWorkerRun",
@@ -900,12 +906,12 @@ class App(models.Model):
             return "removing"
         if self.job_status != self.JobStatus.IDLE:
             return self.job_status
+        if self.last_attempt_error == self.LastAttemptError.REMOVAL_FAILED:
+            return "failed"
         if self.live_state == self.LiveState.DEPLOYED:
             return "succeeded"
         if self.last_attempt_error:
             return "failed"
-        if self.live_state == self.LiveState.TORN_DOWN:
-            return "torn_down"
         return ""
 
     @property
@@ -915,6 +921,10 @@ class App(models.Model):
     @property
     def is_pending_removal(self) -> bool:
         return self.job_status in self.REMOVAL_JOB_STATUSES
+
+    @property
+    def has_failed_removal(self) -> bool:
+        return self.last_attempt_error == self.LastAttemptError.REMOVAL_FAILED
 
     @property
     def job_in_flight(self) -> bool:

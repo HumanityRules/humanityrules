@@ -1,0 +1,15 @@
+{% comment %} Stable live region for removal progress. The full app page renders it in place;
+the deployment status poll replaces it out of band as the removal attempt changes state. {% endcomment %}
+<div id="app-removal-banner"{% if oob %} hx-swap-oob="true"{% endif %}>
+    {% if app.is_pending_removal %}
+    <div class="mb-6 rounded-lg border border-amber-300 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+        <span class="font-medium">Removing this app…</span>
+        Cleanup is in progress.
+    </div>
+    {% elif app.has_failed_removal %}
+    <div class="mb-6 rounded-lg border border-red-300 dark:border-red-500/30 bg-red-50 dark:bg-red-500/10 px-4 py-3 text-sm text-red-800 dark:text-red-200">
+        <span class="font-medium">Removal failed.</span>
+        Cleanup is incomplete. Retry removal to finish deleting this app.
+    </div>
+    {% endif %}
+</div>

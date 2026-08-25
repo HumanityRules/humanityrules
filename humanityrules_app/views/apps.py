@@ -3,15 +3,16 @@ from typing import Any
 
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
-from django.http import HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
 
-from humanityrules_app.models import App, DeploymentLog, DeploymentRecord, Environment, ResourceTag
+from humanityrules_app.models import App, DeploymentLog, DeploymentRecord, ResourceTag, Workspace
 from humanityrules_app.services import abac_service
 from humanityrules_app.services.cost import panel as cost_panel
 from humanityrules_app.services.jobs import app_job_service
+from humanityrules_app.services.jobs import app_remove_executor
 
 from . import abac_view_checks
 from . import base
@@ -24,45 +25,61 @@ MAX_DEPLOYMENT_LOG_LINES = 1000
 MAX_DEPLOYMENT_RECORDS = 30
 
 
-def _app_removable(app: App) -> bool:
-    """An app can be removed only while idle with no infra possibly behind it."""
-    return (
-        app.environment.status == Environment.Status.READY
-        and app.job_status == App.JobStatus.IDLE
-        and not app.may_have_infra
-    )
+def _find_app_for_user(request: HttpRequest, app_slug: str) -> App | None:
+    """Look up an app in the current user's organization, or None when there is no such row.
 
-
-def _app_has_persistent_data(app: App) -> bool:
-    """True if the template declares persistent storage (EFS or per-container host bind mounts)."""
-    template = app.source_template
-    if not template:
-        return False
-    if template.efs_config:
-        return True
-    for container in (template.containers or []):
-        if container.get("host_mounts"):
-            return True
-    return False
+    Only the polling endpoints use the None arm: an app removal completing under an open
+    page is a normal terminal transition, not an error (see ``_app_gone_response``).
+    """
+    return App.objects.select_related(
+        "workspace", "created_by", "source_template",
+        "environment", "environment__aws_account",
+    ).filter(
+        slug=app_slug,
+        organization=request.user.current_organization,
+    ).first()
 
 
 def _get_app_for_user(request: HttpRequest, app_slug: str) -> App:
     """Get an app that belongs to the current user's organization."""
-    return get_object_or_404(
-        App.objects.select_related(
-            "workspace", "created_by", "source_template",
-            "environment", "environment__aws_account",
-        ),
-        slug=app_slug,
-        organization=request.user.current_organization,
+    app = _find_app_for_user(request, app_slug)
+    if app is None:
+        raise Http404(f"No App matches the slug {app_slug!r}")
+    return app
+
+
+def _app_gone_response(request: HttpRequest, *, navigate: bool) -> HttpResponse:
+    """Terminal response for a live fragment whose App row has been removed.
+
+    HTMX does not swap 4xx responses, so a bare 404 would freeze the fragment on the last
+    frame of the removal. A fragment that *is* the page (the deployment section, the log)
+    navigates the browser to the workspace the app belonged to; a fragment that lives inside
+    someone else's grid (a card, a status row) returns an empty body, so the swap deletes it
+    from the list instead.
+
+    The workspace is carried on the poll URL by the templates, because by the time the poll
+    comes back "gone" there is no App row left to read it from.
+    """
+    response = HttpResponse(status=200)
+    if not navigate:
+        return response
+    workspace_slug = request.GET.get("ws", "")
+    known_workspace = workspace_slug and Workspace.objects.filter(
+        slug=workspace_slug, organization=request.user.current_organization,
+    ).exists()
+    response["HX-Redirect"] = (
+        reverse("workspace_detail", kwargs={"workspace_slug": workspace_slug})
+        if known_workspace
+        else reverse("dashboard")
     )
+    return response
 
 
 def _app_live_region_context(app: App, can_edit: bool) -> dict[str, Any]:
     """Context for the regions the status poll re-renders out of band: header actions and History."""
     return {
         "deployment_records": DeploymentRecord.objects.filter(app=app).select_related("created_by")[:MAX_DEPLOYMENT_RECORDS],
-        "can_remove": can_edit and not app.is_pending_removal and _app_removable(app),
+        "can_remove": can_edit and app_job_service.get_remove_skip_reason(app=app) is None,
     }
 
 
@@ -86,7 +103,7 @@ def build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
     context["initial_tab"] = "logs" if app.job_in_flight else "content"
     if app.last_attempt_id is not None:
         # Address shown by the welcome + deploy-success dialogs. Computed here so
-        # every renderer of app_detail.html (detail, redeploy, teardown) includes
+        # every renderer of app_detail.html (detail, redeploy) includes
         # the deploy-success watcher, not just the app_detail view.
         zone = app.environment.shared_alb_hosted_zone
         context["deploy_address"] = f"{app.slug}.{zone}" if zone else app.slug
@@ -95,11 +112,15 @@ def build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
     context["inherited_tags"] = inherited_tags
     context["tags_json"] = json.dumps([{"key": t.key, "value": t.value} for t in direct_tags])
     context["can_edit"] = can_edit
-    context["can_admin"] = can_admin
+    # Once removal has failed, cleanup may already have deleted part of the app's
+    # data. Keep the page read-only except for the explicit removal retry.
+    context["can_admin"] = can_admin and not app.has_failed_removal
     context["is_pending_removal"] = app.is_pending_removal
     context["url_base"] = f"/apps/{app.slug}/tags/"
     context["suggested_keys"], context["suggested_values"] = abac_service.get_resource_tag_suggestions(org, "app")
-    context.update(webapp_public_access.build_public_access_context(request=request, app=app))
+    public_access_context = webapp_public_access.build_public_access_context(request=request, app=app)
+    public_access_context["can_publish"] = public_access_context["can_publish"] and not app.has_failed_removal
+    context.update(public_access_context)
 
     return context
 
@@ -139,29 +160,13 @@ def app_detail(request: HttpRequest, app_slug: str) -> HttpResponse:
 
 
 @login_required
-@require_POST
-def app_deployment_teardown(request: HttpRequest, app_slug: str) -> HttpResponse:
-    """Queue a teardown attempt for the app's live infra."""
-    app = _get_app_for_user(request, app_slug)
-
-    denied = abac_view_checks.check_abac(request, app.workspace, "workspace", "workspace:edit")
-    if denied:
-        return denied
-
-    try:
-        app_job_service.queue_teardown(app=app, created_by=request.user, label=None)
-    except app_job_service.AppJobAdmissionError:
-        return HttpResponse(status=422)
-
-    context = build_app_detail_context(request=request, app=_get_app_for_user(request, app_slug))
-    return render(request, "humanityrules_app/apps/app_detail.html", context=context)
-
-
-@login_required
 @require_GET
 def app_status_row(request: HttpRequest, app_slug: str) -> HttpResponse:
     """Return an updated app status row for the workspace/environment lists."""
-    app = _get_app_for_user(request, app_slug)
+    # Gone before ABAC: a removed app has no workspace left to evaluate against.
+    app = _find_app_for_user(request, app_slug)
+    if app is None:
+        return _app_gone_response(request, navigate=False)
 
     denied = abac_view_checks.check_abac(request, app.workspace, "workspace", "workspace:view")
     if denied:
@@ -176,7 +181,11 @@ def app_status_row(request: HttpRequest, app_slug: str) -> HttpResponse:
 @require_GET
 def app_deployment_log(request: HttpRequest, app_slug: str) -> HttpResponse:
     """Render the most recent deployment's log fragment; self-polls every 1s while transient."""
-    app = _get_app_for_user(request, app_slug)
+    # Gone before ABAC: a removed app has no workspace left to evaluate against. The log is
+    # the last thing a user watches during a removal, so it carries the page off the app.
+    app = _find_app_for_user(request, app_slug)
+    if app is None:
+        return _app_gone_response(request, navigate=True)
 
     denied = abac_view_checks.check_abac(request, app.workspace, "workspace", "workspace:view")
     if denied:
@@ -206,7 +215,11 @@ def app_deployment_log(request: HttpRequest, app_slug: str) -> HttpResponse:
 @require_GET
 def app_deployment_section_status(request: HttpRequest, app_slug: str) -> HttpResponse:
     """Return the deployment section for the self-terminating poll, plus its OOB companions."""
-    app = _get_app_for_user(request, app_slug)
+    # Gone before ABAC: a removed app has no workspace left to evaluate against. This is the
+    # page's live clock, so it is the poll that ends a removal by navigating away.
+    app = _find_app_for_user(request, app_slug)
+    if app is None:
+        return _app_gone_response(request, navigate=True)
 
     denied = abac_view_checks.check_abac(request, app.workspace, "workspace", "workspace:view")
     if denied:
@@ -226,25 +239,10 @@ def app_deployment_section_status(request: HttpRequest, app_slug: str) -> HttpRe
 @require_GET
 def app_card(request: HttpRequest, app_slug: str) -> HttpResponse:
     """Return the app summary card for the self-terminating poll."""
-    app = _get_app_for_user(request, app_slug)
+    app = _find_app_for_user(request, app_slug)
+    if app is None:
+        return _app_gone_response(request, navigate=False)
     return render(request, "humanityrules_app/partials/_app_card.html", {"app": app})
-
-
-@login_required
-@require_GET
-def app_teardown_confirm(request: HttpRequest, app_slug: str) -> HttpResponse:
-    """Return the teardown confirmation modal HTML."""
-    app = _get_app_for_user(request, app_slug)
-
-    denied = abac_view_checks.check_abac(request, app.workspace, "workspace", "workspace:view")
-    if denied:
-        return denied
-
-    context = {
-        "app": app,
-        "post_url": reverse("app_deployment_teardown", kwargs={"app_slug": app.slug}),
-    }
-    return render(request, "humanityrules_app/apps/_app_teardown_confirm_modal.html", context=context)
 
 
 @login_required
@@ -317,14 +315,15 @@ def app_remove_confirm(request: HttpRequest, app_slug: str) -> HttpResponse:
     if denied:
         return denied
 
-    if not _app_removable(app):
+    if app_job_service.get_remove_skip_reason(app=app) is not None:
         return HttpResponse(status=422)
 
     context = {
         "app": app,
         "post_url": reverse("app_remove", kwargs={"app_slug": app.slug}),
-        "has_persistent_data": _app_has_persistent_data(app),
-        "is_sandbox": app.environment.aws_account.is_humr_sandbox,
+        # Asked of the executor's own predicate so the modal's promise cannot drift
+        # from what the purge actually does.
+        "has_persistent_data": app_remove_executor.app_has_persistent_data(app=app),
     }
     return render(request, "humanityrules_app/apps/_app_remove_confirm_modal.html", context=context)
 
@@ -339,26 +338,16 @@ def app_remove(request: HttpRequest, app_slug: str) -> HttpResponse:
     if denied:
         return denied
 
-    # Sandbox slugs are reusable across orgs, so a released slug must never leave data behind:
-    # the full-purge choice is mandatory, not a user checkbox.
-    is_sandbox = app.environment.aws_account.is_humr_sandbox
-    delete_all_data = is_sandbox or request.POST.get("delete_all_data") == "on"
     try:
-        app_job_service.queue_removal(
-            app=app,
-            created_by=request.user,
-            delete_all_data=delete_all_data,
-            teardown_first=False,
-            label=None,
-        )
+        app_job_service.queue_removal(app=app, created_by=request.user, label=None)
     except app_job_service.AppJobAdmissionError:
         return HttpResponse(status=422)
 
-    response = HttpResponse(status=200)
-    response["HX-Redirect"] = reverse(
-        "workspace_detail", kwargs={"workspace_slug": app.workspace.slug},
-    )
-    return response
+    # Stay on the app page: teardown-plus-purge takes minutes and streams a real log. The
+    # re-render shows the "Removing this app…" banner and restarts the polls, which carry
+    # the browser to the workspace once the row is actually gone.
+    context = build_app_detail_context(request, _get_app_for_user(request, app_slug))
+    return render(request, "humanityrules_app/apps/app_detail.html", context=context)
 
 
 @login_required

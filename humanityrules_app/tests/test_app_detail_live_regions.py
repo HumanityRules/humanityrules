@@ -1,4 +1,4 @@
-"""Tests for the app-detail live regions: the status poll and the two regions it OOB-swaps."""
+"""Tests for the app-detail live regions and the status poll that updates them."""
 
 import uuid
 
@@ -55,11 +55,10 @@ class TestAppDetailLiveRegions(TestCase):
         self.app.job_status = App.JobStatus.DEPLOYING
         self.app.save(update_fields=["job_status", "updated_at"])
 
-    def _set_torn_down(self) -> None:
+    def _set_idle(self) -> None:
+        """Back to idle, still deployed with live infra — the state removal is now offered from."""
         self.app.job_status = App.JobStatus.IDLE
-        self.app.live_state = App.LiveState.TORN_DOWN
-        self.app.may_have_infra = False
-        self.app.save(update_fields=["job_status", "live_state", "may_have_infra", "updated_at"])
+        self.app.save(update_fields=["job_status", "updated_at"])
 
     def test_page_renders_both_regions_in_place_without_oob(self) -> None:
         self._record(DeploymentRecord.EventType.DEPLOY_STARTED)
@@ -79,11 +78,12 @@ class TestAppDetailLiveRegions(TestCase):
         self.assertIn("/apps/myapp/deployment-section-status/", overview_button)
         self.assertIn(f'hx-target="#deployment-section-{self.app.id}"', overview_button)
 
-    def test_poll_response_carries_both_regions_out_of_band(self) -> None:
+    def test_poll_response_carries_live_regions_out_of_band(self) -> None:
         self._set_deploying()
         response = self.client.get("/apps/myapp/deployment-section-status/", **HTMX)
 
         body = response.content.decode()
+        self.assertIn('id="app-removal-banner" hx-swap-oob="true"', body)
         self.assertIn('id="app-detail-actions" hx-swap-oob="true"', body)
         self.assertIn('id="deployment-history" hx-swap-oob="true"', body)
         # Still the live clock: the section keeps polling while the job runs.
@@ -104,8 +104,8 @@ class TestAppDetailLiveRegions(TestCase):
         self._set_deploying()
         self.assertNotContains(self.client.get("/apps/myapp/deployment-section-status/", **HTMX), "Remove App")
 
-        # A settled teardown leaves the app idle with no infra: removal is now legal.
-        self._set_torn_down()
+        # A settled job leaves the app idle: removal is legal even though it is still deployed.
+        self._set_idle()
         self.assertContains(self.client.get("/apps/myapp/deployment-section-status/", **HTMX), "Remove App")
 
     def test_poll_response_hides_remove_from_a_viewer(self) -> None:
@@ -122,7 +122,7 @@ class TestAppDetailLiveRegions(TestCase):
             resource_conditions=[{"key": "domain", "value": "engineering"}],
             actions=["workspace:view"],
         )
-        self._set_torn_down()
+        self._set_idle()
         self.client.force_login(viewer)
 
         response = self.client.get("/apps/myapp/deployment-section-status/", **HTMX)

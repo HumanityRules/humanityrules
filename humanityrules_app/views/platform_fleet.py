@@ -12,6 +12,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from humanityrules_app import models
 from humanityrules_app.services import fleet_service
+from humanityrules_app.services.jobs import app_job_service
 from humanityrules_app.views import platform_access
 
 FLEET_LOG_MAX_LINES = 300
@@ -96,7 +97,7 @@ def fleet_app_remove_confirm(request: HttpRequest, app_id: UUID) -> HttpResponse
     )
     context = {
         "app": app,
-        "skip_reason": fleet_service.get_remove_skip_reason(app=app),
+        "skip_reason": app_job_service.get_remove_skip_reason(app=app),
     }
     return render(request, "humanityrules_app/platform_fleet/_fleet_remove_confirm.html", context=context)
 

@@ -255,21 +255,19 @@ class TestSandboxTeardownGuard(TestCase):
 
 
 @override_settings(**SANDBOX_SETTINGS)
-class TestSandboxRemovalForcesDataPurge(TestCase):
-    def test_humr_control_removal_forces_all_delete_flags_for_sandbox_app(self) -> None:
+class TestSandboxRemovalFromTheCLI(TestCase):
+    def test_humr_control_queues_a_removal_for_a_sandbox_app(self) -> None:
         org = models.Organization.objects.create(name="Acme", slug="acme")
         env = models.Environment.objects.get(aws_account__organization=org, slug="sandbox")
         _make_app(org, "demo", env)
 
         call_command(
-            "humr_control", "teardown-app", "--app", "demo", "--remove-app",
+            "humr_control", "remove-app", "--app", "demo",
             stdout=StringIO(), stderr=StringIO(),
         )
 
         app = models.App.objects.get(slug="demo")
         self.assertEqual(app.job_status, models.App.JobStatus.REMOVAL_PENDING)
-        self.assertTrue(app.removal_delete_all_data)
-        self.assertTrue(app.removal_teardown_first)
 
 
 @override_settings(**SANDBOX_SETTINGS)
@@ -337,19 +335,18 @@ class TestSandboxEnvironmentTeardownUI(TestCase):
         self.sandbox_env.refresh_from_db()
         self.assertEqual(self.sandbox_env.status, models.Environment.Status.READY)
 
-    def test_sandbox_app_remove_confirm_modal_shows_mandatory_purge_copy(self) -> None:
+    def test_app_remove_confirm_modal_offers_no_way_to_keep_data(self) -> None:
         _make_app(self.org, "demo", self.sandbox_env)
         self.client.force_login(self.admin_user)
         response = self.client.get(reverse("app_remove_confirm", kwargs={"app_slug": "demo"}), **HTMX)
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "This is a sandbox app")
-        self.assertNotContains(response, 'name="delete_all_data"')
+        self.assertContains(response, "Removing it destroys")
+        self.assertNotContains(response, "<input")
 
-    def test_sandbox_app_remove_forces_full_purge_without_checkbox(self) -> None:
+    def test_sandbox_app_remove_queues_a_removal(self) -> None:
         _make_app(self.org, "demo", self.sandbox_env)
         self.client.force_login(self.admin_user)
         response = self.client.post(reverse("app_remove", kwargs={"app_slug": "demo"}), **HTMX)
         self.assertEqual(response.status_code, 200)
         app = models.App.objects.get(slug="demo")
         self.assertEqual(app.job_status, models.App.JobStatus.REMOVAL_PENDING)
-        self.assertTrue(app.removal_delete_all_data)
