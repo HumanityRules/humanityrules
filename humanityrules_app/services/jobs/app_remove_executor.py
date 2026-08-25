@@ -69,18 +69,6 @@ def _get_env_session(environment: models.Environment):
     )
 
 
-def app_has_persistent_data(app: models.App) -> bool:
-    """True when the app's template declares storage that outlives its tasks (EFS or host bind mounts).
-
-    The remove-confirm modal asks this to decide whether to promise a data purge, so it
-    must stay the same question `_run_persistent_data_purge` answers before doing one.
-    """
-    template = app.source_template
-    if template is None:
-        return False
-    return bool(template.efs_config) or bool(_template_host_path_templates(template=template))
-
-
 def _run_persistent_data_purge(app: models.App, env: models.Environment) -> tuple[bool, str]:
     """Delete the app's EFS subtree and host bind-mount dirs. No-op if the template declares neither."""
     template = app.source_template

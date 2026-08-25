@@ -12,7 +12,6 @@ from humanityrules_app.models import App, DeploymentLog, DeploymentRecord, Resou
 from humanityrules_app.services import abac_service
 from humanityrules_app.services.cost import panel as cost_panel
 from humanityrules_app.services.jobs import app_job_service
-from humanityrules_app.services.jobs import app_remove_executor
 
 from . import abac_view_checks
 from . import base
@@ -321,9 +320,6 @@ def app_remove_confirm(request: HttpRequest, app_slug: str) -> HttpResponse:
     context = {
         "app": app,
         "post_url": reverse("app_remove", kwargs={"app_slug": app.slug}),
-        # Asked of the executor's own predicate so the modal's promise cannot drift
-        # from what the purge actually does.
-        "has_persistent_data": app_remove_executor.app_has_persistent_data(app=app),
     }
     return render(request, "humanityrules_app/apps/_app_remove_confirm_modal.html", context=context)
 
