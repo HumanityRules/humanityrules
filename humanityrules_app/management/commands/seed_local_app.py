@@ -2,14 +2,15 @@
 
 The running docker-compose stack *is* the app — no AWS deployment
 is created. HUMR only needs identity rows: a DB-only App stub (App row + owner
-tag), a localhost Environment, and an EnvironmentBearerToken.
+tag), a localhost Environment, and the App's AppBearerToken.
 
-Those rows let the local container impersonate one existing App owned by one
-user when supervisor sees HUMR_CONTROL_PLANE_URL / HUMR_ENV_BEARER /
-HUMR_OWNER_USERNAME / HUMR_APP_SLUG. That wiring is required for the app to
-show up in the control plane UI and for the integrations broker (Google/GitHub
-OAuth) to authenticate against the laptop's Django via the humanityrules.ngrok.io
-tunnel.
+Those rows let the local container act as one existing App owned by one user
+when supervisor sees HUMR_CONTROL_PLANE_URL / HUMR_APP_BEARER /
+HUMR_OWNER_USERNAME / HUMR_APP_SLUG. The bearer is what the control plane
+authenticates and resolves to the App; the other two are for in-container use.
+That wiring is required for the app to show up in the control plane UI and for
+the integrations broker (Google/GitHub OAuth) to authenticate against the
+laptop's Django via the humanityrules.ngrok.io tunnel.
 
 Usage:
     uv run manage.py seed_local_app \\
@@ -31,10 +32,10 @@ from django.db.models import Q
 from humanityrules_app import app_slugs
 from humanityrules_app.models import (
     App,
+    AppBearerToken,
     AppTemplate,
     AWSAccount,
     Environment,
-    EnvironmentBearerToken,
     ResourceTag,
     User,
     Workspace,
@@ -58,7 +59,7 @@ class Command(BaseCommand):
         parser.add_argument("--owner-username", required=True, help="Username that owns --app-slug (e.g. 'vmendi@gmail.com').")
         parser.add_argument("--env-slug", default=DEFAULT_ENV_SLUG, help=f"Environment slug to create (default '{DEFAULT_ENV_SLUG}').")
         parser.add_argument("--hosted-zone", default=DEFAULT_HOSTED_ZONE, help=f"shared_alb_hosted_zone; must suffix-match the WebUI host (default '{DEFAULT_HOSTED_ZONE}').")
-        parser.add_argument("--bearer", default=DEFAULT_BEARER, help=f"Raw bearer to export as HUMR_ENV_BEARER (default '{DEFAULT_BEARER}').")
+        parser.add_argument("--bearer", default=DEFAULT_BEARER, help=f"Raw bearer to export as HUMR_APP_BEARER (default '{DEFAULT_BEARER}').")
         parser.add_argument("--region", default="us-east-1", help="aws_region for the env row (cosmetic locally; default 'us-east-1').")
         parser.add_argument(
             "--template",
@@ -85,7 +86,7 @@ class Command(BaseCommand):
             hosted_zone=options["hosted_zone"],
             region=options["region"],
         )
-        self._ensure_local_app_stub(
+        app = self._ensure_local_app_stub(
             org=aws_account.organization,
             environment=env,
             app_slug=app_slug,
@@ -94,7 +95,7 @@ class Command(BaseCommand):
             workspace_slug=options["workspace"],
         )
         raw = options["bearer"]
-        self._mint_bearer(env=env, raw=raw)
+        self._mint_bearer(app=app, raw=raw)
         self._print_summary(
             env=env, app_slug=app_slug, owner_username=options["owner_username"],
             org_slug=aws_account.organization.slug,
@@ -143,8 +144,8 @@ class Command(BaseCommand):
         owner_username: str,
         template_slug: str,
         workspace_slug: str,
-    ) -> None:
-        """Ensure the local compose container can impersonate *app_slug* in *org*."""
+    ) -> App:
+        """Ensure the local compose container can act as *app_slug* in *org*; return that App."""
         user = User.objects.filter(username=owner_username, organization_memberships__organization=org).first()
         if user is None:
             raise CommandError(f"No User {owner_username!r} in org {org.name!r}; token refresh would treat every provider as absent.")
@@ -161,8 +162,9 @@ class Command(BaseCommand):
             )
             self.stdout.write(self.style.SUCCESS(f"created local App stub slug={app_slug!r} (no deployment)"))
         else:
-            # Broker ownership resolution is env-scoped, so an existing app in a different env than
-            # the bearer we mint yields a green setup whose every broker request 404s. Fail loudly.
+            # The bearer resolves to the App and through it to *its* environment, so an existing
+            # app in a different env than the one requested would silently point the local stack
+            # somewhere else. Fail loudly.
             if app.environment_id != environment.id:
                 raise CommandError(
                     f"App {app_slug!r} exists in env {app.environment.slug!r}, not {environment.slug!r}; "
@@ -186,6 +188,7 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS(f"stamped owner tag {owner_username!r} on App={app_slug!r}"))
 
         self.stdout.write(self.style.SUCCESS(f"validated App={app_slug!r} owner={owner_username!r} (tag + org membership OK)"))
+        return app
 
     def _create_local_app_stub(
         self,
@@ -251,15 +254,15 @@ class Command(BaseCommand):
             return upstream_container
         return target
 
-    def _mint_bearer(self, env: Environment, raw: str) -> None:
-        """Store only the SHA-256 hash on HUMR; the raw value goes in the container's HUMR_ENV_BEARER."""
+    def _mint_bearer(self, app: App, raw: str) -> None:
+        """Store only the SHA-256 hash on HUMR; the raw value goes in the container's HUMR_APP_BEARER."""
         token_hash = hashlib.sha256(raw.encode("utf-8")).hexdigest()
-        _, created = EnvironmentBearerToken.objects.update_or_create(
-            environment=env,
+        _, created = AppBearerToken.objects.update_or_create(
+            app=app,
             defaults={"token_hash": token_hash},
         )
         action = "minted" if created else "rotated"
-        self.stdout.write(self.style.SUCCESS(f"{action} EnvironmentBearerToken for env={env.slug!r}"))
+        self.stdout.write(self.style.SUCCESS(f"{action} AppBearerToken for app={app.slug!r}"))
 
     def _print_summary(
         self, env: Environment, app_slug: str, owner_username: str, org_slug: str,
@@ -270,7 +273,7 @@ class Command(BaseCommand):
         self.stdout.write("Set these in template_repos/hermes_agent_local/.env:")
         self.stdout.write("")
         self.stdout.write("  HUMR_CONTROL_PLANE_URL=https://humanityrules.ngrok.io")
-        self.stdout.write(f"  HUMR_ENV_BEARER={raw}")
+        self.stdout.write(f"  HUMR_APP_BEARER={raw}")
         self.stdout.write(f"  HUMR_OWNER_USERNAME={owner_username}")
         self.stdout.write(f"  HUMR_APP_SLUG={app_slug}")
         self.stdout.write(f"  HUMR_ORG_SLUG={org_slug}")

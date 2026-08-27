@@ -28,7 +28,7 @@ All custom commands live in `humanityrules_app/management/commands/`.
 - **seed_test_apps** — Seed orgs, workspaces, environments, and apps for UI testing.
 - **seed_test_groups** — Seed test groups with attributes for ABAC testing.
 - **seed_test_users** — Seed test users with group memberships.
-- **seed_local_app** — Seed DB rows for a local Hermes compose app (App stub, localhost Environment, bearer token).
+- **seed_local_app** — Seed DB rows for a local Hermes compose app (App stub, localhost Environment, the App's bearer token); prints the `HUMR_APP_BEARER=...` block for `hermes_agent_local/.env`.
 - **setup_oidc_org** — Create/update an organization with OIDC (Okta) auth config.
 - **setup_google_oauth_client** — Load a Google OAuth 2.0 Client ID JSON (from Cloud Console) into `IntegrationConfig`; re-running rotates it in place.
 - **setup_x_oauth_client** — Store X (Twitter) OAuth 2.0 client id/secret/redirect-uris into `IntegrationConfig` via flags (X gives no downloadable JSON); re-running rotates it in place.

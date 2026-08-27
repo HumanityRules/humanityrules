@@ -37,7 +37,7 @@ def _make_entitlement(get_json: AsyncMock) -> billing_entitlement.BillingEntitle
     """Build entitlement state over a HumrClient whose GET is test-controlled."""
     client = humr_client.HumrClient(
         control_plane_url="https://humr.example",
-        bearer="env-bearer",
+        bearer="app-bearer",
         owner_username="vmendi",
         app_slug="hermes",
     )
@@ -316,7 +316,7 @@ class _FacadeReporter:
 def _make_facade(refusal: dict | None) -> tuple[billing_service.BillingService, _FacadeEntitlement, _FacadeReporter]:
     client = humr_client.HumrClient(
         control_plane_url="https://humr.example",
-        bearer="env-bearer",
+        bearer="app-bearer",
         owner_username="vmendi",
         app_slug="hermes",
     )
@@ -473,7 +473,7 @@ class _StubCredentialStateStore:
 async def _exhausted_billing_service() -> tuple[billing_service.BillingService, AsyncMock]:
     client = humr_client.HumrClient(
         control_plane_url="https://humr.example",
-        bearer="env-bearer",
+        bearer="app-bearer",
         owner_username="vmendi",
         app_slug="hermes",
     )

@@ -99,7 +99,7 @@ def _make_humr_client() -> humr_client.HumrClient:
     """Build a HumrClient with the fixed test identity."""
     return humr_client.HumrClient(
         control_plane_url="https://humr.example",
-        bearer="env-bearer",
+        bearer="app-bearer",
         owner_username="vmendi",
         app_slug="hermes",
     )
@@ -2731,7 +2731,7 @@ class TestHumrClient(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(timeouts, [30])
         request = captured["request"]
         self.assertEqual(str(request.url), "https://humr.example/api/integrations/credentials/disconnect")
-        self.assertEqual(request.headers["Authorization"], "Bearer env-bearer")
+        self.assertEqual(request.headers["Authorization"], "Bearer app-bearer")
         self.assertEqual(
             _json.loads(request.content.decode("utf-8")),
             {"owner_username": "vmendi", "app_slug": "hermes", "provider": "telegram"},

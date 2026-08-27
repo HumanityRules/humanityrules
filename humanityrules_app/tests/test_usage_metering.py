@@ -345,7 +345,7 @@ class TestUsageReporter(unittest.IsolatedAsyncioTestCase):
     def _make_reporter(self) -> tuple[billing_usage_metering.UsageReporter, AsyncMock]:
         client = humr_client.HumrClient(
             control_plane_url="https://humr.example",
-            bearer="env-bearer",
+            bearer="app-bearer",
             owner_username="vmendi",
             app_slug="hermes",
         )
@@ -384,7 +384,7 @@ class TestUsageReporter(unittest.IsolatedAsyncioTestCase):
     async def test_only_an_accepted_post_hands_the_response_to_its_callback(self) -> None:
         client = humr_client.HumrClient(
             control_plane_url="https://humr.example",
-            bearer="env-bearer",
+            bearer="app-bearer",
             owner_username="vmendi",
             app_slug="hermes",
         )
@@ -476,7 +476,7 @@ class _StubCredentialStateStore:
 def _billing_service_with_reporter(reporter: _RecordingReporter) -> billing_service.BillingService:
     client = humr_client.HumrClient(
         control_plane_url="https://humr.example",
-        bearer="env-bearer",
+        bearer="app-bearer",
         owner_username="vmendi",
         app_slug="hermes",
     )

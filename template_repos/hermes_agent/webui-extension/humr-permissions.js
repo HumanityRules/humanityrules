@@ -6,7 +6,7 @@
 // (app, environment) is implicit — HUMR resolves it from the deployment identity
 // behind the broker, so no app/env is ever named here. All calls go same-origin
 // to the humr_broker control API via the Caddy /__humr_broker/permissions/* route;
-// the env bearer and AWS creds never enter the sandbox.
+// the app bearer and AWS creds never enter the sandbox.
 //
 // Phase 1 is editor-only and the panel is the sole writer, so a mutation returns
 // fresh state and we re-render from it — no cross-process refresh problem yet.

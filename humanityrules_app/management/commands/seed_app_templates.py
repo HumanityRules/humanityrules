@@ -164,7 +164,7 @@ _HERMES_CHECKPOINT_EFS_CONFIG = {
 # Policy proxy: platform-owned SSO+ABAC gate that fronts the Hermes container.
 # Its image is an ordinary template image (humr/{env_slug}/policy-proxy at the
 # tree hash of template_repos/policy_proxy); role="policy_proxy" is what turns
-# on the proxy wiring (env-bearer overlay, upstream forwarding, ALB targeting).
+# on the proxy wiring (app bearer overlay, upstream forwarding, ALB targeting).
 # Listens on hermes.container_port + 1 to keep the upstream port free.
 _HERMES_POLICY_PROXY_CONTAINER = {
     "name": "policy-proxy",
@@ -251,7 +251,7 @@ HERMES_PERSONAL_TEMPLATE = {
             ),
             # Supervisor process (outside the nono sandbox) refreshes provider
             # access tokens by POSTing to HUMR /api/integrations/tokens.
-            "requires_env_bearer": True,
+            "requires_app_bearer": True,
         },
         # Policy proxy is tiny (httpx + starlette); 128 MiB is plenty. Must
         # be set so the task has no container without a memory cap (ECS

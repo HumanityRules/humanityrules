@@ -45,7 +45,7 @@ Device flow is OpenAI's bespoke `deviceauth` JSON API, **not** RFC 8628 / `oauth
 ## HUMR control plane
 
 - `provider_openai_codex.py`: OAUTH-kind provider. `refresh_outcome` exchanges the stored refresh_token (`grant_type=refresh_token`, public `client_id`, no secret) and returns two secrets — `access_token` + `chatgpt_account_id` (JWT claim, no verification). `revoke` is a no-op (no revocation endpoint for this public client). Registered in `provider_registry.py`; enum member added to `IntegrationUserCredential.Provider` (migration 0063).
-- `provider_device.py`: generic device completion endpoint `POST /api/integrations/credentials/{provider}/device-complete` (env-bearer). Dispatches through `provider_registry`; `provider_openai_codex.store_device_credentials` validates the broker-forwarded access token has `chatgpt_account_id`, then stores the refresh token. Disconnect reuses the unified handler.
+- `provider_device.py`: generic device completion endpoint `POST /api/integrations/credentials/{provider}/device-complete` (app-bearer). Dispatches through `provider_registry`; `provider_openai_codex.store_device_credentials` validates the broker-forwarded access token has `chatgpt_account_id`, then stores the refresh token. Disconnect reuses the unified handler.
 
 ## Broker (`humr_runtime/`)
 

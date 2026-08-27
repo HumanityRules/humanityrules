@@ -19,7 +19,7 @@ Merge's API key authorizes operations across **every** Registered User in our Me
 
 The Hermes container runs in the **customer's** AWS account. A customer admin with `ecs:ExecuteCommand` can read `/proc/<pid>/environ` on any process in the container, including the broker sidecar. So the Merge API key cannot live there.
 
-This mirrors the Google integration's earlier-resolved problem: Google's OAuth `client_secret` is a tenant-wide secret too. The solution is the same — keep the secret on HUMR's control plane, and have the broker reach Merge through HUMR-side endpoints authenticated with `HUMR_ENV_BEARER`.
+This mirrors the Google integration's earlier-resolved problem: Google's OAuth `client_secret` is a tenant-wide secret too. The solution is the same — keep the secret on HUMR's control plane, and have the broker reach Merge through HUMR-side endpoints authenticated with the app's bearer (`HUMR_APP_BEARER`).
 
 ## Architecture
 
@@ -41,20 +41,19 @@ This mirrors the Google integration's earlier-resolved problem: Google's OAuth `
 │      url = $HUMR_CONTROL_PLANE/api/         │
 │            integrations/merge/mcp          │
 │      headers:                              │
-│        Authorization: Bearer HUMR_ENV_BEARER│
-│        X-Humr-App-Slug: <slug>              │
-│        X-Humr-Owner-Username: <username>    │
+│        Authorization: Bearer HUMR_APP_BEARER│
 │                                            │
 │  /__humr_broker/integrations/merge/* on :9951│
 │    link-token, connector-status, connectors,│
 │    disconnect — all forward to HUMR         │
 └──────────────────┬─────────────────────────┘
-                   │ HTTPS (env bearer)
+                   │ HTTPS (app bearer)
                    ▼
 ┌─ HUMR control plane ────────────────────────┐
 │                                            │
 │  /api/integrations/merge/*                 │
-│    validates HUMR_ENV_BEARER                │
+│    validates HUMR_APP_BEARER → App          │
+│    owner = App's `owner` ResourceTag        │
 │    derives origin_user_id =                │
 │      f"humr_{user.pk}_{app_slug}"           │
 │    attaches MERGE_AGENT_HANDLER_API_KEY    │
@@ -79,7 +78,7 @@ Per-Hermes-app, not per-HUMR-user. Each agent gets its own connector credentials
 - **Different user takes over the slug → fresh slate.** Different `user.pk` produces a different `origin_user_id`, so Merge issues a new Registered User. The old user's grants don't leak to the new owner.
 - **Renames are disallowed at the App level**, so the slug is stable for the app's lifetime.
 
-HUMR derives `origin_user_id` server-side from authenticated state (the env bearer's resolved environment + `app_slug` from the request). The broker has no way to forge a different identity — it can only act for its own (env-bearer-resolved) app.
+HUMR derives `origin_user_id` server-side from authenticated state: the app bearer resolves to the App, and the owning user comes from the App's `owner` tag. The broker has no way to forge a different identity — nothing in the request names an app or a user, so it can only act for the app whose token it holds.
 
 ## Endpoints (HUMR side)
 
@@ -94,7 +93,7 @@ All under `/api/integrations/merge/`:
 | `disconnect` | POST | Revoke credentials for one connector. |
 | `mcp` | POST | Streaming-HTTP MCP relay. |
 
-Identity (`app_slug`, `owner_username`) is read first from `X-Humr-App-Slug` / `X-Humr-Owner-Username` headers (the MCP relay path, where the body is the JSON-RPC payload), then from query string (GET) or JSON body (POST) for the other endpoints. Bearer always in `Authorization`.
+Identity (app and owning user) is derived from the bearer in `Authorization` on every endpoint, including the MCP relay whose body is the JSON-RPC payload. No `X-Humr-*` header, query parameter or body field names the app or the user; any such field is ignored.
 
 Each endpoint is a narrow, validated surface. None forwards arbitrary `{method, path, body}` to Merge. URL path components (`tool_pack_id`, `registered_user_id`) are constructed server-side from authenticated state, never injected by the caller.
 
@@ -145,7 +144,7 @@ We use one Merge Tool Pack for all HUMR customers. Cross-tenant security comes f
 
 ## What the broker's env contract gains
 
-One new variable: `HUMR_APP_SLUG`, injected by `deploy_app.py`'s env-bearer overlay alongside the existing `HUMR_OWNER_USERNAME`, `HUMR_ENV_BEARER`, etc. Used to construct the `X-Humr-App-Slug` header on every Merge-bound call.
+Nothing. The Merge relay authenticates with the same `HUMR_APP_BEARER` the broker already holds, injected by `deploy_app.py`'s app bearer overlay; `HUMR_APP_SLUG` and `HUMR_OWNER_USERNAME` are present for in-container use (status card, logs) but are not sent to HUMR.
 
 No new secrets in the customer container.
 

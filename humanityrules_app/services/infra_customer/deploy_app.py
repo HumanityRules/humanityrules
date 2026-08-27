@@ -171,12 +171,12 @@ class AppStack(Stack):
                 f"ALB attachment requires one container in the list to be marked as the target."
             )
 
-        # Every container that needs the control-plane bearer requires the app's
+        # Every container that needs the app bearer requires the app's
         # own secrets-bag ARN (to mount HUMR_APP_BEARER via ECS secret injection).
         # Policy-proxy containers need the same bearer implicitly, plus
         # auth_base_url + upstream wiring. Validate preconditions before
         # building resources.
-        if (app_config.needs_env_bearer() or app_config.app_secrets) and not app_secret_arn:
+        if (app_config.needs_app_bearer() or app_config.app_secrets) and not app_secret_arn:
             raise RuntimeError(
                 "App needs its per-app secrets bag but app_secret_arn is missing — did the "
                 "orchestration skip ensure_app_bearer_token_exists / ensure_app_secrets_exist?",
@@ -189,7 +189,7 @@ class AppStack(Stack):
             if not auth_base_url:
                 raise RuntimeError(
                     "Policy-proxy deploy requires auth_base_url. Missing — did the "
-                    "orchestration skip ensure_env_policy_proxy_secrets_exist?",
+                    "orchestration skip resolving the control-plane URL?",
                 )
             if not policy_proxy.upstream_container:
                 raise RuntimeError(
@@ -228,10 +228,10 @@ class AppStack(Stack):
         )
         # Grant access to this app's own bag and nothing else — it holds both the
         # template-declared secrets (ensure_app_secrets_exist) and the app's
-        # control-plane bearer (ensure_app_bearer_token_exists), both written
+        # app bearer (ensure_app_bearer_token_exists), both written
         # outside CDK. Read on humr/{env}/{app}/* is what keeps one app's
         # credentials unreachable from every other app in the environment.
-        if app_config.app_secrets or app_config.needs_env_bearer():
+        if app_config.app_secrets or app_config.needs_app_bearer():
             task_role.add_to_policy(iam.PolicyStatement(
                 actions=["secretsmanager:GetSecretValue"],
                 resources=[f"arn:aws:secretsmanager:{Aws.REGION}:{Aws.ACCOUNT_ID}:secret:humr/{env_slug}/{app_config.app_name}/*"],
@@ -387,7 +387,7 @@ class AppStack(Stack):
         # Two platform overlays, computed once so the main container loop stays uniform:
         #
         # 1. Bearer overlay — applied to every container that talks to HUMR's
-        #    control plane: explicit requires_env_bearer=True, or a policy-proxy
+        #    control plane: explicit requires_app_bearer=True, or a policy-proxy
         #    container.
         #    Provides HUMR_APP_BEARER (from the app's own bag) plus the local
         #    identity vars HUMR_ENV_SLUG, HUMR_CONTROL_PLANE_URL, HUMR_APP_SLUG,
@@ -396,11 +396,11 @@ class AppStack(Stack):
         #    for in-container use (logs, the WebUI status card) only.
         # 2. Policy-proxy-specific overlay — applied only to the policy-proxy
         #    container. Carries JWT verification URL, upstream wiring, etc.
-        env_bearer_environment_overlay: dict[str, str] = {}
-        env_bearer_secret_overlay: dict[str, ecs.Secret] = {}
-        if app_config.needs_env_bearer():
+        app_bearer_environment_overlay: dict[str, str] = {}
+        app_bearer_secret_overlay: dict[str, ecs.Secret] = {}
+        if app_config.needs_app_bearer():
             assert app_secret_resource is not None  # enforced above
-            env_bearer_environment_overlay = {
+            app_bearer_environment_overlay = {
                 "HUMR_ENV_SLUG": env_slug,
                 "HUMR_CONTROL_PLANE_URL": _resolve_control_plane_url(),
                 "HUMR_APP_SLUG": app_config.app_name,
@@ -409,12 +409,12 @@ class AppStack(Stack):
                 "HUMR_PLATFORM_CAPABILITIES": ",".join(app_config.platform_capabilities),
             }
             if app_config.owner_username:
-                env_bearer_environment_overlay["HUMR_OWNER_USERNAME"] = app_config.owner_username
+                app_bearer_environment_overlay["HUMR_OWNER_USERNAME"] = app_config.owner_username
             if app_config.org_slug:
-                env_bearer_environment_overlay["HUMR_ORG_SLUG"] = app_config.org_slug
+                app_bearer_environment_overlay["HUMR_ORG_SLUG"] = app_config.org_slug
             if shared_alb_hosted_zone:
-                env_bearer_environment_overlay["HUMR_PUBLIC_HOSTNAME"] = f"{subdomain}.{shared_alb_hosted_zone}"
-            env_bearer_secret_overlay = {
+                app_bearer_environment_overlay["HUMR_PUBLIC_HOSTNAME"] = f"{subdomain}.{shared_alb_hosted_zone}"
+            app_bearer_secret_overlay = {
                 secrets_utils.APP_SECRETS_KEY_HUMR_APP_BEARER: ecs.Secret.from_secrets_manager(
                     app_secret_resource, field=secrets_utils.APP_SECRETS_KEY_HUMR_APP_BEARER,
                 ),
@@ -445,14 +445,14 @@ class AppStack(Stack):
                 image_tags=image_tags,
             )
 
-            container_needs_env_bearer = app_config.container_needs_env_bearer(container=c)
+            container_needs_app_bearer = app_config.container_needs_app_bearer(container=c)
 
             # Environment: per-container list of {name, value}, plus the
-            # env-bearer overlay for every container that needs it, plus the
+            # app bearer overlay for every container that needs it, plus the
             # policy-proxy-specific overlay on the policy-proxy container.
             environment = {e["name"]: e["value"] for e in c.environment_variables}
-            if container_needs_env_bearer:
-                environment.update(env_bearer_environment_overlay)
+            if container_needs_app_bearer:
+                environment.update(app_bearer_environment_overlay)
             if c.role == appconfig.ContainerRole.POLICY_PROXY:
                 environment.update(policy_proxy_environment_overlay)
 
@@ -462,8 +462,8 @@ class AppStack(Stack):
             if app_secret_resource is not None and c.app_secrets:
                 for field_name in c.app_secrets:
                     secrets[field_name] = ecs.Secret.from_secrets_manager(app_secret_resource, field=field_name)
-            if container_needs_env_bearer:
-                secrets.update(env_bearer_secret_overlay)
+            if container_needs_app_bearer:
+                secrets.update(app_bearer_secret_overlay)
 
             health_check = None
             if c.health_check_command:
@@ -836,12 +836,12 @@ def deploy(
         shared_secrets = secrets_utils.get_shared_secrets(session=session, env=environment)
         secrets_utils.ensure_app_secrets_exist(session=session, env_slug=env_slug, app_config=app_config, shared_secrets=shared_secrets)
 
-    # Control-plane bearer prerequisite: HUMR_APP_BEARER inside the app's own
+    # App bearer prerequisite: HUMR_APP_BEARER inside the app's own
     # secrets bag + the matching AppBearerToken row. Runs after the template
     # secrets above so its read-modify-write of one key preserves them, and it
     # creates the bag when no template declared any secret at all.
     policy_proxy_needed = app_config.policy_proxy_container() is not None
-    app_bearer_needed = app_config.needs_env_bearer()
+    app_bearer_needed = app_config.needs_app_bearer()
     app_secret_arn: str | None = None
 
     if app_bearer_needed:
@@ -852,7 +852,8 @@ def deploy(
     elif app_config.app_secrets:
         app_secret_arn = secrets_utils.app_secrets_secret_arn(session=session, env_slug=env_slug, app_slug=app_config.app_name)
 
-    # Policy-proxy prerequisites (auth Lambda config + per-env secrets).
+    # Policy-proxy prerequisites: HTTPS (the session cookie is host-scoped) and
+    # the control-plane URL the sidecar bounces unauthenticated requests to.
     policy_proxy_auth_base_url: str | None = None
     if policy_proxy_needed:
         if not shared_alb_hosted_zone:
@@ -860,7 +861,6 @@ def deploy(
             logger.error(msg)
             return DeployResult(success=False, error=msg, service_url="", alb_dns="", image_hashes={})
 
-        secrets_utils.ensure_env_policy_proxy_secrets_exist(session=session, env=environment)
         policy_proxy_auth_base_url = _resolve_control_plane_url()
 
     # Phase 1: Resolve every container's shared template image, building on

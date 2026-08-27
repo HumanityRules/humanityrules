@@ -10,8 +10,8 @@ The token being resolved is per-App (`AppBearerToken`, raw value in
 `humr/{env}/{app}/secrets` under `HUMR_APP_BEARER`), which is what lets a view
 *derive* the calling App — and through it the Environment, Organization and
 owner — instead of trusting an app_slug / owner_username the caller put in the
-request. `resolve_env_from_token` is the retired per-environment path, kept only
-until its last callers move over.
+request. `integrations/broker_request_context.py` wraps this into the
+`(value, JsonResponse | None)` envelope the views use.
 """
 
 import hashlib
@@ -19,7 +19,7 @@ import hmac
 
 from django.http import HttpRequest
 
-from humanityrules_app.models import App, AppBearerToken, Environment, EnvironmentBearerToken
+from humanityrules_app.models import App, AppBearerToken
 
 
 def hash_token(raw: str) -> str:
@@ -51,20 +51,3 @@ def resolve_app_from_token(raw_token: str) -> App | None:
         return None
     return row.app
 
-
-def resolve_env_from_token(raw_token: str) -> Environment | None:
-    """Return the Environment whose EnvironmentBearerToken matches *raw_token*, or None.
-
-    Legacy per-environment path — the token names only the environment, so every
-    caller of this has to take the App's identity on trust from the request.
-    Deleted once the broker family moves to resolve_app_from_token.
-    """
-    token_hash = hash_token(raw=raw_token)
-    row = EnvironmentBearerToken.objects.select_related(
-        "environment", "environment__aws_account__organization",
-    ).filter(token_hash=token_hash).first()
-    if row is None:
-        return None
-    if not hmac.compare_digest(row.token_hash, token_hash):
-        return None
-    return row.environment

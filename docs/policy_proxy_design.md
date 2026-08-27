@@ -28,14 +28,21 @@ Three pieces, all living inside the customer's AWS account except the PDP:
 - **HUMR PDP endpoint** — on the HUMR control plane. Evaluates ABAC policies. Called by policy proxies over HTTPS.
 
 
-## Per-Environment Trust Anchors
+## Trust Anchors
 
-Two secrets are provisioned when an environment is created:
+- **Policy-proxy JWT keypair** (per environment) — RSA or EdDSA. Private half kept by the auth service. Public half served at `https://auth.<env-domain>/.well-known/jwks.json`. Stored in Secrets Manager at `humr/{env-slug}/policy-proxy-auth-config` under the `jwt_key` key (alongside `oidc_config`, which carries the Okta app credentials for the same service). Auto-generated at env bootstrap.
+- **App bearer token** (per app) — random 64-char bearer token, one per App. Stored as key `HUMR_APP_BEARER` of the app's own secret `humr/{env-slug}/{app-slug}/secrets`; the control plane keeps only its SHA-256 hash (`AppBearerToken`, one-to-one with `App`). Minted by `secrets_utils.ensure_app_bearer_token_exists` on every deploy of an app whose config needs the control plane: if the stored hash matches the bag's value the deploy is a no-op, otherwise a fresh token is written to both sides ("DB wins"). Every container of the app that talks to HUMR (the policy proxy, Hermes' supervisor) receives it through ECS secret injection; the task role may read `humr/{env}/{app}/*` and nothing else, so one app's token is unreachable from its neighbours.
 
-- **Policy-proxy JWT keypair** — RSA or EdDSA. Private half kept by the auth service. Public half served at `https://auth.<env-domain>/.well-known/jwks.json`. Stored in Secrets Manager at `humr/{env-slug}/policy-proxy-auth-config` under the `jwt_key` key (alongside `oidc_config`, which carries the Okta app credentials for the same service).
-- **Environment bearer token** — random 64-char bearer token. Stored in the shared-per-env secret `humr/{env-slug}/shared-secrets` under key `HUMR_ENV_BEARER`. In the shared HumR sandbox — where every org reuses one AWS account and the fixed slug `sandbox` — the secret is namespaced per org instead, `humr/sandbox/{org-slug}/shared-secrets`, so each org's token resolves to its own Environment/org. Any env-resident component that calls HUMR's control plane (policy proxies today; Hermes and other future services) reads it and sends it on every call. Rotated by redeploying the env's policy proxies.
+Presenting the app bearer *proves* which App is calling. The control plane derives the App, and through it the Environment, Organization and owner (`ResourceTag` `owner`), from the token alone — no request field or header names the app or the owner, and none is read. Removing the app revokes the token on both sides: the removal purge deletes the `humr/{env}/{app}/` prefix and the `App` row cascade deletes the hash.
 
-Both are auto-generated at env bootstrap. No manual provisioning.
+### Cutover from the environment bearer
+
+Before this design each environment had a single `HUMR_ENV_BEARER` shared by every app in it (`EnvironmentBearerToken`). The cutover is big-bang — there is no dual-accept path — so the order matters:
+
+1. Deploy the control plane. Its migration deletes `EnvironmentBearerToken`; from this point every not-yet-redeployed app gets 401s from the control plane.
+2. Fleet redeploy (`humr_control fleet-redeploy`). Each app's first deploy mints its token, and the changed `valueFrom` in the task definition rolls its tasks so they boot with `HUMR_APP_BEARER`.
+3. Per environment (per org in the shared sandbox): `humr_secrets shared-delete HUMR_ENV_BEARER` to drop the dead key from the shared-secrets bag.
+4. Rotation, if ever needed: delete the app's `AppBearerToken` row in admin, redeploy the app (the mint sees the missing row and writes a fresh value), then force a new ECS deployment so the running task picks it up.
 
 
 ## Auth Service
@@ -113,17 +120,16 @@ Request:
 
 ```json
 {
-  "app_id": "hermesvmendi00",
   "oidc_sub": "00u1a2b3c4...",
   "username": "vmendi",
   "path": "/chat/new"
 }
 ```
 
-Headers: `Authorization: Bearer <HUMR_ENV_BEARER>`.
+Headers: `Authorization: Bearer <HUMR_APP_BEARER>`.
 
-- The token authenticates the caller as a legitimate component inside a customer env. Shared per env, since all env-resident components sit inside the same trust boundary.
-- The `app_id` is self-reported by the policy proxy. Inside a trusted env, this is acceptable.
+- The token authenticates the caller as one specific App's policy proxy. The control plane resolves the App (and its environment and org) from the token; the proxy does not — and cannot — name an app in the request.
+- The proxy still knows its own app slug as `HUMR_APP_ID`, for log lines and the decision-cache key only.
 
 Response:
 

@@ -157,10 +157,10 @@ Environment reporting is trusted. Operator runs on HumR infra; Team/Enterprise (
 
 ### 6.3 Delivery
 
-1. Events post directly to a CP endpoint — async, batched (every N events or T seconds), never blocking the relay. Transport and auth already exist: `humr_client.py` (`HUMR_ENV_BEARER` to `HUMR_CONTROL_PLANE_URL`), with the policy proxy's `activity_reporter.py` as the flush-loop precedent.
+1. Events post directly to a CP endpoint — async, batched (every N events or T seconds), never blocking the relay. Transport and auth already exist: `humr_client.py` (`HUMR_APP_BEARER` to `HUMR_CONTROL_PLANE_URL`), with the policy proxy's `activity_reporter.py` as the flush-loop precedent.
 2. No spool. CP unreachable = drop the batch with a log line. The failure mode is undercharging, acceptable while inference cost is flat. Idempotency keys are minted at event creation anyway, so a spool can be added later without double-charge risk.
-3. Attribution: the broker is a per-app sidecar (an environment hosts many agent apps, each with its own broker), and it already knows `owner_username` + `app_slug` — every event carries org, app, and owning user. The env bearer names only the environment, which is why the payload must carry the app identity.
-4. The CP endpoint validates the env bearer, resolves the org, and inserts BillingUsageEvents (duplicate keys ignored). Rating runs as a periodic job over unrated events.
+3. Attribution: the broker is a per-app sidecar (an environment hosts many agent apps, each with its own broker). The app bearer it presents identifies the App, so the CP derives org, app, and owning user (the app's `owner` tag) from the token — the payload carries only the events, never the identity.
+4. The CP endpoint validates the app bearer, resolves app → org → owner, and inserts BillingUsageEvents (duplicate keys ignored). Rating runs as a periodic job over unrated events.
 5. Version skew is the steady state, not an error: brokers ship inside HA images and redeploy long after the CP does. A malformed event still rejects the whole batch — the reporter is trusted platform code, so malformed means a bug — but an old broker omitting a quantity key (reads as 0) or reporting a source this CP predates (that event is skipped, the rest of the batch ingests) must never cost the batch. Only the reverse skew rejects: a broker *ahead* of the CP is a template shipped before the CP that understands it, and there the CP cannot store a quantity rating will need. Deploy the CP first.
 
 ### 6.4 Sources outside the broker

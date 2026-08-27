@@ -28,7 +28,7 @@ class ImageSource(StrEnum):
 class ContainerRole(StrEnum):
     """Platform wiring a container carries beyond how its image is sourced."""
 
-    # SSO + ABAC proxy fronting a sibling container. Receives the env-bearer
+    # SSO + ABAC proxy fronting a sibling container. Receives the app bearer
     # overlay and the proxy env wiring, and must be the ALB target. Fields
     # consumed: upstream_container (name of the sibling the proxy fronts;
     # resolved into HUMR_UPSTREAM_HOST=127.0.0.1 + HUMR_UPSTREAM_PORT env vars).
@@ -168,15 +168,16 @@ class ContainerConfig:
     # burst to the full node when neighbors are idle.
     cpu_reservation: int | None = None
 
-    # Opt this container in to the HUMR control-plane bearer overlay:
-    # HUMR_ENV_BEARER (from shared-secrets), HUMR_ENV_SLUG, HUMR_APP_SLUG, and
-    # HUMR_OWNER_USERNAME (if the owning App has an owner tag). Any env-resident
-    # component that calls the HUMR control plane sets this — Hermes integrations
-    # today; future env-resident services later. Policy-proxy containers receive
-    # the overlay implicitly from role=policy_proxy, so templates do not
-    # need to set this knob for them. The IAM grant to read shared-secrets is
-    # added to the task role iff any container needs the overlay.
-    requires_env_bearer: bool = False
+    # Opt this container in to the HUMR app bearer overlay:
+    # HUMR_APP_BEARER (from the app's own secrets bag), HUMR_ENV_SLUG,
+    # HUMR_APP_SLUG, and HUMR_OWNER_USERNAME (if the owning App has an owner
+    # tag). Any env-resident component that calls the HUMR control plane sets
+    # this — Hermes' supervisor today; future env-resident services later.
+    # Policy-proxy containers receive the overlay implicitly from
+    # role=policy_proxy, so templates do not need to set this knob for them.
+    # The IAM grant to read humr/{env}/{app}/* is added to the task role iff
+    # any container needs the overlay.
+    requires_app_bearer: bool = False
 
 
 @dataclass
@@ -220,7 +221,7 @@ class AppConfig:
 
     # Platform-owned capabilities this deploy is entitled to, resolved from the
     # owning organization's grants. CDK maps them to infrastructure grants on the
-    # ECS task role and mirrors them into env-bearer containers as
+    # ECS task role and mirrors them into app-bearer containers as
     # HUMR_PLATFORM_CAPABILITIES, so in-container features gate on the same fact.
     platform_capabilities: list[str] = field(default_factory=list)
 
@@ -232,12 +233,12 @@ class AppConfig:
     serialize_task_replacement: bool = False
 
     # Owner's username (from the App's `owner` ResourceTag) when the app has
-    # one, else None. Injected into env-bearer containers as HUMR_OWNER_USERNAME so
+    # one, else None. Injected into app-bearer containers as HUMR_OWNER_USERNAME so
     # they can identify themselves to HUMR's control plane on behalf of this
     # user. None for apps without an owner tag (typical multi-user apps).
     owner_username: str | None = None
 
-    # Slug of the organization that owns the App. Injected into env-bearer
+    # Slug of the organization that owns the App. Injected into app-bearer
     # containers as HUMR_ORG_SLUG so env-resident components can key
     # org-dependent behavior (e.g. the broker's integration-card visibility).
     org_slug: str | None = None
@@ -248,13 +249,13 @@ class AppConfig:
     # docs/app_workloads_design.md.
     enable_webapp_hosts: bool = False
 
-    def container_needs_env_bearer(self, container: ContainerConfig) -> bool:
-        """True if this container should receive the HUMR control-plane bearer overlay."""
-        return container.requires_env_bearer or container.role == ContainerRole.POLICY_PROXY
+    def container_needs_app_bearer(self, container: ContainerConfig) -> bool:
+        """True if this container should receive the HUMR app bearer overlay."""
+        return container.requires_app_bearer or container.role == ContainerRole.POLICY_PROXY
 
-    def needs_env_bearer(self) -> bool:
-        """True if any container in the task needs the HUMR control-plane bearer overlay."""
-        return any(self.container_needs_env_bearer(container=c) for c in self.containers)
+    def needs_app_bearer(self) -> bool:
+        """True if any container in the task needs the HUMR app bearer overlay."""
+        return any(self.container_needs_app_bearer(container=c) for c in self.containers)
 
     def alb_target(self) -> ContainerConfig | None:
         """Return the ALB-target ContainerConfig, or None if no ALB exposure."""

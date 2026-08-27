@@ -178,7 +178,7 @@ def _build_container_config(
         memory_limit_mib=template_container.get("memory_limit_mib") or None,
         memory_reservation_mib=template_container.get("memory_reservation_mib") or None,
         cpu_reservation=template_container.get("cpu_reservation") or None,
-        requires_env_bearer=bool(template_container.get("requires_env_bearer", False)),
+        requires_app_bearer=bool(template_container.get("requires_app_bearer", False)),
     )
 
 
@@ -261,7 +261,7 @@ def _owner_username_for_app(app: App) -> str | None:
     """Return the `owner` ResourceTag value for *app*, or None if the app has no owner tag.
 
     The owner tag is set by the Personal Assistant deploy flow (see
-    docs/policy_proxy_design.md). It's the identity HUMR injects into env-bearer
+    docs/policy_proxy_design.md). It's the identity HUMR injects into app-bearer
     containers as HUMR_OWNER_USERNAME so they can speak to the HUMR control plane on
     behalf of this user.
     """

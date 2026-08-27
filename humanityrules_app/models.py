@@ -659,7 +659,7 @@ class AppTemplate(models.Model):
     #     "image_source": "template",
     #     "template_path": "hermes_agent",
     #     # Platform role. "policy_proxy" turns on the SSO+ABAC proxy wiring
-    #     # (env-bearer overlay, upstream forwarding, ALB-target requirement);
+    #     # (app bearer overlay, upstream forwarding, ALB-target requirement);
     #     # upstream_container names the sibling the proxy fronts.
     #     "role": "policy_proxy",
     #     "upstream_container": "<sibling container name>",
@@ -1447,34 +1447,6 @@ class Policy(models.Model):
 
     def __str__(self) -> str:
         return self.name
-
-
-class EnvironmentBearerToken(models.Model):
-    """
-    Per-environment bearer token used by components running inside a customer
-    env (policy proxies, Hermes, future env-resident services) to authenticate
-    calls to HUMR's control plane. One active token per environment; the raw
-    token lives in the customer's AWS Secrets Manager
-    (humr/{env-slug}/shared-secrets under key HUMR_ENV_BEARER; namespaced per
-    org as humr/sandbox/{org-slug}/shared-secrets in the shared sandbox). Only
-    the hash is stored here so HUMR can authenticate incoming control-plane calls
-    without ever seeing the raw value after issue.
-    """
-    id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
-    environment = models.OneToOneField(
-        Environment,
-        on_delete=models.CASCADE,
-        related_name="env_bearer_token",
-    )
-    token_hash = models.CharField(
-        max_length=128,
-        unique=True,
-        help_text="SHA-256 hex digest of the raw bearer token.",
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    def __str__(self) -> str:
-        return f"EnvironmentBearerToken({self.environment.slug})"
 
 
 class AppBearerToken(models.Model):

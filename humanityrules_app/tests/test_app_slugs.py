@@ -1,5 +1,6 @@
 """Tests for dashless agent hostname labels."""
 
+import hashlib
 import uuid
 from io import StringIO
 from unittest.mock import MagicMock, Mock, patch
@@ -467,4 +468,67 @@ class SeedLocalAppEnvMismatchTests(TestCase):
         )
         self.assertTrue(
             models.ResourceTag.objects.filter(app=self.app, key="owner", value=self.user.username).exists()
+        )
+
+
+class SeedLocalAppBearerTests(TestCase):
+    """seed_local_app mints the stub App's bearer so the local stack authenticates as that App."""
+
+    def setUp(self) -> None:
+        self.organization = models.Organization.objects.create(name="Seed Bearer Org", slug="seed-bearer-org")
+        self.workspace = models.Workspace.objects.get(organization=self.organization, slug="default")
+        self.user = models.User.objects.create_user(
+            username="seed-bearer@example.com",
+            password="x",
+            current_organization=self.organization,
+        )
+        models.OrganizationMembership.objects.create(
+            organization=self.organization,
+            user=self.user,
+            role=models.OrganizationMembership.Role.ADMIN,
+        )
+        self.aws_account = models.AWSAccount.objects.create(organization=self.organization, name="Seed Bearer AWS")
+        self.env = models.Environment.objects.create(
+            aws_account=self.aws_account, name="Local", slug="local",
+            aws_region="us-east-1", status=models.Environment.Status.READY,
+        )
+        self.app = models.App.objects.create(
+            organization=self.organization,
+            workspace=self.workspace,
+            environment=self.env,
+            source_template=app_test_factories.make_source_template(),
+            name="seedbearerapp",
+            slug="seedbearerapp",
+            container_port=8000,
+            health_check_path="/health",
+            cpu=256,
+            memory=512,
+        )
+
+    def test_command_mints_app_bearer_token_matching_the_printed_value(self) -> None:
+        stdout = StringIO()
+
+        call_command(
+            "seed_local_app",
+            "--aws-account", "Seed Bearer AWS",
+            "--app-slug", "seedbearerapp",
+            "--owner-username", self.user.username,
+            "--bearer", "printed-raw-value",
+            stdout=stdout,
+        )
+
+        row = models.AppBearerToken.objects.get(app=self.app)
+        self.assertEqual(row.token_hash, hashlib.sha256(b"printed-raw-value").hexdigest())
+        self.assertIn("HUMR_APP_BEARER=printed-raw-value", stdout.getvalue())
+
+    def test_rerun_rotates_the_same_row_in_place(self) -> None:
+        command = seed_local_app.Command(stdout=StringIO())
+
+        command._mint_bearer(app=self.app, raw="first")
+        command._mint_bearer(app=self.app, raw="second")
+
+        self.assertEqual(models.AppBearerToken.objects.filter(app=self.app).count(), 1)
+        self.assertEqual(
+            models.AppBearerToken.objects.get(app=self.app).token_hash,
+            hashlib.sha256(b"second").hexdigest(),
         )
