@@ -16,10 +16,13 @@ request. `integrations/broker_request_context.py` wraps this into the
 
 import hashlib
 import hmac
+import logging
 
 from django.http import HttpRequest
 
 from humanityrules_app.models import App, AppBearerToken
+
+logger = logging.getLogger(__name__)
 
 
 def hash_token(raw: str) -> str:
@@ -40,6 +43,11 @@ def resolve_app_from_token(raw_token: str) -> App | None:
 
     Constant-time match: look up by hash via the unique index, then compare
     digests with hmac.compare_digest so equality can't leak timing.
+
+    Fails closed when the App's denormalized organization disagrees with its
+    Environment's: views derive the owner from `app.organization` but scope AWS
+    resources through `app.environment`, so a drifted App (admin edit, bad
+    data) would otherwise mix two tenants in one request.
     """
     token_hash = hash_token(raw=raw_token)
     row = AppBearerToken.objects.select_related(
@@ -49,5 +57,12 @@ def resolve_app_from_token(raw_token: str) -> App | None:
         return None
     if not hmac.compare_digest(row.token_hash, token_hash):
         return None
-    return row.app
+    app = row.app
+    env_org_id = app.environment.aws_account.organization_id
+    if env_org_id != app.organization_id:
+        logger.error(
+            "Rejecting bearer for app %s: app org %s != environment org %s", app.id, app.organization_id, env_org_id,
+        )
+        return None
+    return app
 
