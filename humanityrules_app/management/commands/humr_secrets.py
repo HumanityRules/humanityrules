@@ -170,12 +170,14 @@ class Command(BaseCommand):
             subprefix = (options["subprefix"] or "").strip()
             if not subprefix:
                 raise CommandError("--subprefix must be a non-empty string.")
-            secrets_utils.delete_secrets_matching_prefix(
+            _, failed_names = secrets_utils.delete_secrets_matching_prefix(
                 session=session,
                 subprefix=subprefix,
                 dry_run=options["dry_run"],
                 force_immediate=options["force"],
             )
+            if failed_names:
+                raise CommandError(f"Failed to delete {len(failed_names)} secret(s): {', '.join(failed_names)}")
         elif operation == "shared-list":
             env = _get_environment(aws_account=aws_account, env_slug=options["env"])
             self._run_shared_list(session=session, env=env, reveal=options["reveal"])

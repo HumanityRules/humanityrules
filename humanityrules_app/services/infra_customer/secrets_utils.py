@@ -300,11 +300,16 @@ def ensure_app_bearer_token_exists(session: boto3.Session, env_slug: str, app) -
     return arn
 
 
-def delete_secrets_matching_prefix(session: boto3.Session, subprefix: str, dry_run: bool, force_immediate: bool) -> int:
+def delete_secrets_matching_prefix(
+    session: boto3.Session, subprefix: str, dry_run: bool, force_immediate: bool,
+) -> tuple[int, list[str]]:
     """Delete secrets whose names start with *subprefix* (AWS name-prefix filter).
 
     When *force_immediate* is False, each secret is scheduled for deletion with a
     7-day recovery window. When True, uses ForceDeleteWithoutRecovery (same as purge-deleted).
+    Returns (deleted_count, names_that_failed). A per-secret failure never aborts the loop —
+    every other secret is still attempted — but it is reported so callers can refuse to treat
+    the namespace as clean.
     """
     sm_client = session.client("secretsmanager")
     paginator = sm_client.get_paginator("list_secrets")
@@ -319,7 +324,7 @@ def delete_secrets_matching_prefix(session: boto3.Session, subprefix: str, dry_r
 
     if not secrets_list:
         print(f"No active secrets found with name prefix '{subprefix}'.")
-        return 0
+        return 0, []
 
     plan = "permanent removal" if force_immediate else "scheduled deletion (7-day recovery window)"
     print(f"Found {len(secrets_list)} secret(s) matching prefix '{subprefix}' — {plan}:")
@@ -329,9 +334,10 @@ def delete_secrets_matching_prefix(session: boto3.Session, subprefix: str, dry_r
 
     if dry_run:
         print("Dry run — no secrets were deleted.")
-        return len(secrets_list)
+        return len(secrets_list), []
 
     deleted_count = 0
+    failed_names: list[str] = []
     for secret in secrets_list:
         try:
             if force_immediate:
@@ -343,8 +349,9 @@ def delete_secrets_matching_prefix(session: boto3.Session, subprefix: str, dry_r
             deleted_count += 1
         except ClientError as e:
             print(f"❌ Failed to delete {secret['name']}: {e}")
+            failed_names.append(secret["name"])
 
-    return deleted_count
+    return deleted_count, failed_names
 
 
 def purge_deleted_secrets(session: boto3.Session, dry_run: bool) -> int:

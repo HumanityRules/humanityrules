@@ -404,3 +404,35 @@ class TestAppRemovalRevokesBearer(TestCase):
         self.assertTrue(models.SandboxSlugClaim.objects.filter(slug="revokedagent").exists())
         self.assertTrue(models.AppBearerToken.objects.filter(app=self.app).exists())
         self.assertIn("humr/sandbox/revokedagent/secrets", self.fake_sm.store)
+
+    def test_single_secret_delete_failure_fails_the_removal(self) -> None:
+        """delete_secrets_matching_prefix swallows per-secret errors; removal must still refuse to release the slug."""
+        self.fake_sm.create_secret(
+            Name="humr/sandbox/revokedagent/extra", Description="seed", SecretString='{"K": "v"}',
+        )
+        error = ClientError(
+            error_response={"Error": {"Code": "AccessDeniedException", "Message": "no"}},
+            operation_name="DeleteSecret",
+        )
+        real_delete = self.fake_sm.delete_secret
+
+        def flaky_delete(SecretId: str, **kwargs: object) -> dict:
+            if SecretId.endswith("revokedagent/secrets-AAAA"):
+                raise error
+            return real_delete(SecretId=SecretId, **kwargs)
+
+        with (
+            patch.object(self.fake_sm, "delete_secret", side_effect=flaky_delete),
+            patch.object(app_remove_executor, "_get_env_session", return_value=self.session),
+        ):
+            success = app_remove_executor.run_removal(app_id=str(self.app.id))
+
+        self.assertFalse(success)
+        self.app.refresh_from_db()
+        self.assertEqual(self.app.last_attempt_error, models.App.LastAttemptError.REMOVAL_FAILED)
+        self.assertIn("could not delete humr/sandbox/revokedagent/secrets", self.app.last_attempt_error_text)
+        self.assertTrue(models.SandboxSlugClaim.objects.filter(slug="revokedagent").exists())
+        self.assertTrue(models.AppBearerToken.objects.filter(app=self.app).exists())
+        self.assertIn("humr/sandbox/revokedagent/secrets", self.fake_sm.store)
+        # The other secret was still attempted — a single failure does not abort the loop.
+        self.assertNotIn("humr/sandbox/revokedagent/extra", self.fake_sm.store)
