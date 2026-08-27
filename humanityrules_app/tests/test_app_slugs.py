@@ -521,6 +521,36 @@ class SeedLocalAppBearerTests(TestCase):
         self.assertEqual(row.token_hash, hashlib.sha256(b"printed-raw-value").hexdigest())
         self.assertIn("HUMR_APP_BEARER=printed-raw-value", stdout.getvalue())
 
+    def test_default_bearer_is_per_slug_so_two_apps_can_be_seeded(self) -> None:
+        second_app = models.App.objects.create(
+            organization=self.organization,
+            workspace=self.workspace,
+            environment=self.env,
+            source_template=self.app.source_template,
+            name="seedbearerapp2",
+            slug="seedbearerapp2",
+            container_port=8000,
+            health_check_path="/health",
+            cpu=256,
+            memory=512,
+        )
+
+        for slug in ("seedbearerapp", "seedbearerapp2"):
+            call_command(
+                "seed_local_app",
+                "--aws-account", "Seed Bearer AWS",
+                "--app-slug", slug,
+                "--owner-username", self.user.username,
+                stdout=StringIO(),
+            )
+
+        for app in (self.app, second_app):
+            expected = seed_local_app.default_bearer(app_slug=app.slug)
+            self.assertEqual(
+                models.AppBearerToken.objects.get(app=app).token_hash,
+                hashlib.sha256(expected.encode("utf-8")).hexdigest(),
+            )
+
     def test_rerun_rotates_the_same_row_in_place(self) -> None:
         command = seed_local_app.Command(stdout=StringIO())
 

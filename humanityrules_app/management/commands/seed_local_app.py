@@ -44,9 +44,16 @@ from humanityrules_app.services.jobs import app_config_builder
 
 DEFAULT_ENV_SLUG = "local"
 DEFAULT_HOSTED_ZONE = "localhost"
-DEFAULT_BEARER = "local-dev-bearer-token"
+# Default bearer is derived per app slug: token_hash is globally unique, so a shared
+# literal default would make seeding a second local App fail with an integrity error.
+DEFAULT_BEARER_PREFIX = "local-dev-bearer-"
 DEFAULT_TEMPLATE_SLUG = "hermes-personal"
 DEFAULT_WORKSPACE_SLUG = "default"
+
+
+def default_bearer(app_slug: str) -> str:
+    """Return the per-slug default raw bearer so several local Apps can be seeded without --bearer."""
+    return f"{DEFAULT_BEARER_PREFIX}{app_slug}"
 
 
 class Command(BaseCommand):
@@ -59,7 +66,7 @@ class Command(BaseCommand):
         parser.add_argument("--owner-username", required=True, help="Username that owns --app-slug (e.g. 'vmendi@gmail.com').")
         parser.add_argument("--env-slug", default=DEFAULT_ENV_SLUG, help=f"Environment slug to create (default '{DEFAULT_ENV_SLUG}').")
         parser.add_argument("--hosted-zone", default=DEFAULT_HOSTED_ZONE, help=f"shared_alb_hosted_zone; must suffix-match the WebUI host (default '{DEFAULT_HOSTED_ZONE}').")
-        parser.add_argument("--bearer", default=DEFAULT_BEARER, help=f"Raw bearer to export as HUMR_APP_BEARER (default '{DEFAULT_BEARER}').")
+        parser.add_argument("--bearer", default=None, help=f"Raw bearer to export as HUMR_APP_BEARER (default '{DEFAULT_BEARER_PREFIX}<app-slug>').")
         parser.add_argument("--region", default="us-east-1", help="aws_region for the env row (cosmetic locally; default 'us-east-1').")
         parser.add_argument(
             "--template",
@@ -94,7 +101,7 @@ class Command(BaseCommand):
             template_slug=options["template"],
             workspace_slug=options["workspace"],
         )
-        raw = options["bearer"]
+        raw = options["bearer"] if options["bearer"] is not None else default_bearer(app_slug=app_slug)
         self._mint_bearer(app=app, raw=raw)
         self._print_summary(
             env=env, app_slug=app_slug, owner_username=options["owner_username"],
