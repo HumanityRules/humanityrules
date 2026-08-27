@@ -7,11 +7,11 @@ batches them, and posts them here as ``BillingUsageEvent`` rows (see
 know whether the organization still has credits — the entitlement snapshot —
 so it can soft-refuse further spending when the balance is exhausted.
 
-Both concerns share one auth story. The broker presents an environment bearer
-token. That token identifies the environment, not a particular app: one
-environment hosts many agents, and each has its own broker. Which app a report
-belongs to is named in the JSON body (``app_slug``), scoped to that
-environment.
+Both concerns share one auth story. The broker presents its app's bearer token
+(``HUMR_APP_BEARER``). That token identifies the App, so which app a report
+belongs to — and, through the app's owner tag, whose usage it is — is derived
+here rather than read from the body. One environment hosts many agents, each
+with its own broker and its own token; a broker can only ever report as itself.
 
 Two endpoints cover the loop:
 
@@ -34,7 +34,6 @@ need those quantities and we cannot invent them.
 """
 
 import datetime
-import json
 import logging
 
 from django.http import HttpRequest, JsonResponse
@@ -44,7 +43,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from humanityrules_app import models
 from humanityrules_app.services.billing import entitlements
-from . import app_bearer_auth
+from humanityrules_app.views.integrations import broker_request_context
 
 logger = logging.getLogger(__name__)
 
@@ -105,41 +104,26 @@ def _parse_event(event: dict, now: datetime.datetime) -> dict | str | None:
 @require_POST
 def billing_usage_events(request: HttpRequest) -> JsonResponse:
     """Insert a batch of broker-reported usage events, ignoring duplicates."""
-    raw_token = app_bearer_auth.extract_bearer_token(request=request)
-    if raw_token is None:
-        return JsonResponse({"error": "missing bearer token"}, status=401)
-    environment = app_bearer_auth.resolve_env_from_token(raw_token=raw_token)
-    if environment is None:
-        return JsonResponse({"error": "invalid bearer token"}, status=401)
+    app, auth_error = broker_request_context.resolve_app_bearer_context(request=request)
+    if auth_error is not None:
+        return auth_error
+    # The owner label on each event is the verified owner tag, never a
+    # client-supplied username; an ownerless (team) app cannot report usage.
+    owner_user, owner_error = broker_request_context.resolve_app_owner(app=app)
+    if owner_error is not None:
+        return owner_error
 
-    try:
-        payload = json.loads(request.body)
-    except json.JSONDecodeError:
-        return JsonResponse({"error": "invalid JSON body"}, status=400)
-    if not isinstance(payload, dict):
-        return JsonResponse({"error": "JSON object body is required"}, status=400)
+    payload, parse_error = broker_request_context.parse_json_body(request=request)
+    if parse_error is not None:
+        return parse_error
 
-    owner_username = payload.get("owner_username")
-    app_slug = payload.get("app_slug")
     events = payload.get("events")
-    if not isinstance(owner_username, str) or not owner_username:
-        return JsonResponse({"error": "owner_username is required"}, status=400)
-    if not isinstance(app_slug, str) or not app_slug:
-        return JsonResponse({"error": "app_slug is required"}, status=400)
     if not isinstance(events, list):
         return JsonResponse({"error": "events must be a list"}, status=400)
     if len(events) > MAX_EVENTS_PER_REPORT:
         return JsonResponse({"error": f"at most {MAX_EVENTS_PER_REPORT} events per report"}, status=400)
 
-    organization = environment.aws_account.organization
-    app = models.App.objects.filter(
-        organization=organization,
-        slug=app_slug,
-        environment=environment,
-    ).first()
-    if app is None:
-        return JsonResponse({"error": "app not found in environment"}, status=404)
-
+    organization = app.organization
     now = timezone.now()
     rows: list[models.BillingUsageEvent] = []
     skipped_sources: list[object] = []
@@ -156,7 +140,7 @@ def billing_usage_events(request: HttpRequest) -> JsonResponse:
             organization=organization,
             app_id=app.id,
             app_slug=app.slug,
-            owner_username=owner_username,
+            owner_username=owner_user.username,
             **parsed,
         ))
 
@@ -175,13 +159,8 @@ def billing_usage_events(request: HttpRequest) -> JsonResponse:
 
 @require_GET
 def billing_entitlement(request: HttpRequest) -> JsonResponse:
-    """Serve the calling environment's organization its current entitlement snapshot."""
-    raw_token = app_bearer_auth.extract_bearer_token(request=request)
-    if raw_token is None:
-        return JsonResponse({"error": "missing bearer token"}, status=401)
-    environment = app_bearer_auth.resolve_env_from_token(raw_token=raw_token)
-    if environment is None:
-        return JsonResponse({"error": "invalid bearer token"}, status=401)
-
-    organization = environment.aws_account.organization
-    return JsonResponse({"entitlement": entitlements.entitlement_snapshot(organization=organization)})
+    """Serve the calling app's organization its current entitlement snapshot."""
+    app, auth_error = broker_request_context.resolve_app_bearer_context(request=request)
+    if auth_error is not None:
+        return auth_error
+    return JsonResponse({"entitlement": entitlements.entitlement_snapshot(organization=app.organization)})

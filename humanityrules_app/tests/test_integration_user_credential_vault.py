@@ -1,6 +1,10 @@
-"""Tests for broker-assisted, browser-direct IntegrationUserCredential vault flows."""
+"""Tests for broker-assisted, browser-direct IntegrationUserCredential vault flows.
 
-import hashlib
+`setup-session` authenticates with the per-app bearer (app + owner derived from
+it); `submit` / `poll` authenticate with the signed token it minted, which binds
+the app by id and is re-checked against the app's current owner.
+"""
+
 import json
 import time
 from unittest.mock import MagicMock, patch
@@ -12,7 +16,6 @@ from humanityrules_app.models import (
     AWSAccount,
     App,
     Environment,
-    EnvironmentBearerToken,
     IntegrationUserCredential,
     Organization,
     OrganizationMembership,
@@ -20,6 +23,7 @@ from humanityrules_app.models import (
     User,
     Workspace,
 )
+from humanityrules_app.tests import bearer_test_helpers
 from humanityrules_app.tests.app_test_factories import make_source_template
 from humanityrules_app.views.integrations import (
     provider_anthropic,
@@ -28,10 +32,6 @@ from humanityrules_app.views.integrations import (
     provider_telegram,
     user_credential_vault,
 )
-
-
-def _hash(raw: str) -> str:
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 TELEGRAM_MANAGER_SETTINGS = {
@@ -104,23 +104,30 @@ class _CredentialVaultTestBase(TestCase):
             key="owner",
             value=self.user.username,
         )
-        self.raw_env_token = "v" * 64
-        EnvironmentBearerToken.objects.create(
-            environment=self.env,
-            token_hash=_hash(self.raw_env_token),
-        )
+        self.raw_token = bearer_test_helpers.make_app_bearer(app=self.app, raw="v" * 64)
         self.client = Client()
 
-    def _env_headers(self) -> dict:
-        return {"HTTP_AUTHORIZATION": f"Bearer {self.raw_env_token}"}
+    def _headers(self) -> dict:
+        return bearer_test_helpers.auth_header(raw=self.raw_token)
+
+    def _make_app(self, slug: str, owner_username: str | None) -> App:
+        app = App.objects.create(
+            organization=self.org, workspace=self.workspace, source_template=make_source_template(),
+            name=slug, slug=slug, environment=self.env,
+            container_port=8000, health_check_path="/health", cpu=256, memory=512,
+        )
+        if owner_username is not None:
+            ResourceTag.objects.create(
+                organization=self.org, resource_type=ResourceTag.ResourceType.APP,
+                app=app, key="owner", value=owner_username,
+            )
+        return app
 
     def _setup_payload(self) -> dict:
         return self._setup_payload_for_provider(provider=IntegrationUserCredential.Provider.TELEGRAM)
 
     def _setup_payload_for_provider(self, provider: str) -> dict:
         return {
-            "owner_username": self.user.username,
-            "app_slug": self.app.slug,
             "provider": provider,
             "public_origin": "https://hermes.dev.example.com",
         }
@@ -133,7 +140,7 @@ class _CredentialVaultTestBase(TestCase):
             "/api/integrations/credentials/setup-session",
             data=json.dumps(self._setup_payload_for_provider(provider=provider)),
             content_type="application/json",
-            **self._env_headers(),
+            **self._headers(),
         )
         return response.status_code, response.json()
 
@@ -181,7 +188,7 @@ class TestSetupSession(_CredentialVaultTestBase):
         )
         self.assertEqual(token_payload["owner_user_id"], str(self.user.id))
         self.assertEqual(token_payload["environment_id"], str(self.env.id))
-        self.assertEqual(token_payload["app_slug"], "hermes")
+        self.assertEqual(token_payload["app_id"], str(self.app.id))
         self.assertEqual(token_payload["allowed_origin"], "https://hermes.dev.example.com")
 
         bot_username = token_payload["provider_state"]["bot_username"]
@@ -265,7 +272,7 @@ class TestSetupSession(_CredentialVaultTestBase):
             "/api/integrations/credentials/setup-session",
             data=json.dumps(payload),
             content_type="application/json",
-            **self._env_headers(),
+            **self._headers(),
         )
 
         self.assertEqual(response.status_code, 200)
@@ -276,6 +283,35 @@ class TestSetupSession(_CredentialVaultTestBase):
             max_age=user_credential_vault.SETUP_TOKEN_MAX_AGE_SECONDS,
         )
         self.assertEqual(token_payload["allowed_origin"], "https://hermes.dev.example.com")
+
+    def test_setup_session_ignores_identity_in_body(self) -> None:
+        other = self._make_app(slug="theirs", owner_username="someone-else")
+        payload = {**self._setup_payload(), "owner_username": "someone-else", "app_slug": other.slug}
+
+        response = self.client.post(
+            "/api/integrations/credentials/setup-session",
+            data=json.dumps(payload),
+            content_type="application/json",
+            **self._headers(),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        token_payload = self._setup_token_payload(session=response.json())
+        self.assertEqual(token_payload["app_id"], str(self.app.id))
+        self.assertEqual(token_payload["owner_user_id"], str(self.user.id))
+
+    def test_setup_session_for_app_without_owner_returns_404(self) -> None:
+        lonely = self._make_app(slug="lonely", owner_username=None)
+        lonely_token = bearer_test_helpers.make_app_bearer(app=lonely, raw="l" * 64)
+
+        response = self.client.post(
+            "/api/integrations/credentials/setup-session",
+            data=json.dumps(self._setup_payload()),
+            content_type="application/json",
+            **bearer_test_helpers.auth_header(raw=lonely_token),
+        )
+
+        self.assertEqual(response.status_code, 404)
 
 
 @override_settings(**TELEGRAM_MANAGER_SETTINGS)
@@ -476,6 +512,43 @@ class TestCredentialSubmit(_CredentialVaultTestBase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("not connected", response.json()["error"])
+        self.assertFalse(IntegrationUserCredential.objects.exists())
+
+    def test_submit_refused_when_app_ownership_changed_since_session_was_minted(self) -> None:
+        _status, session = self._post_setup_session_for_provider(provider=IntegrationUserCredential.Provider.BROWSERUSE)
+        ResourceTag.objects.filter(app=self.app, key="owner").update(value="someone-else")
+
+        response = self.client.post(
+            "/api/integrations/credentials/submit",
+            data=json.dumps({
+                "submit_token": session["submit_token"],
+                "credentials": {"api_key": "bu-real"},
+                "config": {},
+            }),
+            content_type="text/plain",
+            HTTP_ORIGIN="https://hermes.dev.example.com",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["error"], "app is not available")
+        self.assertFalse(IntegrationUserCredential.objects.exists())
+
+    def test_submit_refused_when_app_was_removed_since_session_was_minted(self) -> None:
+        _status, session = self._post_setup_session_for_provider(provider=IntegrationUserCredential.Provider.BROWSERUSE)
+        self.app.delete()
+
+        response = self.client.post(
+            "/api/integrations/credentials/submit",
+            data=json.dumps({
+                "submit_token": session["submit_token"],
+                "credentials": {"api_key": "bu-real"},
+                "config": {},
+            }),
+            content_type="text/plain",
+            HTTP_ORIGIN="https://hermes.dev.example.com",
+        )
+
+        self.assertEqual(response.status_code, 404)
         self.assertFalse(IntegrationUserCredential.objects.exists())
 
     def test_submit_rejects_wrong_origin(self) -> None:

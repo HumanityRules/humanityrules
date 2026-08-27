@@ -6,9 +6,10 @@ providers have nothing to revoke). Registry-driven, mirroring the batched
 refresh endpoint (`token_refresh_batch.py`) — together they are the two
 cross-provider integration endpoints.
 
-The env-resident broker posts here (env bearer + {owner_username, app_slug,
-provider} body) at `/api/integrations/credentials/disconnect` whenever the
-user clicks Disconnect in the Hermes WebUI, for every provider kind.
+The env-resident broker posts here (per-app bearer + {provider} body) at
+`/api/integrations/credentials/disconnect` whenever the user clicks Disconnect
+in the Hermes WebUI, for every provider kind. The app and its owner are derived
+from the bearer, so a broker can only disconnect its own app's credentials.
 """
 
 import logging
@@ -87,25 +88,15 @@ def disconnect_user_integration(
 @require_POST
 def integrations_credential_disconnect(request: HttpRequest) -> JsonResponse:
     """Delete a user credential row (any provider) on behalf of the env-resident broker."""
-    environment, auth_error = broker_request_context.resolve_env_bearer_context(request=request)
+    app, auth_error = broker_request_context.resolve_app_bearer_context(request=request)
     if auth_error is not None:
         return auth_error
+    owner_user, owner_error = broker_request_context.resolve_app_owner(app=app)
+    if owner_error is not None:
+        return owner_error
     payload, parse_error = broker_request_context.parse_json_body(request=request)
     if parse_error is not None:
         return parse_error
-    owner_user, owner_error = broker_request_context.resolve_owner_user(
-        owner_username=payload.get("owner_username"),
-        environment=environment,
-    )
-    if owner_error is not None:
-        return owner_error
-    app_slug, app_error = broker_request_context.resolve_owned_app_slug(
-        app_slug=payload.get("app_slug"),
-        environment=environment,
-        owner_user=owner_user,
-    )
-    if app_error is not None:
-        return app_error
     provider = payload.get("provider")
     spec = provider_registry.get(provider=provider) if isinstance(provider, str) else None
     if spec is None:
@@ -113,8 +104,8 @@ def integrations_credential_disconnect(request: HttpRequest) -> JsonResponse:
 
     disconnect_user_integration(
         owner_user=owner_user,
-        environment=environment,
-        app_slug=app_slug,
+        environment=app.environment,
+        app_slug=app.slug,
         spec=spec,
     )
     return JsonResponse({"ok": True, "status": "not_connected"})

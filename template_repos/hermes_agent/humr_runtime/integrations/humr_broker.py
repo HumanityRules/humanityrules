@@ -18,12 +18,13 @@ It starts:
    relay under /permissions, and the credits snapshot under /billing.
 
 The aggregator's port 9952 is sandbox-only MCP traffic. Refresh tokens, HUMR's
-OAuth client secrets, and the env bearer never enter the sandbox.
+OAuth client secrets, and the app bearer never enter the sandbox.
 
-Environment contract (set by deploy_app.py's env-bearer overlay):
-- HUMR_ENV_BEARER        — bearer for HUMR's per-env integration endpoints.
-- HUMR_OWNER_USERNAME    — whose grants this container is for.
-- HUMR_APP_SLUG          — logical app key for app-scoped credentials.
+Environment contract (set by deploy_app.py's bearer overlay):
+- HUMR_APP_BEARER        — this app's bearer for HUMR's app-facing endpoints.
+                           HUMR derives the app and its owner from it.
+- HUMR_OWNER_USERNAME    — whose grants this container is for (status card + logs).
+- HUMR_APP_SLUG          — logical app key for app-scoped credentials (status card + logs).
 - HUMR_CONTROL_PLANE_URL — base URL for HUMR (e.g. https://humanityrules.io).
 - HUMR_ENV_SLUG          — env slug, for logging only.
 - HUMR_MERGE_INTEGRATION_ENABLED — optional; false disables all Merge.dev connectors.
@@ -119,7 +120,7 @@ async def _run(
     process_compose_url: str,
 ) -> None:
     control_plane_url = _require_env(name="HUMR_CONTROL_PLANE_URL")
-    bearer = _require_env(name="HUMR_ENV_BEARER")
+    bearer = _require_env(name="HUMR_APP_BEARER")
     owner_username = _require_env(name="HUMR_OWNER_USERNAME")
     app_slug = _require_env(name="HUMR_APP_SLUG")
     env_slug = os.environ.get("HUMR_ENV_SLUG", "")
@@ -155,9 +156,7 @@ async def _run(
         persistent_dir=mcp_persistent_dir,
         public_base_url=public_base_url,
         humr_control_plane_url=control_plane_url,
-        humr_env_bearer=bearer,
-        humr_app_slug=app_slug,
-        humr_owner_username=owner_username,
+        humr_app_bearer=bearer,
         merge_enabled=merge_enabled,
     )
 

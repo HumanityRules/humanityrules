@@ -15,9 +15,10 @@ The aggregator owns the lifecycle:
     integrations_broker mounts the Merge passthrough endpoints alongside the
     DCR OAuth ones.
 
-The browser-facing handlers proxy POST/GET to HUMR with the env bearer and
-identity (app_slug, owner_username) auto-injected. HUMR owns the Merge API key
-and does the real work; we just relay.
+The browser-facing handlers proxy POST/GET to HUMR with the app bearer
+attached. The bearer is per-app, so HUMR derives the app and its owner from it
+— nothing about identity goes on the wire. HUMR owns the Merge API key and does
+the real work; we just relay.
 """
 
 import asyncio
@@ -68,24 +69,16 @@ class MergeBackend:
         self,
         *,
         humr_control_plane_url: str,
-        humr_env_bearer: str,
-        humr_app_slug: str,
-        humr_owner_username: str,
+        humr_app_bearer: str,
         excluded_connector_slugs: frozenset[str],
         on_config_change: Callable[[str, str, mcp_top_level_tools.StateTransition], Awaitable[None]],
     ) -> None:
         self._humr_control_plane_url = humr_control_plane_url
-        self._humr_env_bearer = humr_env_bearer
-        self._humr_app_slug = humr_app_slug
-        self._humr_owner_username = humr_owner_username
+        self._humr_app_bearer = humr_app_bearer
         self._excluded_connector_slugs = excluded_connector_slugs
         self._mcp_url = humr_control_plane_url + "/api/integrations/merge/mcp"
         self._status_url = humr_control_plane_url + "/api/integrations/merge/connector-status"
-        self._headers = {
-            "Authorization": f"Bearer {humr_env_bearer}",
-            "X-Humr-App-Slug": humr_app_slug,
-            "X-Humr-Owner-Username": humr_owner_username,
-        }
+        self._headers = {"Authorization": f"Bearer {humr_app_bearer}"}
         self._status_cache: dict[str, tuple[str, float]] = {}
         self._status_lock = asyncio.Lock()
         # Fired after a connect/disconnect we observe so the aggregator can
@@ -219,11 +212,8 @@ class MergeBackend:
             async with httpx.AsyncClient(timeout=30) as client:
                 resp = await client.post(
                     url=f"{self._humr_control_plane_url}/api/integrations/merge/ensure-registered-user",
-                    headers={
-                        "Authorization": f"Bearer {self._humr_env_bearer}",
-                        "Content-Type": "application/json",
-                    },
-                    json={"app_slug": self._humr_app_slug, "owner_username": self._humr_owner_username},
+                    headers={**self._headers, "Content-Type": "application/json"},
+                    json={},
                 )
             if resp.status_code != 200:
                 logger.error("merge ensure-registered-user at boot returned %d: %s", resp.status_code, resp.text[:300])
@@ -237,8 +227,8 @@ class MergeBackend:
     def routes(self, prefix: str) -> list[Route]:
         """Routes the integrations_broker mounts under /__humr_broker/<prefix>/merge/*.
 
-        HUMR owns the Merge API key — these handlers forward to HUMR with bearer
-        + identity injected and stream the response back to the WebUI.
+        HUMR owns the Merge API key — these handlers forward to HUMR with the
+        app bearer attached and stream the response back to the WebUI.
         """
         return [
             Route(path=f"{prefix}/merge/connector-status", endpoint=self.handle_connector_status, methods=["GET"]),
@@ -306,23 +296,18 @@ class MergeBackend:
         json_body: dict | None = None,
         extra_query: dict | None = None,
     ) -> Response:
-        """Forward to HUMR with the env bearer attached. HUMR does the real work.
+        """Forward to HUMR with the app bearer attached. HUMR does the real work.
 
-        app_slug and owner_username are auto-injected — into the query string
-        for GET, into the JSON body for POST. Callers provide only the
-        operation-specific fields.
+        Callers provide only the operation-specific fields; HUMR derives the
+        app and owner from the bearer.
         """
         url = f"{self._humr_control_plane_url}{path}"
-        headers = {"Authorization": f"Bearer {self._humr_env_bearer}"}
-        identity = {"app_slug": self._humr_app_slug, "owner_username": self._humr_owner_username}
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 if method == "GET":
-                    params = {**identity, **(extra_query or {})}
-                    resp = await client.get(url=url, headers=headers, params=params)
+                    resp = await client.get(url=url, headers=self._headers, params=extra_query or {})
                 else:
-                    body = {**identity, **(json_body or {})}
-                    resp = await client.request(method=method, url=url, headers=headers, json=body)
+                    resp = await client.request(method=method, url=url, headers=self._headers, json=json_body or {})
         except Exception as exc:
             logger.exception("merge passthrough %s %s failed", method, path)
             return JSONResponse(content={"error": f"humr unreachable: {exc}"}, status_code=502)

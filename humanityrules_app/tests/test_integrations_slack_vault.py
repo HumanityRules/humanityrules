@@ -1,6 +1,5 @@
 """Tests for the Slack vault flow (schema, two-token submit, refresh outcome)."""
 
-import hashlib
 import json
 from unittest.mock import MagicMock, patch
 
@@ -11,7 +10,6 @@ from humanityrules_app.models import (
     App,
     AppTemplate,
     Environment,
-    EnvironmentBearerToken,
     IntegrationUserCredential,
     Organization,
     OrganizationMembership,
@@ -19,12 +17,9 @@ from humanityrules_app.models import (
     User,
     Workspace,
 )
+from humanityrules_app.tests import bearer_test_helpers
 from humanityrules_app.tests.app_test_factories import make_source_template
 from humanityrules_app.views.integrations import provider_slack
-
-
-def _hash(raw: str) -> str:
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 class _SlackVaultTestBase(TestCase):
@@ -68,24 +63,18 @@ class _SlackVaultTestBase(TestCase):
             key="owner",
             value=self.user.username,
         )
-        self.raw_env_token = "v" * 64
-        EnvironmentBearerToken.objects.create(environment=self.env, token_hash=_hash(self.raw_env_token))
+        self.raw_token = bearer_test_helpers.make_app_bearer(app=self.app, raw="v" * 64)
         self.client = Client()
-
-    def _env_headers(self) -> dict:
-        return {"HTTP_AUTHORIZATION": f"Bearer {self.raw_env_token}"}
 
     def _post_setup_session(self) -> tuple[int, dict]:
         response = self.client.post(
             "/api/integrations/credentials/setup-session",
             data=json.dumps({
-                "owner_username": self.user.username,
-                "app_slug": self.app.slug,
                 "provider": IntegrationUserCredential.Provider.SLACK,
                 "public_origin": "https://hermes.dev.example.com",
             }),
             content_type="application/json",
-            **self._env_headers(),
+            **bearer_test_helpers.auth_header(raw=self.raw_token),
         )
         return response.status_code, response.json()
 

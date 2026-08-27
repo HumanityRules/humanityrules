@@ -134,18 +134,14 @@ class MCPAggregator:
         persistent_dir: Path,
         public_base_url: str | None,
         humr_control_plane_url: str,
-        humr_env_bearer: str,
-        humr_app_slug: str,
-        humr_owner_username: str,
+        humr_app_bearer: str,
         merge_enabled: bool,
     ) -> None:
         self._port = port
         self._persistent_dir = persistent_dir
         self._public_base_url = public_base_url.rstrip("/") if public_base_url else None
         self._humr_control_plane_url = humr_control_plane_url.rstrip("/")
-        self._humr_env_bearer = humr_env_bearer
-        self._humr_app_slug = humr_app_slug
-        self._humr_owner_username = humr_owner_username
+        self._humr_app_bearer = humr_app_bearer
         self._mcp = FastMCP(name="humr-mcp-aggregator")
         self._oauth_states: dict[str, _OAuthState] = {}
         self._pending_oauth: dict[str, dict] = {}
@@ -168,9 +164,7 @@ class MCPAggregator:
             merge_excluded = frozenset(set(DCR_CONNECTORS_BY_SLUG.keys()) | {"github", "slack", "x"})
             self._merge_backend = MergeBackend(
                 humr_control_plane_url=self._humr_control_plane_url,
-                humr_env_bearer=self._humr_env_bearer,
-                humr_app_slug=self._humr_app_slug,
-                humr_owner_username=self._humr_owner_username,
+                humr_app_bearer=self._humr_app_bearer,
                 excluded_connector_slugs=merge_excluded,
                 on_config_change=self._on_state_change,
             )

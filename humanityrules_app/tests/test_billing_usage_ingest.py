@@ -1,7 +1,10 @@
-"""Tests for billing usage-event ingestion from environment brokers."""
+"""Tests for billing usage-event ingestion from app brokers.
+
+The app and the owner label on every event come from the per-app bearer; the
+body carries only `events`.
+"""
 
 import datetime
-import hashlib
 import json
 
 from django.test import Client, TestCase
@@ -9,11 +12,8 @@ from django.utils import timezone
 
 from humanityrules_app import models
 from humanityrules_app.services.billing import grants
+from humanityrules_app.tests import bearer_test_helpers
 from humanityrules_app.tests.app_test_factories import make_source_template
-
-
-def _hash(raw: str) -> str:
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def _quantities(**overrides: int) -> dict:
@@ -50,41 +50,51 @@ class BillingUsageIngestTestBase(TestCase):
             slug="staging",
             aws_region="us-east-1",
         )
-        workspace = models.Workspace.objects.create(
+        self.workspace = models.Workspace.objects.create(
             organization=self.organization,
             name="Assistants",
             slug="assistants",
         )
-        self.app = models.App.objects.create(
+        self.owner = models.User.objects.create_user(
+            username="vmendi", email="vmendi@example.com", password="pw", current_organization=self.organization,
+        )
+        models.OrganizationMembership.objects.create(
+            user=self.owner, organization=self.organization, role=models.OrganizationMembership.Role.MEMBER,
+        )
+        self.app = self._make_app(slug="usage-agent", owner_username=self.owner.username)
+        self.raw_token = bearer_test_helpers.make_app_bearer(app=self.app, raw="a" * 64)
+        self.client = Client()
+
+    def _make_app(self, slug: str, owner_username: str | None) -> models.App:
+        app = models.App.objects.create(
             organization=self.organization,
-            workspace=workspace,
+            workspace=self.workspace,
             environment=self.environment,
             source_template=make_source_template(),
-            name="Usage Agent",
-            slug="usage-agent",
+            name=slug,
+            slug=slug,
             container_port=8787,
             health_check_path="/health",
             cpu=256,
             memory=512,
         )
-        self.raw_token = "a" * 64
-        models.EnvironmentBearerToken.objects.create(
-            environment=self.environment,
-            token_hash=_hash(raw=self.raw_token),
-        )
-        self.client = Client()
+        if owner_username is not None:
+            models.ResourceTag.objects.create(
+                organization=self.organization, resource_type=models.ResourceTag.ResourceType.APP,
+                app=app, key="owner", value=owner_username,
+            )
+        return app
 
     def post_events(self, events: list[dict], token: str | None) -> tuple[int, dict]:
+        return self.post_body(body={"events": events}, token=token)
+
+    def post_body(self, body: dict, token: str | None) -> tuple[int, dict]:
         headers = {}
         if token is not None:
             headers["HTTP_AUTHORIZATION"] = f"Bearer {token}"
         response = self.client.post(
             "/api/runtime/billing-usage-events",
-            data=json.dumps({
-                "owner_username": "vmendi",
-                "app_slug": self.app.slug,
-                "events": events,
-            }),
+            data=json.dumps(body),
             content_type="application/json",
             **headers,
         )
@@ -154,23 +164,28 @@ class TestBillingUsageIngestion(BillingUsageIngestTestBase):
         # The duplicate did not overwrite the original event.
         self.assertEqual(models.BillingUsageEvent.objects.get(idempotency_key="evt-1").quantities["input_tokens"], 200)
 
-    def test_app_must_belong_to_bearer_environment(self) -> None:
-        other_environment = models.Environment.objects.create(
-            aws_account=self.aws_account,
-            name="Production",
-            slug="production",
-            aws_region="us-east-1",
-        )
-        other_token = "b" * 64
-        models.EnvironmentBearerToken.objects.create(
-            environment=other_environment,
-            token_hash=_hash(raw=other_token),
+    def test_identity_in_body_is_ignored_in_favour_of_the_bearers_app(self) -> None:
+        other = self._make_app(slug="theirs", owner_username="someone-else")
+
+        status, _body = self.post_body(
+            body={"owner_username": "someone-else", "app_slug": other.slug, "events": [_event()]},
+            token=self.raw_token,
         )
 
-        status, body = self.post_events(events=[_event()], token=other_token)
+        self.assertEqual(status, 200)
+        event = models.BillingUsageEvent.objects.get(idempotency_key="evt-1")
+        self.assertEqual(event.app_id, self.app.id)
+        self.assertEqual(event.app_slug, self.app.slug)
+        self.assertEqual(event.owner_username, "vmendi")
+
+    def test_app_without_owner_cannot_report_usage(self) -> None:
+        lonely = self._make_app(slug="lonely", owner_username=None)
+        lonely_token = bearer_test_helpers.make_app_bearer(app=lonely, raw="b" * 64)
+
+        status, body = self.post_events(events=[_event()], token=lonely_token)
 
         self.assertEqual(status, 404)
-        self.assertEqual(body["error"], "app not found in environment")
+        self.assertIn("error", body)
         self.assertFalse(models.BillingUsageEvent.objects.exists())
 
     def test_events_survive_app_deletion(self) -> None:
@@ -336,7 +351,7 @@ class TestBillingEntitlementEndpoint(BillingUsageIngestTestBase):
         self.assertEqual(status, 401)
         self.assertIn("error", body)
 
-    def test_bearer_resolves_the_environments_organization(self) -> None:
+    def test_bearer_resolves_the_apps_organization(self) -> None:
         grants.grant_trial_credits(organization=self.organization)
 
         status, body = self.get_entitlement(token=self.raw_token)

@@ -1,12 +1,12 @@
 """Tests for the bearer-auth /api/permissions/* endpoints (the Hermes editor).
 
 The env-resident humr_broker relays the WebUI's calls here. These exercise the
-JSON twin of the session-auth HTML editor: target resolution from the bearer +
-identity, statement mutation, the draft/apply lifecycle, and ABAC on Apply.
-AWS-touching iam_utils calls are mocked so the suite is hermetic.
+JSON twin of the session-auth HTML editor: target resolution from the per-app
+bearer alone (the body cannot rename the app or owner), statement mutation, the
+draft/apply lifecycle, and ABAC on Apply. AWS-touching iam_utils calls are
+mocked so the suite is hermetic.
 """
 
-import hashlib
 import json
 from unittest.mock import patch
 
@@ -20,18 +20,14 @@ from humanityrules_app.models import (
     AppPermissionRequest,
     AppPermissions,
     Environment,
-    EnvironmentBearerToken,
     Organization,
     OrganizationMembership,
     ResourceTag,
     User,
     Workspace,
 )
+from humanityrules_app.tests import bearer_test_helpers
 from humanityrules_app.tests.app_test_factories import make_source_template
-
-
-def _hash(raw: str) -> str:
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 class TestPermissionsApi(TestCase):
@@ -55,8 +51,6 @@ class TestPermissionsApi(TestCase):
             aws_region="us-east-1",
             shared_alb_hosted_zone="dev.example.com",
         )
-        self.raw_token = "test-bearer"
-        EnvironmentBearerToken.objects.create(environment=self.env, token_hash=_hash(self.raw_token))
         self.user = User.objects.create_user(
             username="vmendi", email="vmendi@example.com", password="pw", current_organization=self.org,
         )
@@ -65,6 +59,7 @@ class TestPermissionsApi(TestCase):
         )
         self.workspace = Workspace.objects.create(organization=self.org, name="Engineering", slug="engineering")
         self.app = self._make_app(slug="hermes", name="Hermes", owner_username=self.user.username)
+        self.raw_token = bearer_test_helpers.make_app_bearer(app=self.app, raw="test-bearer")
 
         # No AWS in tests: empty policy baseline and empty resource listings.
         read_patch = patch(
@@ -97,30 +92,36 @@ class TestPermissionsApi(TestCase):
             headers["HTTP_AUTHORIZATION"] = f"Bearer {bearer}"
         return self.client.post(path, data=json.dumps(payload), content_type="application/json", **headers)
 
-    def _identity(self) -> dict:
-        return {"owner_username": "vmendi", "app_slug": "hermes"}
-
     def _open_draft(self) -> dict:
-        response = self._post("/api/permissions/draft", self._identity(), bearer=self.raw_token)
+        response = self._post("/api/permissions/draft", {}, bearer=self.raw_token)
         self.assertEqual(response.status_code, 200)
         return response.json()
 
     # ── Auth + target resolution ────────────────────────────────────────────
 
     def test_missing_bearer_returns_401(self) -> None:
-        response = self._post("/api/permissions/draft", self._identity(), bearer=None)
+        response = self._post("/api/permissions/draft", {}, bearer=None)
         self.assertEqual(response.status_code, 401)
 
     def test_invalid_bearer_returns_401(self) -> None:
-        response = self._post("/api/permissions/draft", self._identity(), bearer="nope")
+        response = self._post("/api/permissions/draft", {}, bearer="nope")
         self.assertEqual(response.status_code, 401)
 
-    def test_unowned_app_returns_403(self) -> None:
-        self._make_app(slug="other", name="Other", owner_username=None)
+    def test_body_naming_another_app_acts_on_the_bearers_app(self) -> None:
+        other = self._make_app(slug="other", name="Other", owner_username="someone-else")
         response = self._post(
-            "/api/permissions/draft", {"owner_username": "vmendi", "app_slug": "other"}, bearer=self.raw_token,
+            "/api/permissions/draft", {"owner_username": "someone-else", "app_slug": "other"}, bearer=self.raw_token,
         )
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["app"], {"slug": "hermes", "name": "Hermes"})
+        self.assertEqual(AppPermissionRequest.objects.filter(app=self.app).count(), 1)
+        self.assertFalse(AppPermissionRequest.objects.filter(app=other).exists())
+
+    def test_app_without_owner_returns_404(self) -> None:
+        lonely = self._make_app(slug="lonely", name="Lonely", owner_username=None)
+        lonely_token = bearer_test_helpers.make_app_bearer(app=lonely, raw="lonely-bearer")
+        response = self._post("/api/permissions/draft", {}, bearer=lonely_token)
+        self.assertEqual(response.status_code, 404)
 
     # ── Draft open + poll ─────────────────────────────────────────────────────
 
@@ -140,7 +141,7 @@ class TestPermissionsApi(TestCase):
         apr.status = AppPermissionRequest.Status.APPLYING
         apr.save(update_fields=["status"])
         response = self._post(
-            "/api/permissions/draft", {**self._identity(), "request_id": draft["request_id"]}, bearer=self.raw_token,
+            "/api/permissions/draft", {"request_id": draft["request_id"]}, bearer=self.raw_token,
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "applying")
@@ -150,7 +151,7 @@ class TestPermissionsApi(TestCase):
     def test_draft_poll_unknown_request_id_returns_404(self) -> None:
         response = self._post(
             "/api/permissions/draft",
-            {**self._identity(), "request_id": "00000000-0000-0000-0000-000000000000"},
+            {"request_id": "00000000-0000-0000-0000-000000000000"},
             bearer=self.raw_token,
         )
         self.assertEqual(response.status_code, 404)
@@ -160,14 +161,14 @@ class TestPermissionsApi(TestCase):
     def test_add_service_then_level(self) -> None:
         draft = self._open_draft()
         rid = draft["request_id"]
-        r1 = self._post("/api/permissions/draft/statement", {**self._identity(), "request_id": rid, "action": "add_service", "service": "s3"}, bearer=self.raw_token)
+        r1 = self._post("/api/permissions/draft/statement", {"request_id": rid, "action": "add_service", "service": "s3"}, bearer=self.raw_token)
         self.assertEqual(r1.status_code, 200)
         groups = r1.json()["service_groups"]
         self.assertEqual([g["service"] for g in groups], ["s3"])
         sid = groups[0]["sid"]
         self.assertTrue(sid)
 
-        r2 = self._post("/api/permissions/draft/statement", {**self._identity(), "request_id": rid, "action": "add_level", "service": "s3", "statement_id": sid, "level": "Read"}, bearer=self.raw_token)
+        r2 = self._post("/api/permissions/draft/statement", {"request_id": rid, "action": "add_level", "service": "s3", "statement_id": sid, "level": "Read"}, bearer=self.raw_token)
         self.assertEqual(r2.status_code, 200)
         body = r2.json()
         self.assertTrue(body["has_changes"])
@@ -198,17 +199,17 @@ class TestPermissionsApi(TestCase):
         draft = self._open_draft()
         rid = draft["request_id"]
 
-        g1 = self._post("/api/permissions/draft/statement", {**self._identity(), "request_id": rid, "action": "add_service", "service": "dynamodb"}, bearer=self.raw_token).json()["service_groups"]
+        g1 = self._post("/api/permissions/draft/statement", {"request_id": rid, "action": "add_service", "service": "dynamodb"}, bearer=self.raw_token).json()["service_groups"]
         sid1 = g1[0]["sid"]
-        groups = self._post("/api/permissions/draft/statement", {**self._identity(), "request_id": rid, "action": "add_service", "service": "dynamodb"}, bearer=self.raw_token).json()["service_groups"]
+        groups = self._post("/api/permissions/draft/statement", {"request_id": rid, "action": "add_service", "service": "dynamodb"}, bearer=self.raw_token).json()["service_groups"]
         self.assertEqual(len(groups), 2)
         sid2 = next(g["sid"] for g in groups if g["sid"] != sid1)
 
         # List on the first statement, Read on the second — independent scopes.
-        self._post("/api/permissions/draft/statement", {**self._identity(), "request_id": rid, "action": "add_level", "service": "dynamodb", "statement_id": sid1, "level": "List"}, bearer=self.raw_token)
-        self._post("/api/permissions/draft/statement", {**self._identity(), "request_id": rid, "action": "add_resource", "service": "dynamodb", "statement_id": sid1, "arn": "*"}, bearer=self.raw_token)
-        self._post("/api/permissions/draft/statement", {**self._identity(), "request_id": rid, "action": "add_level", "service": "dynamodb", "statement_id": sid2, "level": "Read"}, bearer=self.raw_token)
-        body = self._post("/api/permissions/draft/statement", {**self._identity(), "request_id": rid, "action": "add_resource", "service": "dynamodb", "statement_id": sid2, "arn": "arn:aws:dynamodb:us-east-1:111122223333:table/Orders"}, bearer=self.raw_token).json()
+        self._post("/api/permissions/draft/statement", {"request_id": rid, "action": "add_level", "service": "dynamodb", "statement_id": sid1, "level": "List"}, bearer=self.raw_token)
+        self._post("/api/permissions/draft/statement", {"request_id": rid, "action": "add_resource", "service": "dynamodb", "statement_id": sid1, "arn": "*"}, bearer=self.raw_token)
+        self._post("/api/permissions/draft/statement", {"request_id": rid, "action": "add_level", "service": "dynamodb", "statement_id": sid2, "level": "Read"}, bearer=self.raw_token)
+        body = self._post("/api/permissions/draft/statement", {"request_id": rid, "action": "add_resource", "service": "dynamodb", "statement_id": sid2, "arn": "arn:aws:dynamodb:us-east-1:111122223333:table/Orders"}, bearer=self.raw_token).json()
 
         statements = AppPermissionRequest.objects.get(id=rid).statements
         self.assertEqual(len(statements), 2)
@@ -227,7 +228,7 @@ class TestPermissionsApi(TestCase):
         apr.save(update_fields=["status"])
         response = self._post(
             "/api/permissions/draft/statement",
-            {**self._identity(), "request_id": rid, "action": "add_service", "service": "s3"},
+            {"request_id": rid, "action": "add_service", "service": "s3"},
             bearer=self.raw_token,
         )
         self.assertEqual(response.status_code, 409)
@@ -239,7 +240,7 @@ class TestPermissionsApi(TestCase):
         rid = draft["request_id"]
         response = self._post(
             "/api/permissions/draft/description",
-            {**self._identity(), "request_id": rid, "description": "needs s3 read"},
+            {"request_id": rid, "description": "needs s3 read"},
             bearer=self.raw_token,
         )
         self.assertEqual(response.status_code, 200)
@@ -257,7 +258,7 @@ class TestPermissionsApi(TestCase):
         apr.statements = [{"service": "s3", "effect": "Allow", "access_levels": ["Write"], "resources": []}]
         apr.save(update_fields=["statements"])
 
-        response = self._post("/api/permissions/draft/cancel", {**self._identity(), "request_id": rid}, bearer=self.raw_token)
+        response = self._post("/api/permissions/draft/cancel", {"request_id": rid}, bearer=self.raw_token)
         self.assertEqual(response.status_code, 200)
         self.assertFalse(response.json()["has_changes"])
         self.assertEqual(
@@ -270,7 +271,7 @@ class TestPermissionsApi(TestCase):
         draft = self._open_draft()
         rid = draft["request_id"]
         with patch("humanityrules_app.views.permissions_api.abac_service.check_action", return_value=False):
-            response = self._post("/api/permissions/draft/apply", {**self._identity(), "request_id": rid}, bearer=self.raw_token)
+            response = self._post("/api/permissions/draft/apply", {"request_id": rid}, bearer=self.raw_token)
         self.assertEqual(response.status_code, 403)
         self.assertEqual(AppPermissionRequest.objects.get(id=rid).status, AppPermissionRequest.Status.DRAFT)
 
@@ -278,7 +279,7 @@ class TestPermissionsApi(TestCase):
         draft = self._open_draft()
         rid = draft["request_id"]
         with patch("humanityrules_app.views.permissions_api.abac_service.check_action", return_value=True):
-            response = self._post("/api/permissions/draft/apply", {**self._identity(), "request_id": rid}, bearer=self.raw_token)
+            response = self._post("/api/permissions/draft/apply", {"request_id": rid}, bearer=self.raw_token)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"status": "approved_pending_apply", "request_id": rid})
         self.assertEqual(
@@ -293,7 +294,7 @@ class TestPermissionsApi(TestCase):
         with patch("humanityrules_app.views.permissions_api.abac_service.check_action", return_value=True):
             response = self._post(
                 "/api/permissions/draft/apply",
-                {**self._identity(), "request_id": rid},
+                {"request_id": rid},
                 bearer=self.raw_token,
             )
 
@@ -311,7 +312,7 @@ class TestPermissionsApi(TestCase):
             self.settings(HUMR_PLATFORM_OWNER_ORG_SLUG="humanity-rules"),
             patch("humanityrules_app.views.permissions_api.abac_service.check_action", return_value=True),
         ):
-            response = self._post("/api/permissions/draft/apply", {**self._identity(), "request_id": rid}, bearer=self.raw_token)
+            response = self._post("/api/permissions/draft/apply", {"request_id": rid}, bearer=self.raw_token)
         self.assertEqual(response.status_code, 403)
         self.assertIn("Humanity Rules", response.json()["error"])
         self.assertEqual(AppPermissionRequest.objects.get(id=rid).status, AppPermissionRequest.Status.DRAFT)
@@ -325,7 +326,7 @@ class TestPermissionsApi(TestCase):
             self.settings(HUMR_PLATFORM_OWNER_ORG_SLUG="perm-org"),
             patch("humanityrules_app.views.permissions_api.abac_service.check_action", return_value=True),
         ):
-            response = self._post("/api/permissions/draft/apply", {**self._identity(), "request_id": rid}, bearer=self.raw_token)
+            response = self._post("/api/permissions/draft/apply", {"request_id": rid}, bearer=self.raw_token)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             AppPermissionRequest.objects.get(id=rid).status, AppPermissionRequest.Status.APPROVED_PENDING_APPLY,
@@ -334,19 +335,19 @@ class TestPermissionsApi(TestCase):
     # ── Catalog / resources ────────────────────────────────────────────────────
 
     def test_service_catalog(self) -> None:
-        response = self._post("/api/permissions/service-catalog", self._identity(), bearer=self.raw_token)
+        response = self._post("/api/permissions/service-catalog", {}, bearer=self.raw_token)
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertIn("Read", body["access_levels"])
         self.assertTrue(any(s["value"] == "s3" and s["is_curated"] for s in body["services"]))
 
     def test_resources_requires_service(self) -> None:
-        response = self._post("/api/permissions/resources", self._identity(), bearer=self.raw_token)
+        response = self._post("/api/permissions/resources", {}, bearer=self.raw_token)
         self.assertEqual(response.status_code, 400)
 
     def test_resources_returns_available(self) -> None:
         response = self._post(
-            "/api/permissions/resources", {**self._identity(), "service": "s3"}, bearer=self.raw_token,
+            "/api/permissions/resources", {"service": "s3"}, bearer=self.raw_token,
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"service": "s3", "available_resources": []})

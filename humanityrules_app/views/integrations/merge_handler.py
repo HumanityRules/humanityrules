@@ -3,9 +3,9 @@
 The Merge tenant-wide API key lives on HUMR only — never inside the customer's
 Hermes container. Env-resident callers (the integrations broker / MCP
 aggregator) reach Merge through these endpoints, authenticating with their
-HUMR_ENV_BEARER. HUMR validates the bearer, derives `origin_user_id` from the
-authenticated env's owner + app slug, attaches the Merge API key, and
-forwards.
+HUMR_APP_BEARER. HUMR validates the bearer, derives the App and its owner from
+it, builds `origin_user_id` from those, attaches the Merge API key, and
+forwards. Nothing in the request names the app or owner.
 
 `origin_user_id = f"humr_{owner.pk}_{app_slug}"`. Per-app, not per-user. Same
 user destroying/recreating the same slug keeps integrations; a different user
@@ -22,8 +22,8 @@ from django.http import HttpRequest, JsonResponse, StreamingHttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
-from humanityrules_app.models import App, ResourceTag, User
-from humanityrules_app.views import app_bearer_auth
+from humanityrules_app.models import App, User
+from humanityrules_app.views.integrations import broker_request_context
 
 logger = logging.getLogger(__name__)
 
@@ -50,59 +50,13 @@ def _origin_user_id(*, user: User, app_slug: str) -> str:
 
 
 def _resolve_caller(request: HttpRequest) -> tuple[App, User] | JsonResponse:
-    """Validate the bearer and resolve the (App, User) pair the call is for.
-
-    Identity is read first from `X-Humr-App-Slug` / `X-Humr-Owner-Username`
-    headers (used by the MCP relay, where the body is the JSON-RPC payload),
-    and falls back to query string / JSON body for the other endpoints.
-    """
-    raw_token = app_bearer_auth.extract_bearer_token(request=request)
-    if raw_token is None:
-        return JsonResponse({"error": "missing bearer token"}, status=401)
-    environment = app_bearer_auth.resolve_env_from_token(raw_token=raw_token)
-    if environment is None:
-        return JsonResponse({"error": "invalid bearer token"}, status=401)
-
-    app_slug = request.headers.get("X-Humr-App-Slug", "")
-    owner_username = request.headers.get("X-Humr-Owner-Username", "")
-    if not app_slug or not owner_username:
-        if request.method == "GET":
-            app_slug = app_slug or request.GET.get("app_slug", "")
-            owner_username = owner_username or request.GET.get("owner_username", "")
-        else:
-            try:
-                payload = json.loads(request.body) if request.body else {}
-            except json.JSONDecodeError:
-                payload = {}
-            app_slug = app_slug or payload.get("app_slug", "")
-            owner_username = owner_username or payload.get("owner_username", "")
-
-    if not isinstance(app_slug, str) or not app_slug:
-        return JsonResponse({"error": "app_slug is required"}, status=400)
-    if not isinstance(owner_username, str) or not owner_username:
-        return JsonResponse({"error": "owner_username is required"}, status=400)
-
-    organization = environment.aws_account.organization
-    user = User.objects.filter(
-        username=owner_username,
-        organization_memberships__organization=organization,
-    ).first()
-    if user is None:
-        return JsonResponse({"error": "owner user not found"}, status=404)
-
-    app = App.objects.filter(organization=organization, slug=app_slug).first()
-    if app is None:
-        return JsonResponse({"error": "app not found in env's organization"}, status=404)
-    owner_tag_exists = ResourceTag.objects.filter(
-        organization=organization,
-        resource_type=ResourceTag.ResourceType.APP,
-        app=app,
-        key="owner",
-        value=user.username,
-    ).exists()
-    if not owner_tag_exists:
-        return JsonResponse({"error": "app is not owned by requested user"}, status=403)
-
+    """Validate the per-app bearer and derive the (App, owner User) pair the call is for."""
+    app, auth_error = broker_request_context.resolve_app_bearer_context(request=request)
+    if auth_error is not None:
+        return auth_error
+    user, owner_error = broker_request_context.resolve_app_owner(app=app)
+    if owner_error is not None:
+        return owner_error
     return app, user
 
 
