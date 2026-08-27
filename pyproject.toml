@@ -34,4 +34,5 @@ dependencies = [
 dev = [
     "django-browser-reload>=1.21.0",
     "django-watchfiles>=1.4.0",
+    "starlette>=1.6.0",
 ]

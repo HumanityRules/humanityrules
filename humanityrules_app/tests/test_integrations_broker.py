@@ -2708,9 +2708,9 @@ def _patched_humr_httpx_client(handler: Callable[[httpx.Request], httpx.Response
 
 
 class TestHumrClient(unittest.IsolatedAsyncioTestCase):
-    """HumrClient owns the bearer and merges the owner/app identity into every payload."""
+    """HumrClient owns the bearer; payloads go out unchanged because identity comes from the bearer."""
 
-    async def test_post_json_merges_identity_and_sends_bearer(self) -> None:
+    async def test_post_json_sends_payload_unchanged_with_bearer(self) -> None:
         import json as _json
         captured: dict = {}
         timeouts: list[int] = []
@@ -2734,7 +2734,7 @@ class TestHumrClient(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request.headers["Authorization"], "Bearer app-bearer")
         self.assertEqual(
             _json.loads(request.content.decode("utf-8")),
-            {"owner_username": "vmendi", "app_slug": "hermes", "provider": "telegram"},
+            {"provider": "telegram"},
         )
 
     async def test_network_error_maps_to_synthetic_502(self) -> None:
