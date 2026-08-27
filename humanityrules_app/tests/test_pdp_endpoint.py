@@ -110,6 +110,14 @@ class TestPDPAuthentication(PDPTestBase):
         self.assertEqual(status, 401)
         self.assertIn("error", body)
 
+    def test_app_whose_org_differs_from_environment_org_returns_401(self) -> None:
+        """A valid bearer fails closed when the App's org drifts from its Environment's org."""
+        other_org = Organization.objects.create(name="Other Org", slug="other-org")
+        App.objects.filter(pk=self.app.pk).update(organization=other_org)
+        status, body = self._post(body={}, token=self.raw_token)
+        self.assertEqual(status, 401)
+        self.assertIn("error", body)
+
     def test_invalid_json_returns_400(self) -> None:
         response = self.client.post(
             "/api/pdp/evaluate",
