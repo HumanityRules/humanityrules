@@ -94,15 +94,22 @@ def _run_persistent_data_purge(app: models.App, env: models.Environment) -> tupl
     return True, "ok"
 
 
-def _run_secrets_purge(env: models.Environment, app_slug: str) -> None:
-    """Delete every humr/{env}/{app}/* Secrets Manager entry for the app."""
+def _run_secrets_purge(env: models.Environment, app_slug: str) -> tuple[bool, str]:
+    """Delete every humr/{env}/{app}/* Secrets Manager entry for the app.
+
+    A partial purge must fail the removal: the slug is released afterwards and a successor
+    app under the same prefix would inherit whatever was left behind.
+    """
     session = _get_env_session(env)
-    secrets_utils.delete_secrets_matching_prefix(
+    _, failed_names = secrets_utils.delete_secrets_matching_prefix(
         session=session,
         subprefix=f"humr/{env.slug}/{app_slug}/",
         dry_run=False,
         force_immediate=True,
     )
+    if failed_names:
+        return False, f"Secrets cleanup failed in '{env.slug}': could not delete {', '.join(failed_names)}"
+    return True, "ok"
 
 
 def purge_app_namespace_data(app: models.App, env: models.Environment) -> tuple[bool, str]:
@@ -115,10 +122,9 @@ def purge_app_namespace_data(app: models.App, env: models.Environment) -> tuple[
     if not ok:
         return False, message
     try:
-        _run_secrets_purge(env=env, app_slug=app.slug)
+        return _run_secrets_purge(env=env, app_slug=app.slug)
     except ClientError as e:
         return False, f"Secrets cleanup failed in '{env.slug}': {e}"
-    return True, "ok"
 
 
 def run_removal(app_id: str) -> bool:
