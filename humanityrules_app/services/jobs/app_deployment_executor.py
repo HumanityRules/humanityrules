@@ -93,6 +93,7 @@ def run_deployment(app_id: str) -> bool:
                 build_id=str(app.last_attempt_id),
                 env_slug=environment.slug,
                 environment=environment,
+                app=app,
                 subdomain=app.slug,
                 synth_only=False,
                 shared_alb_hosted_zone=environment.shared_alb_hosted_zone or None,

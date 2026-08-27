@@ -44,7 +44,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from humanityrules_app import models
 from humanityrules_app.services.billing import entitlements
-from . import env_bearer_auth
+from . import app_bearer_auth
 
 logger = logging.getLogger(__name__)
 
@@ -105,10 +105,10 @@ def _parse_event(event: dict, now: datetime.datetime) -> dict | str | None:
 @require_POST
 def billing_usage_events(request: HttpRequest) -> JsonResponse:
     """Insert a batch of broker-reported usage events, ignoring duplicates."""
-    raw_token = env_bearer_auth.extract_bearer_token(request=request)
+    raw_token = app_bearer_auth.extract_bearer_token(request=request)
     if raw_token is None:
         return JsonResponse({"error": "missing bearer token"}, status=401)
-    environment = env_bearer_auth.resolve_env_from_token(raw_token=raw_token)
+    environment = app_bearer_auth.resolve_env_from_token(raw_token=raw_token)
     if environment is None:
         return JsonResponse({"error": "invalid bearer token"}, status=401)
 
@@ -176,10 +176,10 @@ def billing_usage_events(request: HttpRequest) -> JsonResponse:
 @require_GET
 def billing_entitlement(request: HttpRequest) -> JsonResponse:
     """Serve the calling environment's organization its current entitlement snapshot."""
-    raw_token = env_bearer_auth.extract_bearer_token(request=request)
+    raw_token = app_bearer_auth.extract_bearer_token(request=request)
     if raw_token is None:
         return JsonResponse({"error": "missing bearer token"}, status=401)
-    environment = env_bearer_auth.resolve_env_from_token(raw_token=raw_token)
+    environment = app_bearer_auth.resolve_env_from_token(raw_token=raw_token)
     if environment is None:
         return JsonResponse({"error": "invalid bearer token"}, status=401)
 

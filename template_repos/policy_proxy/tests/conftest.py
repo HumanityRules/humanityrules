@@ -61,7 +61,7 @@ def policy_proxy_config() -> config_mod.PolicyProxyConfig:
         control_plane_url="https://humanityrules.io",
         jwks_url="https://auth.humr-sandbox.humrsandbox.com/.well-known/jwks.json",
         pdp_url="https://humanityrules.io/api/pdp/evaluate",
-        env_bearer_token="t" * 64,
+        app_bearer_token="t" * 64,
         upstream_host="127.0.0.1",
         upstream_port=8787,
         listen_port=8443,

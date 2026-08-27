@@ -20,14 +20,12 @@ class PolicyProxyActivityReporter:
         *,
         http_client_provider: Callable[[], httpx.AsyncClient],
         endpoint_url: str,
-        env_bearer_token: str,
-        app_id: str,
+        app_bearer_token: str,
         interval_seconds: float,
     ) -> None:
         self._http_client_provider = http_client_provider
         self._endpoint_url = endpoint_url
-        self._env_bearer_token = env_bearer_token
-        self._app_id = app_id
+        self._app_bearer_token = app_bearer_token
         self._interval_seconds = max(0.0, interval_seconds)
         self._latest_observed_at: datetime.datetime | None = None
         self._last_reported_at: datetime.datetime | None = None
@@ -79,11 +77,8 @@ class PolicyProxyActivityReporter:
         try:
             response = await self._http_client_provider().post(
                 url=self._endpoint_url,
-                json={
-                    "app_id": self._app_id,
-                    "observed_at": observed_at.isoformat(),
-                },
-                headers={"Authorization": f"Bearer {self._env_bearer_token}"},
+                json={"observed_at": observed_at.isoformat()},
+                headers={"Authorization": f"Bearer {self._app_bearer_token}"},
                 timeout=REPORT_TIMEOUT_SECONDS,
             )
         except Exception as exc:

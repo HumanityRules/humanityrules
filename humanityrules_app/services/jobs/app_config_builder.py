@@ -19,6 +19,11 @@ from humanityrules_app.services.infra_customer.appconfig import (
 )
 
 
+# Keys the control plane writes into humr/{env}/{app}/secrets itself; a template
+# may not declare them (see _union_app_secrets).
+RESERVED_APP_SECRET_NAMES = frozenset({infra_customer.secrets_utils.APP_SECRETS_KEY_HUMR_APP_BEARER})
+
+
 def _merge_container_environment(
     template_container: dict, app_container: dict,
 ) -> list[dict[str, str]]:
@@ -51,6 +56,10 @@ class ContainerSecretCollision(ValueError):
 
 class PlatformCapabilityNotGranted(ValueError):
     """The app's configuration needs a platform capability its org's plan does not enable."""
+
+
+class ReservedSecretName(ValueError):
+    """A container declared a secret field name the control plane owns."""
 
 
 def effective_platform_capabilities(organization: Organization) -> list[str]:
@@ -87,12 +96,20 @@ def _union_app_secrets(containers: list[ContainerConfig]) -> dict[str, str | Non
     """Collision-checked union of each container's app_secrets.
 
     Same field name across containers must declare identical values (literal,
-    ""-placeholder, or None-auto-generate all compared by equality).
+    ""-placeholder, or None-auto-generate all compared by equality). Names the
+    control plane owns inside the per-app bag are reserved: a template that
+    declared HUMR_APP_BEARER would have its value overwritten by the mint on
+    every deploy, so we refuse it instead of letting it silently lose.
     """
     merged: dict[str, str | None] = {}
     owners: dict[str, str] = {}
     for c in containers:
         for field_name, value in c.app_secrets.items():
+            if field_name in RESERVED_APP_SECRET_NAMES:
+                raise ReservedSecretName(
+                    f"Container '{c.name}' declares secret '{field_name}', which is "
+                    f"reserved for the control plane's per-app bearer token"
+                )
             if field_name in merged and merged[field_name] != value:
                 raise ContainerSecretCollision(
                     f"Secret '{field_name}' declared with different values in "

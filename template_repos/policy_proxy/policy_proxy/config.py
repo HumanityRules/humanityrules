@@ -3,8 +3,12 @@
 The sidecar verifies session JWTs via the central JWKS, calls the PDP, and
 proxies authorized traffic to a local upstream container.
 
+HUMR_APP_BEARER is the app's own control-plane credential: presenting it is what
+tells HUMR which app is asking, so nothing this process sends has to name the app.
+HUMR_APP_ID stays for logs and decision-cache keys only.
+
 Required env: HUMR_APP_ID, HUMR_ENV_SLUG, HUMR_ENV_DOMAIN, HUMR_AUTH_BASE_URL,
-HUMR_CONTROL_PLANE_URL, HUMR_JWKS_URL, HUMR_PDP_URL, HUMR_ENV_BEARER,
+HUMR_CONTROL_PLANE_URL, HUMR_JWKS_URL, HUMR_PDP_URL, HUMR_APP_BEARER,
 HUMR_UPSTREAM_HOST, HUMR_UPSTREAM_PORT, HUMR_LISTEN_PORT.
 """
 
@@ -21,7 +25,7 @@ class PolicyProxyConfig:
     control_plane_url: str
     jwks_url: str
     pdp_url: str
-    env_bearer_token: str
+    app_bearer_token: str
     upstream_host: str
     upstream_port: int
     listen_port: int
@@ -64,7 +68,7 @@ def load_proxy_config_from_env() -> PolicyProxyConfig:
         control_plane_url=_required("HUMR_CONTROL_PLANE_URL").rstrip("/"),
         jwks_url=_required("HUMR_JWKS_URL"),
         pdp_url=_required("HUMR_PDP_URL"),
-        env_bearer_token=_required("HUMR_ENV_BEARER"),
+        app_bearer_token=_required("HUMR_APP_BEARER"),
         upstream_host=_required("HUMR_UPSTREAM_HOST"),
         upstream_port=int(_required("HUMR_UPSTREAM_PORT")),
         listen_port=int(_required("HUMR_LISTEN_PORT")),

@@ -1,9 +1,12 @@
-"""Tests for the env-bearer overlay in deploy_app.AppStack.
+"""Tests for the control-plane bearer overlay in deploy_app.AppStack.
 
-Verifies that containers needing env-bearer receive the HUMR_ENV_BEARER
-secret and the HUMR_ENV_SLUG / HUMR_CONTROL_PLANE_URL / HUMR_OWNER_USERNAME /
-HUMR_PUBLIC_HOSTNAME / HUMR_PLATFORM_CAPABILITIES plain vars, and that other
-containers in the same task do not.
+Verifies that containers talking to the control plane receive the
+HUMR_APP_BEARER secret — mounted from the app's own Secrets Manager bag, not
+from the environment's shared one — plus the HUMR_ENV_SLUG /
+HUMR_CONTROL_PLANE_URL / HUMR_OWNER_USERNAME / HUMR_PUBLIC_HOSTNAME /
+HUMR_PLATFORM_CAPABILITIES plain vars, and that other containers in the same
+task do not. Also pins the task role to the app's own secret prefix, which is
+what keeps one app's bearer unreachable from its neighbours.
 """
 
 from aws_cdk import App
@@ -19,7 +22,7 @@ from humanityrules_app.services.infra_customer.appconfig import (
 )
 
 
-SHARED_SECRETS_ARN = "arn:aws:secretsmanager:us-east-1:123456789012:secret:humr/staging/shared-secrets-abcdef"
+APP_SECRET_ARN = "arn:aws:secretsmanager:us-east-1:123456789012:secret:humr/staging/my-app/secrets-abcdef"
 
 
 def _render(
@@ -49,7 +52,7 @@ def _render(
         resource_prefix="humr-staging-my-app",
         subdomain="myapp",
         shared_alb_hosted_zone=shared_alb_hosted_zone,
-        env_bearer_shared_secrets_arn=SHARED_SECRETS_ARN,
+        app_secret_arn=APP_SECRET_ARN,
         auth_base_url="https://humanityrules.io",
     )
     return Template.from_stack(stack)
@@ -80,7 +83,26 @@ def _container_defs_by_name(template: Template) -> dict[str, dict]:
     raise AssertionError("No ECS::TaskDefinition resource found in stack")
 
 
-class TestEnvBearerOverlay(SimpleTestCase):
+def _secrets_manager_resources(template: Template) -> list[str]:
+    """Every resource a GetSecretValue statement in the stack's IAM policies grants on."""
+    granted: list[str] = []
+    for resource in template.to_json()["Resources"].values():
+        if resource["Type"] != "AWS::IAM::Policy":
+            continue
+        for statement in resource["Properties"]["PolicyDocument"]["Statement"]:
+            actions = statement.get("Action", [])
+            if isinstance(actions, str):
+                actions = [actions]
+            if "secretsmanager:GetSecretValue" not in actions:
+                continue
+            statement_resources = statement.get("Resource", [])
+            if not isinstance(statement_resources, list):
+                statement_resources = [statement_resources]
+            granted.extend(str(r) for r in statement_resources)
+    return granted
+
+
+class TestAppBearerOverlay(SimpleTestCase):
 
     def test_requires_env_bearer_container_gets_secret_and_env_vars(self) -> None:
         template = _render(
@@ -111,7 +133,7 @@ class TestEnvBearerOverlay(SimpleTestCase):
         # missing capability as denial rather than as unconfigured.
         self.assertEqual(env.get("HUMR_PLATFORM_CAPABILITIES"), "")
         secret_names = {s["Name"] for s in hermes.get("Secrets", [])}
-        self.assertIn("HUMR_ENV_BEARER", secret_names)
+        self.assertIn("HUMR_APP_BEARER", secret_names)
 
     def test_granted_capabilities_render_comma_separated(self) -> None:
         template = _render(
@@ -179,7 +201,7 @@ class TestEnvBearerOverlay(SimpleTestCase):
         self.assertNotIn("HUMR_OWNER_USERNAME", env)
         self.assertNotIn("HUMR_ORG_SLUG", env)
         secret_names = {s["Name"] for s in container.get("Secrets", [])}
-        self.assertIn("HUMR_ENV_BEARER", secret_names)
+        self.assertIn("HUMR_APP_BEARER", secret_names)
 
     def test_policy_proxy_container_gets_bearer_without_requires_flag(self) -> None:
         template = _render(
@@ -211,13 +233,13 @@ class TestEnvBearerOverlay(SimpleTestCase):
         self.assertEqual(proxy_env.get("HUMR_ENV_SLUG"), "staging")
         self.assertEqual(proxy_env.get("HUMR_OWNER_USERNAME"), "vmendi")
         proxy_secret_names = {s["Name"] for s in proxy.get("Secrets", [])}
-        self.assertIn("HUMR_ENV_BEARER", proxy_secret_names)
+        self.assertIn("HUMR_APP_BEARER", proxy_secret_names)
 
         hermes = containers["hermes"]
         hermes_env = {e["Name"]: e["Value"] for e in hermes.get("Environment", [])}
         self.assertNotIn("HUMR_ENV_SLUG", hermes_env)
         hermes_secret_names = {s["Name"] for s in hermes.get("Secrets", [])}
-        self.assertNotIn("HUMR_ENV_BEARER", hermes_secret_names)
+        self.assertNotIn("HUMR_APP_BEARER", hermes_secret_names)
 
     def test_container_without_flag_gets_no_overlay(self) -> None:
         template = _render(
@@ -250,4 +272,49 @@ class TestEnvBearerOverlay(SimpleTestCase):
         self.assertNotIn("HUMR_CONTROL_PLANE_URL", env)
         self.assertNotIn("HUMR_PLATFORM_CAPABILITIES", env)
         secret_names = {s["Name"] for s in dind.get("Secrets", [])}
-        self.assertNotIn("HUMR_ENV_BEARER", secret_names)
+        self.assertNotIn("HUMR_APP_BEARER", secret_names)
+
+    def test_task_role_reads_only_this_app_secret_prefix(self) -> None:
+        template = _render(
+            containers=[
+                ContainerConfig(
+                    name="hermes",
+                    image_source=ImageSource.TEMPLATE,
+                    template_path="hermes_agent",
+                    container_port=8787,
+                    requires_env_bearer=True,
+                ),
+            ],
+            owner_username="vmendi",
+            org_slug="acme",
+            shared_alb_hosted_zone=None,
+            platform_capabilities=[],
+        )
+
+        granted = _secrets_manager_resources(template)
+        self.assertEqual(len(granted), 1)
+        self.assertIn("humr/staging/my-app/*", granted[0])
+        # The environment's shared bag is out of reach: it is what used to hold
+        # one bearer for every app in the environment.
+        self.assertNotIn("shared-secrets", granted[0])
+
+    def test_bearer_secret_points_at_the_app_bag(self) -> None:
+        template = _render(
+            containers=[
+                ContainerConfig(
+                    name="hermes",
+                    image_source=ImageSource.TEMPLATE,
+                    template_path="hermes_agent",
+                    container_port=8787,
+                    requires_env_bearer=True,
+                ),
+            ],
+            owner_username="vmendi",
+            org_slug="acme",
+            shared_alb_hosted_zone=None,
+            platform_capabilities=[],
+        )
+
+        hermes = _container_defs_by_name(template)["hermes"]
+        bearer = next(s for s in hermes["Secrets"] if s["Name"] == "HUMR_APP_BEARER")
+        self.assertEqual(bearer["ValueFrom"], f"{APP_SECRET_ARN}:HUMR_APP_BEARER::")

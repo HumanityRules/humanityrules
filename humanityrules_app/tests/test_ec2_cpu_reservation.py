@@ -16,7 +16,7 @@ def _task_definition_properties(template: Template) -> dict:
     raise AssertionError("No ECS::TaskDefinition resource found in stack")
 
 
-SHARED_SECRETS_ARN = "arn:aws:secretsmanager:us-east-1:123456789012:secret:humr/staging/shared-secrets-abcdef"
+APP_SECRET_ARN = "arn:aws:secretsmanager:us-east-1:123456789012:secret:humr/staging/my-app/secrets-abcdef"
 
 
 def _render_ec2(containers: list[ContainerConfig], cpu: int, alb_target_container: str, serialize_task_replacement: bool) -> Template:
@@ -39,7 +39,7 @@ def _render_ec2(containers: list[ContainerConfig], cpu: int, alb_target_containe
         resource_prefix="humr-staging-my-app",
         subdomain="myapp",
         shared_alb_hosted_zone=None,
-        env_bearer_shared_secrets_arn=SHARED_SECRETS_ARN,
+        app_secret_arn=APP_SECRET_ARN,
         auth_base_url="https://humanityrules.io",
     )
     return Template.from_stack(stack)
