@@ -65,6 +65,17 @@ def get_shared_secrets(session: boto3.Session, env) -> dict[str, str]:
         raise
 
 
+def app_secrets_secret_name(env_slug: str, app_slug: str) -> str:
+    """Secrets Manager name for one app's own bag (template secrets + HUMR_APP_BEARER)."""
+    return f"humr/{env_slug}/{app_slug}/secrets"
+
+
+def app_secrets_secret_arn(session: boto3.Session, env_slug: str, app_slug: str) -> str:
+    """Complete ARN of an app's bag. The bag must already exist (see ensure_app_secrets_exist)."""
+    sm_client = session.client("secretsmanager")
+    return _get_secret_arn(sm_client, app_secrets_secret_name(env_slug=env_slug, app_slug=app_slug))
+
+
 def ensure_app_secrets_exist(session: boto3.Session, env_slug: str, app_config: AppConfig, shared_secrets: dict[str, str]) -> None:
     """
     Ensure all app secrets exist in Secrets Manager. Creates or merges as needed.
@@ -87,7 +98,7 @@ def ensure_app_secrets_exist(session: boto3.Session, env_slug: str, app_config: 
     if not app_config.app_secrets:
         return
 
-    secret_name = f"humr/{env_slug}/{app_config.app_name}/secrets"
+    secret_name = app_secrets_secret_name(env_slug=env_slug, app_slug=app_config.app_name)
     sm_client = session.client("secretsmanager")
     
     # Check if secret already exists
@@ -165,11 +176,20 @@ def list_secrets(session: boto3.Session, include_deleted: bool) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Environment bearer / auth Lambda secrets (per-environment, see docs/policy_proxy_design.md)
+# Control-plane bearer tokens (see docs/policy_proxy_design.md)
+#
+# Two tokens live here while the per-app bearer lands: the retired per-environment
+# HUMR_ENV_BEARER in the shared-secrets bag, and the per-app HUMR_APP_BEARER in
+# each app's own bag. Both follow the same custody rule — the raw value only ever
+# exists in the customer account, the control plane keeps just its SHA-256 hash.
 # ---------------------------------------------------------------------------
 
 
 SHARED_SECRETS_KEY_HUMR_ENV_BEARER = "HUMR_ENV_BEARER"
+
+# Control-plane-owned key inside the per-app bag humr/{env}/{app}/secrets.
+# Reserved: a template may not declare it (see app_config_builder._union_app_secrets).
+APP_SECRETS_KEY_HUMR_APP_BEARER = "HUMR_APP_BEARER"
 
 
 def _secret_exists(sm_client, secret_name: str) -> bool:
@@ -184,6 +204,17 @@ def _secret_exists(sm_client, secret_name: str) -> bool:
 
 def _get_secret_arn(sm_client, secret_name: str) -> str:
     return sm_client.describe_secret(SecretId=secret_name)["ARN"]
+
+
+def _get_secret_json_or_none(sm_client, secret_name: str) -> dict[str, str] | None:
+    """Return the secret's decoded JSON, or None when the entry does not exist."""
+    try:
+        response = sm_client.get_secret_value(SecretId=secret_name)
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "ResourceNotFoundException":
+            return None
+        raise
+    return json.loads(response["SecretString"])
 
 
 def _create_or_merge_secret(
@@ -291,6 +322,67 @@ def ensure_env_bearer_token_exists(session: boto3.Session, env) -> str:
         existing_row.save(update_fields=["token_hash"])
         logger.info("env bearer token row rotated for env '%s'", env_slug)
 
+    return arn
+
+
+# ---------------------------------------------------------------------------
+# Per-app bearer (humr/{env}/{app}/secrets, key HUMR_APP_BEARER)
+# ---------------------------------------------------------------------------
+
+
+def ensure_app_bearer_token_exists(session: boto3.Session, env_slug: str, app) -> str:
+    """Ensure the app's HUMR_APP_BEARER exists in its per-app bag and as an AppBearerToken row.
+
+    "DB wins", i.e. the last deployment wins. The control plane only ever accepts
+    the hash it has stored, so whenever the two sides disagree — or either is
+    missing — we mint a fresh raw token and write both together. The only no-op
+    case is a row whose hash already matches the value in the bag.
+
+    Unlike the retired per-env bearer there is no adopt/re-sync branch: an app
+    only ever talks to the control plane that last deployed it (the control-plane
+    URL is baked into its task definition), so a stale row in some other control
+    plane's DB is harmless.
+
+    The bag humr/{env_slug}/{app_slug}/secrets is created on demand — most
+    templates declare no secrets at all, so the bearer is usually its first key.
+    Runs after ensure_app_secrets_exist so the read-modify-write of the single
+    HUMR_APP_BEARER key preserves whatever template secrets landed there.
+
+    Returns the complete ARN of the per-app bag. *app* is a Django App instance —
+    passed in rather than imported so this module stays free of Django model
+    imports at top level.
+    """
+    # Local import so test harnesses that don't have Django set up can still
+    # exercise the AWS-side helpers in isolation.
+    from humanityrules_app.models import AppBearerToken
+
+    secret_name = app_secrets_secret_name(env_slug=env_slug, app_slug=app.slug)
+    sm_client = session.client("secretsmanager")
+
+    existing_row = AppBearerToken.objects.filter(app=app).first()
+    existing_secret = _get_secret_json_or_none(sm_client=sm_client, secret_name=secret_name)
+    secret_raw_token = existing_secret.get(APP_SECRETS_KEY_HUMR_APP_BEARER) if existing_secret else None
+    secret_token_hash = hashlib.sha256(secret_raw_token.encode("utf-8")).hexdigest() if secret_raw_token else None
+
+    if existing_row is not None and existing_row.token_hash == secret_token_hash:
+        logger.info("app bearer token already consistent for app '%s' in env '%s'", app.slug, env_slug)
+        return _get_secret_arn(sm_client, secret_name)
+
+    raw = secrets.token_urlsafe(48)[:64]
+    token_hash = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    values = dict(existing_secret or {})
+    values[APP_SECRETS_KEY_HUMR_APP_BEARER] = raw
+    arn = _create_or_merge_secret(
+        sm_client=sm_client,
+        secret_name=secret_name,
+        description=f"Application secrets for {app.slug} in env '{env_slug}'",
+        values_to_write=values,
+        merge_mode=False,  # we already merged in-memory; replace authoritatively
+    )
+
+    AppBearerToken.objects.update_or_create(app=app, defaults={"token_hash": token_hash})
+    logger.info("app bearer token minted for app '%s' in env '%s'", app.slug, env_slug)
     return arn
 
 

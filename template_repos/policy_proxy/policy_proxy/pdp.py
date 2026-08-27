@@ -1,4 +1,8 @@
-"""PDP client — calls HUMR's /api/pdp/evaluate endpoint per request."""
+"""PDP client — calls HUMR's /api/pdp/evaluate endpoint per request.
+
+The app bearer identifies the calling app to HUMR, so the payload carries only
+the end user's claims and the requested path.
+"""
 
 import logging
 from dataclasses import dataclass
@@ -20,8 +24,7 @@ class PdpDecision:
 async def evaluate(
     http_client: httpx.AsyncClient,
     pdp_url: str,
-    env_bearer_token: str,
-    app_id: str,
+    app_bearer_token: str,
     provider: str,
     sub: str,
     username: str,
@@ -31,9 +34,8 @@ async def evaluate(
     try:
         response = await http_client.post(
             pdp_url,
-            headers={"Authorization": f"Bearer {env_bearer_token}"},
+            headers={"Authorization": f"Bearer {app_bearer_token}"},
             json={
-                "app_id": app_id,
                 "provider": provider,
                 "sub": sub,
                 "username": username,
@@ -66,8 +68,7 @@ async def evaluate(
 async def evaluate_public(
     http_client: httpx.AsyncClient,
     pdp_url: str,
-    env_bearer_token: str,
-    app_id: str,
+    app_bearer_token: str,
     webapp_slug: str,
     path: str,
 ) -> PdpDecision | None:
@@ -79,9 +80,8 @@ async def evaluate_public(
     try:
         response = await http_client.post(
             f"{pdp_url}-public",
-            headers={"Authorization": f"Bearer {env_bearer_token}"},
+            headers={"Authorization": f"Bearer {app_bearer_token}"},
             json={
-                "app_id": app_id,
                 "webapp_slug": webapp_slug,
                 "path": path,
             },

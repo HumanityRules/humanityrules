@@ -8,6 +8,7 @@ from pathlib import Path
 
 import boto3
 
+from humanityrules_app.models import App as AppModel
 from humanityrules_app.models import Environment
 from aws_cdk import App, Aws, CfnOutput, Duration, Fn, Stack, Tags
 from aws_cdk import aws_ec2 as ec2
@@ -157,7 +158,7 @@ class AppStack(Stack):
         resource_prefix: str,
         subdomain: str,
         shared_alb_hosted_zone: str | None,
-        env_bearer_shared_secrets_arn: str | None,
+        app_secret_arn: str | None,
         auth_base_url: str | None,
         **kwargs,
     ) -> None:
@@ -170,15 +171,15 @@ class AppStack(Stack):
                 f"ALB attachment requires one container in the list to be marked as the target."
             )
 
-        # Every container that needs the env-bearer overlay requires the env's
-        # shared-secrets ARN (to mount HUMR_ENV_BEARER via ECS secret injection).
+        # Every container that needs the control-plane bearer requires the app's
+        # own secrets-bag ARN (to mount HUMR_APP_BEARER via ECS secret injection).
         # Policy-proxy containers need the same bearer implicitly, plus
         # auth_base_url + upstream wiring. Validate preconditions before
         # building resources.
-        if app_config.needs_env_bearer() and not env_bearer_shared_secrets_arn:
+        if (app_config.needs_env_bearer() or app_config.app_secrets) and not app_secret_arn:
             raise RuntimeError(
-                "App needs env bearer but env_bearer_shared_secrets_arn "
-                "is missing — did the orchestration skip ensure_env_bearer_token_exists?",
+                "App needs its per-app secrets bag but app_secret_arn is missing — did the "
+                "orchestration skip ensure_app_bearer_token_exists / ensure_app_secrets_exist?",
             )
 
         # Policy proxy (SSO + ABAC) is opt-in: a template declares a container
@@ -225,18 +226,15 @@ class AppStack(Stack):
             role_name=f"{resource_prefix}-task-role"[:64],
             assumed_by=iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
         )
-        # Grant access to this app's secrets (created outside CDK via ensure_app_secrets_exist)
-        if app_config.app_secrets:
+        # Grant access to this app's own bag and nothing else — it holds both the
+        # template-declared secrets (ensure_app_secrets_exist) and the app's
+        # control-plane bearer (ensure_app_bearer_token_exists), both written
+        # outside CDK. Read on humr/{env}/{app}/* is what keeps one app's
+        # credentials unreachable from every other app in the environment.
+        if app_config.app_secrets or app_config.needs_env_bearer():
             task_role.add_to_policy(iam.PolicyStatement(
                 actions=["secretsmanager:GetSecretValue"],
                 resources=[f"arn:aws:secretsmanager:{Aws.REGION}:{Aws.ACCOUNT_ID}:secret:humr/{env_slug}/{app_config.app_name}/*"],
-            ))
-        if app_config.needs_env_bearer():
-            # Containers needing env-bearer read HUMR_ENV_BEARER from the env's
-            # shared-secrets entry via ECS secret injection.
-            task_role.add_to_policy(iam.PolicyStatement(
-                actions=["secretsmanager:GetSecretValue"],
-                resources=[env_bearer_shared_secrets_arn],
             ))
         if _grants_bedrock_runtime(app_config):
             task_role.add_to_policy(iam.PolicyStatement(
@@ -282,12 +280,14 @@ class AppStack(Stack):
                 },
             ))
 
-        # Shared task-level Secrets Manager bag. Each container only sees the
-        # fields it declared in its own ContainerConfig.app_secrets.
+        # The app's single Secrets Manager bag, imported once and shared by both
+        # readers below: the per-container template secrets and the bearer
+        # overlay. Each container only sees the fields it declared in its own
+        # ContainerConfig.app_secrets, plus HUMR_APP_BEARER when it needs it.
         app_secret_resource: secretsmanager.ISecret | None = None
-        if app_config.app_secrets:
-            app_secret_resource = secretsmanager.Secret.from_secret_name_v2(
-                self, "AppSecret", f"humr/{env_slug}/{app_config.app_name}/secrets",
+        if app_secret_arn:
+            app_secret_resource = secretsmanager.Secret.from_secret_complete_arn(
+                self, "AppSecret", app_secret_arn,
             )
 
         if app_config.compute_mode == "fargate" and any(c.privileged for c in app_config.containers):
@@ -386,21 +386,20 @@ class AppStack(Stack):
 
         # Two platform overlays, computed once so the main container loop stays uniform:
         #
-        # 1. Env-bearer overlay — applied to every container that needs the
-        #    env bearer: explicit requires_env_bearer=True, or a policy-proxy
+        # 1. Bearer overlay — applied to every container that talks to HUMR's
+        #    control plane: explicit requires_env_bearer=True, or a policy-proxy
         #    container.
-        #    Provides HUMR_ENV_BEARER (from shared-secrets), HUMR_ENV_SLUG,
-        #    HUMR_CONTROL_PLANE_URL, HUMR_APP_SLUG, and HUMR_OWNER_USERNAME when
-        #    the app has an owner tag. Any env-resident component that calls
-        #    HUMR's control plane gets this.
+        #    Provides HUMR_APP_BEARER (from the app's own bag) plus the local
+        #    identity vars HUMR_ENV_SLUG, HUMR_CONTROL_PLANE_URL, HUMR_APP_SLUG,
+        #    and HUMR_OWNER_USERNAME when the app has an owner tag. The bearer
+        #    itself is what the control plane authenticates; the plain vars are
+        #    for in-container use (logs, the WebUI status card) only.
         # 2. Policy-proxy-specific overlay — applied only to the policy-proxy
         #    container. Carries JWT verification URL, upstream wiring, etc.
         env_bearer_environment_overlay: dict[str, str] = {}
         env_bearer_secret_overlay: dict[str, ecs.Secret] = {}
         if app_config.needs_env_bearer():
-            env_bearer_shared_secret = secretsmanager.Secret.from_secret_complete_arn(
-                self, "EnvBearerSharedSecret", env_bearer_shared_secrets_arn,
-            )
+            assert app_secret_resource is not None  # enforced above
             env_bearer_environment_overlay = {
                 "HUMR_ENV_SLUG": env_slug,
                 "HUMR_CONTROL_PLANE_URL": _resolve_control_plane_url(),
@@ -416,8 +415,8 @@ class AppStack(Stack):
             if shared_alb_hosted_zone:
                 env_bearer_environment_overlay["HUMR_PUBLIC_HOSTNAME"] = f"{subdomain}.{shared_alb_hosted_zone}"
             env_bearer_secret_overlay = {
-                "HUMR_ENV_BEARER": ecs.Secret.from_secrets_manager(
-                    env_bearer_shared_secret, field="HUMR_ENV_BEARER",
+                secrets_utils.APP_SECRETS_KEY_HUMR_APP_BEARER: ecs.Secret.from_secrets_manager(
+                    app_secret_resource, field=secrets_utils.APP_SECRETS_KEY_HUMR_APP_BEARER,
                 ),
             }
 
@@ -458,7 +457,7 @@ class AppStack(Stack):
                 environment.update(policy_proxy_environment_overlay)
 
             # Secrets: the container's declared fields from the shared app_secrets bag,
-            # plus HUMR_ENV_BEARER on any container that needs it.
+            # plus HUMR_APP_BEARER on any container that needs it.
             secrets: dict[str, ecs.Secret] = {}
             if app_secret_resource is not None and c.app_secrets:
                 for field_name in c.app_secrets:
@@ -774,6 +773,7 @@ def deploy(
     build_id: str,
     env_slug: str,
     environment: Environment,
+    app: AppModel,
     subdomain: str,
     synth_only: bool,
     shared_alb_hosted_zone: str | None,
@@ -792,6 +792,8 @@ def deploy(
         app_config: Application configuration.
         build_id: Unique id for this attempt, isolating any image builds on the shared EC2 builder.
         env_slug: Environment slug (e.g., "default", "prod").
+        environment: The Environment row the app is deployed into.
+        app: The App row being deployed — the per-app bearer token hangs off it.
         subdomain: Hostname label this deployment is served under.
         synth_only: If True, only synthesize templates, don't deploy.
         shared_alb_hosted_zone: Hosted zone for shared ALB (e.g., "dev.example.com"). None = HTTP only.
@@ -834,18 +836,21 @@ def deploy(
         shared_secrets = secrets_utils.get_shared_secrets(session=session, env=environment)
         secrets_utils.ensure_app_secrets_exist(session=session, env_slug=env_slug, app_config=app_config, shared_secrets=shared_secrets)
 
-    # Env-bearer prerequisite: shared-secrets entry + EnvironmentBearerToken row.
-    # Any container in the app that needs the HUMR control-plane bearer needs
-    # this. Idempotent; reused across apps sharing the env.
+    # Control-plane bearer prerequisite: HUMR_APP_BEARER inside the app's own
+    # secrets bag + the matching AppBearerToken row. Runs after the template
+    # secrets above so its read-modify-write of one key preserves them, and it
+    # creates the bag when no template declared any secret at all.
     policy_proxy_needed = app_config.policy_proxy_container() is not None
-    env_bearer_needed = app_config.needs_env_bearer()
-    env_bearer_shared_secrets_arn: str | None = None
+    app_bearer_needed = app_config.needs_env_bearer()
+    app_secret_arn: str | None = None
 
-    if env_bearer_needed:
-        logger.info("Ensuring per-env bearer token exists")
-        env_bearer_shared_secrets_arn = secrets_utils.ensure_env_bearer_token_exists(
-            session=session, env=environment,
+    if app_bearer_needed:
+        logger.info("Ensuring per-app bearer token exists")
+        app_secret_arn = secrets_utils.ensure_app_bearer_token_exists(
+            session=session, env_slug=env_slug, app=app,
         )
+    elif app_config.app_secrets:
+        app_secret_arn = secrets_utils.app_secrets_secret_arn(session=session, env_slug=env_slug, app_slug=app_config.app_name)
 
     # Policy-proxy prerequisites (auth Lambda config + per-env secrets).
     policy_proxy_auth_base_url: str | None = None
@@ -894,7 +899,7 @@ def deploy(
             resource_prefix=resource_prefix,
             subdomain=subdomain,
             shared_alb_hosted_zone=shared_alb_hosted_zone,
-            env_bearer_shared_secrets_arn=env_bearer_shared_secrets_arn,
+            app_secret_arn=app_secret_arn,
             auth_base_url=policy_proxy_auth_base_url,
         )
         assembly_dir = cdk_utils.synth_cdk_app(cdk_app)

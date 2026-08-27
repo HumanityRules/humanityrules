@@ -37,7 +37,7 @@ def _render_app_stack(enable_webapp_hosts: bool) -> Template:
         resource_prefix="humr-staging-wolfie",
         subdomain="wolfie",
         shared_alb_hosted_zone=HOSTED_ZONE,
-        env_bearer_shared_secrets_arn=None,
+        app_secret_arn=None,
         auth_base_url=None,
     )
     return Template.from_stack(stack)

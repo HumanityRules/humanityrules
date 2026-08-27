@@ -55,7 +55,7 @@ def _bedrock_actions_from_stack(app_config: AppConfig) -> list[str]:
         resource_prefix="humr-staging-my-hermes",
         subdomain="myhermes",
         shared_alb_hosted_zone=None,
-        env_bearer_shared_secrets_arn=None,
+        app_secret_arn=None,
         auth_base_url=None,
     )
     template = Template.from_stack(stack).to_json()

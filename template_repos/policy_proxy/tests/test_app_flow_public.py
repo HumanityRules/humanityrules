@@ -62,7 +62,7 @@ def test_public_grant_allows_anonymous_and_strips_spoofed_identity(policy_proxy_
     assert response.status_code == 200
     assert response.text == "public content"
     url, payload = seen_payloads[0]
-    assert payload == {"app_id": "vmendihermes", "webapp_slug": "dashboard", "path": "/"}
+    assert payload == {"webapp_slug": "dashboard", "path": "/"}
 
 
 def test_public_request_cannot_forge_underscore_identity_alias(

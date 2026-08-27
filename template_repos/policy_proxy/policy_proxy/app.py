@@ -109,8 +109,7 @@ async def _authorize_session(
             decision = await pdp_mod.evaluate_public(
                 http_client=state.http_client,
                 pdp_url=state.config.pdp_url,
-                env_bearer_token=state.config.env_bearer_token,
-                app_id=state.config.app_id,
+                app_bearer_token=state.config.app_bearer_token,
                 webapp_slug=webapp_slug,
                 path=path,
             )
@@ -136,8 +135,7 @@ async def _authorize_session(
         decision = await pdp_mod.evaluate(
             http_client=state.http_client,
             pdp_url=state.config.pdp_url,
-            env_bearer_token=state.config.env_bearer_token,
-            app_id=state.config.app_id,
+            app_bearer_token=state.config.app_bearer_token,
             provider=identity.provider,
             sub=identity.sub,
             username=identity.username,
@@ -253,8 +251,7 @@ def create_app(cfg: config_mod.PolicyProxyConfig) -> FastAPI:
     app.state.activity_reporter = activity_reporter_mod.PolicyProxyActivityReporter(
         http_client_provider=lambda: app.state.http_client,
         endpoint_url=f"{cfg.control_plane_url}/api/runtime/policy-proxy-activity",
-        env_bearer_token=cfg.env_bearer_token,
-        app_id=cfg.app_id,
+        app_bearer_token=cfg.app_bearer_token,
         interval_seconds=cfg.activity_report_interval_seconds,
     )
 

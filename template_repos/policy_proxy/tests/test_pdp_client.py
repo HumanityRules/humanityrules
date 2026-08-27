@@ -21,8 +21,7 @@ async def test_allow_response_parsed() -> None:
         decision = await pdp_mod.evaluate(
             http_client=client,
             pdp_url="https://humanityrules.io/api/pdp/evaluate",
-            env_bearer_token="token-abc",
-            app_id="vmendihermes",
+            app_bearer_token="token-abc",
             provider="oidc",
             sub="okta|v",
             username="vmendi",
@@ -32,10 +31,11 @@ async def test_allow_response_parsed() -> None:
     assert decision.decision == "allow"
     assert decision.reason == "policy:x"
     assert captured["auth"] == "Bearer token-abc"
-    # httpx encodes JSON with spaces after colons; just check the key/value are in the body.
+    # The bearer names the app; the payload must not carry an app identifier the
+    # caller could have chosen.
     body = captured["body"]
-    assert b"vmendihermes" in body
-    assert b"app_id" in body
+    assert b"app_id" not in body
+    assert b"vmendihermes" not in body
 
 
 @pytest.mark.asyncio
@@ -48,8 +48,8 @@ async def test_deny_response_parsed() -> None:
         decision = await pdp_mod.evaluate(
             http_client=client,
             pdp_url="https://humanityrules.io/api/pdp/evaluate",
-            env_bearer_token="t",
-            app_id="x", provider="oidc", sub="y", username="z", path="/",
+            app_bearer_token="t",
+            provider="oidc", sub="y", username="z", path="/",
         )
     assert decision is not None
     assert decision.decision == "deny"
@@ -65,8 +65,8 @@ async def test_non_200_returns_none() -> None:
         decision = await pdp_mod.evaluate(
             http_client=client,
             pdp_url="https://humanityrules.io/api/pdp/evaluate",
-            env_bearer_token="t",
-            app_id="x", provider="oidc", sub="y", username="z", path="/",
+            app_bearer_token="t",
+            provider="oidc", sub="y", username="z", path="/",
         )
     assert decision is None
 
@@ -81,7 +81,7 @@ async def test_connection_error_returns_none() -> None:
         decision = await pdp_mod.evaluate(
             http_client=client,
             pdp_url="https://humanityrules.io/api/pdp/evaluate",
-            env_bearer_token="t",
-            app_id="x", provider="oidc", sub="y", username="z", path="/",
+            app_bearer_token="t",
+            provider="oidc", sub="y", username="z", path="/",
         )
     assert decision is None

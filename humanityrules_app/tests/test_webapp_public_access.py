@@ -1,6 +1,5 @@
 """Tests for webapp public-access grants: PDP anonymous endpoint, grant lifecycle, CP views."""
 
-import hashlib
 import json
 from datetime import datetime, timedelta
 from unittest import mock
@@ -15,7 +14,6 @@ from humanityrules_app.models import (
     AppTemplate,
     AWSAccount,
     Environment,
-    EnvironmentBearerToken,
     Organization,
     OrganizationMembership,
     User,
@@ -23,11 +21,8 @@ from humanityrules_app.models import (
     Workspace,
 )
 from humanityrules_app.services import abac_service
+from humanityrules_app.tests import bearer_test_helpers
 from humanityrules_app.views import webapp_public_access
-
-
-def _hash(raw: str) -> str:
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 class PublicAccessTestBase(TestCase):
@@ -59,10 +54,7 @@ class PublicAccessTestBase(TestCase):
             container_port=8000, health_check_path="/health", cpu=256, memory=512,
             live_state=App.LiveState.DEPLOYED, service_url="https://wolfie.staging.example.com",
         )
-        self.raw_token = "t" * 64
-        EnvironmentBearerToken.objects.create(
-            environment=self.environment, token_hash=_hash(self.raw_token),
-        )
+        self.raw_token = bearer_test_helpers.make_app_bearer(app=self.app, raw="t" * 64)
         self.client = Client()
 
     def _grant(self, slug: str, expires_at: datetime | None) -> WebappPublicGrant:
@@ -71,9 +63,7 @@ class PublicAccessTestBase(TestCase):
         )
 
     def _pdp_public(self, body: dict, token: str | None) -> tuple[int, dict]:
-        headers = {}
-        if token is not None:
-            headers["HTTP_AUTHORIZATION"] = f"Bearer {token}"
+        headers = bearer_test_helpers.auth_header(raw=token) if token is not None else {}
         response = self.client.post(
             "/api/pdp/evaluate-public",
             data=json.dumps(body),
@@ -87,12 +77,12 @@ class TestPdpEvaluatePublic(PublicAccessTestBase):
 
     def test_live_grant_allows(self) -> None:
         self._grant(slug="dashboard", expires_at=None)
-        status, body = self._pdp_public(body={"app_id": "wolfie", "webapp_slug": "dashboard", "path": "/"}, token=self.raw_token)
+        status, body = self._pdp_public(body={"webapp_slug": "dashboard", "path": "/"}, token=self.raw_token)
         self.assertEqual(status, 200)
         self.assertEqual(body, {"decision": "allow", "reason": "public-webapp"})
 
     def test_no_grant_denies(self) -> None:
-        status, body = self._pdp_public(body={"app_id": "wolfie", "webapp_slug": "dashboard", "path": "/"}, token=self.raw_token)
+        status, body = self._pdp_public(body={"webapp_slug": "dashboard", "path": "/"}, token=self.raw_token)
         self.assertEqual(status, 200)
         self.assertEqual(body, {"decision": "deny", "reason": "not-public"})
 
@@ -100,39 +90,50 @@ class TestPdpEvaluatePublic(PublicAccessTestBase):
         grant = self._grant(slug="dashboard", expires_at=None)
         grant.revoked_at = timezone.now()
         grant.save(update_fields=["revoked_at"])
-        status, body = self._pdp_public(body={"app_id": "wolfie", "webapp_slug": "dashboard", "path": "/"}, token=self.raw_token)
+        status, body = self._pdp_public(body={"webapp_slug": "dashboard", "path": "/"}, token=self.raw_token)
         self.assertEqual(body["decision"], "deny")
 
     def test_expired_grant_denies(self) -> None:
         self._grant(slug="dashboard", expires_at=timezone.now() - timedelta(minutes=1))
-        status, body = self._pdp_public(body={"app_id": "wolfie", "webapp_slug": "dashboard", "path": "/"}, token=self.raw_token)
+        status, body = self._pdp_public(body={"webapp_slug": "dashboard", "path": "/"}, token=self.raw_token)
         self.assertEqual(body["decision"], "deny")
 
-    def test_bearer_from_other_environment_denies(self) -> None:
-        # A live grant exists, but the caller's env bearer belongs to a
-        # different environment than the app's — deny before the grant lookup.
-        other_env = Environment.objects.create(
-            aws_account=self.aws_account, name="prod", slug="prod",
-            aws_region="us-east-1", shared_alb_hosted_zone="prod.example.com",
+    def test_another_apps_bearer_does_not_see_this_apps_grant(self) -> None:
+        # A live grant exists on self.app, but the caller presents a different
+        # app's token — grants are looked up against the bearer's app, so the
+        # neighbour sees nothing.
+        neighbour = App.objects.create(
+            organization=self.org, workspace=self.workspace,
+            source_template=self.template, environment=self.environment,
+            name="Neighbour", slug="neighbour",
+            container_port=8000, health_check_path="/health", cpu=256, memory=512,
         )
-        other_token_raw = "u" * 64
-        EnvironmentBearerToken.objects.create(
-            environment=other_env, token_hash=_hash(other_token_raw),
-        )
+        neighbour_token = bearer_test_helpers.make_app_bearer(app=neighbour, raw="u" * 64)
         self._grant(slug="dashboard", expires_at=None)
-        status, body = self._pdp_public(body={"app_id": "wolfie", "webapp_slug": "dashboard", "path": "/"}, token=other_token_raw)
-        self.assertEqual(body, {"decision": "deny", "reason": "app-not-in-env"})
+        status, body = self._pdp_public(body={"webapp_slug": "dashboard", "path": "/"}, token=neighbour_token)
+        self.assertEqual(body, {"decision": "deny", "reason": "not-public"})
 
-    def test_unknown_app_denies(self) -> None:
-        status, body = self._pdp_public(body={"app_id": "ghost", "webapp_slug": "dashboard", "path": "/"}, token=self.raw_token)
-        self.assertEqual(body, {"decision": "deny", "reason": "app-not-in-org"})
+    def test_body_app_id_cannot_borrow_another_apps_grant(self) -> None:
+        neighbour = App.objects.create(
+            organization=self.org, workspace=self.workspace,
+            source_template=self.template, environment=self.environment,
+            name="Neighbour", slug="neighbour",
+            container_port=8000, health_check_path="/health", cpu=256, memory=512,
+        )
+        neighbour_token = bearer_test_helpers.make_app_bearer(app=neighbour, raw="u" * 64)
+        self._grant(slug="dashboard", expires_at=None)
+        status, body = self._pdp_public(
+            body={"app_id": self.app.slug, "webapp_slug": "dashboard", "path": "/"},
+            token=neighbour_token,
+        )
+        self.assertEqual(body, {"decision": "deny", "reason": "not-public"})
 
     def test_missing_bearer_returns_401(self) -> None:
-        status, _ = self._pdp_public(body={"app_id": "wolfie", "webapp_slug": "dashboard", "path": "/"}, token=None)
+        status, _ = self._pdp_public(body={"webapp_slug": "dashboard", "path": "/"}, token=None)
         self.assertEqual(status, 401)
 
     def test_missing_fields_return_400(self) -> None:
-        status, _ = self._pdp_public(body={"app_id": "wolfie"}, token=self.raw_token)
+        status, _ = self._pdp_public(body={}, token=self.raw_token)
         self.assertEqual(status, 400)
 
 

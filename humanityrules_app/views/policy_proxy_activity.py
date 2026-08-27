@@ -1,4 +1,9 @@
-"""Runtime activity reports from policy proxies inside customer environments."""
+"""Runtime activity reports from policy proxies inside customer environments.
+
+The reporting sidecar authenticates with its app's own bearer token, so the App
+the report lands on is derived from the token — the body carries only the
+observation timestamp.
+"""
 
 import datetime
 import json
@@ -10,7 +15,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from humanityrules_app import models
-from . import env_bearer_auth
+from . import app_bearer_auth
 
 MAX_FUTURE_CLOCK_SKEW = datetime.timedelta(minutes=5)
 
@@ -19,12 +24,12 @@ MAX_FUTURE_CLOCK_SKEW = datetime.timedelta(minutes=5)
 @require_POST
 def policy_proxy_activity(request: HttpRequest) -> JsonResponse:
     """Record the latest authorized traffic observed by a policy proxy."""
-    raw_token = env_bearer_auth.extract_bearer_token(request=request)
+    raw_token = app_bearer_auth.extract_bearer_token(request=request)
     if raw_token is None:
         return JsonResponse({"error": "missing bearer token"}, status=401)
 
-    environment = env_bearer_auth.resolve_env_from_token(raw_token=raw_token)
-    if environment is None:
+    app = app_bearer_auth.resolve_app_from_token(raw_token=raw_token)
+    if app is None:
         return JsonResponse({"error": "invalid bearer token"}, status=401)
 
     try:
@@ -34,10 +39,7 @@ def policy_proxy_activity(request: HttpRequest) -> JsonResponse:
     if not isinstance(payload, dict):
         return JsonResponse({"error": "JSON object body is required"}, status=400)
 
-    app_id = payload.get("app_id")
     observed_at_value = payload.get("observed_at")
-    if not isinstance(app_id, str) or not app_id:
-        return JsonResponse({"error": "app_id is required"}, status=400)
     if not isinstance(observed_at_value, str):
         return JsonResponse({"error": "observed_at is required"}, status=400)
 
@@ -48,14 +50,7 @@ def policy_proxy_activity(request: HttpRequest) -> JsonResponse:
     if observed_at > now + MAX_FUTURE_CLOCK_SKEW:
         return JsonResponse({"error": "observed_at is too far in the future"}, status=400)
 
-    organization = environment.aws_account.organization
-    app = models.App.objects.filter(
-        organization=organization,
-        slug=app_id,
-        environment=environment,
-    ).first()
-    if app is None:
-        return JsonResponse({"error": "app not found in environment"}, status=404)
+    organization = app.organization
 
     activity, created = models.AppEnvironmentActivity.objects.get_or_create(
         organization=organization,

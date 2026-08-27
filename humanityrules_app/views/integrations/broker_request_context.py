@@ -1,10 +1,20 @@
-"""Shared request plumbing for broker-to-HUMR integration endpoints.
+"""Shared request plumbing for the HUMR endpoints that deployed apps call.
 
-The env-resident Hermes broker calls several HUMR endpoints (batched token
-refresh, credential setup/submit, disconnect) with the same shape: an env
-bearer in the Authorization header and a JSON body naming an owner_username
-and app_slug. These helpers resolve and validate that shared envelope so each
-endpoint is left with only its own logic.
+Every one of these requests has the same envelope: a bearer token in the
+Authorization header, from which the control plane works out who is calling.
+These helpers resolve that envelope once so each endpoint is left with only its
+own logic.
+
+Two generations of the envelope live here while the per-app bearer lands:
+
+- `resolve_app_bearer_context` / `resolve_app_owner` — the target shape. The
+  token belongs to one App, so the App (and through it the Environment, the
+  Organization and the owner) is *derived*. Nothing in the request body can
+  change which app is acted on.
+- `resolve_env_bearer_context` / `resolve_owner_user` / `resolve_owned_app_slug`
+  — the retired shape. The token names only the Environment, so the caller has
+  to name its own owner_username and app_slug and these helpers check the pair
+  is consistent. Deleted once the broker family moves over.
 
 Each helper returns a `(value, JsonResponse | None)` tuple: on failure the
 JsonResponse carries the right status and the value is None, so callers
@@ -17,7 +27,7 @@ import logging
 from django.http import HttpRequest, JsonResponse
 
 from humanityrules_app.models import App, Environment, ResourceTag, User
-from humanityrules_app.views import env_bearer_auth
+from humanityrules_app.views import app_bearer_auth
 
 logger = logging.getLogger(__name__)
 
@@ -33,12 +43,47 @@ def parse_json_body(request: HttpRequest) -> tuple[dict | None, JsonResponse | N
     return payload, None
 
 
-def resolve_env_bearer_context(request: HttpRequest) -> tuple[Environment | None, JsonResponse | None]:
-    """Resolve the env bearer used by broker-to-HUMR integration endpoints."""
-    raw_token = env_bearer_auth.extract_bearer_token(request=request)
+def resolve_app_bearer_context(request: HttpRequest) -> tuple[App | None, JsonResponse | None]:
+    """Resolve the calling App from its per-app bearer token."""
+    raw_token = app_bearer_auth.extract_bearer_token(request=request)
     if raw_token is None:
         return None, JsonResponse({"error": "missing bearer token"}, status=401)
-    environment = env_bearer_auth.resolve_env_from_token(raw_token=raw_token)
+    app = app_bearer_auth.resolve_app_from_token(raw_token=raw_token)
+    if app is None:
+        return None, JsonResponse({"error": "invalid bearer token"}, status=401)
+    return app, None
+
+
+def resolve_app_owner(app: App) -> tuple[User | None, JsonResponse | None]:
+    """Resolve the App's owner from its ResourceTag(key="owner"); 404 when it has none.
+
+    Ownership is recorded as a tag rather than a column (see
+    template_deploy_service._stamp_template_tags), so an app can legitimately
+    exist without an owner — a shared/team app. Endpoints that act on behalf of
+    a person call this and fail closed; endpoints that don't need a user skip it.
+    """
+    owner_tag = ResourceTag.objects.filter(
+        resource_type=ResourceTag.ResourceType.APP,
+        app=app,
+        key="owner",
+    ).first()
+    if owner_tag is None:
+        return None, JsonResponse({"error": "app has no owner"}, status=404)
+    user = User.objects.filter(
+        username=owner_tag.value,
+        organization_memberships__organization=app.organization,
+    ).first()
+    if user is None:
+        return None, JsonResponse({"error": "not connected"}, status=404)
+    return user, None
+
+
+def resolve_env_bearer_context(request: HttpRequest) -> tuple[Environment | None, JsonResponse | None]:
+    """Resolve the env bearer used by broker-to-HUMR integration endpoints."""
+    raw_token = app_bearer_auth.extract_bearer_token(request=request)
+    if raw_token is None:
+        return None, JsonResponse({"error": "missing bearer token"}, status=401)
+    environment = app_bearer_auth.resolve_env_from_token(raw_token=raw_token)
     if environment is None:
         return None, JsonResponse({"error": "invalid bearer token"}, status=401)
     return environment, None

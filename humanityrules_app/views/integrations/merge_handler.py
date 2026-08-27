@@ -23,7 +23,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
 from humanityrules_app.models import App, ResourceTag, User
-from humanityrules_app.views import env_bearer_auth
+from humanityrules_app.views import app_bearer_auth
 
 logger = logging.getLogger(__name__)
 
@@ -56,10 +56,10 @@ def _resolve_caller(request: HttpRequest) -> tuple[App, User] | JsonResponse:
     headers (used by the MCP relay, where the body is the JSON-RPC payload),
     and falls back to query string / JSON body for the other endpoints.
     """
-    raw_token = env_bearer_auth.extract_bearer_token(request=request)
+    raw_token = app_bearer_auth.extract_bearer_token(request=request)
     if raw_token is None:
         return JsonResponse({"error": "missing bearer token"}, status=401)
-    environment = env_bearer_auth.resolve_env_from_token(raw_token=raw_token)
+    environment = app_bearer_auth.resolve_env_from_token(raw_token=raw_token)
     if environment is None:
         return JsonResponse({"error": "invalid bearer token"}, status=401)
 

@@ -1,6 +1,12 @@
-"""Tests for the PDP HTTP endpoint (humanityrules_app/views/pdp.py)."""
+"""Tests for the PDP HTTP endpoint (humanityrules_app/views/pdp.py).
 
-import hashlib
+The app whose policies are evaluated comes from the caller's per-app bearer
+token, so the body carries only the end user's claims. The old app-not-in-org /
+app-not-in-env denials are gone with the caller-supplied app_id; what replaces
+them is the pair of tests proving an app_id in the body cannot redirect the
+decision to another app.
+"""
+
 import json
 
 from django.test import Client, TestCase
@@ -14,15 +20,11 @@ from humanityrules_app.models import (
     OrganizationMembership,
     Policy,
     ResourceTag,
-    EnvironmentBearerToken,
     User,
     Workspace,
 )
+from humanityrules_app.tests import bearer_test_helpers
 from humanityrules_app.tests.app_test_factories import make_source_template
-
-
-def _hash(raw: str) -> str:
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 class PDPTestBase(TestCase):
@@ -82,16 +84,11 @@ class PDPTestBase(TestCase):
             resource_conditions=[{"key": "app-type", "value": "personal-assistant"}],
             actions=["app:use"],
         )
-        self.raw_token = "t" * 64
-        EnvironmentBearerToken.objects.create(
-            environment=self.environment, token_hash=_hash(self.raw_token),
-        )
+        self.raw_token = bearer_test_helpers.make_app_bearer(app=self.app, raw="t" * 64)
         self.client = Client()
 
     def _post(self, body: dict, token: str | None) -> tuple[int, dict]:
-        headers = {}
-        if token is not None:
-            headers["HTTP_AUTHORIZATION"] = f"Bearer {token}"
+        headers = bearer_test_helpers.auth_header(raw=token) if token is not None else {}
         response = self.client.post(
             "/api/pdp/evaluate",
             data=json.dumps(body),
@@ -128,7 +125,6 @@ class TestPDPEvaluation(PDPTestBase):
     def test_owner_receives_allow(self) -> None:
         status, body = self._post(
             body={
-                "app_id": "vmendihermes",
                 "provider": "oidc",
                 "sub": "okta|vmendi",
                 "username": "vmendi",
@@ -142,7 +138,6 @@ class TestPDPEvaluation(PDPTestBase):
     def test_non_owner_receives_deny(self) -> None:
         status, body = self._post(
             body={
-                "app_id": "vmendihermes",
                 "provider": "oidc",
                 "sub": "okta|alice",
                 "username": "alice",
@@ -154,49 +149,71 @@ class TestPDPEvaluation(PDPTestBase):
         self.assertEqual(body["decision"], "deny")
         self.assertEqual(body["reason"], "no-matching-policy")
 
-    def test_unknown_app_returns_deny_app_not_in_org(self) -> None:
+    def test_body_app_id_cannot_redirect_the_decision(self) -> None:
+        # A second app in the same org whose owner tag names alice. Naming it in
+        # the body must not get alice an allow — the bearer's app is what the
+        # policies are evaluated against, and vmendi owns that one.
+        other = App.objects.create(
+            organization=self.org, workspace=self.workspace, source_template=make_source_template(),
+            environment=self.environment, name="AlicePA", slug="alicehermes",
+            container_port=8000, health_check_path="/health", cpu=256, memory=512,
+        )
+        ResourceTag.objects.create(
+            organization=self.org, resource_type="app", app=other,
+            key="app-type", value="personal-assistant",
+        )
+        ResourceTag.objects.create(
+            organization=self.org, resource_type="app", app=other, key="owner", value="alice",
+        )
+        Policy.objects.filter(organization=self.org, name=f"Default: {other.name} open access").delete()
+
         status, body = self._post(
             body={
-                "app_id": "does-not-exist",
+                "app_id": other.slug,
                 "provider": "oidc",
-                "sub": "okta|vmendi",
-                "username": "vmendi",
+                "sub": "okta|alice",
+                "username": "alice",
                 "path": "/",
             },
             token=self.raw_token,
         )
         self.assertEqual(status, 200)
         self.assertEqual(body["decision"], "deny")
-        self.assertEqual(body["reason"], "app-not-in-org")
+        self.assertEqual(body["reason"], "no-matching-policy")
 
-    def test_app_in_different_env_returns_deny_app_not_in_env(self) -> None:
-        other_env = Environment.objects.create(
-            aws_account=self.aws_account, name="prod", slug="prod",
-            aws_region="us-east-1",
+    def test_the_other_apps_bearer_evaluates_that_apps_policies(self) -> None:
+        # Same pair as above, this time presenting the other app's own token —
+        # alice owns it, so she is allowed. Isolation cuts both ways.
+        other = App.objects.create(
+            organization=self.org, workspace=self.workspace, source_template=make_source_template(),
+            environment=self.environment, name="AlicePA", slug="alicehermes",
+            container_port=8000, health_check_path="/health", cpu=256, memory=512,
         )
-        other_token_raw = "u" * 64
-        EnvironmentBearerToken.objects.create(
-            environment=other_env, token_hash=_hash(other_token_raw),
+        ResourceTag.objects.create(
+            organization=self.org, resource_type="app", app=other,
+            key="app-type", value="personal-assistant",
         )
-        # The app exists in the org but belongs to self.environment, not other_env.
+        ResourceTag.objects.create(
+            organization=self.org, resource_type="app", app=other, key="owner", value="alice",
+        )
+        Policy.objects.filter(organization=self.org, name=f"Default: {other.name} open access").delete()
+        other_token = bearer_test_helpers.make_app_bearer(app=other, raw="u" * 64)
+
         status, body = self._post(
             body={
-                "app_id": "vmendihermes",
                 "provider": "oidc",
-                "sub": "okta|vmendi",
-                "username": "vmendi",
+                "sub": "okta|alice",
+                "username": "alice",
                 "path": "/",
             },
-            token=other_token_raw,
+            token=other_token,
         )
         self.assertEqual(status, 200)
-        self.assertEqual(body["decision"], "deny")
-        self.assertEqual(body["reason"], "app-not-in-env")
+        self.assertEqual(body["decision"], "allow")
 
     def test_unknown_oidc_sub_returns_deny(self) -> None:
         status, body = self._post(
             body={
-                "app_id": "vmendihermes",
                 "provider": "oidc",
                 "sub": "okta|ghost",
                 "username": "ghost",
@@ -212,7 +229,6 @@ class TestPDPEvaluation(PDPTestBase):
         """A WorkOS sub that doesn't match any User.workos_user_id is user-not-found."""
         status, body = self._post(
             body={
-                "app_id": "vmendihermes",
                 "provider": "workos",
                 "sub": "user_01H_unknown",
                 "username": "ghost@example.com",
@@ -235,22 +251,22 @@ class TestPDPEvaluation(PDPTestBase):
         OrganizationMembership.objects.create(
             user=outsider, organization=other_org, role=OrganizationMembership.Role.MEMBER,
         )
-        App.objects.create(
+        open_app = App.objects.create(
             organization=self.org, workspace=self.workspace, source_template=make_source_template(),
             environment=self.environment, name="Open App", slug="open-app",
             container_port=8000,
             health_check_path="/health", cpu=256, memory=512,
         )
+        open_app_token = bearer_test_helpers.make_app_bearer(app=open_app, raw="o" * 64)
 
         status, body = self._post(
             body={
-                "app_id": "open-app",
                 "provider": "oidc",
                 "sub": "okta|outsider",
                 "username": "outsider",
                 "path": "/",
             },
-            token=self.raw_token,
+            token=open_app_token,
         )
 
         self.assertEqual(status, 200)
@@ -272,7 +288,6 @@ class TestPDPEvaluation(PDPTestBase):
 
         status, body = self._post(
             body={
-                "app_id": "vmendihermes",
                 "provider": "oidc",
                 "sub": "okta|platform-admin",
                 "username": "platform-admin",
@@ -291,7 +306,6 @@ class TestPDPEvaluation(PDPTestBase):
         self.owner.save()
         status, body = self._post(
             body={
-                "app_id": "vmendihermes",
                 "provider": "workos",
                 "sub": "user_01H_vmendi",
                 "username": "vmendi",
@@ -305,7 +319,6 @@ class TestPDPEvaluation(PDPTestBase):
     def test_unknown_provider_returns_400(self) -> None:
         status, body = self._post(
             body={
-                "app_id": "vmendihermes",
                 "provider": "facebook",
                 "sub": "x",
                 "username": "x",
@@ -317,7 +330,7 @@ class TestPDPEvaluation(PDPTestBase):
 
     def test_missing_required_fields_returns_400(self) -> None:
         status, body = self._post(
-            body={"app_id": "vmendihermes"},
+            body={},
             token=self.raw_token,
         )
         self.assertEqual(status, 400)

@@ -1,18 +1,19 @@
-"""Tests for policy-proxy runtime activity ingestion."""
+"""Tests for policy-proxy runtime activity ingestion.
+
+The reporting app is derived from its bearer token, so an app_id in the body is
+inert. That replaces the old "app not found in environment" rejection, which
+only existed because the caller named the app it was reporting for.
+"""
 
 import datetime
-import hashlib
 import json
 
 from django.test import Client, TestCase
 from django.utils import timezone
 
 from humanityrules_app import models
+from humanityrules_app.tests import bearer_test_helpers
 from humanityrules_app.tests.app_test_factories import make_source_template
-
-
-def _hash(raw: str) -> str:
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 class PolicyProxyActivityTestBase(TestCase):
@@ -25,37 +26,37 @@ class PolicyProxyActivityTestBase(TestCase):
             slug="staging",
             aws_region="us-east-1",
         )
-        workspace = models.Workspace.objects.create(
+        self.workspace = models.Workspace.objects.create(
             organization=self.organization,
             name="Assistants",
             slug="assistants",
         )
-        self.app = models.App.objects.create(
+        self.app = self.make_app(name="Activity Agent", slug="activity-agent")
+        self.raw_token = bearer_test_helpers.make_app_bearer(app=self.app, raw="a" * 64)
+        self.client = Client()
+
+    def make_app(self, name: str, slug: str) -> models.App:
+        return models.App.objects.create(
             organization=self.organization,
-            workspace=workspace,
+            workspace=self.workspace,
             environment=self.environment,
             source_template=make_source_template(),
-            name="Activity Agent",
-            slug="activity-agent",
+            name=name,
+            slug=slug,
             container_port=8787,
             health_check_path="/health",
             cpu=256,
             memory=512,
         )
-        self.raw_token = "a" * 64
-        models.EnvironmentBearerToken.objects.create(
-            environment=self.environment,
-            token_hash=_hash(raw=self.raw_token),
-        )
-        self.client = Client()
 
-    def post_activity(self, app_id: str, observed_at: str, token: str | None) -> tuple[int, dict]:
-        headers = {}
-        if token is not None:
-            headers["HTTP_AUTHORIZATION"] = f"Bearer {token}"
+    def post_activity(self, observed_at: str, token: str | None, app_id: str | None) -> tuple[int, dict]:
+        headers = bearer_test_helpers.auth_header(raw=token) if token is not None else {}
+        body: dict[str, str] = {"observed_at": observed_at}
+        if app_id is not None:
+            body["app_id"] = app_id
         response = self.client.post(
             "/api/runtime/policy-proxy-activity",
-            data=json.dumps({"app_id": app_id, "observed_at": observed_at}),
+            data=json.dumps(body),
             content_type="application/json",
             **headers,
         )
@@ -65,9 +66,9 @@ class PolicyProxyActivityTestBase(TestCase):
 class TestPolicyProxyActivityAuthentication(PolicyProxyActivityTestBase):
     def test_missing_bearer_is_rejected(self) -> None:
         status, body = self.post_activity(
-            app_id=self.app.slug,
             observed_at=timezone.now().isoformat(),
             token=None,
+            app_id=None,
         )
 
         self.assertEqual(status, 401)
@@ -75,9 +76,9 @@ class TestPolicyProxyActivityAuthentication(PolicyProxyActivityTestBase):
 
     def test_wrong_bearer_is_rejected(self) -> None:
         status, body = self.post_activity(
-            app_id=self.app.slug,
             observed_at=timezone.now().isoformat(),
             token="wrong",
+            app_id=None,
         )
 
         self.assertEqual(status, 401)
@@ -89,9 +90,9 @@ class TestPolicyProxyActivityIngestion(PolicyProxyActivityTestBase):
         observed_at = timezone.now() - datetime.timedelta(minutes=2)
 
         status, body = self.post_activity(
-            app_id=self.app.slug,
             observed_at=observed_at.isoformat(),
             token=self.raw_token,
+            app_id=None,
         )
 
         self.assertEqual(status, 200)
@@ -113,9 +114,9 @@ class TestPolicyProxyActivityIngestion(PolicyProxyActivityTestBase):
         )
 
         status, _body = self.post_activity(
-            app_id=self.app.slug,
             observed_at=oldest.isoformat(),
             token=self.raw_token,
+            app_id=None,
         )
 
         self.assertEqual(status, 200)
@@ -123,43 +124,47 @@ class TestPolicyProxyActivityIngestion(PolicyProxyActivityTestBase):
         self.assertEqual(activity.last_policy_proxy_activity_at, newest)
 
         status, _body = self.post_activity(
-            app_id=self.app.slug,
             observed_at=later.isoformat(),
             token=self.raw_token,
+            app_id=None,
         )
 
         self.assertEqual(status, 200)
         activity.refresh_from_db()
         self.assertEqual(activity.last_policy_proxy_activity_at, later)
 
-    def test_app_must_belong_to_bearer_environment(self) -> None:
-        other_environment = models.Environment.objects.create(
-            aws_account=self.aws_account,
-            name="Production",
-            slug="production",
-            aws_region="us-east-1",
-        )
-        other_token = "b" * 64
-        models.EnvironmentBearerToken.objects.create(
-            environment=other_environment,
-            token_hash=_hash(raw=other_token),
-        )
+    def test_activity_lands_on_the_bearer_app_whatever_the_body_names(self) -> None:
+        neighbour = self.make_app(name="Neighbour Agent", slug="neighbour-agent")
 
-        status, body = self.post_activity(
-            app_id=self.app.slug,
+        status, _body = self.post_activity(
             observed_at=timezone.now().isoformat(),
-            token=other_token,
+            token=self.raw_token,
+            app_id=neighbour.slug,
         )
 
-        self.assertEqual(status, 404)
-        self.assertEqual(body["error"], "app not found in environment")
-        self.assertFalse(models.AppEnvironmentActivity.objects.exists())
+        self.assertEqual(status, 200)
+        self.assertTrue(models.AppEnvironmentActivity.objects.filter(app=self.app).exists())
+        self.assertFalse(models.AppEnvironmentActivity.objects.filter(app=neighbour).exists())
+
+    def test_a_neighbours_bearer_records_against_that_neighbour(self) -> None:
+        neighbour = self.make_app(name="Neighbour Agent", slug="neighbour-agent")
+        neighbour_token = bearer_test_helpers.make_app_bearer(app=neighbour, raw="b" * 64)
+
+        status, _body = self.post_activity(
+            observed_at=timezone.now().isoformat(),
+            token=neighbour_token,
+            app_id=None,
+        )
+
+        self.assertEqual(status, 200)
+        self.assertTrue(models.AppEnvironmentActivity.objects.filter(app=neighbour).exists())
+        self.assertFalse(models.AppEnvironmentActivity.objects.filter(app=self.app).exists())
 
     def test_timestamp_requires_timezone(self) -> None:
         status, body = self.post_activity(
-            app_id=self.app.slug,
             observed_at="2026-07-09T12:00:00",
             token=self.raw_token,
+            app_id=None,
         )
 
         self.assertEqual(status, 400)
@@ -169,9 +174,9 @@ class TestPolicyProxyActivityIngestion(PolicyProxyActivityTestBase):
         observed_at = timezone.now() + datetime.timedelta(minutes=6)
 
         status, body = self.post_activity(
-            app_id=self.app.slug,
             observed_at=observed_at.isoformat(),
             token=self.raw_token,
+            app_id=None,
         )
 
         self.assertEqual(status, 400)

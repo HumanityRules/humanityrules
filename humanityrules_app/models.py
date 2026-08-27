@@ -1477,6 +1477,36 @@ class EnvironmentBearerToken(models.Model):
         return f"EnvironmentBearerToken({self.environment.slug})"
 
 
+class AppBearerToken(models.Model):
+    """
+    Per-app bearer token used by the components of one deployed app (its policy
+    proxy, its Hermes supervisor) to authenticate calls to HUMR's control plane.
+
+    Presenting the token *proves* which App is calling, so the control plane
+    derives the Environment, Organization and owner from it instead of trusting
+    identifiers in the request. One token per App; the raw value lives in the
+    customer's AWS Secrets Manager under humr/{env-slug}/{app-slug}/secrets, key
+    HUMR_APP_BEARER. Only the hash is stored here, so HUMR can verify a
+    presentation without ever holding the raw value again. Deleting the App
+    cascades this row, which is what revokes the token.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
+    app = models.OneToOneField(
+        App,
+        on_delete=models.CASCADE,
+        related_name="app_bearer_token",
+    )
+    token_hash = models.CharField(
+        max_length=128,
+        unique=True,
+        help_text="SHA-256 hex digest of the raw bearer token.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self) -> str:
+        return f"AppBearerToken({self.app.slug})"
+
+
 class IntegrationConfig(models.Model):
     """HUMR-global config for a third-party integration provider.
 

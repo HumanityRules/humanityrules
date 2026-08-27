@@ -27,8 +27,7 @@ async def test_first_observation_reports_immediately() -> None:
         reporter = activity_reporter.PolicyProxyActivityReporter(
             http_client_provider=lambda: client,
             endpoint_url="https://humanityrules.io/api/runtime/policy-proxy-activity",
-            env_bearer_token="secret-token",
-            app_id="activity-agent",
+            app_bearer_token="secret-token",
             interval_seconds=60,
         )
 
@@ -37,7 +36,8 @@ async def test_first_observation_reports_immediately() -> None:
         await reporter.close()
 
     payload = json.loads(requests[0].content)
-    assert payload["app_id"] == "activity-agent"
+    # The bearer names the app; the report carries only the observation.
+    assert "app_id" not in payload
     assert payload["observed_at"].endswith("+00:00")
     assert requests[0].headers["authorization"] == "Bearer secret-token"
 
@@ -53,8 +53,7 @@ async def test_observations_inside_window_are_coalesced_to_latest_report() -> No
         reporter = activity_reporter.PolicyProxyActivityReporter(
             http_client_provider=lambda: client,
             endpoint_url="https://humanityrules.io/api/runtime/policy-proxy-activity",
-            env_bearer_token="secret-token",
-            app_id="activity-agent",
+            app_bearer_token="secret-token",
             interval_seconds=0.02,
         )
 
