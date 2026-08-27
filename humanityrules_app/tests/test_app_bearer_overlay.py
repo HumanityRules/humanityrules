@@ -1,4 +1,4 @@
-"""Tests for the control-plane bearer overlay in deploy_app.AppStack.
+"""Tests for the app bearer overlay in deploy_app.AppStack.
 
 Verifies that containers talking to the control plane receive the
 HUMR_APP_BEARER secret — mounted from the app's own Secrets Manager bag, not
@@ -104,7 +104,7 @@ def _secrets_manager_resources(template: Template) -> list[str]:
 
 class TestAppBearerOverlay(SimpleTestCase):
 
-    def test_requires_env_bearer_container_gets_secret_and_env_vars(self) -> None:
+    def test_requires_app_bearer_container_gets_secret_and_env_vars(self) -> None:
         template = _render(
             containers=[
                 ContainerConfig(
@@ -112,7 +112,7 @@ class TestAppBearerOverlay(SimpleTestCase):
                     image_source=ImageSource.TEMPLATE,
                     template_path="hermes_agent",
                     container_port=8787,
-                    requires_env_bearer=True,
+                    requires_app_bearer=True,
                 ),
             ],
             owner_username="vmendi",
@@ -143,7 +143,7 @@ class TestAppBearerOverlay(SimpleTestCase):
                     image_source=ImageSource.TEMPLATE,
                     template_path="hermes_agent",
                     container_port=8787,
-                    requires_env_bearer=True,
+                    requires_app_bearer=True,
                 ),
             ],
             owner_username="vmendi",
@@ -164,7 +164,7 @@ class TestAppBearerOverlay(SimpleTestCase):
                     image_source=ImageSource.TEMPLATE,
                     template_path="hermes_agent",
                     container_port=8787,
-                    requires_env_bearer=True,
+                    requires_app_bearer=True,
                 ),
             ],
             owner_username="vmendi",
@@ -186,7 +186,7 @@ class TestAppBearerOverlay(SimpleTestCase):
                     image_source=ImageSource.TEMPLATE,
                     template_path="policy_proxy",
                     container_port=8443,
-                    requires_env_bearer=True,
+                    requires_app_bearer=True,
                 ),
             ],
             owner_username=None,
@@ -249,14 +249,14 @@ class TestAppBearerOverlay(SimpleTestCase):
                     image_source=ImageSource.TEMPLATE,
                     template_path="hermes_agent",
                     container_port=8787,
-                    requires_env_bearer=True,
+                    requires_app_bearer=True,
                 ),
                 ContainerConfig(
                     name="docker-dind",
                     image_source=ImageSource.TEMPLATE,
                     template_path="docker_dind",
                     container_port=0,
-                    requires_env_bearer=False,
+                    requires_app_bearer=False,
                 ),
             ],
             owner_username="vmendi",
@@ -282,7 +282,7 @@ class TestAppBearerOverlay(SimpleTestCase):
                     image_source=ImageSource.TEMPLATE,
                     template_path="hermes_agent",
                     container_port=8787,
-                    requires_env_bearer=True,
+                    requires_app_bearer=True,
                 ),
             ],
             owner_username="vmendi",
@@ -306,7 +306,7 @@ class TestAppBearerOverlay(SimpleTestCase):
                     image_source=ImageSource.TEMPLATE,
                     template_path="hermes_agent",
                     container_port=8787,
-                    requires_env_bearer=True,
+                    requires_app_bearer=True,
                 ),
             ],
             owner_username="vmendi",

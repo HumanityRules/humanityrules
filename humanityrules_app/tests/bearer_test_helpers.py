@@ -1,4 +1,4 @@
-"""Fixtures for the per-app control-plane bearer token.
+"""Fixtures for the per-app app bearer token.
 
 Every endpoint a deployed app calls authenticates with an AppBearerToken, so
 nearly every API test suite needs to mint one and put it on a request. These

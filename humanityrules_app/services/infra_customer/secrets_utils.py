@@ -38,8 +38,8 @@ def env_shared_secrets_namespace(env) -> str:
     """Path namespace for an env's shared-secrets bag — per-org for HumR-sandbox envs, else the env slug.
 
     Every org's sandbox env shares one AWS account and the fixed slug "sandbox", so keying the secret
-    by slug alone collides every org on one bag (and one env bearer → wrong-org resolution). Dedicated
-    customer accounts already have a unique slug, so they keep it. *env* is a Django Environment.
+    by slug alone collides every org on one bag. Dedicated customer accounts already have a unique
+    slug, so they keep it. *env* is a Django Environment.
     """
     aws_account = env.aws_account
     if aws_account.is_humr_sandbox:
@@ -48,7 +48,7 @@ def env_shared_secrets_namespace(env) -> str:
 
 
 def shared_secrets_secret_name(env) -> str:
-    """Secrets Manager name for an env's shared-secrets bag (holds HUMR_ENV_BEARER + shared keys)."""
+    """Secrets Manager name for an env's shared-secrets bag (operator-set keys shared across its apps)."""
     return f"humr/{env_shared_secrets_namespace(env)}/shared-secrets"
 
 
@@ -176,30 +176,17 @@ def list_secrets(session: boto3.Session, include_deleted: bool) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Control-plane bearer tokens (see docs/policy_proxy_design.md)
+# Per-app bearer (see docs/policy_proxy_design.md)
 #
-# Two tokens live here while the per-app bearer lands: the retired per-environment
-# HUMR_ENV_BEARER in the shared-secrets bag, and the per-app HUMR_APP_BEARER in
-# each app's own bag. Both follow the same custody rule — the raw value only ever
-# exists in the customer account, the control plane keeps just its SHA-256 hash.
+# The raw HUMR_APP_BEARER lives in each app's own bag humr/{env}/{app}/secrets;
+# the control plane keeps just its SHA-256 hash (AppBearerToken). Presenting the
+# raw value is what proves which App is calling.
 # ---------------------------------------------------------------------------
 
-
-SHARED_SECRETS_KEY_HUMR_ENV_BEARER = "HUMR_ENV_BEARER"
 
 # Control-plane-owned key inside the per-app bag humr/{env}/{app}/secrets.
 # Reserved: a template may not declare it (see app_config_builder._union_app_secrets).
 APP_SECRETS_KEY_HUMR_APP_BEARER = "HUMR_APP_BEARER"
-
-
-def _secret_exists(sm_client, secret_name: str) -> bool:
-    try:
-        sm_client.describe_secret(SecretId=secret_name)
-        return True
-    except ClientError as e:
-        if e.response["Error"]["Code"] == "ResourceNotFoundException":
-            return False
-        raise
 
 
 def _get_secret_arn(sm_client, secret_name: str) -> str:
@@ -257,79 +244,6 @@ def _create_or_merge_secret(
     return response["ARN"]
 
 
-def ensure_env_bearer_token_exists(session: boto3.Session, env) -> str:
-    """Ensure HUMR_ENV_BEARER exists both in shared-secrets and as an EnvironmentBearerToken row.
-
-    The shared-secrets entry is the source of truth for the raw token: whenever it
-    already holds a HUMR_ENV_BEARER, the DB row is made to match its hash (adopted when
-    missing, re-synced when drifted) and the secret is never rewritten. A fresh token is
-    minted only when the secret has none. This keeps every control-plane DB that deploys
-    into the (account-shared) env consistent with the one live secret — e.g. a local-DB
-    deploy against a freshly recreated env adopts the existing token instead of clobbering
-    it and stranding every other DB (including prod) on a now-stale hash.
-
-    Returns the ARN of the shared-secrets entry. *env* is a Django Environment
-    instance — passed in rather than imported so this module stays free of
-    Django model imports at top level.
-    """
-    # Local import so test harnesses that don't have Django set up can still
-    # exercise the AWS-side helpers in isolation.
-    from humanityrules_app.models import EnvironmentBearerToken
-
-    env_slug = env.slug
-    secret_name = shared_secrets_secret_name(env)
-    sm_client = session.client("secretsmanager")
-
-    existing_row = EnvironmentBearerToken.objects.filter(environment=env).first()
-    existing_secret = get_shared_secrets(session=session, env=env) if _secret_exists(sm_client, secret_name) else None
-    secret_raw_token = existing_secret.get(SHARED_SECRETS_KEY_HUMR_ENV_BEARER) if existing_secret else None
-
-    # Secret already carries a token → it wins. Make the DB row match its hash and
-    # leave the secret untouched: adopt when the row is missing, re-sync when it has
-    # drifted (the drift case self-heals a DB whose hash fell out of step with the
-    # live secret — the desync that wedges deploys).
-    if secret_raw_token:
-        secret_token_hash = hashlib.sha256(secret_raw_token.encode("utf-8")).hexdigest()
-        if existing_row is None:
-            EnvironmentBearerToken.objects.create(environment=env, token_hash=secret_token_hash)
-            logger.info("env bearer token row adopted from existing secret for env '%s'", env_slug)
-        elif existing_row.token_hash != secret_token_hash:
-            existing_row.token_hash = secret_token_hash
-            existing_row.save(update_fields=["token_hash"])
-            logger.info("env bearer token row re-synced to secret (healed drift) for env '%s'", env_slug)
-        return _get_secret_arn(sm_client, secret_name)
-
-    # Secret has no token (true first provisioning, or it lost the key): mint a
-    # fresh raw token and write both sides together.
-    raw = secrets.token_urlsafe(48)[:64]
-    token_hash = hashlib.sha256(raw.encode("utf-8")).hexdigest()
-
-    values = dict(existing_secret or {})
-    values[SHARED_SECRETS_KEY_HUMR_ENV_BEARER] = raw
-    arn = _create_or_merge_secret(
-        sm_client=sm_client,
-        secret_name=secret_name,
-        description=f"Shared secrets for env '{env_slug}' (per-env keys merged across apps)",
-        values_to_write=values,
-        merge_mode=False,  # we already merged in-memory; replace authoritatively
-    )
-
-    if existing_row is None:
-        EnvironmentBearerToken.objects.create(environment=env, token_hash=token_hash)
-        logger.info("env bearer token row created for env '%s'", env_slug)
-    else:
-        existing_row.token_hash = token_hash
-        existing_row.save(update_fields=["token_hash"])
-        logger.info("env bearer token row rotated for env '%s'", env_slug)
-
-    return arn
-
-
-# ---------------------------------------------------------------------------
-# Per-app bearer (humr/{env}/{app}/secrets, key HUMR_APP_BEARER)
-# ---------------------------------------------------------------------------
-
-
 def ensure_app_bearer_token_exists(session: boto3.Session, env_slug: str, app) -> str:
     """Ensure the app's HUMR_APP_BEARER exists in its per-app bag and as an AppBearerToken row.
 
@@ -338,10 +252,10 @@ def ensure_app_bearer_token_exists(session: boto3.Session, env_slug: str, app) -
     missing — we mint a fresh raw token and write both together. The only no-op
     case is a row whose hash already matches the value in the bag.
 
-    Unlike the retired per-env bearer there is no adopt/re-sync branch: an app
-    only ever talks to the control plane that last deployed it (the control-plane
-    URL is baked into its task definition), so a stale row in some other control
-    plane's DB is harmless.
+    There is deliberately no adopt/re-sync branch: an app only ever talks to
+    the control plane that last deployed it (the control-plane URL is baked
+    into its task definition), so a stale row in some other control plane's DB
+    is harmless.
 
     The bag humr/{env_slug}/{app_slug}/secrets is created on demand — most
     templates declare no secrets at all, so the bearer is usually its first key.
@@ -384,17 +298,6 @@ def ensure_app_bearer_token_exists(session: boto3.Session, env_slug: str, app) -
     AppBearerToken.objects.update_or_create(app=app, defaults={"token_hash": token_hash})
     logger.info("app bearer token minted for app '%s' in env '%s'", app.slug, env_slug)
     return arn
-
-
-def ensure_env_policy_proxy_secrets_exist(session: boto3.Session, env) -> dict[str, str]:
-    """Top-level helper: provision per-env policy-proxy secrets and return their ARNs.
-
-    Returns a dict with keys: 'shared_secrets_arn'. Called from the deploy
-    pipeline before the policy-proxy stack runs.
-    """
-    return {
-        "shared_secrets_arn": ensure_env_bearer_token_exists(session=session, env=env),
-    }
 
 
 def delete_secrets_matching_prefix(session: boto3.Session, subprefix: str, dry_run: bool, force_immediate: bool) -> int:

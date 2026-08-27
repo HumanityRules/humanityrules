@@ -14,6 +14,7 @@ from humanityrules_app.models import (
     AWSAccount,
     App,
     AppPermissions,
+    AppBearerToken,
     AppTemplate,
     BillingBalance,
     BillingLedgerEntry,
@@ -38,7 +39,6 @@ from humanityrules_app.models import (
     PlatformSettings,
     PlatformSharedCredential,
     Policy,
-    EnvironmentBearerToken,
     Repository,
     ResourceTag,
     User,
@@ -549,12 +549,12 @@ class BillingBalanceAdmin(admin.ModelAdmin):
 # =============================================================================
 
 
-@admin.register(EnvironmentBearerToken)
-class EnvironmentBearerTokenAdmin(admin.ModelAdmin):
-    list_display = ["environment", "token_hash", "created_at"]
-    search_fields = ["environment__name", "environment__slug", "token_hash"]
+@admin.register(AppBearerToken)
+class AppBearerTokenAdmin(admin.ModelAdmin):
+    list_display = ["app", "token_hash", "created_at"]
+    search_fields = ["app__name", "app__slug", "app__organization__slug", "token_hash"]
     readonly_fields = ["id", "token_hash", "created_at"]
-    autocomplete_fields = ["environment"]
+    autocomplete_fields = ["app"]
 
 
 @admin.register(IntegrationConfig)

@@ -91,13 +91,13 @@ def matcher_name(slug: str) -> str:
 
 
 def public_hostname() -> str:
-    """Read the agent's public hostname from the env-bearer overlay."""
+    """Read the agent's public hostname from the app bearer overlay."""
     host = os.environ.get(PUBLIC_HOSTNAME_ENV)
     if not host:
         die(
             message=(
                 f"{PUBLIC_HOSTNAME_ENV} is not set; webapps routing requires it. "
-                "This usually means the AppTemplate is not wired for env-bearer overlay."
+                "This usually means the AppTemplate is not wired for the app bearer overlay."
             ),
             code=1,
         )

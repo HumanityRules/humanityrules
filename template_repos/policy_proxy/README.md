@@ -7,7 +7,7 @@ A tiny reverse proxy that sits in front of apps deployed by Humanity Rules and e
 1. Reads the `humr_session` cookie.
 2. If missing or invalid, 302s to `https://humanityrules.io/auth/env-start?rd=<current-url>` for the OAuth dance. The control plane mints a session JWT and bounces back to `/__humr_session_install?token=...&rd=...`, which sets the env-scoped cookie and redirects the browser to `rd`.
 3. Verifies the JWT against the central JWKS (fetched from `/.well-known/jwks.json`, cached 15 min). The `aud` claim must match `HUMR_ENV_DOMAIN` to block cross-env replay (the env's DNS zone is globally unique; `HUMR_ENV_SLUG` is only unique per AWS account).
-4. POSTs to HUMR's PDP endpoint with `{app_id, provider, sub, username, path}` and `Authorization: Bearer <HUMR_ENV_BEARER>`.
+4. POSTs to HUMR's PDP endpoint with `{provider, sub, username, path}` and `Authorization: Bearer <HUMR_APP_BEARER>`. The bearer identifies the app; nothing in the body does.
 5. On `allow`, proxies to the app container on localhost, injecting trusted identity headers.
 6. On `deny`, returns a 403 with a short message.
 
@@ -19,14 +19,14 @@ requests still receive the `302` directly.
 
 | Var | Example | Purpose |
 | --- | --- | --- |
-| `HUMR_APP_ID` | `vmendihermes` | App slug, sent in the PDP request. |
+| `HUMR_APP_ID` | `vmendihermes` | App slug, for log lines and the decision-cache key. Not sent to the control plane. |
 | `HUMR_ENV_SLUG` | `humr-sandbox` | For log lines only. |
 | `HUMR_ENV_DOMAIN` | `humr-sandbox.humrsandbox.com` | Parent domain the session cookie is scoped to. |
 | `HUMR_AUTH_BASE_URL` | `https://humanityrules.io` | Control-plane base URL; the sidecar bounces unauthenticated requests to `<base>/auth/env-start`. |
 | `HUMR_CONTROL_PLANE_URL` | `https://humanityrules.io` | Control-plane base URL for runtime activity reports. |
 | `HUMR_JWKS_URL` | `https://humanityrules.io/.well-known/jwks.json` | Central JWKS endpoint for verifying session JWTs. |
 | `HUMR_PDP_URL` | `https://humanityrules.io/api/pdp/evaluate` | Central authorization endpoint. |
-| `HUMR_ENV_BEARER` | 64 random chars | Environment bearer token. From Secrets Manager. Used by any env component calling the HUMR control plane. |
+| `HUMR_APP_BEARER` | 64 random chars | This app's bearer token. From the app's own Secrets Manager bag (`humr/{env}/{app}/secrets`). Presenting it proves which app is calling. |
 | `HUMR_UPSTREAM_HOST` | `127.0.0.1` | The app container. |
 | `HUMR_UPSTREAM_PORT` | `8787` | The app container's port. |
 | `HUMR_LISTEN_PORT` | `8443` | Port the policy proxy listens on. ALB routes here. |

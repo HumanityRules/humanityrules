@@ -8,6 +8,8 @@
 
 Custody and gate design are mostly right in intent: refresh tokens stay on CP, policy proxy fail-closes, PA owner ABAC is real, Merge key never enters the customer container, per-app task roles/EFS are scoped at deploy. The problems that matter before customers are **escape hatches that collapse those boundaries** — especially sandbox→IMDS via the broker CONNECT tunnel, IAM Apply that does not freeze what was approved, a 30-day irrevocable env session, and `AdministratorAccess` as the customer install role. Several High findings are the same bug in different clothes: **one env bearer + client-supplied identity + unauthenticated loopback `:9951`**.
 
+> **Update 2026-08-27 — per-app bearer landed** (task `implement-per-app-token-system-for-enhanced-security`). `HUMR_ENV_BEARER` / `EnvironmentBearerToken` are gone; each App has its own `HUMR_APP_BEARER` (`AppBearerToken`, raw value in `humr/{env}/{app}/secrets`) and every bearer-authenticated endpoint derives app, environment, org and owner from the token, ignoring any identity in the request. This closes the cross-app confused-deputy findings 01 (token minting), 02 (Merge relay, incl. the missing environment filter), 03 (PDP probing), 04 (shared raw secret; removal now purges the app's bag) and 06 (`**payload` identity override — the broker no longer sends identity, so there is nothing to override). Theme 1 below is resolved by the "per-app bearers" option. The unauthenticated loopback `:9951` finding is unchanged.
+
 ## Decide first
 
 Ordered by “if this is real, fix or accept before GA.” One line each; open the area file for evidence.

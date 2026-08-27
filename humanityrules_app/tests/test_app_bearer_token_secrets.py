@@ -1,25 +1,104 @@
-"""Tests for the per-app bearer-token mint in infra_customer.secrets_utils.
+"""Tests for the Secrets Manager helpers in infra_customer.secrets_utils.
 
-The mint is "DB wins": the control plane only ever accepts the hash it stored,
-so the single no-op case is a row whose hash already matches the value in the
-app's Secrets Manager bag. Everything else — no row, no bag, no key, or a
-mismatch — re-mints and writes both sides together.
+Three things live here:
 
-AWS is faked with the same in-memory FakeSecretsManager the env-bearer suite
-uses, injected through the `session` parameter; no moto, no patching.
+- The per-app bearer mint. It is "DB wins": the control plane only ever
+  accepts the hash it stored, so the single no-op case is a row whose hash
+  already matches the value in the app's Secrets Manager bag. Everything else
+  — no row, no bag, no key, or a mismatch — re-mints and writes both sides
+  together.
+- The shared-secrets bag naming, namespaced per org in the HumR sandbox.
+- `ensure_app_secrets_exist`, the template-declared secrets that share the
+  per-app bag with the bearer.
+
+AWS is faked with an in-memory `FakeSecretsManager` injected through the
+`session` parameter; no moto, no patching. Other suites (app removal) reuse the
+fake to prove the bearer is purged with the rest of the app's prefix.
 """
 
 import hashlib
 import json
+from unittest.mock import MagicMock
 
-from django.test import TestCase
+from botocore.exceptions import ClientError
+from django.test import TestCase, override_settings
 
 from humanityrules_app.models import App, AppBearerToken, AWSAccount, Environment, Organization, Workspace
 from humanityrules_app.services.infra_customer import secrets_utils
+from humanityrules_app.services.infra_customer.appconfig import AppConfig, ContainerConfig, ImageSource
 from humanityrules_app.services.jobs import app_config_builder
-from humanityrules_app.services.infra_customer.appconfig import ContainerConfig, ImageSource
 from humanityrules_app.tests.app_test_factories import make_source_template
-from humanityrules_app.tests.test_env_bearer_token_secrets import FakeSecretsManager, _session_with
+
+
+def _not_found_error() -> ClientError:
+    return ClientError(
+        error_response={"Error": {"Code": "ResourceNotFoundException", "Message": "nope"}},
+        operation_name="DescribeSecret",
+    )
+
+
+class _FakeListSecretsPaginator:
+    """Single-page paginator over the fake store, honouring the name-prefix filter."""
+
+    def __init__(self, store: dict[str, dict]) -> None:
+        self._store = store
+
+    def paginate(self, **kwargs: object) -> list[dict]:
+        prefixes: list[str] = []
+        for f in kwargs.get("Filters") or []:
+            if f.get("Key") == "name":
+                prefixes.extend(f.get("Values", []))
+        rows = [
+            {"Name": name, "ARN": row["ARN"]}
+            for name, row in self._store.items()
+            if not prefixes or any(name.startswith(p) for p in prefixes)
+        ]
+        return [{"SecretList": rows}]
+
+
+class FakeSecretsManager:
+    """In-memory stub implementing the subset of Secrets Manager we call."""
+
+    def __init__(self) -> None:
+        self.store: dict[str, dict] = {}
+
+    def describe_secret(self, SecretId: str) -> dict:
+        if SecretId not in self.store:
+            raise _not_found_error()
+        return {"ARN": self.store[SecretId]["ARN"]}
+
+    def get_secret_value(self, SecretId: str) -> dict:
+        if SecretId not in self.store:
+            raise _not_found_error()
+        row = self.store[SecretId]
+        return {"ARN": row["ARN"], "SecretString": row["SecretString"]}
+
+    def create_secret(self, Name: str, Description: str, SecretString: str) -> dict:
+        arn = f"arn:aws:secretsmanager:us-east-1:0:secret:{Name}-AAAA"
+        self.store[Name] = {"ARN": arn, "SecretString": SecretString, "Description": Description}
+        return {"ARN": arn}
+
+    def put_secret_value(self, SecretId: str, SecretString: str) -> dict:
+        self.store[SecretId]["SecretString"] = SecretString
+        return {"ARN": self.store[SecretId]["ARN"]}
+
+    def get_paginator(self, operation_name: str) -> _FakeListSecretsPaginator:
+        assert operation_name == "list_secrets"
+        return _FakeListSecretsPaginator(store=self.store)
+
+    def delete_secret(self, SecretId: str, **kwargs: object) -> dict:
+        # Accepts ForceDeleteWithoutRecovery / RecoveryWindowInDays like boto3; both delete here.
+        name = next((n for n, row in self.store.items() if row["ARN"] == SecretId or n == SecretId), None)
+        if name is None:
+            raise _not_found_error()
+        del self.store[name]
+        return {"ARN": SecretId}
+
+
+def _session_with(fake: FakeSecretsManager) -> MagicMock:
+    session = MagicMock()
+    session.client.return_value = fake
+    return session
 
 
 SECRET_NAME = "humr/staging/wolfie/secrets"
@@ -46,6 +125,11 @@ class AppBearerTestBase(TestCase):
 
     def _stored_secret(self, fake: FakeSecretsManager) -> dict[str, str]:
         return json.loads(fake.store[SECRET_NAME]["SecretString"])
+
+
+# -----------------------------------------------------------------------------
+# ensure_app_bearer_token_exists
+# -----------------------------------------------------------------------------
 
 
 class TestEnsureAppBearerToken(AppBearerTestBase):
@@ -180,3 +264,172 @@ class TestReservedAppSecretName(TestCase):
             app_secrets={"SLACK_TOKEN": ""},
         )
         self.assertEqual(app_config_builder._union_app_secrets([container]), {"SLACK_TOKEN": ""})
+
+
+# -----------------------------------------------------------------------------
+# shared-secrets namespacing (operator bag; per-org in the HumR sandbox)
+# -----------------------------------------------------------------------------
+
+
+# Neutralize the Organization post_save signal that auto-creates a "Humanity Rules Sandbox"
+# account when sandbox env vars are present — we build the sandbox accounts ourselves here.
+@override_settings(HUMR_SANDBOX_AWS_ACCOUNT_ID="", HUMR_SANDBOX_EXTERNAL_ID="")
+class TestSharedSecretsNamespace(TestCase):
+    """The operator's shared-secrets bag is namespaced per org in the HumR sandbox."""
+
+    def _make_org(self, slug: str) -> Organization:
+        return Organization.objects.create(
+            name=slug, slug=slug,
+            auth_provider=Organization.AuthProvider.OIDC,
+            oidc_issuer_url="https://okta.example.com/oauth2/default",
+            oidc_client_id="client-abc",
+            oidc_client_secret="secret-xyz",
+        )
+
+    def _make_sandbox_env(self, org_slug: str) -> Environment:
+        org = self._make_org(slug=org_slug)
+        aws_account = AWSAccount.objects.create(
+            organization=org, name="Humanity Rules Sandbox", is_humr_sandbox=True,
+        )
+        return Environment.objects.create(
+            aws_account=aws_account, name="Sandbox", slug="sandbox", aws_region="us-east-1",
+        )
+
+    def test_sandbox_namespace_is_per_org(self) -> None:
+        env_a = self._make_sandbox_env(org_slug="org-a")
+        env_b = self._make_sandbox_env(org_slug="org-b")
+        self.assertEqual(secrets_utils.env_shared_secrets_namespace(env_a), "sandbox/org-a")
+        self.assertEqual(secrets_utils.shared_secrets_secret_name(env_a), "humr/sandbox/org-a/shared-secrets")
+        self.assertEqual(secrets_utils.shared_secrets_secret_name(env_b), "humr/sandbox/org-b/shared-secrets")
+
+    def test_non_sandbox_namespace_is_env_slug(self) -> None:
+        org = self._make_org(slug="dedicated-org")
+        aws_account = AWSAccount.objects.create(organization=org, name="Prod Account")
+        env = Environment.objects.create(
+            aws_account=aws_account, name="prod", slug="prod", aws_region="us-east-1",
+        )
+        self.assertFalse(aws_account.is_humr_sandbox)
+        self.assertEqual(secrets_utils.env_shared_secrets_namespace(env), "prod")
+        self.assertEqual(secrets_utils.shared_secrets_secret_name(env), "humr/prod/shared-secrets")
+
+    def test_get_shared_secrets_reads_the_org_bag(self) -> None:
+        # Both orgs' sandbox envs live in ONE AWS account → ONE Secrets Manager store; the
+        # per-org namespace is what keeps them from reading each other's operator keys.
+        fake = FakeSecretsManager()
+        session = _session_with(fake)
+        env_a = self._make_sandbox_env(org_slug="org-a")
+        env_b = self._make_sandbox_env(org_slug="org-b")
+        fake.create_secret(
+            Name="humr/sandbox/org-a/shared-secrets", Description="seed",
+            SecretString=json.dumps({"OPENAI_API_KEY": "sk-a"}),
+        )
+
+        self.assertEqual(secrets_utils.get_shared_secrets(session=session, env=env_a), {"OPENAI_API_KEY": "sk-a"})
+        self.assertEqual(secrets_utils.get_shared_secrets(session=session, env=env_b), {})
+
+
+# -----------------------------------------------------------------------------
+# ensure_app_secrets_exist
+# -----------------------------------------------------------------------------
+
+
+def _make_app_config(app_secrets: dict[str, str | None] | None) -> AppConfig:
+    return AppConfig(
+        app_name="simple-dashboard",
+        cpu=256,
+        memory=512,
+        containers=[
+            ContainerConfig(
+                name="app",
+                image_source=ImageSource.TEMPLATE,
+                template_path="simple_dashboard",
+                container_port=8000,
+                health_check_path="/health",
+                app_secrets=dict(app_secrets or {}),
+            ),
+        ],
+        alb_target_container="app",
+        app_secrets=app_secrets,
+    )
+
+
+class TestEnsureAppSecretsExist(TestCase):
+
+    def test_creates_secret_under_env_app_prefix_when_missing(self) -> None:
+        fake = FakeSecretsManager()
+        session = _session_with(fake)
+        app_config = _make_app_config({"secret_key_base": None, "slack_token": "literal-token"})
+
+        secrets_utils.ensure_app_secrets_exist(
+            session=session, env_slug="staging", app_config=app_config, shared_secrets={},
+        )
+
+        self.assertIn("humr/staging/simple-dashboard/secrets", fake.store)
+        payload = json.loads(fake.store["humr/staging/simple-dashboard/secrets"]["SecretString"])
+        self.assertEqual(payload["slack_token"], "literal-token")
+        self.assertEqual(len(payload["secret_key_base"]), 64)
+
+    def test_merges_missing_keys_into_existing_secret(self) -> None:
+        fake = FakeSecretsManager()
+        session = _session_with(fake)
+        fake.create_secret(
+            Name="humr/staging/simple-dashboard/secrets",
+            Description="seed",
+            SecretString=json.dumps({"slack_token": "existing-value"}),
+        )
+        app_config = _make_app_config({"slack_token": "NEW-IGNORED", "secret_key_base": None})
+
+        secrets_utils.ensure_app_secrets_exist(
+            session=session, env_slug="staging", app_config=app_config, shared_secrets={},
+        )
+
+        payload = json.loads(fake.store["humr/staging/simple-dashboard/secrets"]["SecretString"])
+        self.assertEqual(payload["slack_token"], "existing-value")
+        self.assertEqual(len(payload["secret_key_base"]), 64)
+
+    def test_resolves_empty_placeholder_from_shared_secrets(self) -> None:
+        fake = FakeSecretsManager()
+        session = _session_with(fake)
+        app_config = _make_app_config({"OPENAI_API_KEY": ""})
+
+        secrets_utils.ensure_app_secrets_exist(
+            session=session, env_slug="staging", app_config=app_config,
+            shared_secrets={"OPENAI_API_KEY": "sk-from-shared"},
+        )
+
+        payload = json.loads(fake.store["humr/staging/simple-dashboard/secrets"]["SecretString"])
+        self.assertEqual(payload["OPENAI_API_KEY"], "sk-from-shared")
+
+    def test_heals_empty_existing_value_from_shared_secrets(self) -> None:
+        # Simulates first-deploy having created the app secret with empty
+        # placeholders because shared-secrets wasn't yet populated; a later
+        # shared-set + redeploy must backfill the stored values.
+        fake = FakeSecretsManager()
+        session = _session_with(fake)
+        fake.create_secret(
+            Name="humr/staging/simple-dashboard/secrets",
+            Description="seed",
+            SecretString=json.dumps({"AWS_BEDROCK_ACCESS_KEY_ID": "", "HERMES_WEBUI_PASSWORD": "kept"}),
+        )
+        app_config = _make_app_config({"AWS_BEDROCK_ACCESS_KEY_ID": "", "HERMES_WEBUI_PASSWORD": ""})
+
+        secrets_utils.ensure_app_secrets_exist(
+            session=session, env_slug="staging", app_config=app_config,
+            shared_secrets={"AWS_BEDROCK_ACCESS_KEY_ID": "AKIA-from-shared"},
+        )
+
+        payload = json.loads(fake.store["humr/staging/simple-dashboard/secrets"]["SecretString"])
+        self.assertEqual(payload["AWS_BEDROCK_ACCESS_KEY_ID"], "AKIA-from-shared")
+        # Non-empty existing value is preserved even when shared has no entry.
+        self.assertEqual(payload["HERMES_WEBUI_PASSWORD"], "kept")
+
+    def test_noop_when_app_secrets_is_none(self) -> None:
+        fake = FakeSecretsManager()
+        session = _session_with(fake)
+        app_config = _make_app_config(None)
+
+        secrets_utils.ensure_app_secrets_exist(
+            session=session, env_slug="staging", app_config=app_config, shared_secrets={},
+        )
+
+        self.assertEqual(fake.store, {})

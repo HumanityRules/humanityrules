@@ -173,7 +173,7 @@ urlpatterns = [
     path("integrations/user/x/callback/", views.integrations_user_x_callback, name="integrations_user_x_callback"),
     # Connect is the browser OAuth round-trip above (start → provider → callback).
     # Disconnect is broker-only: the Hermes WebUI POSTs to /__humr_broker/integrations/tls_intercept/{slug}/disconnect,
-    # which forwards here with the env bearer — see the disconnect handler under api/integrations below.
+    # which forwards here with the app bearer — see the disconnect handler under api/integrations below.
     
     #  - integrations_tokens_batch: the env-resident broker's single refresh endpoint, both for Refresh-all/bootstrap and for slug-targeted refresh after connect/disconnect
     path("api/integrations/tokens", views.integrations_tokens_batch, name="integrations_tokens_batch"),
@@ -217,8 +217,8 @@ urlpatterns = [
     path("api/runtime/billing-entitlement", views.billing_entitlement, name="billing_entitlement"),
 
     #  - Permissions editor (self-referential): the env-resident humr_broker relays the Hermes WebUI's
-    #    /permissions/* calls here with the env bearer. Target (app, environment) is resolved from the
-    #    bearer + owner_username/app_slug body, never a parameter. See docs/permissions_broker_design.md.
+    #    /permissions/* calls here with the app bearer. Target (app, environment, owner) is resolved
+    #    from the bearer alone — never a URL parameter or body field. See docs/permissions_broker_design.md.
     path("api/permissions/draft", views.permissions_draft, name="permissions_draft"),
     path("api/permissions/draft/statement", views.permissions_statement, name="permissions_statement"),
     path("api/permissions/draft/description", views.permissions_description, name="permissions_description"),

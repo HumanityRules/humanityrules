@@ -123,7 +123,7 @@ The aggregator owns the OAuth handlers (DCR, callback, status, disconnect) but t
 
 `GET /__humr_broker/integrations` returns a unified flat list of all integrations: TLS-intercept entries, direct-MCP entries such as PostHog, and per-connector Merge entries. Each item carries a mechanism `kind` and product `category`; the WebUI resolves `kind` to a normalized card specification and uses `category` only for page grouping.
 
-The aggregator also exposes a second kind of upstream — `auth_kind="humr_relay"` — used for Merge.dev: instead of holding OAuth tokens directly, the ProxyProvider's `client_factory` builds a `StreamableHttpTransport` pointed at a HUMR relay endpoint with `HUMR_ENV_BEARER` + identity headers attached. See `merge_integration_design.md`.
+The aggregator also exposes a second kind of upstream — `auth_kind="humr_relay"` — used for Merge.dev: instead of holding OAuth tokens directly, the ProxyProvider's `client_factory` builds a `StreamableHttpTransport` pointed at a HUMR relay endpoint with the app's `HUMR_APP_BEARER` attached (HUMR derives the app and owner from it; no identity headers). See `merge_integration_design.md`.
 
 ## Nono profile changes
 

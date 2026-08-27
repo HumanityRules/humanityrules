@@ -43,7 +43,7 @@ services:
       # (via the humanityrules.ngrok.io tunnel) as one existing App. Seed the DB
       # rows first: uv run manage.py seed_local_app.
       HUMR_CONTROL_PLANE_URL: ${HUMR_CONTROL_PLANE_URL:-https://humanityrules.ngrok.io}
-      HUMR_ENV_BEARER: ${HUMR_ENV_BEARER:-}
+      HUMR_APP_BEARER: ${HUMR_APP_BEARER:-}
       HUMR_OWNER_USERNAME: ${HUMR_OWNER_USERNAME:-}
       HUMR_APP_SLUG: ${HUMR_APP_SLUG:-}
       HUMR_ORG_SLUG: ${HUMR_ORG_SLUG:-}

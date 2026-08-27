@@ -339,7 +339,7 @@ class EcsClusterStack(Stack):
             assumed_by=iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
             managed_policies=[iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AmazonECSTaskExecutionRolePolicy")],
         )
-        # Allow ECS to inject secrets as env vars (e.g., per-app secrets, env-bearer token)
+        # Allow ECS to inject secrets as env vars (e.g., per-app secrets, the app bearer token)
         self.task_execution_role.add_to_policy(iam.PolicyStatement(
             actions=["secretsmanager:GetSecretValue"],
             resources=[f"arn:aws:secretsmanager:{Aws.REGION}:{Aws.ACCOUNT_ID}:secret:humr/*"],

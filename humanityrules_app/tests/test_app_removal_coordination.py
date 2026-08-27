@@ -1,18 +1,21 @@
-"""Tests for app-removal enqueue idempotency, worker claim, and executor guards."""
+"""Tests for app-removal enqueue idempotency, worker claim, executor guards, and bearer revocation."""
 
 from io import StringIO
 from unittest.mock import patch
 
-from django.test import TestCase
+from botocore.exceptions import ClientError
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from humanityrules_app import models
 from humanityrules_app.management.commands import humr_control
 from humanityrules_app.services import abac_service
+from humanityrules_app.services.infra_customer import secrets_utils
 from humanityrules_app.services.jobs import app_job_service
 from humanityrules_app.services.jobs import app_remove_executor
 from humanityrules_app.services.jobs import job_worker
 from humanityrules_app.tests.app_test_factories import make_source_template
+from humanityrules_app.tests.test_app_bearer_token_secrets import FakeSecretsManager, _session_with
 
 
 class TestAppRemovalCoordination(TestCase):
@@ -310,3 +313,94 @@ class TestAppRemovalCoordination(TestCase):
         self.assertTrue(success)
         self.assertFalse(models.App.objects.filter(id=self.app.id).exists())
         self.assertTrue(models.IntegrationUserCredential.objects.filter(id=credential.id).exists())
+
+
+# Neutralize the Organization post_save signal that auto-creates a "Humanity Rules Sandbox"
+# account when sandbox env vars are present — this suite builds the sandbox account itself.
+@override_settings(HUMR_SANDBOX_AWS_ACCOUNT_ID="", HUMR_SANDBOX_EXTERNAL_ID="")
+class TestAppRemovalRevokesBearer(TestCase):
+    """Removal revokes the app's app bearer on both sides with no bearer-specific code.
+
+    The raw token is a key of humr/{env}/{app}/secrets, which the removal purge
+    deletes by prefix; the AppBearerToken row cascades off the App row. A purge
+    failure stops before either happens, so the slug stays claimed and the
+    token stays valid for the retry.
+    """
+
+    def setUp(self) -> None:
+        self.organization = models.Organization.objects.create(name="Revoke Org", slug="revoke-org")
+        self.aws_account = models.AWSAccount.objects.create(
+            organization=self.organization,
+            name="Humanity Rules Sandbox",
+            is_humr_sandbox=True,
+            status=models.AWSAccount.Status.CONNECTED,
+        )
+        self.environment = models.Environment.objects.create(
+            aws_account=self.aws_account,
+            name="Sandbox",
+            slug="sandbox",
+            aws_region="us-east-1",
+            status=models.Environment.Status.READY,
+        )
+        self.workspace = models.Workspace.objects.create(organization=self.organization, name="Ops", slug="ops")
+        self.app = models.App.objects.create(
+            organization=self.organization,
+            workspace=self.workspace,
+            environment=self.environment,
+            source_template=make_source_template(),
+            name="Revoked Agent",
+            slug="revokedagent",
+            container_port=8787,
+            health_check_path="/health",
+            cpu=256,
+            memory=512,
+        )
+        models.SandboxSlugClaim.objects.create(slug=self.app.slug, organization=self.organization)
+        self.user = models.User.objects.create_user(username="revoke-admin", password="pw", current_organization=self.organization)
+        models.OrganizationMembership.objects.create(
+            organization=self.organization, user=self.user, role=models.OrganizationMembership.Role.ADMIN,
+        )
+        # Queue through the service so the attempt id the removal logs against exists, then
+        # put the app where the worker would leave it so run_removal can be driven directly.
+        app_job_service.queue_removal(app=self.app, created_by=self.user, label=None)
+        self.app.refresh_from_db()
+        self.app.job_status = models.App.JobStatus.REMOVING
+        self.app.save(update_fields=["job_status", "updated_at"])
+        self.fake_sm = FakeSecretsManager()
+        self.session = _session_with(self.fake_sm)
+        secrets_utils.ensure_app_bearer_token_exists(session=self.session, env_slug="sandbox", app=self.app)
+        # A neighbour's bag in the same account must survive the prefix purge.
+        self.fake_sm.create_secret(
+            Name="humr/sandbox/neighbour/secrets", Description="seed", SecretString='{"HUMR_APP_BEARER": "theirs"}',
+        )
+
+    def test_removal_purges_the_bag_and_cascades_the_token_row(self) -> None:
+        self.assertIn("humr/sandbox/revokedagent/secrets", self.fake_sm.store)
+        self.assertTrue(models.AppBearerToken.objects.filter(app=self.app).exists())
+
+        with patch.object(app_remove_executor, "_get_env_session", return_value=self.session):
+            success = app_remove_executor.run_removal(app_id=str(self.app.id))
+
+        self.assertTrue(success)
+        self.assertNotIn("humr/sandbox/revokedagent/secrets", self.fake_sm.store)
+        self.assertIn("humr/sandbox/neighbour/secrets", self.fake_sm.store)
+        self.assertFalse(models.App.objects.filter(id=self.app.id).exists())
+        self.assertFalse(models.AppBearerToken.objects.filter(app_id=self.app.id).exists())
+        self.assertFalse(models.SandboxSlugClaim.objects.filter(slug="revokedagent").exists())
+
+    def test_failed_purge_keeps_the_slug_claim_and_the_token(self) -> None:
+        error = ClientError(
+            error_response={"Error": {"Code": "AccessDeniedException", "Message": "no"}},
+            operation_name="ListSecrets",
+        )
+
+        with patch.object(app_remove_executor, "_run_secrets_purge", side_effect=error):
+            success = app_remove_executor.run_removal(app_id=str(self.app.id))
+
+        self.assertFalse(success)
+        self.app.refresh_from_db()
+        self.assertEqual(self.app.job_status, models.App.JobStatus.IDLE)
+        self.assertEqual(self.app.last_attempt_error, models.App.LastAttemptError.REMOVAL_FAILED)
+        self.assertTrue(models.SandboxSlugClaim.objects.filter(slug="revokedagent").exists())
+        self.assertTrue(models.AppBearerToken.objects.filter(app=self.app).exists())
+        self.assertIn("humr/sandbox/revokedagent/secrets", self.fake_sm.store)
