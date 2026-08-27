@@ -1,4 +1,13 @@
-"""HUMR-hosted vault endpoints for user-owned integration credentials."""
+"""HUMR-hosted vault endpoints for user-owned integration credentials.
+
+Two auth stories live here. `setup-session` is called by the env-resident
+broker with its per-app bearer, from which the App, Environment and owner are
+derived; it mints a signed `submit_token` that binds that identity (app id,
+owner id, environment id, provider, allowed browser origin). `submit` and `poll`
+are then called directly from the user's browser with only that signed token —
+no bearer — so their identity is re-derived from the token payload and
+re-checked against the App's current owner tag before anything is written.
+"""
 
 import dataclasses
 import logging
@@ -68,23 +77,24 @@ def _schema_for_provider(provider: str, existing: IntegrationUserCredential | No
 
 def _setup_token_payload(
     owner_user: User,
-    environment: Environment,
-    app_slug: str,
+    app: App,
     provider: str,
     allowed_origin: str,
     provider_state: dict | None,
 ) -> dict:
     """Build the signed setup-session payload.
 
-    `provider_state` carries provider-generated session state (e.g. Telegram's
-    suggested bot username) that the poll endpoint must trust — signing it
-    into the token keeps the browser from substituting its own values.
+    The app is bound by id (not slug) so a slug freed by removal and reclaimed
+    by a different app can never satisfy an old token. `provider_state` carries
+    provider-generated session state (e.g. Telegram's suggested bot username)
+    that the poll endpoint must trust — signing it into the token keeps the
+    browser from substituting its own values.
     """
     return {
         "purpose": "integration_credential_submit",
         "owner_user_id": str(owner_user.id),
-        "environment_id": str(environment.id),
-        "app_slug": app_slug,
+        "environment_id": str(app.environment_id),
+        "app_id": str(app.id),
         "provider": provider,
         "allowed_origin": allowed_origin,
         "provider_state": provider_state,
@@ -95,25 +105,16 @@ def _setup_token_payload(
 @require_POST
 def integrations_credential_setup_session(request: HttpRequest) -> JsonResponse:
     """Mint a short-lived browser-to-HUMR credential submission session."""
-    environment, auth_error = broker_request_context.resolve_env_bearer_context(request=request)
+    app, auth_error = broker_request_context.resolve_app_bearer_context(request=request)
     if auth_error is not None:
         return auth_error
+    owner_user, owner_error = broker_request_context.resolve_app_owner(app=app)
+    if owner_error is not None:
+        return owner_error
     payload, parse_error = broker_request_context.parse_json_body(request=request)
     if parse_error is not None:
         return parse_error
-    owner_user, owner_error = broker_request_context.resolve_owner_user(
-        owner_username=payload.get("owner_username"),
-        environment=environment,
-    )
-    if owner_error is not None:
-        return owner_error
-    app_slug, app_error = broker_request_context.resolve_owned_app_slug(
-        app_slug=payload.get("app_slug"),
-        environment=environment,
-        owner_user=owner_user,
-    )
-    if app_error is not None:
-        return app_error
+    environment = app.environment
     provider, provider_error = _provider_from_payload(provider=payload.get("provider"))
     if provider_error is not None:
         return provider_error
@@ -127,15 +128,10 @@ def integrations_credential_setup_session(request: HttpRequest) -> JsonResponse:
     existing = IntegrationUserCredential.objects.filter(
         owner_user=owner_user,
         environment=environment,
-        app_slug=app_slug,
+        app_slug=app.slug,
         provider=provider,
     ).first()
-    # The Slack schema seeds its default app name from the deploying app's
-    # template; resolve_owned_app_slug already verified ownership by slug.
-    app = App.objects.select_related("source_template").filter(
-        organization=environment.aws_account.organization,
-        slug=app_slug,
-    ).first()
+    # The Slack schema seeds its default app name from the deploying app's template.
     schema = _schema_for_provider(provider=provider, existing=existing, app=app, owner_user=owner_user)
     # Providers with a link+poll connect flow generate per-session state in
     # schema() (e.g. the suggested bot username); it travels only inside the
@@ -143,8 +139,7 @@ def integrations_credential_setup_session(request: HttpRequest) -> JsonResponse:
     provider_state = schema.pop("signed_state", None)
     submit_payload = _setup_token_payload(
         owner_user=owner_user,
-        environment=environment,
-        app_slug=app_slug,
+        app=app,
         provider=provider,
         allowed_origin=allowed_origin,
         provider_state=provider_state,
@@ -218,7 +213,13 @@ class _SetupContext:
 
 
 def _resolve_setup_context(request: HttpRequest, payload: dict) -> tuple[_SetupContext | None, JsonResponse | None]:
-    """Verify the setup token + origin and resolve the owner/env/app it binds."""
+    """Verify the setup token + origin and resolve the owner/env/app it binds.
+
+    There is no bearer on submit/poll, so the App is looked up by the id signed
+    into the token (scoped to the signed environment) and its owner is derived
+    again from the current owner tag. If ownership changed since the session was
+    minted, the token no longer describes reality and is refused.
+    """
     request_origin = request.headers.get("Origin", "")
     token_payload, token_error = _load_setup_token(token=payload.get("submit_token"), request_origin=request_origin)
     if token_error is not None:
@@ -228,24 +229,26 @@ def _resolve_setup_context(request: HttpRequest, payload: dict) -> tuple[_SetupC
         return None, JsonResponse({"error": "origin is not allowed"}, status=403)
 
     try:
-        owner_user = User.objects.get(id=token_payload["owner_user_id"])
-        environment = Environment.objects.get(id=token_payload["environment_id"])
-    except (User.DoesNotExist, Environment.DoesNotExist):
+        environment = Environment.objects.select_related("aws_account__organization").get(id=token_payload["environment_id"])
+    except Environment.DoesNotExist:
+        return None, _cors_json_response({"error": "setup context no longer exists"}, status=404, allowed_origin=allowed_origin)
+    app = App.objects.filter(
+        id=token_payload["app_id"],
+        organization=environment.aws_account.organization,
+        environment=environment,
+    ).first()
+    if app is None:
         return None, _cors_json_response({"error": "setup context no longer exists"}, status=404, allowed_origin=allowed_origin)
 
-    app_slug, app_error = broker_request_context.resolve_owned_app_slug(
-        app_slug=token_payload["app_slug"],
-        environment=environment,
-        owner_user=owner_user,
-    )
-    if app_error is not None:
+    owner_user, owner_error = broker_request_context.resolve_app_owner(app=app)
+    if owner_error is not None or str(owner_user.id) != token_payload["owner_user_id"]:
         return None, _cors_json_response({"error": "app is not available"}, status=403, allowed_origin=allowed_origin)
     return _SetupContext(
         token_payload=token_payload,
         allowed_origin=allowed_origin,
         owner_user=owner_user,
         environment=environment,
-        app_slug=app_slug,
+        app_slug=app.slug,
     ), None
 
 

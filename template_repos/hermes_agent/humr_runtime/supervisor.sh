@@ -107,13 +107,14 @@ start_aws_signer() {
 }
 
 start_humr_broker() {
-    # Only when deploy_app.py's env-bearer overlay supplied the required
-    # identity. Missing any of them = not a personal-assistant deploy (e.g.
-    # local dev), so skip silently — but nono-managed clients will then
-    # call Google without HTTPS_PROXY set and get ENOTCONN, which is the
-    # expected local-dev behavior.
-    if [ -z "${HUMR_ENV_BEARER:-}" ] || [ -z "${HUMR_OWNER_USERNAME:-}" ] || [ -z "${HUMR_APP_SLUG:-}" ] || [ -z "${HUMR_CONTROL_PLANE_URL:-}" ]; then
-        echo "[supervisor] HUMR_ENV_BEARER / HUMR_OWNER_USERNAME / HUMR_APP_SLUG / HUMR_CONTROL_PLANE_URL not set; skipping humr broker"
+    # Only when deploy_app.py's bearer overlay supplied the app bearer plus
+    # the identity the broker shows locally (status card, logs). Missing any
+    # of them = not a personal-assistant deploy (e.g. local dev), so skip
+    # silently — but nono-managed clients will then call Google without
+    # HTTPS_PROXY set and get ENOTCONN, which is the expected local-dev
+    # behavior.
+    if [ -z "${HUMR_APP_BEARER:-}" ] || [ -z "${HUMR_OWNER_USERNAME:-}" ] || [ -z "${HUMR_APP_SLUG:-}" ] || [ -z "${HUMR_CONTROL_PLANE_URL:-}" ]; then
+        echo "[supervisor] HUMR_APP_BEARER / HUMR_OWNER_USERNAME / HUMR_APP_SLUG / HUMR_CONTROL_PLANE_URL not set; skipping humr broker"
         return
     fi
     mkdir -p "$INTEGRATIONS_BROKER_CA_DIR" "$INTEGRATIONS_BROKER_PRIVATE_DIR"

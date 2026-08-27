@@ -1,4 +1,8 @@
-"""Broker-facing endpoints that store device-flow OAuth refresh tokens."""
+"""Broker-facing endpoints that store device-flow OAuth refresh tokens.
+
+The app and its owner are derived from the per-app bearer; the body carries
+only the provider-specific fields (e.g. `refresh_token`).
+"""
 
 import logging
 
@@ -19,30 +23,20 @@ def integrations_device_complete(request: HttpRequest, provider: str) -> JsonRes
     if spec is None or not hasattr(spec.module, "store_device_credentials"):
         return JsonResponse({"error": "unknown device-flow provider"}, status=404)
 
-    environment, auth_error = broker_request_context.resolve_env_bearer_context(request=request)
+    app, auth_error = broker_request_context.resolve_app_bearer_context(request=request)
     if auth_error is not None:
         return auth_error
+    owner_user, owner_error = broker_request_context.resolve_app_owner(app=app)
+    if owner_error is not None:
+        return owner_error
     payload, parse_error = broker_request_context.parse_json_body(request=request)
     if parse_error is not None:
         return parse_error
-    owner_user, owner_error = broker_request_context.resolve_owner_user(
-        owner_username=payload.get("owner_username"),
-        environment=environment,
-    )
-    if owner_error is not None:
-        return owner_error
-    app_slug, app_error = broker_request_context.resolve_owned_app_slug(
-        app_slug=payload.get("app_slug"),
-        environment=environment,
-        owner_user=owner_user,
-    )
-    if app_error is not None:
-        return app_error
 
     status, response_payload = spec.module.store_device_credentials(
-        environment=environment,
+        environment=app.environment,
         owner_user=owner_user,
-        app_slug=app_slug,
+        app_slug=app.slug,
         payload=payload,
     )
     return JsonResponse(response_payload, status=status)

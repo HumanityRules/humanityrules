@@ -1,5 +1,9 @@
 """Tests for POST /api/integrations/tokens — the batched env-resident refresh endpoint.
 
+The app and its owner come from the per-app bearer; the body carries only
+`providers`. Anything else a client sends (an `owner_username` / `app_slug`
+naming some other pair) is ignored.
+
 These tests use TransactionTestCase rather than TestCase because the view
 runs per-provider helpers in a ThreadPoolExecutor (so wall-clock at boot is
 one slow upstream, not N × upstream). Worker threads open their own DB
@@ -7,7 +11,6 @@ connections, which would never see TestCase's uncommitted setUp data —
 TransactionTestCase commits + truncates per-test instead.
 """
 
-import hashlib
 import json
 import logging
 from unittest.mock import MagicMock, patch
@@ -18,7 +21,6 @@ from humanityrules_app.models import (
     AWSAccount,
     App,
     Environment,
-    EnvironmentBearerToken,
     IntegrationConfig,
     IntegrationSharedCredential,
     IntegrationUserCredential,
@@ -30,11 +32,8 @@ from humanityrules_app.models import (
     Workspace,
 )
 from humanityrules_app.services import abac_service
+from humanityrules_app.tests import bearer_test_helpers
 from humanityrules_app.tests.app_test_factories import make_source_template
-
-
-def _hash(raw: str) -> str:
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 GOOGLE_WEB_CONFIG = {
@@ -65,16 +64,12 @@ class _BatchTokensEndpointTestBase(TransactionTestCase):
         OrganizationMembership.objects.create(
             user=self.user, organization=self.org, role=OrganizationMembership.Role.MEMBER,
         )
-        self.raw_token = "b" * 64
-        EnvironmentBearerToken.objects.create(
-            environment=self.env, token_hash=_hash(self.raw_token),
-        )
         IntegrationConfig.objects.create(
             provider=IntegrationConfig.Provider.GOOGLE,
             config=GOOGLE_WEB_CONFIG,
         )
-        # The endpoint verifies owner_username owns app_slug (ResourceTag owner check),
-        # so seed app "hermes" owned by "vmendi" — the (owner, app) pair every test posts.
+        # The endpoint derives the owner from the app's ResourceTag, so seed app
+        # "hermes" owned by "vmendi" — the pair every test's bearer resolves to.
         self.workspace = Workspace.objects.get(organization=self.org, slug="default")
         self.app = App.objects.create(
             organization=self.org, workspace=self.workspace,
@@ -87,6 +82,7 @@ class _BatchTokensEndpointTestBase(TransactionTestCase):
             organization=self.org, resource_type=ResourceTag.ResourceType.APP,
             app=self.app, key="owner", value="vmendi",
         )
+        self.raw_token = bearer_test_helpers.make_app_bearer(app=self.app, raw="b" * 64)
         self.client = Client()
 
     def _post(self, body: dict, token: str | None) -> tuple[int, dict]:
@@ -106,14 +102,14 @@ class TestAuth(_BatchTokensEndpointTestBase):
 
     def test_missing_bearer_returns_401(self) -> None:
         status, _ = self._post(
-            body={"owner_username": "vmendi", "app_slug": "hermes", "providers": ["google"]},
+            body={"providers": ["google"]},
             token=None,
         )
         self.assertEqual(status, 401)
 
     def test_wrong_bearer_returns_401(self) -> None:
         status, _ = self._post(
-            body={"owner_username": "vmendi", "app_slug": "hermes", "providers": ["google"]},
+            body={"providers": ["google"]},
             token="nope",
         )
         self.assertEqual(status, 401)
@@ -121,17 +117,9 @@ class TestAuth(_BatchTokensEndpointTestBase):
 
 class TestValidation(_BatchTokensEndpointTestBase):
 
-    def test_missing_owner_username_returns_400(self) -> None:
-        status, _ = self._post(body={"app_slug": "hermes", "providers": ["google"]}, token=self.raw_token)
-        self.assertEqual(status, 400)
-
-    def test_missing_app_slug_returns_400(self) -> None:
-        status, _ = self._post(body={"owner_username": "vmendi", "providers": ["google"]}, token=self.raw_token)
-        self.assertEqual(status, 400)
-
     def test_empty_providers_returns_400(self) -> None:
         status, _ = self._post(
-            body={"owner_username": "vmendi", "app_slug": "hermes", "providers": []},
+            body={"providers": []},
             token=self.raw_token,
         )
         self.assertEqual(status, 400)
@@ -153,8 +141,6 @@ class TestDisconnectedProvidersReturnAbsent(_BatchTokensEndpointTestBase):
              self.assertNoLogs(logger="humanityrules_app.views.integrations.provider_github", level=logging.INFO):
             status, body = self._post(
                 body={
-                    "owner_username": "vmendi",
-                    "app_slug": "hermes",
                     "providers": ["google", "github", "telegram", "nous"],
                 },
                 token=self.raw_token,
@@ -174,26 +160,12 @@ class TestDisconnectedProvidersReturnAbsent(_BatchTokensEndpointTestBase):
     def test_unknown_provider_slug_is_absent(self) -> None:
         status, body = self._post(
             body={
-                "owner_username": "vmendi", "app_slug": "hermes",
                 "providers": ["google", "unknown-provider"],
             },
             token=self.raw_token,
         )
         self.assertEqual(status, 200)
         self.assertEqual(body["results"]["unknown-provider"], {"outcome": "absent"})
-
-    def test_unknown_user_returns_all_absent_without_logging(self) -> None:
-        """A stale username should map to absent across every provider, not a top-level 4xx."""
-        status, body = self._post(
-            body={
-                "owner_username": "not-a-user", "app_slug": "hermes",
-                "providers": ["google", "github", "telegram", "nous"],
-            },
-            token=self.raw_token,
-        )
-        self.assertEqual(status, 200)
-        for slug in ("google", "github", "telegram", "nous"):
-            self.assertEqual(body["results"][slug], {"outcome": "absent"})
 
 
 class TestConnectedProvidersReturnHasToken(_BatchTokensEndpointTestBase):
@@ -219,7 +191,7 @@ class TestConnectedProvidersReturnHasToken(_BatchTokensEndpointTestBase):
             return_value=http_response,
         ):
             status, body = self._post(
-                body={"owner_username": "vmendi", "app_slug": "hermes", "providers": ["google"]},
+                body={"providers": ["google"]},
                 token=self.raw_token,
             )
 
@@ -261,7 +233,7 @@ class TestConnectedProvidersReturnHasToken(_BatchTokensEndpointTestBase):
             return_value=http_response,
         ):
             status, body = self._post(
-                body={"owner_username": "vmendi", "app_slug": "hermes", "providers": ["google"]},
+                body={"providers": ["google"]},
                 token=self.raw_token,
             )
 
@@ -284,7 +256,7 @@ class TestConnectedProvidersReturnHasToken(_BatchTokensEndpointTestBase):
         )
 
         status, body = self._post(
-            body={"owner_username": "vmendi", "app_slug": "hermes", "providers": ["telegram"]},
+            body={"providers": ["telegram"]},
             token=self.raw_token,
         )
 
@@ -304,7 +276,7 @@ class TestConnectedProvidersReturnHasToken(_BatchTokensEndpointTestBase):
         )
 
         status, body = self._post(
-            body={"owner_username": "vmendi", "app_slug": "hermes", "providers": ["openrouter"]},
+            body={"providers": ["openrouter"]},
             token=self.raw_token,
         )
 
@@ -324,7 +296,7 @@ class TestConnectedProvidersReturnHasToken(_BatchTokensEndpointTestBase):
         )
 
         status, body = self._post(
-            body={"owner_username": "vmendi", "app_slug": "hermes", "providers": ["openai-api"]},
+            body={"providers": ["openai-api"]},
             token=self.raw_token,
         )
 
@@ -343,7 +315,7 @@ class TestConnectedProvidersReturnHasToken(_BatchTokensEndpointTestBase):
         )
 
         status, body = self._post(
-            body={"owner_username": "vmendi", "app_slug": "hermes", "providers": ["anthropic"]},
+            body={"providers": ["anthropic"]},
             token=self.raw_token,
         )
 
@@ -375,7 +347,7 @@ class TestConnectedProvidersReturnHasToken(_BatchTokensEndpointTestBase):
             return_value=http_response,
         ) as post_mock:
             status, body = self._post(
-                body={"owner_username": "vmendi", "app_slug": "hermes", "providers": ["nous"]},
+                body={"providers": ["nous"]},
                 token=self.raw_token,
             )
 
@@ -405,7 +377,7 @@ class TestSharedCredentials(_BatchTokensEndpointTestBase):
 
     def _post_openrouter(self) -> dict:
         status, body = self._post(
-            body={"owner_username": "vmendi", "app_slug": "hermes", "providers": ["openrouter"]},
+            body={"providers": ["openrouter"]},
             token=self.raw_token,
         )
         self.assertEqual(status, 200)
@@ -513,7 +485,7 @@ class TestPlatformSharedCredentials(_BatchTokensEndpointTestBase):
 
     def _post_tavily(self) -> dict:
         status, body = self._post(
-            body={"owner_username": "vmendi", "app_slug": "hermes", "providers": ["tavily"]},
+            body={"providers": ["tavily"]},
             token=self.raw_token,
         )
         self.assertEqual(status, 200)
@@ -579,7 +551,6 @@ class TestMixedConnectedAndAbsent(_BatchTokensEndpointTestBase):
         ):
             status, body = self._post(
                 body={
-                    "owner_username": "vmendi", "app_slug": "hermes",
                     "providers": ["google", "github", "telegram"],
                 },
                 token=self.raw_token,
@@ -592,8 +563,8 @@ class TestMixedConnectedAndAbsent(_BatchTokensEndpointTestBase):
 
 
 class TestAppOwnership(_BatchTokensEndpointTestBase):
-    """The env bearer is org-wide, so the endpoint must verify owner_username owns app_slug
-    before serving its tokens — a missing or unowned app is rejected, not degraded to absent."""
+    """The bearer names the app and the app's owner tag names the user; the body cannot
+    redirect either. An app with no owner has no user to refresh for and is rejected."""
 
     def _make_app(self, slug: str, owner_username: str | None) -> App:
         app = App.objects.create(
@@ -610,24 +581,35 @@ class TestAppOwnership(_BatchTokensEndpointTestBase):
             )
         return app
 
-    def _post_status(self, app_slug: str) -> int:
-        status, _ = self._post(
-            body={"owner_username": "vmendi", "app_slug": app_slug, "providers": ["google"]},
+    def test_body_naming_another_owner_and_app_is_ignored(self) -> None:
+        theirs = self._make_app("theirs", owner_username="someone-else")
+        IntegrationUserCredential.objects.create(
+            owner_user=self.user, environment=self.env, app_slug="hermes",
+            provider=IntegrationUserCredential.Provider.OPENROUTER,
+            credentials={"api_key": "sk-or-HERMES"},
+        )
+
+        status, body = self._post(
+            body={"owner_username": "someone-else", "app_slug": theirs.slug, "providers": ["openrouter"]},
             token=self.raw_token,
         )
-        return status
 
-    def test_owned_app_is_authorized(self) -> None:
-        # The base seeds "hermes" owned by vmendi; the guard lets it through.
-        self.assertEqual(self._post_status("hermes"), 200)
+        # The bearer's own (vmendi, hermes) credential is what comes back.
+        self.assertEqual(status, 200)
+        self.assertEqual(body["results"]["openrouter"]["secrets"], {"api_key": "sk-or-HERMES"})
 
-    def test_missing_app_returns_404(self) -> None:
-        self.assertEqual(self._post_status("ghost"), 404)
+    def test_app_without_owner_returns_404(self) -> None:
+        lonely = self._make_app("lonely", owner_username=None)
+        lonely_token = bearer_test_helpers.make_app_bearer(app=lonely, raw="l" * 64)
 
-    def test_unowned_app_returns_403(self) -> None:
-        self._make_app("lonely", owner_username=None)
-        self.assertEqual(self._post_status("lonely"), 403)
+        status, _ = self._post(body={"providers": ["google"]}, token=lonely_token)
 
-    def test_app_owned_by_another_user_returns_403(self) -> None:
-        self._make_app("theirs", owner_username="someone-else")
-        self.assertEqual(self._post_status("theirs"), 403)
+        self.assertEqual(status, 404)
+
+    def test_owner_who_left_the_org_returns_404(self) -> None:
+        gone = self._make_app("gone", owner_username="departed")
+        gone_token = bearer_test_helpers.make_app_bearer(app=gone, raw="g" * 64)
+
+        status, _ = self._post(body={"providers": ["google"]}, token=gone_token)
+
+        self.assertEqual(status, 404)

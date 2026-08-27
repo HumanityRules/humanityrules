@@ -197,9 +197,7 @@ class TestAggregatorMergeDisabled(unittest.IsolatedAsyncioTestCase):
             persistent_dir=pathlib.Path(self.tempdir.name),
             public_base_url="https://hermes.example",
             humr_control_plane_url="https://humr.example",
-            humr_env_bearer="b",
-            humr_app_slug="hermes-test",
-            humr_owner_username="vmendi",
+            humr_app_bearer="b",
             merge_enabled=False,
         )
 
@@ -229,9 +227,7 @@ class TestAggregatorRouteNamespaces(unittest.IsolatedAsyncioTestCase):
             persistent_dir=pathlib.Path(self.tempdir.name),
             public_base_url="https://hermes.example",
             humr_control_plane_url="https://humr.example",
-            humr_env_bearer="b",
-            humr_app_slug="hermes-test",
-            humr_owner_username="vmendi",
+            humr_app_bearer="b",
             merge_enabled=True,
         )
 
@@ -526,9 +522,7 @@ class TestMergeBackendStateHooks(unittest.IsolatedAsyncioTestCase):
         self.hook = AsyncMock()
         self.merge = mcp_merge_backend.MergeBackend(
             humr_control_plane_url="https://humr.example",
-            humr_env_bearer="b",
-            humr_app_slug="hermes-test",
-            humr_owner_username="vmendi",
+            humr_app_bearer="b",
             excluded_connector_slugs=frozenset({"posthog"}),
             on_config_change=self.hook,
         )

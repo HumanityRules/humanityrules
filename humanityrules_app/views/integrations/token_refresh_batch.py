@@ -1,11 +1,15 @@
 """Batched integration token refresh for env-resident Hermes brokers.
 
-POST /api/integrations/tokens (env bearer auth) returns a per-slug outcome
+POST /api/integrations/tokens (per-app bearer auth) returns a per-slug outcome
 map for the requested providers. The Hermes integration broker calls this at
 bootstrap (Refresh-all) and after connect/disconnect (single-slug list).
 
-    body: {owner_username, app_slug, providers: ["google", "github", ...]}
+    body: {providers: ["google", "github", ...]}
     resp: 200 {results: {<slug>: {outcome, secrets?, expires_in?, config, metadata}, ...}}
+
+The app and its owner come from the bearer (token -> App -> owner ResourceTag),
+so a broker can only ever pull tokens for its own app/owner pair. An app with no
+owner tag is rejected (404) — there is no user whose grants it could refresh.
 
 Each slug routes to a provider outcome helper (OAuth token exchange or vault
 DB read). Helpers run in parallel via ThreadPoolExecutor so wall-clock time
@@ -14,7 +18,7 @@ not the sum across slugs.
 
 `outcome` is `has_token`, `absent`, or `transient`. `absent` means no
 connected integration row — a normal 200 entry, not an HTTP error. Unknown
-slugs and users with no org membership on the env also return `absent`.
+slugs also return `absent`.
 Handler exceptions surface as `transient` so the broker can keep serving a
 still-valid cached token when refresh fails transiently.
 """
@@ -27,7 +31,7 @@ from django.http import HttpRequest, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
-from humanityrules_app.models import App, Environment, User
+from humanityrules_app.models import Environment, User
 from humanityrules_app.views.integrations import (
     broker_request_context,
     platform_credential_resolver,
@@ -42,23 +46,22 @@ logger = logging.getLogger(__name__)
 @require_POST
 def integrations_tokens_batch(request: HttpRequest) -> JsonResponse:
     """Refresh many providers in one round-trip; `absent` is a normal result, not 404."""
-    environment, auth_error = broker_request_context.resolve_env_bearer_context(request=request)
+    app, auth_error = broker_request_context.resolve_app_bearer_context(request=request)
     if auth_error is not None:
-        logger.error("batched token refresh: env bearer auth failed")
+        logger.error("batched token refresh: app bearer auth failed")
         return auth_error
+    environment = app.environment
+    app_slug = app.slug
+    user, owner_error = broker_request_context.resolve_app_owner(app=app)
+    if owner_error is not None:
+        logger.error("batched token refresh: app has no resolvable owner env=%s app=%s", environment.slug, app_slug)
+        return owner_error
+    owner_username = user.username
     payload, parse_error = broker_request_context.parse_json_body(request=request)
     if parse_error is not None:
-        logger.error("batched token refresh: invalid JSON body env=%s", environment.slug)
+        logger.error("batched token refresh: invalid JSON body env=%s app=%s", environment.slug, app_slug)
         return parse_error
 
-    owner_username = payload.get("owner_username")
-    if not isinstance(owner_username, str) or not owner_username:
-        logger.error("batched token refresh: missing owner_username env=%s", environment.slug)
-        return JsonResponse({"error": "owner_username is required"}, status=400)
-    app_slug = payload.get("app_slug")
-    if not isinstance(app_slug, str) or not app_slug:
-        logger.error("batched token refresh: missing app_slug env=%s owner=%s", environment.slug, owner_username)
-        return JsonResponse({"error": "app_slug is required"}, status=400)
     requested_providers = payload.get("providers")
     if not isinstance(requested_providers, list) or not requested_providers:
         logger.error(
@@ -73,31 +76,6 @@ def integrations_tokens_batch(request: HttpRequest) -> JsonResponse:
                 environment.slug, owner_username, app_slug, requested_providers,
             )
             return JsonResponse({"error": "providers must be non-empty strings"}, status=400)
-
-    user = User.objects.filter(
-        username=owner_username,
-        organization_memberships__organization=environment.aws_account.organization,
-    ).first()
-    if user is None:
-        # No org/user binding for this env+username; surface as absent for
-        # every provider so the broker treats them as disconnected. Avoid
-        # logging — a stale username after an org membership change should
-        # not look like an error from this endpoint's perspective.
-        return JsonResponse({"results": {slug: {"outcome": "absent"} for slug in requested_providers}})
-
-    # The env bearer is org-wide, so before handing back tokens verify the requested app
-    # actually belongs to owner_username — the ResourceTag owner check every other broker
-    # endpoint does. Without it, any app holding the bearer could pull another owner/app's
-    # outcome. A missing or unowned app is rejected (404/403), not degraded to absent.
-    _owned_slug, ownership_error = broker_request_context.resolve_owned_app_slug(
-        app_slug=app_slug, environment=environment, owner_user=user,
-    )
-    if ownership_error is not None:
-        logger.error(
-            "batched token refresh: app ownership check failed env=%s owner=%s app=%s",
-            environment.slug, owner_username, app_slug,
-        )
-        return ownership_error
 
     logger.info(
         "batched token refresh: env=%s owner=%s app=%s providers=%s",
@@ -125,10 +103,8 @@ def integrations_tokens_batch(request: HttpRequest) -> JsonResponse:
 
     # Org-provisioned shared credentials win over the user's own pasted key.
     # Resolve them first (DB-only, no upstream calls); whatever they cover drops
-    # out of the personal-refresh dispatch below. The ownership guard above already
-    # confirmed this app exists and is owned by owner_username, so the lookup hits.
-    organization = environment.aws_account.organization
-    app = App.objects.filter(organization=organization, slug=app_slug).first()
+    # out of the personal-refresh dispatch below.
+    organization = app.organization
     personal_specs = {}
     for slug, spec in specs_to_run.items():
         refresh_outcome_from_shared = getattr(spec.module, "refresh_outcome_from_shared", None)

@@ -1,12 +1,13 @@
 """Bearer-auth JSON endpoints for the self-referential Hermes permissions editor.
 
 The env-resident `humr_broker` relays the Hermes WebUI's `/permissions/*` calls
-here (env bearer + {owner_username, app_slug, ...} body). HUMR owns auth, target
+here (per-app bearer + operation-specific body). HUMR owns auth, target
 resolution, ABAC, and the async Apply job; the sandbox never holds the bearer.
 
-The target `(app, environment)` is never a request parameter — it is resolved
-from the env bearer (-> environment) plus owner_username/app_slug (-> the app
-owned by that user), exactly as the integration endpoints do. This is the JSON
+The target `(app, environment, owner)` is never a request parameter — all three
+are derived from the app bearer (token -> App -> Environment; App -> owner
+ResourceTag), exactly as the integration endpoints do. Anything a client still
+puts in the body under `app_slug` / `owner_username` is ignored. This is the JSON
 twin of the session-auth HTML editor in `security_permissions_editor.py`; both
 sit on the same `services/permissions_service.py` service layer.
 """
@@ -38,25 +39,17 @@ class _Deployment:
 
 
 def _resolve_deployment(request: HttpRequest) -> tuple[_Deployment | None, JsonResponse | None]:
-    """Resolve (environment, owner_user, app) + body from the env bearer, or an error response."""
-    environment, auth_error = broker_request_context.resolve_env_bearer_context(request=request)
+    """Resolve (environment, owner_user, app) from the app bearer, plus the JSON body, or an error response."""
+    app, auth_error = broker_request_context.resolve_app_bearer_context(request=request)
     if auth_error is not None:
         return None, auth_error
     payload, parse_error = broker_request_context.parse_json_body(request=request)
     if parse_error is not None:
         return None, parse_error
-    owner_user, owner_error = broker_request_context.resolve_owner_user(
-        owner_username=payload.get("owner_username"), environment=environment,
-    )
+    owner_user, owner_error = broker_request_context.resolve_app_owner(app=app)
     if owner_error is not None:
         return None, owner_error
-    app_slug, app_error = broker_request_context.resolve_owned_app_slug(
-        app_slug=payload.get("app_slug"), environment=environment, owner_user=owner_user,
-    )
-    if app_error is not None:
-        return None, app_error
-    app = App.objects.get(organization=environment.aws_account.organization, environment=environment, slug=app_slug)
-    return _Deployment(environment=environment, owner_user=owner_user, app=app, payload=payload), None
+    return _Deployment(environment=app.environment, owner_user=owner_user, app=app, payload=payload), None
 
 
 def _get_scoped_request(deployment: _Deployment, request_id: object) -> AppPermissionRequest | None:

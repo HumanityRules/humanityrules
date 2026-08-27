@@ -1,10 +1,11 @@
 """Browser-facing relay for the self-referential permissions editor.
 
 Pure transport: each route parses the WebUI's `/__humr_broker/permissions/*`
-request, forwards it to HUMR's `/api/permissions/*` via `HumrClient` (which attaches
-the env bearer and the deployment's owner/app identity), and serializes the
-reply. No bearer, no authorization decision, and no target `(app, environment)`
-ever lives here — HUMR resolves all of that from the bearer + identity.
+request, forwards it to HUMR's `/api/permissions/*` via `HumrClient` (which
+attaches the app bearer), and serializes the reply. No bearer, no authorization
+decision, and no target `(app, environment, owner)` ever lives here — HUMR
+derives all of that from the bearer alone, so nothing a loopback caller puts in
+the body can change which app is acted on.
 
 Browser path-params (request_id) and query (request_id, service) are folded into
 the JSON payload because every HUMR permissions endpoint is POST + body. The

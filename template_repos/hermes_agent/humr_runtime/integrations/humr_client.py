@@ -1,11 +1,15 @@
-"""Outbound JSON client for HUMR's per-env integration endpoints.
+"""Outbound JSON client for HUMR's app-facing integration endpoints.
 
 One `HumrClient` instance, built by the broker at startup, owns the
-control-plane URL, the env bearer, and the owner/app identity that every
-per-env integration endpoint requires. Everything in the broker that talks
+control-plane URL and the app's bearer. Everything in the broker that talks
 to HUMR (token refresh, device-flow completion, disconnect, vault setup
 sessions, usage reporting, entitlement refresh) goes through it — the bearer
 never leaves this module.
+
+The bearer is per-app, so HUMR derives the App and its owner from it; nothing
+about identity travels in the request. `owner_username` and `app_slug` are
+kept on the instance only for the WebUI status card and logs — they are never
+put on the wire, so a loopback caller of the control API cannot override them.
 """
 
 import logging
@@ -17,7 +21,7 @@ logger = logging.getLogger("humr_client")
 
 
 class HumrClient:
-    """Async JSON client bound to one env bearer and one owner/app identity."""
+    """Async JSON client bound to one app bearer."""
 
     def __init__(self, control_plane_url: str, bearer: str, owner_username: str, app_slug: str) -> None:
         self.control_plane_url = control_plane_url.rstrip("/")
@@ -28,21 +32,15 @@ class HumrClient:
     async def post_json(self, path: str, payload: dict, timeout_seconds: int) -> tuple[int, dict]:
         """POST JSON to HUMR and return `(status, parsed body)`.
 
-        `owner_username` and `app_slug` are merged into every payload — all
-        of HUMR's per-env integration endpoints take them. Transport failures
-        and unparseable success bodies come back as a synthetic 502, and an
-        unparseable error body keeps its real status with a fallback body,
-        so callers only ever branch on the status code.
+        The payload is sent exactly as given — identity comes from the bearer.
+        Transport failures and unparseable success bodies come back as a
+        synthetic 502, and an unparseable error body keeps its real status
+        with a fallback body, so callers only ever branch on the status code.
         """
         url = f"{self.control_plane_url}{path}"
-        body = {
-            "owner_username": self.owner_username,
-            "app_slug": self.app_slug,
-            **payload,
-        }
         try:
             async with httpx.AsyncClient(timeout=timeout_seconds) as client:
-                response = await client.post(url=url, json=body, headers={"Authorization": f"Bearer {self._bearer}"})
+                response = await client.post(url=url, json=payload, headers={"Authorization": f"Bearer {self._bearer}"})
         except Exception as exc:
             logger.error("control plane request failed path=%s: %s", path, exc)
             return 502, {"error": "control plane request failed"}
@@ -52,9 +50,7 @@ class HumrClient:
         """GET JSON from HUMR and return `(status, parsed body)`.
 
         Same failure contract as `post_json`: callers only ever branch on the
-        status code. Nothing is merged into the request — a GET has no body to
-        carry owner/app identity, and the endpoints reached this way resolve
-        everything they need from the env bearer.
+        status code.
         """
         url = f"{self.control_plane_url}{path}"
         try:
