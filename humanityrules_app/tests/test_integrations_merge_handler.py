@@ -110,7 +110,7 @@ class TestMergeCallerResolution(TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(body["registered_user_id"], "11111111-1111-1111-1111-111111111111")
         post_mock.assert_called_once()
-        self.assertEqual(post_mock.call_args.kwargs["json"]["origin_user_id"], f"humr_{self.owner.pk}_hermes")
+        self.assertEqual(post_mock.call_args.kwargs["json"]["origin_user_id"], f"humr_{self.org.pk}_{self.owner.pk}_hermes")
 
     def test_headers_and_body_naming_another_app_and_owner_are_ignored(self) -> None:
         alice = User.objects.create_user(
@@ -128,7 +128,7 @@ class TestMergeCallerResolution(TestCase):
 
         # The bearer's own (vmendi, hermes) identity is what reaches Merge.
         self.assertEqual(status, 200)
-        self.assertEqual(post_mock.call_args.kwargs["json"]["origin_user_id"], f"humr_{self.owner.pk}_hermes")
+        self.assertEqual(post_mock.call_args.kwargs["json"]["origin_user_id"], f"humr_{self.org.pk}_{self.owner.pk}_hermes")
 
     def test_app_without_owner_returns_404(self) -> None:
         lonely = self._make_app(slug="lonely", owner_username=None)
@@ -162,3 +162,43 @@ class TestMergeCallerResolution(TestCase):
         self.assertEqual(status, 404)
         self.assertIn("error", body)
         post_mock.assert_not_called()
+
+    def test_same_user_same_slug_in_another_org_gets_a_distinct_merge_identity(self) -> None:
+        """`user.pk` is global and slugs repeat across orgs; only the org id keeps the vaults apart."""
+        other_org = Organization.objects.create(name="Other Org", slug="other-org")
+        other_aws = AWSAccount.objects.create(organization=other_org, name="Other AWS")
+        other_env = Environment.objects.create(
+            aws_account=other_aws, name="Staging", slug="staging", aws_region="us-east-1",
+        )
+        other_workspace = Workspace.objects.create(organization=other_org, name="Assistants", slug="assistants")
+        OrganizationMembership.objects.create(
+            user=self.owner, organization=other_org, role=OrganizationMembership.Role.MEMBER,
+        )
+        other_app = App.objects.create(
+            organization=other_org,
+            workspace=other_workspace,
+            source_template=make_source_template(),
+            name="hermes",
+            slug="hermes",
+            environment=other_env,
+            container_port=8000,
+            health_check_path="/health",
+            cpu=256,
+            memory=512,
+        )
+        ResourceTag.objects.create(
+            organization=other_org,
+            resource_type=ResourceTag.ResourceType.APP,
+            app=other_app,
+            key="owner",
+            value=self.owner.username,
+        )
+        other_token = bearer_test_helpers.make_app_bearer(app=other_app, raw="o" * 64)
+
+        with self._patched_merge_create() as post_mock:
+            status, _body = self._post_ensure(body={}, token=other_token, extra_headers={})
+
+        self.assertEqual(status, 200)
+        sent = post_mock.call_args.kwargs["json"]["origin_user_id"]
+        self.assertEqual(sent, f"humr_{other_org.pk}_{self.owner.pk}_hermes")
+        self.assertNotEqual(sent, f"humr_{self.org.pk}_{self.owner.pk}_hermes")

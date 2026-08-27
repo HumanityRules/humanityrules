@@ -7,9 +7,13 @@ HUMR_APP_BEARER. HUMR validates the bearer, derives the App and its owner from
 it, builds `origin_user_id` from those, attaches the Merge API key, and
 forwards. Nothing in the request names the app or owner.
 
-`origin_user_id = f"humr_{owner.pk}_{app_slug}"`. Per-app, not per-user. Same
-user destroying/recreating the same slug keeps integrations; a different user
-taking over the slug starts fresh.
+`origin_user_id = f"humr_{organization_id}_{owner.pk}_{app_slug}"`. Per-app, not
+per-user. Same user destroying/recreating the same slug in the same organization
+keeps integrations; a different user taking over the slug starts fresh. The
+organization is the tenant boundary: `user.pk` is global and slugs repeat across
+organizations, so without it one human owning `hermes` in two organizations
+would share a single Merge credential vault across both. The organization comes
+from the frozen Environment path, not the editable `App.organization` copy.
 """
 
 import json
@@ -45,8 +49,9 @@ _DUPLICATE_USER_UUID_RE = re.compile(
 )
 
 
-def _origin_user_id(*, user: User, app_slug: str) -> str:
-    return f"humr_{user.pk}_{app_slug}"
+def _origin_user_id(*, app: App, user: User) -> str:
+    organization_id = app.environment.aws_account.organization_id
+    return f"humr_{organization_id}_{user.pk}_{app.slug}"
 
 
 def _resolve_caller(request: HttpRequest) -> tuple[App, User] | JsonResponse:
@@ -76,7 +81,7 @@ def _tool_pack_or_500() -> str | JsonResponse:
     return pack_id
 
 
-def _ensure_registered_user_remote(*, user: User, app_slug: str, api_key: str) -> tuple[str | None, str | None]:
+def _ensure_registered_user_remote(*, app: App, user: User, api_key: str) -> tuple[str | None, str | None]:
     """POST /api/v1/registered-users on Merge.
 
     Merge does NOT make this endpoint idempotent — duplicate POSTs return 400
@@ -85,8 +90,8 @@ def _ensure_registered_user_remote(*, user: User, app_slug: str, api_key: str) -
     Returns `(registered_user_id, error_message)` — exactly one is None.
     """
     body = {
-        "origin_user_id": _origin_user_id(user=user, app_slug=app_slug),
-        "origin_user_name": app_slug,
+        "origin_user_id": _origin_user_id(app=app, user=user),
+        "origin_user_name": app.slug,
     }
     try:
         response = httpx.post(
@@ -152,7 +157,7 @@ def integrations_merge_ensure_registered_user(request: HttpRequest) -> JsonRespo
     if isinstance(api_key, JsonResponse):
         return api_key
 
-    rid, error = _ensure_registered_user_remote(user=user, app_slug=app.slug, api_key=api_key)
+    rid, error = _ensure_registered_user_remote(app=app, user=user, api_key=api_key)
     if error is not None:
         logger.error("merge ensure-registered-user failed: %s", error)
         return JsonResponse({"error": "merge ensure failed"}, status=502)
@@ -180,7 +185,7 @@ def integrations_merge_link_token(request: HttpRequest) -> JsonResponse:
     if isinstance(api_key, JsonResponse):
         return api_key
 
-    rid, error = _ensure_registered_user_remote(user=user, app_slug=app.slug, api_key=api_key)
+    rid, error = _ensure_registered_user_remote(app=app, user=user, api_key=api_key)
     if error is not None:
         logger.error("merge link-token: ensure failed: %s", error)
         return JsonResponse({"error": "merge ensure failed"}, status=502)
@@ -257,7 +262,7 @@ def integrations_merge_connectors(request: HttpRequest) -> JsonResponse:
     if isinstance(pack_id, JsonResponse):
         return pack_id
 
-    rid, error = _ensure_registered_user_remote(user=user, app_slug=app.slug, api_key=api_key)
+    rid, error = _ensure_registered_user_remote(app=app, user=user, api_key=api_key)
     if error is not None:
         logger.error("merge connectors: ensure failed: %s", error)
         return JsonResponse({"error": "merge ensure failed"}, status=502)
@@ -302,7 +307,7 @@ def integrations_merge_connector_status(request: HttpRequest) -> JsonResponse:
     if isinstance(api_key, JsonResponse):
         return api_key
 
-    rid, error = _ensure_registered_user_remote(user=user, app_slug=app.slug, api_key=api_key)
+    rid, error = _ensure_registered_user_remote(app=app, user=user, api_key=api_key)
     if error is not None:
         logger.error("merge connector-status: ensure failed: %s", error)
         return JsonResponse({"error": "merge ensure failed"}, status=502)
@@ -338,7 +343,7 @@ def integrations_merge_disconnect(request: HttpRequest) -> JsonResponse:
     if isinstance(api_key, JsonResponse):
         return api_key
 
-    rid, error = _ensure_registered_user_remote(user=user, app_slug=app.slug, api_key=api_key)
+    rid, error = _ensure_registered_user_remote(app=app, user=user, api_key=api_key)
     if error is not None:
         logger.error("merge disconnect: ensure failed: %s", error)
         return JsonResponse({"error": "merge ensure failed"}, status=502)
@@ -384,7 +389,7 @@ def integrations_merge_mcp(request: HttpRequest) -> StreamingHttpResponse | Json
     if isinstance(pack_id, JsonResponse):
         return pack_id
 
-    rid, error = _ensure_registered_user_remote(user=user, app_slug=app.slug, api_key=api_key)
+    rid, error = _ensure_registered_user_remote(app=app, user=user, api_key=api_key)
     if error is not None:
         logger.error("merge mcp: ensure failed: %s", error)
         return JsonResponse({"error": "merge ensure failed"}, status=502)

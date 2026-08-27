@@ -55,7 +55,7 @@ This mirrors the Google integration's earlier-resolved problem: Google's OAuth `
 │    validates HUMR_APP_BEARER → App          │
 │    owner = App's `owner` ResourceTag        │
 │    derives origin_user_id =                │
-│      f"humr_{user.pk}_{app_slug}"           │
+│      f"humr_{org_id}_{user.pk}_{app_slug}"  │
 │    attaches MERGE_AGENT_HANDLER_API_KEY    │
 │    forwards to Merge                       │
 │                                            │
@@ -70,9 +70,9 @@ This mirrors the Google integration's earlier-resolved problem: Google's OAuth `
 
 Three internet hops on the customer side (sandbox→aggregator is loopback, sub-ms). The HUMR hop is the price of keeping the Merge API key off customer infrastructure. Same trade-off Google's design already makes for token refresh.
 
-## Identity: `origin_user_id = f"humr_{user.pk}_{app_slug}"`
+## Identity: `origin_user_id = f"humr_{organization_id}_{user.pk}_{app_slug}"`
 
-Per-Hermes-app, not per-HUMR-user. Each agent gets its own connector credentials.
+Per-Hermes-app, not per-HUMR-user. Each agent gets its own connector credentials. The organization id (from the frozen `env.aws_account` path) is the tenant boundary: `user.pk` is global and slugs repeat across organizations, so one human owning `hermes` in two organizations gets two separate credential vaults.
 
 - **Same user destroys/recreates the same slug → integrations carry over.** Merge keeps the Registered User; the new container connects on next boot. Familiar redeploy semantics.
 - **Different user takes over the slug → fresh slate.** Different `user.pk` produces a different `origin_user_id`, so Merge issues a new Registered User. The old user's grants don't leak to the new owner.
@@ -133,7 +133,7 @@ The broker fires one `ensure-registered-user` call at boot as fire-and-forget. F
 ## What lives where
 
 - **`MERGE_AGENT_HANDLER_API_KEY`, `MERGE_TOOL_PACK_ID`** — HUMR settings, env-driven. Never injected into customer containers.
-- **`origin_user_id`** — derived per request from `(env.aws_account.organization, app_slug, user.pk)`. Not stored.
+- **`origin_user_id`** — derived per request as `humr_{env.aws_account.organization_id}_{user.pk}_{app_slug}`. Not stored.
 - **`registered_user_id`** — Merge's UUID for our Registered User. Not stored on HUMR; Merge's create-or-409-with-UUID flow makes per-call resolution cheap. The aggregator does cache it in process memory after the boot ensure call.
 - **Connector credentials** — Merge holds them; we never see them.
 - **Tool Pack contents** — Merge dashboard. One global Tool Pack for all HUMR customers. Per-org Tool Packs are deferred until a customer asks for it.
