@@ -91,7 +91,7 @@ PLANS: dict[str, PlanConfig] = {
         on_demand_allowed=False,
     ),
     OPERATOR: PlanConfig(
-        price_usd_month=Decimal("39"),
+        price_usd_month=Decimal("29"),
         price_usd_agent_month=None,
         monthly_credit_grant=2000,
         always_on=True,
@@ -103,7 +103,7 @@ PLANS: dict[str, PlanConfig] = {
     ),
     TEAM: PlanConfig(
         price_usd_month=None,
-        price_usd_agent_month=Decimal("29"),
+        price_usd_agent_month=Decimal("19"),
         monthly_credit_grant=0,
         always_on=True,
         trial_runtime_days=None,
