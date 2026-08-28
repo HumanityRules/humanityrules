@@ -28,8 +28,9 @@ So the WebUI has **two things that must agree**: the base image tag
 branch commits `.humr-upstream-version`, and `build/check-vendor.sh` fails the build
 if it doesn't equal the base tag. A WebUI bump moves **both** in lockstep.
 
-Each mirror's GitHub **default branch is `humr/main`** — a force-moved alias of the
-live pin, moved on every bump (step 4). The agent stack permanently carries
+Every stack commit's subject is **`humr:`-prefixed** — keep the convention when
+adding or rewording stack commits. Each mirror's GitHub **default branch is
+`humr/main`** — a force-moved alias of the live pin, moved on every bump (step 4). The agent stack permanently carries
 `humr: drop .github/dependabot.yml` (keeps Dependabot version updates dead on the
 public mirror); never report it as landed-upstream.
 
