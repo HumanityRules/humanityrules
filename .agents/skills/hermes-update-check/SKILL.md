@@ -28,6 +28,11 @@ So the WebUI has **two things that must agree**: the base image tag
 branch commits `.humr-upstream-version`, and `build/check-vendor.sh` fails the build
 if it doesn't equal the base tag. A WebUI bump moves **both** in lockstep.
 
+Each mirror's GitHub **default branch is `humr/main`** — a force-moved alias of the
+live pin, moved on every bump (step 4). The agent stack permanently carries
+`humr: drop .github/dependabot.yml` (keeps Dependabot version updates dead on the
+public mirror); never report it as landed-upstream.
+
 Rebasing happens in the workbench clones at `../hermes-agent` and `../hermes-webui`
 (siblings of this monorepo checkout) — the only checkouts with full history (the
 submodules are shallow). There, `origin` is upstream and `humr` is the mirror. Never
@@ -47,13 +52,16 @@ clone a workbench inside the monorepo; the siblings are the workbench.
 4. **Land it:** push the rebased `humr/v<new>` branch + the new upstream tag to `humr`;
    for WebUI update `.humr-upstream-version` and `WEBUI_BASE_VERSION` together; check out
    `humr/v<new>` in the submodule and commit the gitlink via `build/vendor-commit.sh`
-   (not a blind `git add -A` — it can ship an unintended pin bump).
-5. **Fast-forward the mirror's default branch** to the new upstream base so GitHub's
-   ahead-count shows the true HUMR patch count: `git push humr v<new>^{commit}:master`
-   (webui) / `:main` (agent). The `^{commit}` peel matters — agent tags are annotated,
-   and a branch can't point at a tag object. Run it from the workbench clone (full
-   history); a shallow submodule can't prove the fast-forward, though the GitHub API
-   (`PATCH /git/refs/heads/<branch>`) works from anywhere since it checks server-side.
+   (not a blind `git add -A` — it can ship an unintended pin bump). Then move the
+   default-branch alias: `git push humr humr/v<new>:humr/main --force` (both repos).
+5. **Fast-forward the upstream-mirror branch** (`master` webui / `main` agent) to the
+   new upstream base — it's the diff baseline against upstream (it is NOT the default
+   branch; GitHub's ahead/behind reads against `humr/main`): `git push humr
+   v<new>^{commit}:master` (webui) / `:main` (agent). The `^{commit}` peel matters —
+   agent tags are annotated, and a branch can't point at a tag object. Run it from the
+   workbench clone (full history); a shallow submodule can't prove the fast-forward,
+   though the GitHub API (`PATCH /git/refs/heads/<branch>`) works from anywhere since
+   it checks server-side.
 
 ## Behavior-change landmines (a clean rebase is not a working bump)
 
