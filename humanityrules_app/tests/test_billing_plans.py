@@ -91,20 +91,20 @@ class TestPlanRegistry(SimpleTestCase):
         self.assertEqual(trial.trial_runtime_days, 7)
         self.assertEqual(trial.max_agents, 1)
 
-    def test_operator_is_39_dollars_for_2000_credits_always_on(self) -> None:
+    def test_operator_is_29_dollars_for_2000_credits_always_on(self) -> None:
         operator = plans.PLANS[plans.OPERATOR]
 
-        self.assertEqual(operator.price_usd_month, Decimal("39"))
+        self.assertEqual(operator.price_usd_month, Decimal("29"))
         self.assertEqual(operator.monthly_credit_grant, 2000)
         self.assertTrue(operator.always_on)
         self.assertIsNone(operator.trial_runtime_days)
         self.assertEqual(operator.max_agents, 1)
 
-    def test_team_is_29_dollars_per_agent_with_no_credits_and_unlimited_agents(self) -> None:
+    def test_team_is_19_dollars_per_agent_with_no_credits_and_unlimited_agents(self) -> None:
         team = plans.PLANS[plans.TEAM]
 
         self.assertIsNone(team.price_usd_month)
-        self.assertEqual(team.price_usd_agent_month, Decimal("29"))
+        self.assertEqual(team.price_usd_agent_month, Decimal("19"))
         self.assertEqual(team.monthly_credit_grant, 0)
         self.assertTrue(team.always_on)
         self.assertIsNone(team.max_agents)
