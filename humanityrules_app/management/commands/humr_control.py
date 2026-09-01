@@ -5,7 +5,7 @@ Usage:
     uv run manage.py humr_control create-env --aws-account "Name" --name default --region us-east-1 --hosted-zone example.com
     uv run manage.py humr_control teardown-env --slug default --aws-account "Name"
     uv run manage.py humr_control remove-app --app aidetectorandhumanizer
-    uv run manage.py humr_control deploy-app-template --template hermes-agent --org acme-corp --workspace default --env default --app-name "Hermes Vmendi"
+    uv run manage.py humr_control deploy-app-template --template hermes-agent --org humr --workspace default --env default --app-name "Hermes Vmendi"
     uv run manage.py humr_control redeploy-env --slug default --aws-account "Name"
     uv run manage.py humr_control redeploy-app --app simpledashboard
     uv run manage.py humr_control redeploy-app --app simpledashboard

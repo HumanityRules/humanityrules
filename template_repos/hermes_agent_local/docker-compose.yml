@@ -16,9 +16,9 @@
 # with layer cache), recreates the container, and the persistent-root runner
 # rsyncs the new /opt/humr tree on start — reliable, no bind-mount clobber.
 #
-# Bedrock: mounts host ~/.aws and uses AWS_PROFILE (default bedrock_dev). Run
-# refresh-bedrock-creds.sh periodically, or bedrock-creds-launchagent.sh
-# on macOS so opsh keeps the profile fresh for Claude Code and this stack.
+# Bedrock: mounts host ~/.aws and uses AWS_PROFILE (default bedrock_dev). Keep that
+# profile's credentials fresh on the host; Hermes re-reads them when AWS returns
+# ExpiredTokenException.
 
 services:
   hermes:
