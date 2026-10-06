@@ -3197,6 +3197,16 @@
       }
     }
   }
+  .hover\:border-white\/20 {
+    &:hover {
+      @media (hover: hover) {
+        border-color: color-mix(in srgb, #fff 20%, transparent);
+        @supports (color: color-mix(in lab, red, red)) {
+          border-color: color-mix(in oklab, var(--color-white) 20%, transparent);
+        }
+      }
+    }
+  }
   .hover\:bg-\(--chrome-action-hover\) {
     &:hover {
       @media (hover: hover) {
@@ -4013,6 +4023,11 @@
       font-size: 3.35rem;
     }
   }
+  .xl\:inline {
+    @media (width >= 80rem) {
+      display: inline;
+    }
+  }
   .xl\:grid-cols-3 {
     @media (width >= 80rem) {
       grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -4021,6 +4036,16 @@
   .xl\:grid-cols-4 {
     @media (width >= 80rem) {
       grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+  }
+  .xl\:gap-4 {
+    @media (width >= 80rem) {
+      gap: calc(var(--spacing) * 4);
+    }
+  }
+  .xl\:px-4 {
+    @media (width >= 80rem) {
+      padding-inline: calc(var(--spacing) * 4);
     }
   }
   .dark\:divide-gray-700 {

@@ -14,22 +14,30 @@ JS for scroll effect and mobile toggle is in landing_page.html.
 
             <!-- Desktop Navigation -->
             <div class="hidden lg:flex items-center gap-1 absolute left-1/2 -translate-x-1/2 bg-white/[0.03] backdrop-blur-sm border border-white/[0.06] rounded-full px-2 py-1.5">
-                <a href="#features" class="relative px-4 py-2 text-gray-400 hover:text-white transition-colors text-sm font-medium rounded-full hover:bg-white/[0.06]">
+                <a href="#features" class="relative px-3 xl:px-4 py-2 text-gray-400 hover:text-white transition-colors text-sm font-medium rounded-full hover:bg-white/[0.06]">
                     Features
                 </a>
-                <a href="#platform" class="relative px-4 py-2 text-gray-400 hover:text-white transition-colors text-sm font-medium rounded-full hover:bg-white/[0.06]">
+                <a href="#platform" class="relative px-3 xl:px-4 py-2 text-gray-400 hover:text-white transition-colors text-sm font-medium rounded-full hover:bg-white/[0.06]">
                     Platform
                 </a>
-                <a href="#why" class="relative px-4 py-2 text-gray-400 hover:text-white transition-colors text-sm font-medium rounded-full hover:bg-white/[0.06]">
+                <a href="#why" class="relative px-3 xl:px-4 py-2 text-gray-400 hover:text-white transition-colors text-sm font-medium rounded-full hover:bg-white/[0.06]">
                     Why now
                 </a>
-                <a href="#pricing" class="relative px-4 py-2 text-gray-400 hover:text-white transition-colors text-sm font-medium rounded-full hover:bg-white/[0.06]">
+                <a href="#pricing" class="relative px-3 xl:px-4 py-2 text-gray-400 hover:text-white transition-colors text-sm font-medium rounded-full hover:bg-white/[0.06]">
                     Pricing
                 </a>
             </div>
 
-            <!-- Desktop CTA -->
-            <div class="hidden lg:flex items-center gap-4">
+            <!-- Desktop CTA. Below xl the GitHub pill drops its label and spacing tightens:
+                 the nav pill is centered absolutely, so at 1024px only ~25px separate it from
+                 this group. -->
+            <div class="hidden lg:flex items-center gap-2 xl:gap-4">
+                <a href="https://github.com/HumanityRules/humanityrules" target="_blank" rel="noopener noreferrer" aria-label="Humanity Rules on GitHub" class="inline-flex items-center gap-2 p-2 xl:px-4 text-gray-300 hover:text-white text-sm font-medium rounded-full border border-white/10 bg-white/[0.03] hover:bg-white/[0.08] hover:border-white/20 transition-colors">
+                    <svg class="w-5 h-5" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                        <path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/>
+                    </svg>
+                    <span class="hidden xl:inline">GitHub</span>
+                </a>
                 {% if is_authenticated %}
                     <a href="/dashboard/" class="group inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-cyber-400 to-cyan-400 text-navy-950 font-semibold text-sm rounded-full transition-all duration-300 hover:shadow-glow hover:scale-105">
                         Go to Dashboard
@@ -38,7 +46,7 @@ JS for scroll effect and mobile toggle is in landing_page.html.
                         </svg>
                     </a>
                 {% else %}
-                    <a href="/auth/login/" class="px-4 py-2 text-gray-400 hover:text-white transition-colors text-sm font-medium">
+                    <a href="/auth/login/" class="px-2 xl:px-4 py-2 text-gray-400 hover:text-white transition-colors text-sm font-medium">
                         Sign in
                     </a>
                     <a href="{% if public_signup_enabled %}/auth/login/?screen_hint=sign-up{% else %}#waitlist{% endif %}" class="group inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-cyber-400 to-cyan-400 text-navy-950 font-semibold text-sm rounded-full transition-all duration-300 hover:shadow-glow hover:scale-105">
@@ -50,19 +58,27 @@ JS for scroll effect and mobile toggle is in landing_page.html.
                 {% endif %}
             </div>
 
-            <!-- Mobile Menu Button -->
-            <button id="mobile-menu-button" class="lg:hidden relative p-2 text-gray-400 hover:text-white transition-colors rounded-lg hover:bg-white/[0.06]" aria-label="Toggle menu">
-                <div class="relative w-6 h-6">
-                    <!-- Menu icon (hamburger) -->
-                    <svg id="menu-icon-open" class="w-6 h-6 absolute inset-0 transition-all duration-300 opacity-100 rotate-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/>
+            <div class="lg:hidden flex items-center gap-1">
+                <a href="https://github.com/HumanityRules/humanityrules" target="_blank" rel="noopener noreferrer" aria-label="Humanity Rules on GitHub" class="p-2 text-gray-300 hover:text-white transition-colors rounded-lg hover:bg-white/[0.06]">
+                    <svg class="w-6 h-6" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                        <path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/>
                     </svg>
-                    <!-- X icon (close) -->
-                    <svg id="menu-icon-close" class="w-6 h-6 absolute inset-0 transition-all duration-300 opacity-0 -rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
-                    </svg>
-                </div>
-            </button>
+                </a>
+
+                <!-- Mobile Menu Button -->
+                <button id="mobile-menu-button" class="relative p-2 text-gray-400 hover:text-white transition-colors rounded-lg hover:bg-white/[0.06]" aria-label="Toggle menu">
+                    <div class="relative w-6 h-6">
+                        <!-- Menu icon (hamburger) -->
+                        <svg id="menu-icon-open" class="w-6 h-6 absolute inset-0 transition-all duration-300 opacity-100 rotate-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/>
+                        </svg>
+                        <!-- X icon (close) -->
+                        <svg id="menu-icon-close" class="w-6 h-6 absolute inset-0 transition-all duration-300 opacity-0 -rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
+                        </svg>
+                    </div>
+                </button>
+            </div>
         </nav>
     </div>
 </header>
