@@ -6,6 +6,7 @@ parallel pumper (proxy_to_upstream_ws) since httpx is HTTP-only.
 """
 
 import asyncio
+import enum
 import logging
 
 import httpx
@@ -150,15 +151,33 @@ def _filter_response_headers(headers: httpx.Headers) -> dict[str, str]:
     return out
 
 
-def is_fetch_request(request: Request) -> bool:
-    """Return true for fetch/XHR-style requests, false for browser navigations."""
+class RequestKind(enum.Enum):
+    """How the browser will consume our response, which decides its shape."""
+    # Top-level page load issued by the browser itself; a 302 is followed and rendered.
+    NAVIGATION = "navigation"
+    # Asks for HTML but isn't marked as a navigation: a page load re-issued by a
+    # service worker (Hermes WebUI's sw.js does this). The browser renders whatever
+    # we return in the tab, so it must be a page that can act on its own.
+    DOCUMENT = "document"
+    # Script-initiated API call; the calling code reads the status and headers.
+    FETCH = "fetch"
+
+
+def classify_request(request: Request) -> RequestKind:
+    """Classify a request from its Fetch Metadata, falling back to Accept for older clients."""
     sec_fetch_mode = request.headers.get("sec-fetch-mode", "").lower()
-    if sec_fetch_mode:
-        return sec_fetch_mode != "navigate"
-    if request.headers.get("x-requested-with", "").lower() == "xmlhttprequest":
-        return True
     accept = request.headers.get("accept", "").lower()
-    return "application/json" in accept or "text/event-stream" in accept
+    if sec_fetch_mode == "navigate":
+        return RequestKind.NAVIGATION
+    if not sec_fetch_mode:
+        if request.headers.get("x-requested-with", "").lower() == "xmlhttprequest":
+            return RequestKind.FETCH
+        if "application/json" in accept or "text/event-stream" in accept:
+            return RequestKind.FETCH
+        return RequestKind.NAVIGATION
+    if "text/html" in accept:
+        return RequestKind.DOCUMENT
+    return RequestKind.FETCH
 
 
 def _upstream_starting_response(request: Request) -> Response:
@@ -166,7 +185,7 @@ def _upstream_starting_response(request: Request) -> Response:
         "retry-after": str(UPSTREAM_STARTING_REFRESH_SECONDS),
         "cache-control": "no-store",
     }
-    if is_fetch_request(request=request):
+    if classify_request(request=request) is RequestKind.FETCH:
         return PlainTextResponse(content="agent is starting", status_code=503, headers=headers)
     return HTMLResponse(content=_AGENT_STARTING_PAGE_HTML, status_code=503, headers=headers)
 

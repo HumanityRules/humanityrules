@@ -9,6 +9,7 @@ JWT minted upstream, sets the ``humr_session`` cookie scoped to the env domain,
 and bounces the browser to the original ``rd`` URL.
 """
 
+import html
 import logging
 import re
 import time
@@ -21,7 +22,7 @@ from urllib.parse import quote, urlparse
 import httpx
 import jwt
 from fastapi import FastAPI, Request, WebSocket
-from fastapi.responses import PlainTextResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 
 from . import activity_reporter as activity_reporter_mod
 from . import config as config_mod
@@ -54,6 +55,35 @@ PUBLIC_CACHE_MAX_ENTRIES = 512
 # minus the `__` internal prefix — internal webapps are path-routed on the
 # bare agent host, which is never matched as a user webapp hostname).
 _WEBAPP_SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,30}[a-z0-9]$")
+
+# Shown for an instant while the meta refresh moves the tab to sign-in; the
+# link only matters if the browser has meta refresh disabled.
+_AUTH_REDIRECT_PAGE_HTML = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="0;url=__TARGET__">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Signing you in</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    font-family: system-ui, -apple-system, sans-serif;
+    background: #fff; color: #1a1d23;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { background: #0b0d12; color: #e8eaf0; }
+  }
+  p { opacity: 0.65; font-size: 0.95rem; }
+  a { color: inherit; }
+</style>
+</head>
+<body>
+<p>Signing you in&hellip; <a href="__TARGET__">Continue</a></p>
+</body>
+</html>
+"""
 
 
 def _webapp_slug_for_host(host: str, public_hostname: str | None) -> str | None:
@@ -203,20 +233,34 @@ def _session_cookie(*, jwt_value: str, env_domain: str, ttl_seconds: int) -> str
     )
 
 
+def _auth_redirect_page_html(target: str) -> str:
+    """Render the self-redirecting sign-in page served to service-worker page loads."""
+    return _AUTH_REDIRECT_PAGE_HTML.replace("__TARGET__", html.escape(target, quote=True))
+
+
 def _auth_required_response(request: Request, cfg: config_mod.PolicyProxyConfig) -> Response:
-    """Redirect navigations, but make API/fetch callers handle reauth explicitly."""
-    return_url = _extract_reauth_return_url(request=request, cfg=cfg)
-    target = _auth_start_url(return_url=return_url, cfg=cfg)
-    if proxy_mod.is_fetch_request(request=request):
+    """Send the browser to sign-in in whatever form this kind of request can act on.
+
+    Navigations follow a 302. Script calls get a 401 carrying the sign-in URL in
+    X-HUMR-Auth-URL, so the page's own code moves the tab there (fetch can't follow
+    a cross-origin redirect under the app's CSP); their return URL is the calling
+    page (Referer). Service-worker page loads get the same 401 with a body that
+    redirects itself, because the tab renders it and no script reads the header;
+    their Referer is the worker script, so they return to the requested URL.
+    """
+    kind = proxy_mod.classify_request(request=request)
+    no_store = {"cache-control": "no-store"}
+    if kind is proxy_mod.RequestKind.FETCH:
+        target = _auth_start_url(return_url=_extract_reauth_return_url(request=request, cfg=cfg), cfg=cfg)
         return PlainTextResponse(
-            content="authentication required",
-            status_code=401,
-            headers={
-                AUTH_URL_HEADER: target,
-                "cache-control": "no-store",
-            },
+            content="authentication required", status_code=401, headers={AUTH_URL_HEADER: target, **no_store},
         )
-    return RedirectResponse(url=target, status_code=302)
+    target = _auth_start_url(return_url=_extract_original_url(request=request, cfg=cfg), cfg=cfg)
+    if kind is proxy_mod.RequestKind.NAVIGATION:
+        return RedirectResponse(url=target, status_code=302)
+    return HTMLResponse(
+        content=_auth_redirect_page_html(target=target), status_code=401, headers={AUTH_URL_HEADER: target, **no_store},
+    )
 
 
 def create_app(cfg: config_mod.PolicyProxyConfig) -> FastAPI:

@@ -1,5 +1,6 @@
 """End-to-end tests for the FastAPI policy-proxy app, with PDP + upstream mocked."""
 
+import html
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from unittest import mock
@@ -279,6 +280,77 @@ def test_navigation_fetch_metadata_redirects_even_for_api_path(policy_proxy_conf
     assert response.headers["location"].startswith(policy_proxy_config.auth_base_url + "/auth/env-start")
 
 
+# What Chrome sends when a service worker re-issues a page load with
+# fetch(new Request(event.request, {...})): the mode drops to same-origin and
+# the Referer becomes the worker script, but Accept still asks for HTML.
+AGENT_HOST = "vmendihermes.humr-sandbox.humrsandbox.com"
+SERVICE_WORKER_PAGE_LOAD_HEADERS = {
+    "host": AGENT_HOST,
+    "sec-fetch-mode": "same-origin",
+    "sec-fetch-dest": "empty",
+    "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "referer": f"https://{AGENT_HOST}/sw.js",
+}
+
+
+def test_service_worker_page_load_gets_self_redirecting_401(policy_proxy_config, fake_jwks_client) -> None:
+    async def pdp(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("PDP should not be called without a cookie")
+
+    async def upstream(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("upstream should not be called")
+
+    client = _mk_client(policy_proxy_config, fake_jwks_client, pdp, upstream)
+    response = client.get(
+        "/session/abc?x=1&y=2",
+        headers=SERVICE_WORKER_PAGE_LOAD_HEADERS,
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 401
+    assert response.headers["content-type"].startswith("text/html")
+    assert response.headers["cache-control"] == "no-store"
+    auth_url = response.headers[app_mod.AUTH_URL_HEADER]
+    assert auth_url.startswith(policy_proxy_config.auth_base_url + "/auth/env-start")
+    assert parse_qs(urlparse(auth_url).query)["rd"] == [f"https://{AGENT_HOST}/session/abc?x=1&y=2"]
+    assert f'<meta http-equiv="refresh" content="0;url={html.escape(auth_url, quote=True)}">' in response.text
+
+
+def test_navigation_returns_to_requested_url_not_referer(policy_proxy_config, fake_jwks_client) -> None:
+    async def pdp(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("PDP should not be called without a cookie")
+
+    async def upstream(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("upstream should not be called")
+
+    client = _mk_client(policy_proxy_config, fake_jwks_client, pdp, upstream)
+    response = client.get(
+        "/session/abc",
+        headers={
+            "host": AGENT_HOST,
+            "sec-fetch-mode": "navigate",
+            "referer": f"https://{AGENT_HOST}/",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert parse_qs(urlparse(response.headers["location"]).query)["rd"] == [f"https://{AGENT_HOST}/session/abc"]
+
+
+def test_html_accept_without_fetch_metadata_redirects(policy_proxy_config, fake_jwks_client) -> None:
+    async def pdp(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("PDP should not be called without a cookie")
+
+    async def upstream(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("upstream should not be called")
+
+    client = _mk_client(policy_proxy_config, fake_jwks_client, pdp, upstream)
+    response = client.get("/", headers={"accept": "text/html,*/*;q=0.8"}, follow_redirects=False)
+
+    assert response.status_code == 302
+
+
 def test_healthz_returns_ok_without_auth(policy_proxy_config, fake_jwks_client) -> None:
     async def pdp(request: httpx.Request) -> httpx.Response:
         raise AssertionError("PDP should not be called on health checks")
@@ -337,6 +409,27 @@ def test_upstream_connect_error_serves_starting_page_to_navigations(
     assert response.headers["retry-after"] == "3"
     assert response.headers["cache-control"] == "no-store"
     assert 'http-equiv="refresh"' in response.text
+    assert "Your agent is starting" in response.text
+
+
+def test_upstream_connect_error_serves_starting_page_to_service_worker_page_loads(
+    policy_proxy_config, fake_jwks_client, jwt_minter,
+) -> None:
+    async def pdp(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"decision": "allow", "reason": "ok"})
+
+    async def upstream(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    client = _mk_client(policy_proxy_config, fake_jwks_client, pdp, upstream)
+    response = client.get(
+        "/",
+        cookies={jwt_verify.SESSION_COOKIE_NAME: jwt_minter()},
+        headers=SERVICE_WORKER_PAGE_LOAD_HEADERS,
+    )
+
+    assert response.status_code == 503
+    assert response.headers["content-type"].startswith("text/html")
     assert "Your agent is starting" in response.text
 
 

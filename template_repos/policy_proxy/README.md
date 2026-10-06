@@ -11,9 +11,19 @@ A tiny reverse proxy that sits in front of apps deployed by Humanity Rules and e
 5. On `allow`, proxies to the app container on localhost, injecting trusted identity headers.
 6. On `deny`, returns a 403 with a short message.
 
-For API/fetch-style requests with missing or invalid auth, step 2 returns a
-same-origin `401` with `X-HUMR-Auth-URL` instead of a `302`. Browser navigation
-requests still receive the `302` directly.
+Step 2's response depends on who will consume it:
+
+1. Browser navigations (`Sec-Fetch-Mode: navigate`) get the `302`.
+2. API/fetch calls get a same-origin `401` with `X-HUMR-Auth-URL`; the app's
+   own code moves the tab there. `rd` is the calling page (`Referer`).
+3. Page loads re-issued by a service worker arrive as non-navigations that
+   still `Accept: text/html`. They get the same `401` and header, with an
+   HTML body that meta-refreshes to sign-in, since the tab renders it and no
+   script reads the header. `rd` is the requested URL; their `Referer` is the
+   worker script.
+
+The self-refreshing "agent is starting" page follows the same split: plain
+text for API calls, HTML for the other two.
 
 ## Config (all env vars; no defaults)
 
